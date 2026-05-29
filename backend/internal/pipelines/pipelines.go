@@ -1,0 +1,206 @@
+// Package pipelines manages pipelines and their stages (incl. prompt flags).
+package pipelines
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/echayko/leadrula/backend/pkg/httpx"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type Pipeline struct {
+	ID        int64     `json:"id"`
+	PublicID  string    `json:"public_id"`
+	AccountID int64     `json:"-"`
+	Name      string    `json:"name"`
+	Position  int       `json:"position"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type Stage struct {
+	ID                     int64     `json:"id"`
+	PublicID               string    `json:"public_id"`
+	PipelineID             int64     `json:"pipeline_id"`
+	Name                   string    `json:"name"`
+	Position               int       `json:"position"`
+	PromptActionDatetime   bool      `json:"prompt_action_datetime"`
+	PromptDisqualification bool      `json:"prompt_disqualification"`
+	CreatedAt              time.Time `json:"created_at"`
+}
+
+type Service struct {
+	pool *pgxpool.Pool
+}
+
+func NewService(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
+
+func (s *Service) List(ctx context.Context, accountID int64) ([]Pipeline, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, public_id, account_id, name, position, created_at
+		 FROM pipelines WHERE account_id = $1 ORDER BY position, id`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Pipeline
+	for rows.Next() {
+		var p Pipeline
+		if err := rows.Scan(&p.ID, &p.PublicID, &p.AccountID, &p.Name, &p.Position, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+func (s *Service) Create(ctx context.Context, accountID int64, name string) (*Pipeline, error) {
+	p := &Pipeline{}
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO pipelines(account_id, name, position)
+		 VALUES ($1, $2, COALESCE((SELECT MAX(position)+1 FROM pipelines WHERE account_id=$1), 0))
+		 RETURNING id, public_id, account_id, name, position, created_at`,
+		accountID, name).Scan(&p.ID, &p.PublicID, &p.AccountID, &p.Name, &p.Position, &p.CreatedAt)
+	return p, err
+}
+
+func (s *Service) Update(ctx context.Context, accountID, id int64, name *string, position *int) (*Pipeline, error) {
+	p := &Pipeline{}
+	err := s.pool.QueryRow(ctx,
+		`UPDATE pipelines SET name = COALESCE($3, name), position = COALESCE($4, position)
+		 WHERE id = $1 AND account_id = $2
+		 RETURNING id, public_id, account_id, name, position, created_at`,
+		id, accountID, name, position).Scan(&p.ID, &p.PublicID, &p.AccountID, &p.Name, &p.Position, &p.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, httpx.NotFound("pipeline not found")
+	}
+	return p, err
+}
+
+func (s *Service) Delete(ctx context.Context, accountID, id int64) error {
+	ct, err := s.pool.Exec(ctx, `DELETE FROM pipelines WHERE id = $1 AND account_id = $2`, id, accountID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return httpx.NotFound("pipeline not found")
+	}
+	return nil
+}
+
+// Stages
+
+func (s *Service) ListStages(ctx context.Context, accountID, pipelineID int64) ([]Stage, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT st.id, st.public_id, st.pipeline_id, st.name, st.position,
+		        st.prompt_action_datetime, st.prompt_disqualification, st.created_at
+		 FROM pipeline_stages st JOIN pipelines p ON p.id = st.pipeline_id
+		 WHERE st.pipeline_id = $1 AND p.account_id = $2
+		 ORDER BY st.position, st.id`, pipelineID, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanStages(rows)
+}
+
+func (s *Service) CreateStage(ctx context.Context, accountID, pipelineID int64, name string, promptAction, promptDisq bool) (*Stage, error) {
+	// verify pipeline ownership
+	var owned bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM pipelines WHERE id=$1 AND account_id=$2)`, pipelineID, accountID).Scan(&owned); err != nil {
+		return nil, err
+	}
+	if !owned {
+		return nil, httpx.NotFound("pipeline not found")
+	}
+	st := &Stage{}
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO pipeline_stages(pipeline_id, name, position, prompt_action_datetime, prompt_disqualification)
+		 VALUES ($1, $2, COALESCE((SELECT MAX(position)+1 FROM pipeline_stages WHERE pipeline_id=$1), 0), $3, $4)
+		 RETURNING id, public_id, pipeline_id, name, position, prompt_action_datetime, prompt_disqualification, created_at`,
+		pipelineID, name, promptAction, promptDisq).Scan(
+		&st.ID, &st.PublicID, &st.PipelineID, &st.Name, &st.Position,
+		&st.PromptActionDatetime, &st.PromptDisqualification, &st.CreatedAt)
+	return st, err
+}
+
+func (s *Service) UpdateStage(ctx context.Context, accountID, stageID int64, name *string, promptAction, promptDisq *bool) (*Stage, error) {
+	st := &Stage{}
+	err := s.pool.QueryRow(ctx,
+		`UPDATE pipeline_stages st SET
+		   name = COALESCE($3, st.name),
+		   prompt_action_datetime = COALESCE($4, st.prompt_action_datetime),
+		   prompt_disqualification = COALESCE($5, st.prompt_disqualification)
+		 FROM pipelines p
+		 WHERE st.id = $1 AND p.id = st.pipeline_id AND p.account_id = $2
+		 RETURNING st.id, st.public_id, st.pipeline_id, st.name, st.position,
+		           st.prompt_action_datetime, st.prompt_disqualification, st.created_at`,
+		stageID, accountID, name, promptAction, promptDisq).Scan(
+		&st.ID, &st.PublicID, &st.PipelineID, &st.Name, &st.Position,
+		&st.PromptActionDatetime, &st.PromptDisqualification, &st.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, httpx.NotFound("stage not found")
+	}
+	return st, err
+}
+
+func (s *Service) DeleteStage(ctx context.Context, accountID, stageID int64) error {
+	ct, err := s.pool.Exec(ctx,
+		`DELETE FROM pipeline_stages st USING pipelines p
+		 WHERE st.id = $1 AND p.id = st.pipeline_id AND p.account_id = $2`,
+		stageID, accountID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return httpx.NotFound("stage not found")
+	}
+	return nil
+}
+
+// Reorder sets stage positions to match the given order. Uses a temporary
+// offset to avoid colliding with the (pipeline_id, position) unique index.
+func (s *Service) Reorder(ctx context.Context, accountID, pipelineID int64, orderedStageIDs []int64) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var owned bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM pipelines WHERE id=$1 AND account_id=$2)`, pipelineID, accountID).Scan(&owned); err != nil {
+		return err
+	}
+	if !owned {
+		return httpx.NotFound("pipeline not found")
+	}
+	// shift to high range first
+	if _, err := tx.Exec(ctx, `UPDATE pipeline_stages SET position = position + 100000 WHERE pipeline_id = $1`, pipelineID); err != nil {
+		return err
+	}
+	for i, id := range orderedStageIDs {
+		if _, err := tx.Exec(ctx,
+			`UPDATE pipeline_stages SET position = $3 WHERE id = $1 AND pipeline_id = $2`,
+			id, pipelineID, i); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+func scanStages(rows pgx.Rows) ([]Stage, error) {
+	var out []Stage
+	for rows.Next() {
+		var st Stage
+		if err := rows.Scan(&st.ID, &st.PublicID, &st.PipelineID, &st.Name, &st.Position,
+			&st.PromptActionDatetime, &st.PromptDisqualification, &st.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}

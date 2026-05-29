@@ -1,0 +1,40 @@
+@import "@fontsource/source-sans-3/400.css";
+@import "@fontsource/source-sans-3/600.css";
+@import "@fontsource/source-sans-3/700.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --pd-green: #1a7f37;
+  --pd-green-dark: #156b2e;
+  --pd-bg: #f4f5f7;
+  --pd-surface: #ffffff;
+  --pd-border: #e3e6ea;
+  --pd-text: #25292e;
+  --pd-text-muted: #6b7280;
+  --pd-stage-bg: #edeff2;
+  --pd-blue: #2d7ff9;
+  --pd-amber: #e8a33d;
+  --pd-red: #d64545;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--pd-bg);
+  color: var(--pd-text);
+  font-family: "Source Sans 3", system-ui, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}

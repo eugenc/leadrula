@@ -1,0 +1,35 @@
+---
+description: Human-line React/Vite conventions for frontend
+globs: frontend/**/*.{js,jsx,ts,tsx}
+alwaysApply: false
+---
+
+# Human-Line React / Vite (`frontend/`)
+
+Applies when editing **`frontend/**/*.{js,jsx,ts,tsx}`**. For general principles, see **`human-line-engineering.mdc`**.
+
+### Hooks and effects
+
+- Correct **`useEffect` / `useMemo` / `useCallback`** dependency arrays; avoid stale closures and infinite loops.
+- Group effects by **shared dependencies** when it keeps behavior obvious.
+
+### Components and data
+
+- No **mirror props** (duplicated state that can get out of sync).
+- Remove **dead branches** (conditions that never run or no-op).
+- Prefer **null/undefined handled once** at boundaries (loader/API layer) instead of scattered `?.` everywhere.
+
+### JSX
+
+- Avoid assigning large **JSX subtrees to locals** in the component body when it hides the render tree; extract a small component or inline clearly.
+- Use the **automatic JSX runtime** — no default `import React from 'react'` when the file only needs JSX (follow existing file style if the codebase still imports React for legacy reasons).
+
+### Lists
+
+- Use **stable `key`s** (ids, stable strings). Avoid **array index** as key when order or list membership changes.
+
+### Types
+
+- Keep TypeScript **noise low**: avoid redundant assertions; prefer shapes that match API responses.
+
+If the repo adds repo-root **`.cursorrules`**, prefer that file for stricter frontend rules when it conflicts with generic guidance above.

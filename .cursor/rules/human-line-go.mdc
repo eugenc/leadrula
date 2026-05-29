@@ -1,0 +1,98 @@
+---
+description: Human-line Go conventions for backend
+globs: backend/**/*.go
+alwaysApply: false
+---
+
+# Human-Line Go (`backend/`)
+
+Applies when editing **`backend/**/*.go`**. For general principles, see **`human-line-engineering.mdc`**.
+
+### Params struct for 4+ same-type or optional args
+
+When a function has four or more parameters of the same type, or four or more optional (pointer) parameters, use a params struct.
+
+**Bad:** `func Update(ctx context.Context, id uuid.UUID, name *string, desc *string, status *string, startDate *string, endDate *string)`
+
+**Good:** `func Update(ctx context.Context, id uuid.UUID, p UpdateParams)`
+
+### No duplicate literal lists
+
+If the same literal list appears more than once (SQL columns, field names, enums, scan args), extract a named constant or variable.
+
+### One JSON writer — `httputil`, not per-package `writeJSON`
+
+Do **not** define a private `writeJSON` (or copy-paste the same `Content-Type` + `WriteHeader` + `Encode` block) in handler packages. Duplicated helpers across packages are the same problem as duplicated literals — **one change point, not three**.
+
+Import the project's shared `internal/httputil` package and use:
+
+- **`httputil.JSON`** — status + body (replaces local `writeJSON`)
+- **`httputil.Error`**, **`BadRequest`**, **`NotFound`**, **`Success`**, **`Created`**, etc. — when the response matches those shapes
+
+When touching a handler that still has a local `writeJSON`, delete it and switch call sites to `httputil` in the same change (do not add a fourth copy).
+
+### Model field names match JSON semantics
+
+Struct field name and `json` tag must name the same concept.
+
+```go
+// Bad
+Name string `json:"author_name"`
+
+// Good
+AuthorName string `json:"author_name"`
+```
+
+### Prefer `int` in domain models
+
+Avoid `int32`/`int64` in domain models unless the driver or wire format requires it.
+
+### Do not reimplement the standard library
+
+If `strconv`, `strings`, `math`, `sort`, etc. already provide the function, import and use it. Hand-rolled replacements add lines, miss edge cases, and usually mean the code was generated without stdlib awareness.
+
+**Bad:** a custom `itoa` loop or a helper named `strconvItoa`
+
+**Good:** `strconv.Itoa(n)`
+
+If a helper name embeds a stdlib package (`strconvItoa`, `stringsJoin`), delete it and call stdlib instead.
+
+### No inline structural interfaces to dodge a repeated call
+
+Prefer two explicit branches over an inline `interface{ ... }` that only unifies `RowsAffected()`-style calls.
+
+### Sentinel errors match the failure type
+
+Handlers map sentinels to HTTP status — wrong sentinel = wrong API response.
+
+- **`ErrConflict`** — uniqueness / duplicate row / constraint
+- **`ErrNotFound`** — zero rows where one required
+- **`ErrInvalid`** — bad input or invalid state (use this, not conflict, for validation failures → **400**, not **409**)
+
+### Route files: one registration style per file
+
+Pick one chi/group style per file and stick to it.
+
+### Handlers: shared scope extraction
+
+If **3+** handlers repeat the same scope extraction (tenant, IDs, etc.), extract a helper that aborts on failure. If one error-message change would touch many handlers, extract.
+
+### Typed HTTP response bodies
+
+Do not use `map[string]any` to construct HTTP response bodies when the response shape is fixed and known at write time.
+
+**Bad:** `map[string]any{"campaignId": id, "state": state, ...}`
+
+**Good:** a typed struct with `json` tags
+
+`map[string]any` loses compiler checking on field names, silently drops type mismatches, and makes the response contract invisible to the next engineer. A struct makes the contract explicit and the JSON output predictable.
+
+**Exception:** genuinely dynamic responses where field presence varies by runtime condition. A response that always has the same fields is not dynamic.
+
+Go error strings passed to clients must be lowercase with no trailing punctuation, per [Go convention](https://github.com/golang/go/wiki/CodeReviewComments#error-strings).
+
+**Bad:** `fmt.Errorf("Transfer user not found")`
+
+**Good:** `fmt.Errorf("transfer user not found")`
+
+Errors that surface directly in HTTP responses are user-facing strings **and** Go errors simultaneously — they must satisfy both conventions.

@@ -1,0 +1,23 @@
+# Env
+.env
+.env.local
+*.local
+
+# Go
+backend/server
+backend/bin/
+backend/tmp/
+*.test
+*.out
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+yarn-error.log*
+
+# Editor / OS
+.DS_Store
+.idea/
+*.swp

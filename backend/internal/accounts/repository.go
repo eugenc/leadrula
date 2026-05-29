@@ -1,0 +1,313 @@
+package accounts
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/database"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+var ErrNotFound = errors.New("not found")
+
+type Repository struct {
+	pool *pgxpool.Pool
+}
+
+func NewRepository(pool *pgxpool.Pool) *Repository {
+	return &Repository{pool: pool}
+}
+
+func (r *Repository) Pool() *pgxpool.Pool { return r.pool }
+
+// LoadPrincipal resolves a user public_id into an auth.Principal.
+func (r *Repository) LoadPrincipal(ctx context.Context, userPublicID string) (*auth.Principal, error) {
+	const q = `
+		SELECT u.id, u.public_id, u.account_id, a.public_id, a.type, u.role, u.is_active
+		FROM users u JOIN accounts a ON a.id = u.account_id
+		WHERE u.public_id = $1`
+	p := &auth.Principal{}
+	var active bool
+	err := r.pool.QueryRow(ctx, q, userPublicID).Scan(
+		&p.UserID, &p.UserPublicID, &p.AccountID, &p.AccountPublicID,
+		&p.AccountType, &p.Role, &active)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if !active {
+		return nil, ErrNotFound
+	}
+	return p, nil
+}
+
+type AuthUser struct {
+	ID           int64
+	PublicID     string
+	AccountID    int64
+	AccountPubID string
+	AccountType  string
+	Email        string
+	PasswordHash *string
+	FullName     string
+	Role         string
+	IsActive     bool
+}
+
+func (r *Repository) FindUserByEmail(ctx context.Context, email string) (*AuthUser, error) {
+	const q = `
+		SELECT u.id, u.public_id, u.account_id, a.public_id, a.type,
+		       u.email, u.password_hash, u.full_name, u.role, u.is_active
+		FROM users u JOIN accounts a ON a.id = u.account_id
+		WHERE u.email = $1`
+	u := &AuthUser{}
+	err := r.pool.QueryRow(ctx, q, email).Scan(
+		&u.ID, &u.PublicID, &u.AccountID, &u.AccountPubID, &u.AccountType,
+		&u.Email, &u.PasswordHash, &u.FullName, &u.Role, &u.IsActive)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return u, nil
+}
+
+func (r *Repository) TouchLogin(ctx context.Context, userID int64) error {
+	_, err := r.pool.Exec(ctx, `UPDATE users SET last_login_at = now() WHERE id = $1`, userID)
+	return err
+}
+
+// BuyerSummary is a publisher-oversight row: a buyer with balance + lead count.
+type BuyerSummary struct {
+	ID        int64   `json:"id"`
+	PublicID  string  `json:"public_id"`
+	Name      string  `json:"name"`
+	Balance   float64 `json:"balance"`
+	LeadCount int     `json:"lead_count"`
+}
+
+func (r *Repository) ListBuyers(ctx context.Context) ([]BuyerSummary, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT a.id, a.public_id, a.name,
+		        COALESCE(b.balance,0)::float8,
+		        (SELECT count(*) FROM leads l WHERE l.owner_account_id = a.id)
+		 FROM accounts a
+		 LEFT JOIN buyer_balances b ON b.buyer_id = a.id
+		 WHERE a.type = 'buyer'
+		 ORDER BY a.name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []BuyerSummary
+	for rows.Next() {
+		var s BuyerSummary
+		if err := rows.Scan(&s.ID, &s.PublicID, &s.Name, &s.Balance, &s.LeadCount); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) GetAccount(ctx context.Context, id int64) (*Account, error) {
+	const q = `SELECT id, public_id, type, name, timezone, created_at FROM accounts WHERE id = $1`
+	a := &Account{}
+	err := r.pool.QueryRow(ctx, q, id).Scan(&a.ID, &a.PublicID, &a.Type, &a.Name, &a.Timezone, &a.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return a, nil
+}
+
+func (r *Repository) GetUser(ctx context.Context, id int64) (*User, error) {
+	const q = `SELECT id, public_id, account_id, email, full_name, role, is_active, prefs, last_login_at, created_at
+		FROM users WHERE id = $1`
+	return scanUser(r.pool.QueryRow(ctx, q, id))
+}
+
+func (r *Repository) ListUsers(ctx context.Context, accountID int64) ([]User, error) {
+	const q = `SELECT id, public_id, account_id, email, full_name, role, is_active, prefs, last_login_at, created_at
+		FROM users WHERE account_id = $1 ORDER BY created_at`
+	rows, err := r.pool.Query(ctx, q, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *u)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) UpdateUser(ctx context.Context, accountID, userID int64, role *string, isActive *bool) (*User, error) {
+	const q = `
+		UPDATE users SET
+			role = COALESCE($3, role),
+			is_active = COALESCE($4, is_active)
+		WHERE id = $1 AND account_id = $2
+		RETURNING id, public_id, account_id, email, full_name, role, is_active, prefs, last_login_at, created_at`
+	return scanUser(r.pool.QueryRow(ctx, q, userID, accountID, role, isActive))
+}
+
+func (r *Repository) UpdatePrefs(ctx context.Context, userID int64, prefs []byte) error {
+	_, err := r.pool.Exec(ctx, `UPDATE users SET prefs = $2 WHERE id = $1`, userID, prefs)
+	return err
+}
+
+func (r *Repository) DeleteUser(ctx context.Context, accountID, userID int64) error {
+	ct, err := r.pool.Exec(ctx, `DELETE FROM users WHERE id = $1 AND account_id = $2`, userID, accountID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// Invites
+
+func (r *Repository) CreateInvite(ctx context.Context, accountID int64, email, role, token string, expires time.Time) (*Invite, error) {
+	const q = `INSERT INTO invites(account_id, email, role, token, expires_at)
+		VALUES ($1,$2,$3,$4,$5)
+		RETURNING id, account_id, email, role, token, expires_at, created_at`
+	inv := &Invite{}
+	err := r.pool.QueryRow(ctx, q, accountID, email, role, token, expires).Scan(
+		&inv.ID, &inv.AccountID, &inv.Email, &inv.Role, &inv.Token, &inv.ExpiresAt, &inv.CreatedAt)
+	return inv, err
+}
+
+type InviteRow struct {
+	ID        int64
+	AccountID int64
+	Email     string
+	Role      string
+	ExpiresAt time.Time
+	Accepted  bool
+}
+
+func (r *Repository) FindInviteByToken(ctx context.Context, token string) (*InviteRow, error) {
+	const q = `SELECT id, account_id, email, role, expires_at, (accepted_at IS NOT NULL)
+		FROM invites WHERE token = $1`
+	row := &InviteRow{}
+	err := r.pool.QueryRow(ctx, q, token).Scan(&row.ID, &row.AccountID, &row.Email, &row.Role, &row.ExpiresAt, &row.Accepted)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return row, nil
+}
+
+// AcceptInvite creates the user and marks the invite accepted atomically.
+func (r *Repository) AcceptInvite(ctx context.Context, inv *InviteRow, fullName, passwordHash string) (string, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx)
+
+	var publicID string
+	err = tx.QueryRow(ctx,
+		`INSERT INTO users(account_id, email, password_hash, full_name, role)
+		 VALUES ($1,$2,$3,$4,$5) RETURNING public_id`,
+		inv.AccountID, inv.Email, passwordHash, fullName, inv.Role).Scan(&publicID)
+	if err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE invites SET accepted_at = now() WHERE id = $1`, inv.ID); err != nil {
+		return "", err
+	}
+	return publicID, tx.Commit(ctx)
+}
+
+// Password resets
+
+func (r *Repository) CreatePasswordReset(ctx context.Context, userID int64, token string, expires time.Time) error {
+	_, err := r.pool.Exec(ctx,
+		`INSERT INTO password_resets(user_id, token, expires_at) VALUES ($1,$2,$3)`,
+		userID, token, expires)
+	return err
+}
+
+type ResetRow struct {
+	ID        int64
+	UserID    int64
+	ExpiresAt time.Time
+	Used      bool
+}
+
+func (r *Repository) FindResetByToken(ctx context.Context, token string) (*ResetRow, error) {
+	const q = `SELECT id, user_id, expires_at, (used_at IS NOT NULL) FROM password_resets WHERE token = $1`
+	row := &ResetRow{}
+	err := r.pool.QueryRow(ctx, q, token).Scan(&row.ID, &row.UserID, &row.ExpiresAt, &row.Used)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return row, nil
+}
+
+func (r *Repository) ConsumeReset(ctx context.Context, resetID, userID int64, passwordHash string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `UPDATE users SET password_hash = $2 WHERE id = $1`, userID, passwordHash); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE password_resets SET used_at = now() WHERE id = $1`, resetID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// AdminUsersForAccount returns user IDs of active admins for notifications.
+func (r *Repository) AdminUserIDs(ctx context.Context, q database.Querier, accountID int64) ([]int64, error) {
+	rows, err := q.Query(ctx, `SELECT id FROM users WHERE account_id = $1 AND role = 'admin' AND is_active`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func scanUser(row pgx.Row) (*User, error) {
+	u := &User{}
+	err := row.Scan(&u.ID, &u.PublicID, &u.AccountID, &u.Email, &u.FullName,
+		&u.Role, &u.IsActive, &u.Prefs, &u.LastLoginAt, &u.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return u, nil
+}

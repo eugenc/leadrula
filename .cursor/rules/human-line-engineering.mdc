@@ -1,0 +1,115 @@
+---
+description: Human-line engineering — simplicity, ops-first (always apply)
+alwaysApply: true
+---
+
+# Human-Line Code Rules
+
+Anti-fluff engineering for operational simplicity (“AI Coding Style Differences” style). You are a senior production engineer: operational simplicity, fast debugging, and honest maintainability beat architectural elegance.
+
+**Stack-specific rules:** Go → `.cursor/rules/human-line-go.mdc` (`backend/**/*.go`). React/Vite → `.cursor/rules/human-line-frontend.mdc` (`frontend/**/*.{js,jsx,ts,tsx}`).
+
+***
+
+## Core Priorities (in order)
+
+1. Clarity over cleverness
+2. Simplicity over abstraction
+3. Direct code over indirection
+4. Operational maintainability over theoretical scalability
+5. Business workflows over framework purity
+6. Deletion over refactoring
+
+***
+
+## Hard Rules (language-agnostic)
+
+### No Premature Abstractions
+
+- Do NOT introduce interfaces, base classes, factories, providers, managers, adapters, or strategy patterns unless multiple concrete implementations already exist in the codebase.
+- One implementation = no abstraction. Ever.
+
+### No Speculative Architecture
+
+- Do not optimize for hypothetical future requirements.
+- Only optimize for: current business requirements, current workflows, and near-term maintainability.
+
+### No Wrapper Chains
+
+- Prefer: handler → business logic → DB/API. Avoid services calling services calling services.
+
+### No Utility Function Sprawl
+
+- Keep logic close to its usage. Explicit and boring beats centralized and clever.
+
+### Helpers and fields earn usage
+
+- Do not add fields, optional props, or config keys for “we might need them.” Add when a real workflow consumes them. Delete dead helpers.
+
+### No Configuration Overload
+
+- Hardcode until flexibility is proven painful.
+
+### No Semantic Inflation
+
+- Name after business operations (`assign_lead`, `retry_call`), not CS jargon (`UnifiedCoordinator`).
+
+### No duplicated cross-package helpers
+
+Same rule as duplicated literals: if the same helper exists in multiple packages (e.g. `writeJSON` in `handlers/`, `a2p/`, and elsewhere), consolidate to one exported home. Go handlers: **`httputil.JSON`** — see **`human-line-go.mdc`**.
+
+***
+
+## Architecture
+
+- **Flatten:** fewer layers between request, logic, and persistence. If you can inline without losing clarity, inline.
+- **Organize by workflow / domain** (e.g. billing, campaigns), not generic `services/` + `repositories/` layers alone.
+- **Minimize file count:** consolidate before you split; new files need justification.
+
+***
+
+## Complexity Justification Gate
+
+Before any new abstraction, layer, or helper:
+
+1. What current production problem does this solve?
+2. Why is direct code insufficient?
+3. Why is this complexity justified **now**?
+
+If you cannot answer all three: delete it and write direct code.
+
+***
+
+## Refactoring Bias
+
+Deletion over addition; consolidation over decomposition; fewer moving parts; direct paths over extensible pipelines. Measure success by what **disappeared**.
+
+***
+
+## Operational Ergonomics
+
+Can you debug in under 5 minutes at 2AM? Failure points traceable? Logs readable without decoding layers? State explicit, not framework magic?
+
+***
+
+## Incremental Prompting Protocol
+
+**PASS 1 — Understand** → **PASS 2 — Detect fluff** → **PASS 3 — Compress one workflow** → **PASS 4 — Flatten** → **PASS 5 — Humanize names** → **PASS 6 — Delete**. Never redesign the whole system in one shot.
+
+***
+
+## The Boring Code Rule
+
+Most boring, readable version wins. Avoid clever abstractions that need a PhD to maintain.
+
+***
+
+## AI vs Humans
+
+AI: implementation, CRUD, tests, migrations, integrations, UI boilerplate. Humans: architecture restraint, naming, operational design, **what gets deleted**.
+
+***
+
+## Final Heuristic
+
+**What real pain does this complexity solve?** If vague → delete, flatten, simplify. Operational minimalism, not architectural maximalism.

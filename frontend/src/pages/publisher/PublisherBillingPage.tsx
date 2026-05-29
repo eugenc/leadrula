@@ -1,0 +1,122 @@
+import { useState } from "react";
+import { useTransactions, useDisputes, useResolveDispute } from "@/features/admin/hooks";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { Badge, Spinner, EmptyState } from "@/components/ui/misc";
+import { formatMoney } from "@/lib/utils";
+import { format } from "date-fns";
+import { toast } from "@/store/toastStore";
+import { apiError } from "@/lib/api";
+
+export function PublisherBillingPage() {
+  const [tab, setTab] = useState<"disputes" | "transactions">("disputes");
+  return (
+    <div>
+      <PageHeader title="Billing" subtitle="Oversee buyer ledgers and disputes." />
+      <div className="mb-4 flex border-b border-pd-border">
+        {(["disputes", "transactions"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`-mb-px border-b-2 px-4 py-2 text-sm font-semibold capitalize ${
+              tab === t ? "border-pd-green text-pd-green" : "border-transparent text-pd-muted"
+            }`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+      {tab === "disputes" ? <Disputes /> : <Transactions />}
+    </div>
+  );
+}
+
+function Disputes() {
+  const { data: disputes, isLoading } = useDisputes("publisher", "open");
+  const resolve = useResolveDispute();
+  if (isLoading) return <Spinner className="h-6 w-6" />;
+  if ((disputes ?? []).length === 0) return <EmptyState title="No open disputes." />;
+  return (
+    <Table>
+      <THead>
+        <tr>
+          <TH>Buyer</TH>
+          <TH>Reason</TH>
+          <TH>Amount</TH>
+          <TH>Opened</TH>
+          <TH />
+        </tr>
+      </THead>
+      <TBody>
+        {(disputes ?? []).map((d) => (
+          <TR key={d.id}>
+            <TD className="font-semibold">{d.buyer_name}</TD>
+            <TD>{d.reason}</TD>
+            <TD>{formatMoney(d.amount)}</TD>
+            <TD>{format(new Date(d.created_at), "MMM d")}</TD>
+            <TD>
+              <div className="flex justify-end gap-2">
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    resolve.mutate(
+                      { id: d.id, accept: true },
+                      { onSuccess: () => toast.success("Refunded"), onError: (e) => toast.error(apiError(e).message) }
+                    )
+                  }
+                >
+                  Accept
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    resolve.mutate(
+                      { id: d.id, accept: false },
+                      { onSuccess: () => toast.info("Rejected"), onError: (e) => toast.error(apiError(e).message) }
+                    )
+                  }
+                >
+                  Reject
+                </Button>
+              </div>
+            </TD>
+          </TR>
+        ))}
+      </TBody>
+    </Table>
+  );
+}
+
+function Transactions() {
+  const { data: txns, isLoading } = useTransactions("publisher");
+  if (isLoading) return <Spinner className="h-6 w-6" />;
+  if ((txns ?? []).length === 0) return <EmptyState title="No transactions." />;
+  return (
+    <Table>
+      <THead>
+        <tr>
+          <TH>Type</TH>
+          <TH>Lead</TH>
+          <TH>Amount</TH>
+          <TH>Balance</TH>
+          <TH>When</TH>
+        </tr>
+      </THead>
+      <TBody>
+        {(txns ?? []).map((t) => (
+          <TR key={t.id}>
+            <TD>
+              <Badge variant={t.amount < 0 ? "red" : "green"}>{t.type}</Badge>
+            </TD>
+            <TD>{t.lead_name ?? "—"}</TD>
+            <TD className={t.amount < 0 ? "text-pd-red" : "text-pd-green"}>{formatMoney(t.amount)}</TD>
+            <TD>{formatMoney(t.balance_after)}</TD>
+            <TD>{format(new Date(t.created_at), "MMM d, h:mma")}</TD>
+          </TR>
+        ))}
+      </TBody>
+    </Table>
+  );
+}

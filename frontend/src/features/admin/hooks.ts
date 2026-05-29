@@ -1,0 +1,335 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { get, ns, post, patch, del } from "@/lib/api";
+import { useAuthStore } from "@/store/authStore";
+import type {
+  ApiKey,
+  BuyerSummary,
+  CalendarEvent,
+  Campaign,
+  Contract,
+  Dispute,
+  FieldMapEntry,
+  QueueItem,
+  ReturnRule,
+  Transaction,
+  UserRow,
+} from "@/types";
+
+function useInvalidate(keys: string[]) {
+  const qc = useQueryClient();
+  return () => keys.forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+}
+
+// ── Pipelines & stages ────────────────────────────────────────────
+export function useCreatePipeline() {
+  const inv = useInvalidate(["pipelines"]);
+  return useMutation({ mutationFn: (name: string) => post(`${ns()}/pipelines`, { name }), onSuccess: inv });
+}
+export function useDeletePipeline() {
+  const inv = useInvalidate(["pipelines"]);
+  return useMutation({ mutationFn: (id: number) => del(`${ns()}/pipelines/${id}`), onSuccess: inv });
+}
+export function useCreateStage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ pipelineId, body }: { pipelineId: number; body: Record<string, unknown> }) =>
+      post(`${ns()}/pipelines/${pipelineId}/stages`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["stages"] }),
+  });
+}
+export function useUpdateStage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
+      patch(`${ns()}/stages/${id}`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["stages"] }),
+  });
+}
+export function useDeleteStage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => del(`${ns()}/stages/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["stages"] }),
+  });
+}
+
+// ── Custom fields ─────────────────────────────────────────────────
+export function useCreateField() {
+  const inv = useInvalidate(["custom-fields"]);
+  return useMutation({ mutationFn: (body: Record<string, unknown>) => post(`${ns()}/custom-fields`, body), onSuccess: inv });
+}
+export function useUpdateField() {
+  const inv = useInvalidate(["custom-fields"]);
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
+      patch(`${ns()}/custom-fields/${id}`, body),
+    onSuccess: inv,
+  });
+}
+export function useDeleteField() {
+  const inv = useInvalidate(["custom-fields"]);
+  return useMutation({ mutationFn: (id: number) => del(`${ns()}/custom-fields/${id}`), onSuccess: inv });
+}
+
+// ── Disqualification reasons ──────────────────────────────────────
+export function useCreateReason() {
+  const inv = useInvalidate(["disq-reasons"]);
+  return useMutation({ mutationFn: (label: string) => post(`${ns()}/disqualification-reasons`, { label }), onSuccess: inv });
+}
+export function useUpdateReason() {
+  const inv = useInvalidate(["disq-reasons"]);
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
+      patch(`${ns()}/disqualification-reasons/${id}`, body),
+    onSuccess: inv,
+  });
+}
+export function useDeleteReason() {
+  const inv = useInvalidate(["disq-reasons"]);
+  return useMutation({ mutationFn: (id: number) => del(`${ns()}/disqualification-reasons/${id}`), onSuccess: inv });
+}
+
+// ── Users ─────────────────────────────────────────────────────────
+export function useInviteUser() {
+  const inv = useInvalidate(["users"]);
+  return useMutation({ mutationFn: (body: Record<string, unknown>) => post(`${ns()}/users/invite`, body), onSuccess: inv });
+}
+export function useUpdateUser() {
+  const inv = useInvalidate(["users"]);
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
+      patch(`${ns()}/users/${id}`, body),
+    onSuccess: inv,
+  });
+}
+export function useDeleteUser() {
+  const inv = useInvalidate(["users"]);
+  return useMutation({ mutationFn: (id: number) => del(`${ns()}/users/${id}`), onSuccess: inv });
+}
+
+// ── Contracts (publisher) ─────────────────────────────────────────
+export function useContracts() {
+  return useQuery({ queryKey: ["contracts"], queryFn: () => get<Contract[]>(`/publisher/contracts`) });
+}
+export function useCreateContract() {
+  const inv = useInvalidate(["contracts"]);
+  return useMutation({ mutationFn: (body: Record<string, unknown>) => post(`/publisher/contracts`, body), onSuccess: inv });
+}
+export function useUpdateContract() {
+  const inv = useInvalidate(["contracts"]);
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
+      patch(`/publisher/contracts/${id}`, body),
+    onSuccess: inv,
+  });
+}
+export function useDeleteContract() {
+  const inv = useInvalidate(["contracts"]);
+  return useMutation({ mutationFn: (id: number) => del(`/publisher/contracts/${id}`), onSuccess: inv });
+}
+export function useReturnRules(contractId: number | null, buyer = false) {
+  const path = buyer ? `/buyer/contract/return-rules` : `/publisher/contracts/${contractId}/return-rules`;
+  return useQuery({
+    queryKey: ["return-rules", contractId, buyer],
+    queryFn: () => get<ReturnRule[]>(path),
+    enabled: buyer || !!contractId,
+  });
+}
+export function useAddReturnRule(buyer = false) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ contractId, buyerStageId }: { contractId: number | null; buyerStageId: number }) =>
+      post(buyer ? `/buyer/contract/return-rules` : `/publisher/contracts/${contractId}/return-rules`, {
+        buyer_stage_id: buyerStageId,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["return-rules"] }),
+  });
+}
+export function useDeleteReturnRule(buyer = false) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ruleId: number) =>
+      del(buyer ? `/buyer/contract/return-rules/${ruleId}` : `/publisher/return-rules/${ruleId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["return-rules"] }),
+  });
+}
+
+export function useMyContract() {
+  return useQuery({ queryKey: ["my-contract"], queryFn: () => get<Contract>(`/buyer/contract`) });
+}
+
+// ── Routing (publisher) ───────────────────────────────────────────
+export function useCampaigns() {
+  return useQuery({ queryKey: ["campaigns"], queryFn: () => get<Campaign[]>(`/publisher/routing-campaigns`) });
+}
+export function useCreateCampaign() {
+  const inv = useInvalidate(["campaigns"]);
+  return useMutation({ mutationFn: (body: Record<string, unknown>) => post(`/publisher/routing-campaigns`, body), onSuccess: inv });
+}
+export function useUpdateCampaign() {
+  const inv = useInvalidate(["campaigns"]);
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
+      patch(`/publisher/routing-campaigns/${id}`, body),
+    onSuccess: inv,
+  });
+}
+export function useDeleteCampaign() {
+  const inv = useInvalidate(["campaigns"]);
+  return useMutation({ mutationFn: (id: number) => del(`/publisher/routing-campaigns/${id}`), onSuccess: inv });
+}
+export function useFieldMap(campaignId: number | null) {
+  return useQuery({
+    queryKey: ["field-map", campaignId],
+    queryFn: () => get<FieldMapEntry[]>(`/publisher/routing-campaigns/${campaignId}/field-map`),
+    enabled: !!campaignId,
+  });
+}
+export function useAddFieldMap() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ campaignId, body }: { campaignId: number; body: Record<string, unknown> }) =>
+      post(`/publisher/routing-campaigns/${campaignId}/field-map`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["field-map"] }),
+  });
+}
+export function useDeleteFieldMap() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => del(`/publisher/field-map/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["field-map"] }),
+  });
+}
+
+// ── Intake queue (publisher) ──────────────────────────────────────
+export function useIntakeQueue(status = "pending_review") {
+  return useQuery({
+    queryKey: ["intake-queue", status],
+    queryFn: () => get<QueueItem[]>(`/publisher/intake-queue?status=${status}`),
+  });
+}
+export function useRouteQueue() {
+  const inv = useInvalidate(["intake-queue", "leads"]);
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
+      post(`/publisher/intake-queue/${id}/route`, body),
+    onSuccess: inv,
+  });
+}
+export function useRejectQueue() {
+  const inv = useInvalidate(["intake-queue"]);
+  return useMutation({ mutationFn: (id: number) => post(`/publisher/intake-queue/${id}/reject`), onSuccess: inv });
+}
+
+// ── Buyers (publisher oversight) ──────────────────────────────────
+export function useBuyers() {
+  return useQuery({ queryKey: ["buyers"], queryFn: () => get<BuyerSummary[]>(`/publisher/buyers`) });
+}
+export function useBuyerPipelines(buyerId: number | null) {
+  return useQuery({
+    queryKey: ["buyer-pipelines", buyerId],
+    queryFn: () => get<import("@/types").Pipeline[]>(`/publisher/buyers/${buyerId}/pipelines`),
+    enabled: !!buyerId,
+  });
+}
+export function useBuyerStages(buyerId: number | null, pipelineId: number | null) {
+  return useQuery({
+    queryKey: ["buyer-stages", buyerId, pipelineId],
+    queryFn: () => get<import("@/types").Stage[]>(`/publisher/buyers/${buyerId}/pipelines/${pipelineId}/stages`),
+    enabled: !!buyerId && !!pipelineId,
+  });
+}
+export function useBuyerLeads(buyerId: number | null) {
+  return useQuery({
+    queryKey: ["buyer-leads", buyerId],
+    queryFn: () => get<import("@/types").Lead[]>(`/publisher/buyers/${buyerId}/leads`),
+    enabled: !!buyerId,
+  });
+}
+export function useBuyerBilling(buyerId: number | null) {
+  return useQuery({
+    queryKey: ["buyer-billing", buyerId],
+    queryFn: () =>
+      get<{ balance: number; transactions: Transaction[] }>(`/publisher/buyers/${buyerId}/billing`),
+    enabled: !!buyerId,
+  });
+}
+
+// ── Billing ───────────────────────────────────────────────────────
+export function useTransactions(scope: "publisher" | "buyer", buyerId?: number, type?: string) {
+  const qs = new URLSearchParams();
+  if (buyerId) qs.set("buyer_id", String(buyerId));
+  if (type) qs.set("type", type);
+  const q = qs.toString();
+  return useQuery({
+    queryKey: ["transactions", scope, buyerId, type],
+    queryFn: () => get<Transaction[]>(`/${scope}/billing/transactions${q ? `?${q}` : ""}`),
+  });
+}
+export function useBalance() {
+  const isBuyer = useAuthStore.getState().user?.account_type === "buyer";
+  return useQuery({
+    queryKey: ["balance"],
+    queryFn: () => get<{ balance: number }>(`/buyer/billing/balance`),
+    enabled: isBuyer,
+  });
+}
+export function useTopup() {
+  const inv = useInvalidate(["balance", "transactions"]);
+  return useMutation({ mutationFn: (amount: number) => post(`/buyer/billing/balance/topup`, { amount }), onSuccess: inv });
+}
+export function useDisputes(scope: "publisher" | "buyer", status?: string) {
+  const q = status ? `?status=${status}` : "";
+  return useQuery({
+    queryKey: ["disputes", scope, status],
+    queryFn: () => get<Dispute[]>(`/${scope}/billing/disputes${q}`),
+  });
+}
+export function useOpenDispute() {
+  const inv = useInvalidate(["disputes"]);
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) => post(`/buyer/billing/disputes`, body),
+    onSuccess: inv,
+  });
+}
+export function useResolveDispute() {
+  const inv = useInvalidate(["disputes", "transactions"]);
+  return useMutation({
+    mutationFn: ({ id, accept }: { id: number; accept: boolean }) =>
+      post(`/publisher/billing/disputes/${id}/${accept ? "accept" : "reject"}`),
+    onSuccess: inv,
+  });
+}
+export function useManualInvoice() {
+  const inv = useInvalidate(["transactions"]);
+  return useMutation({ mutationFn: (body: Record<string, unknown>) => post(`/publisher/billing/manual-invoice`, body), onSuccess: inv });
+}
+
+// ── API keys ──────────────────────────────────────────────────────
+export function useApiKeys() {
+  return useQuery({ queryKey: ["api-keys"], queryFn: () => get<ApiKey[]>(`${ns()}/api-keys`) });
+}
+export function useCreateApiKey() {
+  const inv = useInvalidate(["api-keys"]);
+  return useMutation({
+    mutationFn: (name: string) => post<{ key: ApiKey; secret: string }>(`${ns()}/api-keys`, { name }),
+    onSuccess: inv,
+  });
+}
+export function useRevokeApiKey() {
+  const inv = useInvalidate(["api-keys"]);
+  return useMutation({ mutationFn: (id: number) => del(`${ns()}/api-keys/${id}`), onSuccess: inv });
+}
+
+// ── Calendar ──────────────────────────────────────────────────────
+export function useCalendar(scope: "global" | "me") {
+  return useQuery({
+    queryKey: ["calendar", scope],
+    queryFn: () => get<CalendarEvent[]>(`/buyer/calendar/${scope}`),
+  });
+}
+
+// ── Users list (re-export convenience) ────────────────────────────
+export function useUsersList() {
+  return useQuery({ queryKey: ["users"], queryFn: () => get<UserRow[]>(`${ns()}/users`) });
+}

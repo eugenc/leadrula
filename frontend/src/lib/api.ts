@@ -1,0 +1,114 @@
+import axios, { AxiosError } from "axios";
+import { useAuthStore } from "@/store/authStore";
+
+const baseURL = import.meta.env.VITE_API_URL || "http://localhost:8080";
+
+export const api = axios.create({ baseURL });
+
+api.interceptors.request.use((cfg) => {
+  const t = useAuthStore.getState().accessToken;
+  if (t) cfg.headers.Authorization = `Bearer ${t}`;
+  return cfg;
+});
+
+let refreshing: Promise<string | null> | null = null;
+
+async function tryRefresh(): Promise<string | null> {
+  const refresh = useAuthStore.getState().refreshToken;
+  if (!refresh) return null;
+  try {
+    const res = await axios.post(`${baseURL}/auth/refresh`, { refresh });
+    const { access, refresh: newRefresh } = res.data.data;
+    useAuthStore.getState().setTokens(access, newRefresh);
+    return access;
+  } catch {
+    useAuthStore.getState().logout();
+    return null;
+  }
+}
+
+api.interceptors.response.use(
+  (r) => r,
+  async (err: AxiosError) => {
+    const original = err.config as (typeof err.config & { _retry?: boolean }) | undefined;
+    if (err.response?.status === 401 && original && !original._retry) {
+      original._retry = true;
+      if (!refreshing) refreshing = tryRefresh();
+      const newToken = await refreshing;
+      refreshing = null;
+      if (newToken) {
+        original.headers = original.headers ?? {};
+        original.headers.Authorization = `Bearer ${newToken}`;
+        return api(original);
+      }
+    }
+    return Promise.reject(err);
+  }
+);
+
+// Unwrap the { data } envelope. Throws an ApiError on failure.
+export interface ApiErrorShape {
+  code: string;
+  message: string;
+}
+
+export class ApiError extends Error {
+  code: string;
+  status: number;
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.code = code;
+    this.status = status;
+  }
+}
+
+export function apiError(err: unknown): ApiError {
+  if (axios.isAxiosError(err)) {
+    const status = err.response?.status ?? 0;
+    const e = (err.response?.data as { error?: ApiErrorShape } | undefined)?.error;
+    return new ApiError(status, e?.code ?? "error", e?.message ?? err.message);
+  }
+  return new ApiError(0, "error", "unexpected error");
+}
+
+// Namespace prefix based on the logged-in account type.
+export function ns(): string {
+  const user = useAuthStore.getState().user;
+  return user?.account_type === "publisher" ? "/publisher" : "/buyer";
+}
+
+export async function get<T>(path: string): Promise<T> {
+  try {
+    const res = await api.get(path);
+    return res.data.data as T;
+  } catch (e) {
+    throw apiError(e);
+  }
+}
+
+export async function post<T>(path: string, body?: unknown): Promise<T> {
+  try {
+    const res = await api.post(path, body);
+    return res.data.data as T;
+  } catch (e) {
+    throw apiError(e);
+  }
+}
+
+export async function patch<T>(path: string, body?: unknown): Promise<T> {
+  try {
+    const res = await api.patch(path, body);
+    return res.data.data as T;
+  } catch (e) {
+    throw apiError(e);
+  }
+}
+
+export async function del<T>(path: string): Promise<T> {
+  try {
+    const res = await api.delete(path);
+    return res.data.data as T;
+  } catch (e) {
+    throw apiError(e);
+  }
+}
