@@ -1,7 +1,17 @@
 import axios, { AxiosError } from "axios";
 import { useAuthStore } from "@/store/authStore";
 
-const baseURL = import.meta.env.VITE_API_URL || "http://localhost:8080";
+function normalizeBaseURL(raw: string): string {
+  const trimmed = raw.replace(/\/$/, "");
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  // Production hostnames from env often omit the scheme; localhost keeps http.
+  if (trimmed.startsWith("localhost") || trimmed.startsWith("127.0.0.1")) {
+    return `http://${trimmed}`;
+  }
+  return `https://${trimmed}`;
+}
+
+const baseURL = normalizeBaseURL(import.meta.env.VITE_API_URL || "http://localhost:8080");
 
 export const api = axios.create({ baseURL });
 
