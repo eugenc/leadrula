@@ -1,23 +1,64 @@
 import { useState } from "react";
-import { useBuyers, useBuyerBilling, useManualInvoice } from "@/features/admin/hooks";
+import { useBuyers, useCreateBuyer, useBuyerBilling, useManualInvoice } from "@/features/admin/hooks";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
 import { Spinner, EmptyState, Badge } from "@/components/ui/misc";
 import { Dialog } from "@/components/ui/dialog";
 import { formatMoney } from "@/lib/utils";
 import { format } from "date-fns";
 import { toast } from "@/store/toastStore";
 import { apiError } from "@/lib/api";
+import { Plus } from "lucide-react";
+
+const TIMEZONES = [
+  "America/Toronto",
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Phoenix",
+  "America/Anchorage",
+  "Pacific/Honolulu",
+  "UTC",
+] as const;
+
+const emptyForm = {
+  name: "",
+  website: "",
+  admin_first_name: "",
+  admin_last_name: "",
+  admin_email: "",
+  starting_balance: 0,
+  timezone: "America/Toronto",
+};
 
 export function BuyersPage() {
   const { data: buyers, isLoading } = useBuyers();
+  const create = useCreateBuyer();
   const [detail, setDetail] = useState<{ id: number; name: string } | null>(null);
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState(emptyForm);
+
+  const canSubmit =
+    form.name.trim() &&
+    form.admin_first_name.trim() &&
+    form.admin_last_name.trim() &&
+    form.admin_email.trim() &&
+    form.starting_balance >= 0;
 
   return (
     <div>
-      <PageHeader title="Buyers" subtitle="Accounts purchasing your leads." />
+      <PageHeader
+        title="Buyers"
+        subtitle="Accounts purchasing your leads."
+        action={
+          <Button onClick={() => setOpen(true)}>
+            <Plus className="h-4 w-4" /> Add Buyer
+          </Button>
+        }
+      />
       {isLoading ? (
         <Spinner className="h-6 w-6" />
       ) : (buyers ?? []).length === 0 ? (
@@ -51,6 +92,117 @@ export function BuyersPage() {
         </Table>
       )}
       {detail && <BuyerDetail id={detail.id} name={detail.name} onClose={() => setDetail(null)} />}
+
+      <Dialog open={open} onClose={() => setOpen(false)} title="Add Buyer" className="max-w-lg">
+        <div className="space-y-4">
+          <div>
+            <div className="mb-2 text-sm font-semibold">Company</div>
+            <div className="space-y-3">
+              <div>
+                <Label>Company Name</Label>
+                <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              </div>
+              <div>
+                <Label>Website</Label>
+                <Input
+                  type="url"
+                  placeholder="https://example.com"
+                  value={form.website}
+                  onChange={(e) => setForm({ ...form, website: e.target.value })}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-2 text-sm font-semibold">Admin contact</div>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label>First Name</Label>
+                  <Input
+                    value={form.admin_first_name}
+                    onChange={(e) => setForm({ ...form, admin_first_name: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Label>Last Name</Label>
+                  <Input
+                    value={form.admin_last_name}
+                    onChange={(e) => setForm({ ...form, admin_last_name: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div>
+                <Label>Email</Label>
+                <Input
+                  type="email"
+                  value={form.admin_email}
+                  onChange={(e) => setForm({ ...form, admin_email: e.target.value })}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-2 text-sm font-semibold">Account settings</div>
+            <div className="space-y-3">
+              <div>
+                <Label>Timezone</Label>
+                <Select value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })}>
+                  {TIMEZONES.map((tz) => (
+                    <option key={tz} value={tz}>
+                      {tz}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <Label>Starting Balance</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={form.starting_balance}
+                  onChange={(e) => setForm({ ...form, starting_balance: Number(e.target.value) })}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={!canSubmit || create.isPending}
+              onClick={() =>
+                create.mutate(
+                  {
+                    name: form.name.trim(),
+                    admin_first_name: form.admin_first_name.trim(),
+                    admin_last_name: form.admin_last_name.trim(),
+                    admin_email: form.admin_email.trim(),
+                    website: form.website.trim() || undefined,
+                    starting_balance: form.starting_balance,
+                    timezone: form.timezone,
+                  },
+                  {
+                    onSuccess: () => {
+                      toast.success(`Buyer created — invite sent to ${form.admin_email.trim()}`);
+                      setOpen(false);
+                      setForm(emptyForm);
+                    },
+                    onError: (e) => toast.error(apiError(e).message),
+                  }
+                )
+              }
+            >
+              Create Buyer
+            </Button>
+          </div>
+        </div>
+      </Dialog>
     </div>
   );
 }

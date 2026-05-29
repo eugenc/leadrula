@@ -3,6 +3,7 @@ package accounts
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
@@ -117,9 +118,9 @@ func (r *Repository) ListBuyers(ctx context.Context) ([]BuyerSummary, error) {
 }
 
 func (r *Repository) GetAccount(ctx context.Context, id int64) (*Account, error) {
-	const q = `SELECT id, public_id, type, name, timezone, created_at FROM accounts WHERE id = $1`
+	const q = `SELECT id, public_id, type, name, website, timezone, created_at FROM accounts WHERE id = $1`
 	a := &Account{}
-	err := r.pool.QueryRow(ctx, q, id).Scan(&a.ID, &a.PublicID, &a.Type, &a.Name, &a.Timezone, &a.CreatedAt)
+	err := r.pool.QueryRow(ctx, q, id).Scan(&a.ID, &a.PublicID, &a.Type, &a.Name, &a.Website, &a.Timezone, &a.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -182,30 +183,88 @@ func (r *Repository) DeleteUser(ctx context.Context, accountID, userID int64) er
 
 // Invites
 
-func (r *Repository) CreateInvite(ctx context.Context, accountID int64, email, role, token string, expires time.Time) (*Invite, error) {
-	const q = `INSERT INTO invites(account_id, email, role, token, expires_at)
-		VALUES ($1,$2,$3,$4,$5)
-		RETURNING id, account_id, email, role, token, expires_at, created_at`
+func (r *Repository) CreateInvite(ctx context.Context, accountID int64, email, fullName, role, token string, expires time.Time) (*Invite, error) {
+	const q = `INSERT INTO invites(account_id, email, full_name, role, token, expires_at)
+		VALUES ($1,$2,$3,$4,$5,$6)
+		RETURNING id, account_id, email, full_name, role, token, expires_at, created_at`
 	inv := &Invite{}
-	err := r.pool.QueryRow(ctx, q, accountID, email, role, token, expires).Scan(
-		&inv.ID, &inv.AccountID, &inv.Email, &inv.Role, &inv.Token, &inv.ExpiresAt, &inv.CreatedAt)
+	err := r.pool.QueryRow(ctx, q, accountID, email, fullName, role, token, expires).Scan(
+		&inv.ID, &inv.AccountID, &inv.Email, &inv.FullName, &inv.Role, &inv.Token, &inv.ExpiresAt, &inv.CreatedAt)
 	return inv, err
+}
+
+// CreateBuyer inserts a buyer account, admin invite, balance row, and optional credit txn.
+func (r *Repository) CreateBuyer(ctx context.Context, p CreateBuyerParams, token string, expires time.Time) (*CreateBuyerResult, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	a := &Account{}
+	err = tx.QueryRow(ctx,
+		`INSERT INTO accounts(type, name, website, timezone) VALUES ('buyer', $1, $2, $3)
+		 RETURNING id, public_id, type, name, website, timezone, created_at`,
+		p.Name, p.Website, p.Timezone).Scan(
+		&a.ID, &a.PublicID, &a.Type, &a.Name, &a.Website, &a.Timezone, &a.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+
+	adminName := strings.TrimSpace(p.AdminFirstName + " " + p.AdminLastName)
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO invites(account_id, email, full_name, role, token, expires_at) VALUES ($1,$2,$3,'admin',$4,$5)`,
+		a.ID, p.AdminEmail, adminName, token, expires); err != nil {
+		return nil, err
+	}
+
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO buyer_balances(buyer_id, balance) VALUES ($1, $2)`,
+		a.ID, p.StartingBalance); err != nil {
+		return nil, err
+	}
+
+	if p.StartingBalance > 0 {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO transactions(buyer_id, type, amount, balance_after, description)
+			 VALUES ($1, 'credit', $2, $2, 'initial balance')`,
+			a.ID, p.StartingBalance); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	return &CreateBuyerResult{
+		Buyer: BuyerSummary{
+			ID:        a.ID,
+			PublicID:  a.PublicID,
+			Name:      a.Name,
+			Balance:   p.StartingBalance,
+			LeadCount: 0,
+		},
+		InviteToken: token,
+		AdminEmail:  p.AdminEmail,
+	}, nil
 }
 
 type InviteRow struct {
 	ID        int64
 	AccountID int64
 	Email     string
+	FullName  string
 	Role      string
 	ExpiresAt time.Time
 	Accepted  bool
 }
 
 func (r *Repository) FindInviteByToken(ctx context.Context, token string) (*InviteRow, error) {
-	const q = `SELECT id, account_id, email, role, expires_at, (accepted_at IS NOT NULL)
+	const q = `SELECT id, account_id, email, full_name, role, expires_at, (accepted_at IS NOT NULL)
 		FROM invites WHERE token = $1`
 	row := &InviteRow{}
-	err := r.pool.QueryRow(ctx, q, token).Scan(&row.ID, &row.AccountID, &row.Email, &row.Role, &row.ExpiresAt, &row.Accepted)
+	err := r.pool.QueryRow(ctx, q, token).Scan(&row.ID, &row.AccountID, &row.Email, &row.FullName, &row.Role, &row.ExpiresAt, &row.Accepted)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound

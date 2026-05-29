@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"strings"
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/database"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 )
 
@@ -150,7 +152,7 @@ func (s *Service) Invite(ctx context.Context, accountID int64, email, role strin
 		role = "user"
 	}
 	token := randomToken()
-	inv, err := s.repo.CreateInvite(ctx, accountID, email, role, token, time.Now().Add(72*time.Hour))
+	inv, err := s.repo.CreateInvite(ctx, accountID, email, "", role, token, time.Now().Add(72*time.Hour))
 	if err != nil {
 		return nil, err
 	}
@@ -158,6 +160,59 @@ func (s *Service) Invite(ctx context.Context, accountID int64, email, role strin
 		_ = s.mail.SendInvite(email, token)
 	}
 	return inv, nil
+}
+
+var allowedTimezones = map[string]struct{}{
+	"America/Toronto":   {},
+	"America/New_York":    {},
+	"America/Chicago":     {},
+	"America/Denver":      {},
+	"America/Los_Angeles": {},
+	"America/Phoenix":     {},
+	"America/Anchorage":   {},
+	"Pacific/Honolulu":    {},
+	"UTC":                 {},
+}
+
+func (s *Service) CreateBuyer(ctx context.Context, p CreateBuyerParams) (*BuyerSummary, error) {
+	p.Name = strings.TrimSpace(p.Name)
+	p.Website = strings.TrimSpace(p.Website)
+	p.AdminEmail = strings.TrimSpace(p.AdminEmail)
+	p.AdminFirstName = strings.TrimSpace(p.AdminFirstName)
+	p.AdminLastName = strings.TrimSpace(p.AdminLastName)
+	p.Timezone = strings.TrimSpace(p.Timezone)
+
+	if p.Name == "" || p.AdminEmail == "" || p.AdminFirstName == "" || p.AdminLastName == "" {
+		return nil, httpx.Validation("name, admin email, and admin name are required")
+	}
+	if p.StartingBalance < 0 {
+		return nil, httpx.Validation("starting balance must be zero or positive")
+	}
+	if p.Timezone == "" {
+		p.Timezone = "America/Toronto"
+	}
+	if _, ok := allowedTimezones[p.Timezone]; !ok {
+		return nil, httpx.Validation("invalid timezone")
+	}
+
+	if _, err := s.repo.FindUserByEmail(ctx, p.AdminEmail); err == nil {
+		return nil, httpx.Conflict("email already registered")
+	} else if err != ErrNotFound {
+		return nil, err
+	}
+
+	token := randomToken()
+	res, err := s.repo.CreateBuyer(ctx, p, token, time.Now().Add(72*time.Hour))
+	if err != nil {
+		if database.IsUniqueViolation(err) {
+			return nil, httpx.Conflict("email already registered")
+		}
+		return nil, err
+	}
+	if s.mail != nil {
+		_ = s.mail.SendInvite(res.AdminEmail, res.InviteToken)
+	}
+	return &res.Buyer, nil
 }
 
 func (s *Service) AcceptInvite(ctx context.Context, token, fullName, password string) (*LoginResult, error) {
@@ -172,7 +227,11 @@ func (s *Service) AcceptInvite(ctx context.Context, token, fullName, password st
 	if err != nil {
 		return nil, err
 	}
-	if _, err := s.repo.AcceptInvite(ctx, inv, fullName, hash); err != nil {
+	name := fullName
+	if inv.FullName != "" {
+		name = inv.FullName
+	}
+	if _, err := s.repo.AcceptInvite(ctx, inv, name, hash); err != nil {
 		return nil, err
 	}
 	u, err := s.repo.FindUserByEmail(ctx, inv.Email)

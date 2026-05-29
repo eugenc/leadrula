@@ -225,6 +225,21 @@ export function useRejectQueue() {
 export function useBuyers() {
   return useQuery({ queryKey: ["buyers"], queryFn: () => get<BuyerSummary[]>(`/publisher/buyers`) });
 }
+export function useCreateBuyer() {
+  const inv = useInvalidate(["buyers"]);
+  return useMutation({
+    mutationFn: (body: {
+      name: string;
+      admin_first_name: string;
+      admin_last_name: string;
+      admin_email: string;
+      website?: string;
+      starting_balance?: number;
+      timezone?: string;
+    }) => post<BuyerSummary>("/publisher/buyers", body),
+    onSuccess: inv,
+  });
+}
 export function useBuyerPipelines(buyerId: number | null) {
   return useQuery({
     queryKey: ["buyer-pipelines", buyerId],

@@ -1,0 +1,2 @@
+ALTER TABLE invites  DROP COLUMN IF EXISTS full_name;
+ALTER TABLE accounts DROP COLUMN IF EXISTS website;

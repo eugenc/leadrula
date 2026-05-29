@@ -7,6 +7,7 @@ type Account struct {
 	PublicID  string    `json:"id"`
 	Type      string    `json:"type"`
 	Name      string    `json:"name"`
+	Website   string    `json:"website"`
 	Timezone  string    `json:"timezone"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -28,8 +29,25 @@ type Invite struct {
 	ID        int64     `json:"-"`
 	AccountID int64     `json:"-"`
 	Email     string    `json:"email"`
+	FullName  string    `json:"full_name"`
 	Role      string    `json:"role"`
 	Token     string    `json:"-"`
 	ExpiresAt time.Time `json:"expires_at"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type CreateBuyerParams struct {
+	Name            string
+	Website         string
+	Timezone        string
+	AdminEmail      string
+	AdminFirstName  string
+	AdminLastName   string
+	StartingBalance float64
+}
+
+type CreateBuyerResult struct {
+	Buyer       BuyerSummary
+	InviteToken string
+	AdminEmail  string
 }

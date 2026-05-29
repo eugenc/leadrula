@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/echayko/leadrula/backend/internal/accounts"
+	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/internal/billing"
 	"github.com/echayko/leadrula/backend/internal/calendar"
 	"github.com/echayko/leadrula/backend/internal/leads"
@@ -16,18 +17,20 @@ import (
 
 type Handler struct {
 	accounts  *accounts.Repository
+	accountsSvc *accounts.Service
 	leads     *leads.Repository
 	pipelines *pipelines.Service
 	billing   *billing.Service
 	calendar  *calendar.Service
 }
 
-func NewHandler(acc *accounts.Repository, leadRepo *leads.Repository, pl *pipelines.Service, bl *billing.Service, cal *calendar.Service) *Handler {
-	return &Handler{accounts: acc, leads: leadRepo, pipelines: pl, billing: bl, calendar: cal}
+func NewHandler(acc *accounts.Repository, accSvc *accounts.Service, leadRepo *leads.Repository, pl *pipelines.Service, bl *billing.Service, cal *calendar.Service) *Handler {
+	return &Handler{accounts: acc, accountsSvc: accSvc, leads: leadRepo, pipelines: pl, billing: bl, calendar: cal}
 }
 
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/buyers", h.listBuyers)
+	r.With(auth.RequireRole("admin")).Post("/buyers", h.createBuyer)
 	r.Get("/buyers/{id}", h.getBuyer)
 	r.Get("/buyers/{id}/leads", h.buyerLeads)
 	r.Get("/buyers/{id}/pipelines", h.buyerPipelines)
@@ -45,6 +48,35 @@ func (h *Handler) listBuyers(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, items)
 }
 
+func (h *Handler) createBuyer(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name            string  `json:"name"`
+		Website         string  `json:"website"`
+		Timezone        string  `json:"timezone"`
+		AdminFirstName  string  `json:"admin_first_name"`
+		AdminLastName   string  `json:"admin_last_name"`
+		AdminEmail      string  `json:"admin_email"`
+		StartingBalance float64 `json:"starting_balance"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	buyer, err := h.accountsSvc.CreateBuyer(r.Context(), accounts.CreateBuyerParams{
+		Name:            body.Name,
+		Website:         body.Website,
+		Timezone:        body.Timezone,
+		AdminEmail:      body.AdminEmail,
+		AdminFirstName:  body.AdminFirstName,
+		AdminLastName:   body.AdminLastName,
+		StartingBalance: body.StartingBalance,
+	})
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, buyer)
+}
+
 func (h *Handler) getBuyer(w http.ResponseWriter, r *http.Request) {
 	a, err := h.accounts.GetAccount(r.Context(), id(r))
 	if err != nil {
@@ -54,7 +86,7 @@ func (h *Handler) getBuyer(w http.ResponseWriter, r *http.Request) {
 	bal, _ := h.billing.GetBalance(r.Context(), a.ID)
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"id": a.ID, "public_id": a.PublicID, "name": a.Name, "type": a.Type,
-		"timezone": a.Timezone, "balance": bal,
+		"website": a.Website, "timezone": a.Timezone, "balance": bal,
 	})
 }
 

@@ -84,7 +84,7 @@ func main() {
 	intakeSvc := intake.NewService(pool, leadsRepo, notifSvc, accountsRepo)
 	intakeH := intake.NewHandler(intakeSvc, publisherID)
 
-	oversightH := oversight.NewHandler(accountsRepo, leadsRepo, pipelinesSvc, billingSvc, calSvc)
+	oversightH := oversight.NewHandler(accountsRepo, accountsSvc, leadsRepo, pipelinesSvc, billingSvc, calSvc)
 
 	// ── router ───────────────────────────────────────────────────
 	r := chi.NewRouter()
