@@ -59,21 +59,23 @@ export function ResetPasswordPage() {
           className="space-y-4 [&_input]:!h-8 [&_input]:!text-sm [&_label]:!mb-1 [&_label]:!text-sm"
         >
           <div>
-            <Label>New Password</Label>
+            <Label className="mb-1 text-sm">New Password</Label>
             <Input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              className="h-8 text-sm"
               required
               minLength={8}
             />
           </div>
           <div>
-            <Label>Confirm Password</Label>
+            <Label className="mb-1 text-sm">Confirm Password</Label>
             <Input
               type="password"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
+              className="h-8 text-sm"
               required
               minLength={8}
             />
