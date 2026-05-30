@@ -36,6 +36,7 @@ export function ContractReturnRulesEditor({
   onUpdate,
   onDelete,
 }: Props) {
+  const [draftOpen, setDraftOpen] = useState(false);
   const [addFrom, setAddFrom] = useState(0);
   const [addTo, setAddTo] = useState(defaultReturnStageId);
 
@@ -53,13 +54,35 @@ export function ContractReturnRulesEditor({
 
   const availableFrom = sortedBuyer.filter((s) => !usedFrom.has(s.id));
 
+  function closeDraft() {
+    setDraftOpen(false);
+    setAddFrom(0);
+    setAddTo(defaultReturnStageId);
+  }
+
+  function openDraft() {
+    setAddFrom(availableFrom[0]?.id ?? 0);
+    setAddTo(defaultReturnStageId || sortedPublisher[0]?.id || 0);
+    setDraftOpen(true);
+  }
+
+  function saveDraft() {
+    const from = addFrom || availableFrom[0]?.id;
+    const to = addTo || defaultReturnStageId || sortedPublisher[0]?.id;
+    if (!from || !to) return;
+    onAdd(from, to);
+    closeDraft();
+  }
+
   return (
     <div>
       <p className="mb-3 text-xs text-gray-400">{description}</p>
 
-      {rules.length === 0 ? (
+      {rules.length === 0 && !draftOpen && (
         <p className="mb-3 text-sm text-gray-500">No return rules yet.</p>
-      ) : (
+      )}
+
+      {(rules.length > 0 || draftOpen) && (
         <div className="mb-3 space-y-2">
           {rules.map((rule) => (
             <RuleRow
@@ -72,49 +95,49 @@ export function ContractReturnRulesEditor({
               onDelete={onDelete}
             />
           ))}
+          {draftOpen && (
+            <div className="flex flex-wrap items-end gap-2 rounded-md border border-gray-100 px-3 py-2">
+              <div className="min-w-[120px] flex-1">
+                <div className="mb-1 text-xs font-semibold text-gray-500">From Stage</div>
+                <Select
+                  value={addFrom || availableFrom[0]?.id || 0}
+                  onChange={(e) => setAddFrom(Number(e.target.value))}
+                >
+                  {availableFrom.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="min-w-[120px] flex-1">
+                <div className="mb-1 text-xs font-semibold text-gray-500">To Stage</div>
+                <Select
+                  value={addTo || defaultReturnStageId || sortedPublisher[0]?.id || 0}
+                  onChange={(e) => setAddTo(Number(e.target.value))}
+                >
+                  {sortedPublisher.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <Button size="sm" variant="secondary" onClick={saveDraft}>
+                <Plus className="h-4 w-4" /> Add
+              </Button>
+              <IconButton variant="danger" aria-label="Cancel new rule" onClick={closeDraft}>
+                <Trash2 className="h-4 w-4" />
+              </IconButton>
+            </div>
+          )}
         </div>
       )}
 
-      {availableFrom.length > 0 && (
-        <div className="flex flex-wrap items-end gap-2 border-t border-gray-100 pt-3">
-          <div className="min-w-[140px] flex-1">
-            <div className="mb-1 text-xs font-semibold text-gray-500">From Stage</div>
-            <Select value={addFrom || availableFrom[0]?.id || 0} onChange={(e) => setAddFrom(Number(e.target.value))}>
-              {availableFrom.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="min-w-[140px] flex-1">
-            <div className="mb-1 text-xs font-semibold text-gray-500">To Stage</div>
-            <Select
-              value={addTo || defaultReturnStageId || sortedPublisher[0]?.id || 0}
-              onChange={(e) => setAddTo(Number(e.target.value))}
-            >
-              {sortedPublisher.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => {
-              const from = addFrom || availableFrom[0]?.id;
-              const to = addTo || defaultReturnStageId || sortedPublisher[0]?.id;
-              if (!from || !to) return;
-              onAdd(from, to);
-              setAddFrom(0);
-              setAddTo(defaultReturnStageId);
-            }}
-          >
-            <Plus className="h-4 w-4" /> Add
-          </Button>
-        </div>
+      {availableFrom.length > 0 && !draftOpen && (
+        <Button size="sm" variant="secondary" onClick={openDraft}>
+          <Plus className="h-4 w-4" /> Add
+        </Button>
       )}
     </div>
   );

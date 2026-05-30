@@ -307,6 +307,39 @@ func (s *Service) CreateBuyer(ctx context.Context, p CreateBuyerParams) (*BuyerS
 	return &res.Buyer, nil
 }
 
+func (s *Service) UpdateBuyer(ctx context.Context, id int64, p UpdateBuyerParams) (*Account, error) {
+	if p.Name != nil {
+		name := strings.TrimSpace(*p.Name)
+		if name == "" {
+			return nil, httpx.Validation("name is required")
+		}
+		p.Name = &name
+	}
+	if p.Website != nil {
+		website := strings.TrimSpace(*p.Website)
+		p.Website = &website
+	}
+	if p.Timezone != nil {
+		tz := strings.TrimSpace(*p.Timezone)
+		if tz == "" {
+			tz = "America/Toronto"
+		}
+		if _, ok := allowedTimezones[tz]; !ok {
+			return nil, httpx.Validation("invalid timezone")
+		}
+		p.Timezone = &tz
+	}
+
+	a, err := s.repo.UpdateBuyer(ctx, id, p)
+	if err != nil {
+		if err == ErrNotFound {
+			return nil, httpx.NotFound("buyer not found")
+		}
+		return nil, err
+	}
+	return a, nil
+}
+
 func (s *Service) AcceptInvite(ctx context.Context, token, fullName, password string) (*LoginResult, error) {
 	inv, err := s.repo.FindInviteByToken(ctx, token)
 	if err != nil {

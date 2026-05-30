@@ -62,6 +62,7 @@ func (h *Handler) updateField(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
 		Name     *string         `json:"name"`
+		FieldKey *string         `json:"field_key"`
 		Options  json.RawMessage `json:"options"`
 		Position *int            `json:"position"`
 		IsActive *bool           `json:"is_active"`
@@ -69,7 +70,7 @@ func (h *Handler) updateField(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	f, err := h.svc.UpdateField(r.Context(), p.AccountID, idParam(r), body.Name, body.Options, body.Position, body.IsActive)
+	f, err := h.svc.UpdateField(r.Context(), p.AccountID, idParam(r), body.Name, body.FieldKey, body.Options, body.Position, body.IsActive)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return

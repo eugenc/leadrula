@@ -289,6 +289,16 @@ export interface BuyerSummary {
   lead_count: number;
 }
 
+export interface BuyerDetail {
+  id: number;
+  public_id: string;
+  name: string;
+  website: string;
+  timezone: string;
+  balance: number;
+  type: string;
+}
+
 export type UserStatus = "pending" | "active" | "inactive";
 
 export interface UserRow {

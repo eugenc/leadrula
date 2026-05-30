@@ -31,6 +31,7 @@ func NewHandler(acc *accounts.Repository, accSvc *accounts.Service, leadRepo *le
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/buyers", h.listBuyers)
 	r.With(auth.RequireRole("admin")).Post("/buyers", h.createBuyer)
+	r.With(auth.RequireRole("admin")).Patch("/buyers/{id}", h.updateBuyer)
 	r.Get("/buyers/{id}", h.getBuyer)
 	r.Get("/buyers/{id}/leads", h.buyerLeads)
 	r.Get("/buyers/{id}/pipelines", h.buyerPipelines)
@@ -79,6 +80,33 @@ func (h *Handler) createBuyer(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) getBuyer(w http.ResponseWriter, r *http.Request) {
 	a, err := h.accounts.GetAccount(r.Context(), id(r))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if a.Type != "buyer" {
+		httpx.WriteError(w, httpx.NotFound("buyer not found"))
+		return
+	}
+	bal, _ := h.billing.GetBalance(r.Context(), a.ID)
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"id": a.ID, "public_id": a.PublicID, "name": a.Name, "type": a.Type,
+		"website": a.Website, "timezone": a.Timezone, "balance": bal,
+	})
+}
+
+func (h *Handler) updateBuyer(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name     *string `json:"name"`
+		Website  *string `json:"website"`
+		Timezone *string `json:"timezone"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	a, err := h.accountsSvc.UpdateBuyer(r.Context(), id(r), accounts.UpdateBuyerParams{
+		Name: body.Name, Website: body.Website, Timezone: body.Timezone,
+	})
 	if err != nil {
 		httpx.WriteError(w, err)
 		return

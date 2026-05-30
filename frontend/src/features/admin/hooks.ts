@@ -4,6 +4,7 @@ import { useAuthStore } from "@/store/authStore";
 import type {
   ApiKey,
   BuyerSummary,
+  BuyerDetail,
   CalendarEvent,
   Source,
   Route,
@@ -115,11 +116,14 @@ export function useCreateField() {
   return useMutation({ mutationFn: (body: Record<string, unknown>) => post(`${ns()}/custom-fields`, body), onSuccess: inv });
 }
 export function useUpdateField() {
-  const inv = useInvalidate(["custom-fields"]);
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
       patch(`${ns()}/custom-fields/${id}`, body),
-    onSuccess: inv,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["custom-fields"] });
+      qc.invalidateQueries({ queryKey: ["stage-rules"] });
+    },
   });
 }
 export function useDeleteField() {
@@ -456,6 +460,21 @@ export function useCreateBuyer() {
       starting_balance?: number;
       timezone?: string;
     }) => post<BuyerSummary>("/publisher/buyers", body),
+    onSuccess: inv,
+  });
+}
+export function useBuyer(buyerId: number | null) {
+  return useQuery({
+    queryKey: ["buyer", buyerId],
+    queryFn: () => get<BuyerDetail>(`/publisher/buyers/${buyerId}`),
+    enabled: !!buyerId,
+  });
+}
+export function useUpdateBuyer() {
+  const inv = useInvalidate(["buyers", "buyer"]);
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Record<string, string> }) =>
+      patch<BuyerDetail>(`/publisher/buyers/${id}`, body),
     onSuccess: inv,
   });
 }

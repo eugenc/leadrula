@@ -61,6 +61,12 @@ type UpdateInviteParams struct {
 	Role     *string
 }
 
+type UpdateBuyerParams struct {
+	Name     *string
+	Website  *string
+	Timezone *string
+}
+
 type CreateBuyerParams struct {
 	Name            string
 	Website         string

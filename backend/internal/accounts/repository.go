@@ -130,6 +130,26 @@ func (r *Repository) GetAccount(ctx context.Context, id int64) (*Account, error)
 	return a, nil
 }
 
+func (r *Repository) UpdateBuyer(ctx context.Context, id int64, p UpdateBuyerParams) (*Account, error) {
+	const q = `
+		UPDATE accounts SET
+			name = COALESCE($2, name),
+			website = COALESCE($3, website),
+			timezone = COALESCE($4, timezone)
+		WHERE id = $1 AND type = 'buyer'
+		RETURNING id, public_id, type, name, website, timezone, created_at`
+	a := &Account{}
+	err := r.pool.QueryRow(ctx, q, id, p.Name, p.Website, p.Timezone).Scan(
+		&a.ID, &a.PublicID, &a.Type, &a.Name, &a.Website, &a.Timezone, &a.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return a, nil
+}
+
 func (r *Repository) GetUser(ctx context.Context, id int64) (*User, error) {
 	const q = `SELECT id, public_id, account_id, email, full_name, role, is_active, prefs, last_login_at, created_at
 		FROM users WHERE id = $1`

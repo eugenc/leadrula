@@ -86,26 +86,144 @@ func (s *Service) CreateField(ctx context.Context, accountID int64, name, fieldK
 	return f, nil
 }
 
-func (s *Service) UpdateField(ctx context.Context, accountID, id int64, name *string, options json.RawMessage, position *int, isActive *bool) (*CustomField, error) {
+func (s *Service) UpdateField(ctx context.Context, accountID, id int64, name, fieldKey *string, options json.RawMessage, position *int, isActive *bool) (*CustomField, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var oldKey string
+	err = tx.QueryRow(ctx, `SELECT field_key FROM custom_fields WHERE id = $1 AND account_id = $2`, id, accountID).Scan(&oldKey)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, httpx.NotFound("custom field not found")
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if fieldKey != nil && *fieldKey != oldKey {
+		if err := migrateStageRuleCustomFieldKey(ctx, tx, accountID, oldKey, *fieldKey); err != nil {
+			return nil, err
+		}
+	}
+
 	var optArg interface{}
 	if len(options) > 0 {
 		optArg = []byte(options)
 	}
 	f := &CustomField{}
-	err := s.pool.QueryRow(ctx,
+	err = tx.QueryRow(ctx,
 		`UPDATE custom_fields SET
 		   name = COALESCE($3, name),
-		   options = COALESCE($4, options),
-		   position = COALESCE($5, position),
-		   is_active = COALESCE($6, is_active)
+		   field_key = COALESCE($4, field_key),
+		   options = COALESCE($5, options),
+		   position = COALESCE($6, position),
+		   is_active = COALESCE($7, is_active)
 		 WHERE id = $1 AND account_id = $2
 		 RETURNING id, public_id, account_id, name, field_key, type, options, position, is_active, created_at`,
-		id, accountID, name, optArg, position, isActive).Scan(
+		id, accountID, name, fieldKey, optArg, position, isActive).Scan(
 		&f.ID, &f.PublicID, &f.AccountID, &f.Name, &f.FieldKey, &f.Type, &f.Options, &f.Position, &f.IsActive, &f.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, httpx.NotFound("custom field not found")
+	if err != nil {
+		if database.IsUniqueViolation(err) {
+			return nil, httpx.Conflict("field_key already exists")
+		}
+		return nil, err
 	}
-	return f, err
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+// migrateStageRuleCustomFieldKey rewrites custom:{key} references in stage rule
+// conditions/actions when a field key is renamed so existing filters keep working.
+func migrateStageRuleCustomFieldKey(ctx context.Context, q database.Querier, accountID int64, oldKey, newKey string) error {
+	oldField := "custom:" + oldKey
+	newField := "custom:" + newKey
+
+	rows, err := q.Query(ctx,
+		`SELECT sr.id, sr.conditions, sr.actions
+		 FROM stage_rules sr
+		 JOIN pipeline_stages ps ON ps.id = sr.stage_id
+		 JOIN pipelines p ON p.id = ps.pipeline_id
+		 WHERE p.account_id = $1`, accountID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type ruleRow struct {
+		id         int64
+		conditions json.RawMessage
+		actions    json.RawMessage
+	}
+	var rules []ruleRow
+	for rows.Next() {
+		var r ruleRow
+		if err := rows.Scan(&r.id, &r.conditions, &r.actions); err != nil {
+			return err
+		}
+		rules = append(rules, r)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, r := range rules {
+		conds, condChanged, err := patchRuleJSONFieldRefs(r.conditions, oldField, newField)
+		if err != nil {
+			return err
+		}
+		acts, actChanged, err := patchRuleJSONFieldRefs(r.actions, oldField, newField)
+		if err != nil {
+			return err
+		}
+		if !condChanged && !actChanged {
+			continue
+		}
+		if _, err := q.Exec(ctx,
+			`UPDATE stage_rules SET conditions = $2, actions = $3 WHERE id = $1`,
+			r.id, conds, acts); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func patchRuleJSONFieldRefs(raw json.RawMessage, oldField, newField string) (json.RawMessage, bool, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return raw, false, nil
+	}
+	var items []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return raw, false, err
+	}
+	changed := false
+	for i, item := range items {
+		fieldRaw, ok := item["field"]
+		if !ok {
+			continue
+		}
+		var field string
+		if err := json.Unmarshal(fieldRaw, &field); err != nil {
+			continue
+		}
+		if field != oldField {
+			continue
+		}
+		b, err := json.Marshal(newField)
+		if err != nil {
+			return raw, false, err
+		}
+		items[i]["field"] = b
+		changed = true
+	}
+	if !changed {
+		return raw, false, nil
+	}
+	out, err := json.Marshal(items)
+	return out, true, err
 }
 
 // DeleteField removes a field only if no lead has a value for it.

@@ -102,6 +102,19 @@ export function useChangeStage() {
   });
 }
 
+export function useSetActionAt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ leadId, action_at }: { leadId: number; action_at: string | null }) =>
+      patch<{ ok: boolean }>(`${ns()}/leads/${leadId}/action`, { action_at }),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["lead", v.leadId] });
+      qc.invalidateQueries({ queryKey: ["calendar"] });
+    },
+  });
+}
+
 export function useUpdateLead() {
   const qc = useQueryClient();
   return useMutation({

@@ -1,30 +1,18 @@
 import { useState } from "react";
-import { useBuyers, useCreateBuyer, useBuyerBilling, useManualInvoice } from "@/features/admin/hooks";
+import { useBuyers, useCreateBuyer } from "@/features/admin/hooks";
+import { BuyerDetailDrawer } from "@/features/admin/BuyerDetailDrawer";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
-import { Spinner, EmptyState, Badge } from "@/components/ui/misc";
-import { Dialog, FormDrawer } from "@/components/ui/dialog";
+import { Spinner, EmptyState } from "@/components/ui/misc";
+import { FormDrawer } from "@/components/ui/dialog";
 import { cn, formatMoney } from "@/lib/utils";
-import { format } from "date-fns";
+import { TIMEZONES } from "@/lib/timezones";
 import { toast } from "@/store/toastStore";
 import { apiError } from "@/lib/api";
 import { Plus } from "lucide-react";
-import type { Transaction } from "@/types";
-
-const TIMEZONES = [
-  "America/Toronto",
-  "America/New_York",
-  "America/Chicago",
-  "America/Denver",
-  "America/Los_Angeles",
-  "America/Phoenix",
-  "America/Anchorage",
-  "Pacific/Honolulu",
-  "UTC",
-] as const;
 
 const emptyForm = {
   name: "",
@@ -39,7 +27,8 @@ const emptyForm = {
 export function BuyersPage() {
   const { data: buyers, isLoading } = useBuyers();
   const create = useCreateBuyer();
-  const [detail, setDetail] = useState<{ id: number; name: string } | null>(null);
+  const [selectedBuyerId, setSelectedBuyerId] = useState<number | null>(null);
+  const [selectedLeadCount, setSelectedLeadCount] = useState(0);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
 
@@ -49,6 +38,11 @@ export function BuyersPage() {
     form.admin_last_name.trim() &&
     form.admin_email.trim() &&
     form.starting_balance >= 0;
+
+  function openBuyer(id: number, leadCount: number) {
+    setSelectedBuyerId(id);
+    setSelectedLeadCount(leadCount);
+  }
 
   return (
     <>
@@ -71,28 +65,25 @@ export function BuyersPage() {
                 <TH>Buyer</TH>
                 <TH>Leads</TH>
                 <TH>Balance</TH>
-                <TH />
               </tr>
             </THead>
             <TBody>
               {(buyers ?? []).map((b) => (
-                <TR key={b.id}>
+                <TR key={b.id} onClick={() => openBuyer(b.id, b.lead_count)}>
                   <TD className="font-medium text-gray-800">{b.name}</TD>
                   <TD>{b.lead_count}</TD>
                   <TD className={cn(b.balance < 0 && "font-semibold text-danger")}>{formatMoney(b.balance)}</TD>
-                  <TD>
-                    <div className="flex justify-end">
-                      <Button size="sm" variant="secondary" onClick={() => setDetail({ id: b.id, name: b.name })}>
-                        View
-                      </Button>
-                    </div>
-                  </TD>
                 </TR>
               ))}
             </TBody>
           </Table>
         )}
-        {detail && <BuyerDetail id={detail.id} name={detail.name} onClose={() => setDetail(null)} />}
+
+        <BuyerDetailDrawer
+          buyerId={selectedBuyerId}
+          leadCount={selectedLeadCount}
+          onClose={() => setSelectedBuyerId(null)}
+        />
 
         <FormDrawer
           open={open}
@@ -212,98 +203,5 @@ export function BuyersPage() {
         </FormDrawer>
       </PageBody>
     </>
-  );
-}
-
-const TXN_TYPE_LABELS: Record<Transaction["type"], string> = {
-  debit: "Debit",
-  credit: "Credit",
-  dispute_credit: "Dispute",
-  manual_invoice: "Manual invoice",
-};
-
-function txnTypeDisplay(type: Transaction["type"]) {
-  const label = TXN_TYPE_LABELS[type] ?? type.charAt(0).toUpperCase() + type.slice(1);
-  const red = type === "dispute_credit" || type.includes("return");
-  return { label, variant: red ? ("overdue" as const) : ("distributed" as const), amountClass: red ? "text-danger" : "text-jade-700" };
-}
-
-function BuyerDetail({ id, name, onClose }: { id: number; name: string; onClose: () => void }) {
-  const { data } = useBuyerBilling(id);
-  const invoice = useManualInvoice();
-  const [amount, setAmount] = useState(0);
-  const [desc, setDesc] = useState("");
-
-  return (
-    <Dialog open onClose={onClose} title={name} className="max-w-2xl">
-      <div className="space-y-4">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-400">Balance:</span>
-          <span className={cn("text-lg font-bold text-gray-800", (data?.balance ?? 0) < 0 && "text-danger")}>
-            {formatMoney(data?.balance)}
-          </span>
-        </div>
-
-        <div className="rounded-md border border-gray-100 p-3">
-          <div className="mb-2 text-sm font-semibold text-gray-800">Manual invoice / adjustment</div>
-          <div className="grid grid-cols-[1fr_2fr_auto] items-end gap-2">
-            <div>
-              <Label>Amount</Label>
-              <Input type="number" value={amount} onChange={(e) => setAmount(Number(e.target.value))} />
-            </div>
-            <div>
-              <Label>Description</Label>
-              <Input value={desc} onChange={(e) => setDesc(e.target.value)} />
-            </div>
-            <Button
-              disabled={!amount}
-              onClick={() =>
-                invoice.mutate(
-                  { buyer_id: id, amount, description: desc || "manual invoice" },
-                  {
-                    onSuccess: () => {
-                      toast.success("Invoice recorded");
-                      setAmount(0);
-                      setDesc("");
-                    },
-                    onError: (e) => toast.error(apiError(e).message),
-                  }
-                )
-              }
-            >
-              Charge
-            </Button>
-          </div>
-        </div>
-
-        <div className="max-h-72 overflow-y-auto">
-          <Table>
-            <THead>
-              <tr>
-                <TH className="normal-case">Type</TH>
-                <TH>Amount</TH>
-                <TH>Balance</TH>
-                <TH>When</TH>
-              </tr>
-            </THead>
-            <TBody>
-              {(data?.transactions ?? []).map((t) => {
-                const { label, variant, amountClass } = txnTypeDisplay(t.type);
-                return (
-                <TR key={t.id}>
-                  <TD>
-                    <Badge variant={variant}>{label}</Badge>
-                  </TD>
-                  <TD className={amountClass}>{formatMoney(t.amount)}</TD>
-                  <TD>{formatMoney(t.balance_after)}</TD>
-                  <TD>{format(new Date(t.created_at), "MMM d, h:mma")}</TD>
-                </TR>
-              );
-              })}
-            </TBody>
-          </Table>
-        </div>
-      </div>
-    </Dialog>
   );
 }

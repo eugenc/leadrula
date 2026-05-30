@@ -16,6 +16,7 @@ import {
   useAddNote,
   useStageHistory,
   useUpdateLead,
+  useSetActionAt,
   useUsers,
   useCustomFields,
 } from "./hooks";
@@ -33,6 +34,12 @@ const BUILTINS: { key: keyof Lead; label: string }[] = [
   { key: "state", label: "State" },
   { key: "zip", label: "Zip" },
 ];
+
+function isoToDatetimeLocal(iso: string): string {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 export function LeadDetailDrawer() {
   const leadId = useUIStore((s) => s.detailLeadId);
@@ -56,19 +63,32 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   const user = useAuthStore((s) => s.user);
   const [tab, setTab] = useState<"details" | "notes" | "history">("details");
   const update = useUpdateLead();
+  const setAction = useSetActionAt();
   const { data: users } = useUsers();
   const { data: customFields } = useCustomFields();
 
   const [fields, setFields] = useState<Record<string, string>>({});
+  const [actionAtLocal, setActionAtLocal] = useState("");
   useEffect(() => {
     const f: Record<string, string> = {};
     for (const b of BUILTINS) f[b.key as string] = (lead[b.key] as string) ?? "";
     setFields(f);
+    setActionAtLocal(lead.action_at ? isoToDatetimeLocal(lead.action_at) : "");
   }, [lead]);
 
   function saveField(key: string) {
     update.mutate(
       { leadId: lead.id, body: { fields: { [key]: fields[key] } } },
+      { onSuccess: () => toast.success("Saved"), onError: () => toast.error("Save failed") }
+    );
+  }
+
+  function saveActionAt() {
+    const prev = lead.action_at ? isoToDatetimeLocal(lead.action_at) : "";
+    if (actionAtLocal === prev) return;
+    const payload = actionAtLocal ? new Date(actionAtLocal).toISOString() : null;
+    setAction.mutate(
+      { leadId: lead.id, action_at: payload },
       { onSuccess: () => toast.success("Saved"), onError: () => toast.error("Save failed") }
     );
   }
@@ -83,24 +103,27 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
         onClose={onClose}
       />
 
-      {lead.action_at && (
-        <div className="border-b border-gray-100 px-5 py-2">
-          <div
-            className={cn(
-              "flex items-center gap-2 rounded-md border px-2.5 py-1.5",
-              overdue
-                ? "border-danger-border bg-danger-bg"
-                : "border-gray-100 bg-gray-50"
-            )}
-          >
-            <ActionDot actionAt={lead.action_at} variant="dot" />
-            <span className={cn("text-xs", overdue ? "font-semibold text-danger" : "text-gray-700")}>
-              Action {format(new Date(lead.action_at), "MMM d, h:mma")}
-              {overdue && " — overdue"}
-            </span>
-          </div>
+      <div className="border-b border-gray-100 px-5 py-2">
+        <div
+          className={cn(
+            "flex items-center gap-2 rounded-md border px-2.5 py-1.5",
+            overdue ? "border-danger-border bg-danger-bg" : "border-gray-100 bg-gray-50"
+          )}
+        >
+          {lead.action_at && <ActionDot actionAt={lead.action_at} variant="dot" />}
+          <span className={cn("shrink-0 text-xs", overdue ? "font-semibold text-danger" : "text-gray-700")}>
+            Action{overdue && " — overdue"}
+          </span>
+          <Input
+            type="datetime-local"
+            value={actionAtLocal}
+            onChange={(e) => setActionAtLocal(e.target.value)}
+            onBlur={saveActionAt}
+            disabled={setAction.isPending}
+            className="h-7 min-w-0 flex-1 border-0 bg-transparent px-1 py-0 text-xs shadow-none focus:ring-0"
+          />
         </div>
-      )}
+      </div>
 
       <div className="flex border-b border-gray-100 px-5">
         {(["details", "notes", "history"] as const).map((t) => (

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useCustomFields } from "@/features/leads/hooks";
 import { useCreateField, useUpdateField, useDeleteField } from "@/features/admin/hooks";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -12,6 +12,7 @@ import { FormDrawer } from "@/components/ui/dialog";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "@/store/toastStore";
 import { apiError } from "@/lib/api";
+import type { CustomField } from "@/types";
 
 const CUSTOM_FIELD_TYPES = [
   { value: "text", label: "Text" },
@@ -22,35 +23,93 @@ const CUSTOM_FIELD_TYPES = [
   { value: "checkbox", label: "Checkbox" },
 ] as const;
 
+type FieldForm = { name: string; field_key: string; type: string; options: string };
+
+const emptyForm = (): FieldForm => ({ name: "", field_key: "", type: "text", options: "" });
+
+function fieldToForm(f: CustomField): FieldForm {
+  return {
+    name: f.name,
+    field_key: f.field_key,
+    type: f.type,
+    options: f.type === "dropdown" ? (f.options ?? []).join(", ") : "",
+  };
+}
+
 export function CustomFieldsPage() {
   const { data: fields, isLoading } = useCustomFields();
   const create = useCreateField();
   const update = useUpdateField();
   const remove = useDeleteField();
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: "", field_key: "", type: "text", options: "" });
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editing, setEditing] = useState<CustomField | null>(null);
+  const [form, setForm] = useState<FieldForm>(emptyForm());
 
-  function submit() {
+  useEffect(() => {
+    if (!drawerOpen) return;
+    setForm(editing ? fieldToForm(editing) : emptyForm());
+  }, [drawerOpen, editing]);
+
+  function openCreate() {
+    setEditing(null);
+    setDrawerOpen(true);
+  }
+
+  function openEdit(field: CustomField) {
+    setEditing(field);
+    setDrawerOpen(true);
+  }
+
+  function closeDrawer() {
+    setDrawerOpen(false);
+    setEditing(null);
+  }
+
+  function buildBody(): Record<string, unknown> {
     const body: Record<string, unknown> = {
       name: form.name,
       field_key: form.field_key,
-      type: form.type,
     };
-    if (form.type === "dropdown") body.options = form.options.split(",").map((s) => s.trim()).filter(Boolean);
-    create.mutate(body, {
-      onSuccess: () => {
-        setOpen(false);
-        setForm({ name: "", field_key: "", type: "text", options: "" });
-      },
-      onError: (e) => toast.error(apiError(e).message),
-    });
+    if (form.type === "dropdown") {
+      body.options = form.options.split(",").map((s) => s.trim()).filter(Boolean);
+    }
+    return body;
   }
+
+  function submit() {
+    if (editing) {
+      update.mutate(
+        { id: editing.id, body: buildBody() },
+        {
+          onSuccess: () => {
+            toast.success("Field updated");
+            closeDrawer();
+          },
+          onError: (e) => toast.error(apiError(e).message),
+        }
+      );
+    } else {
+      create.mutate(
+        { ...buildBody(), type: form.type },
+        {
+          onSuccess: () => {
+            toast.success("Field created");
+            closeDrawer();
+          },
+          onError: (e) => toast.error(apiError(e).message),
+        }
+      );
+    }
+  }
+
+  const saving = create.isPending || update.isPending;
+  const canSubmit = !!form.name && !!form.field_key;
 
   return (
     <>
       <PageHeader
         action={
-          <Button onClick={() => setOpen(true)}>
+          <Button onClick={openCreate}>
             <Plus className="h-4 w-4" /> New Field
           </Button>
         }
@@ -71,17 +130,21 @@ export function CustomFieldsPage() {
             </THead>
             <TBody>
               {(fields ?? []).map((f) => (
-                <TR key={f.id}>
+                <TR
+                  key={f.id}
+                  className="cursor-pointer hover:bg-gray-50"
+                  onClick={() => openEdit(f)}
+                >
                   <TD className="font-medium text-gray-800">{f.name}</TD>
                   <TD className="font-mono text-xs">{f.field_key}</TD>
                   <TD>{CUSTOM_FIELD_TYPES.find((t) => t.value === f.type)?.label ?? f.type}</TD>
-                  <TD>
+                  <TD onClick={(e) => e.stopPropagation()}>
                     <Switch
                       checked={f.is_active}
                       onChange={(v) => update.mutate({ id: f.id, body: { is_active: v } })}
                     />
                   </TD>
-                  <TD>
+                  <TD onClick={(e) => e.stopPropagation()}>
                     <IconButton
                       variant="danger"
                       onClick={() => remove.mutate(f.id, { onError: (e) => toast.error(apiError(e).message) })}
@@ -96,16 +159,17 @@ export function CustomFieldsPage() {
         )}
 
         <FormDrawer
-          open={open}
-          onClose={() => setOpen(false)}
-          title="New Custom Field"
+          open={drawerOpen}
+          onClose={closeDrawer}
+          title={editing ? editing.name : "New Custom Field"}
+          subtitle={editing ? "Edit custom field" : undefined}
           footer={
             <>
-              <Button variant="secondary" onClick={() => setOpen(false)}>
+              <Button variant="secondary" onClick={closeDrawer}>
                 Cancel
               </Button>
-              <Button onClick={submit} disabled={!form.name || !form.field_key}>
-                Create
+              <Button onClick={submit} disabled={!canSubmit || saving}>
+                {editing ? "Save" : "Create"}
               </Button>
             </>
           }
@@ -122,18 +186,29 @@ export function CustomFieldsPage() {
                 onChange={(e) => setForm({ ...form, field_key: e.target.value })}
                 placeholder="utility_provider"
               />
+              {editing && editing.field_key !== form.field_key && (
+                <p className="mt-1 text-xs text-gray-500">
+                  Renaming the key updates pipeline stage rules that reference this field.
+                </p>
+              )}
             </div>
             <div>
               <Label>Type</Label>
-              <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-                {CUSTOM_FIELD_TYPES.map(({ value, label }) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </Select>
+              {editing ? (
+                <p className="text-sm text-gray-700">
+                  {CUSTOM_FIELD_TYPES.find((t) => t.value === editing.type)?.label ?? editing.type}
+                </p>
+              ) : (
+                <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+                  {CUSTOM_FIELD_TYPES.map(({ value, label }) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+              )}
             </div>
-            {form.type === "dropdown" && (
+            {(editing ? editing.type === "dropdown" : form.type === "dropdown") && (
               <div>
                 <Label>Options (comma separated)</Label>
                 <Input value={form.options} onChange={(e) => setForm({ ...form, options: e.target.value })} />
