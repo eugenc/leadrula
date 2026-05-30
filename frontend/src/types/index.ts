@@ -179,6 +179,7 @@ export interface ReturnRule {
   id: number;
   contract_id: number;
   buyer_stage_id: number;
+  return_stage_id: number;
 }
 
 export interface Source {

@@ -261,10 +261,38 @@ export function useReturnRules(contractId: number | null, buyer = false) {
 export function useAddReturnRule(buyer = false) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ contractId, buyerStageId }: { contractId: number | null; buyerStageId: number }) =>
+    mutationFn: ({
+      contractId,
+      buyerStageId,
+      returnStageId,
+    }: {
+      contractId: number | null;
+      buyerStageId: number;
+      returnStageId: number;
+    }) =>
       post(buyer ? `/buyer/contract/return-rules` : `/publisher/contracts/${contractId}/return-rules`, {
         buyer_stage_id: buyerStageId,
+        return_stage_id: returnStageId,
       }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["return-rules"] }),
+  });
+}
+export function useUpdateReturnRule(buyer = false) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      ruleId,
+      buyerStageId,
+      returnStageId,
+    }: {
+      ruleId: number;
+      buyerStageId: number;
+      returnStageId: number;
+    }) =>
+      patch(
+        buyer ? `/buyer/contract/return-rules/${ruleId}` : `/publisher/return-rules/${ruleId}`,
+        { buyer_stage_id: buyerStageId, return_stage_id: returnStageId }
+      ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["return-rules"] }),
   });
 }
@@ -279,6 +307,16 @@ export function useDeleteReturnRule(buyer = false) {
 
 export function useMyContract() {
   return useQuery({ queryKey: ["my-contract"], queryFn: () => get<Contract>(`/buyer/contract`) });
+}
+export function useContractPublisherStages(buyer = false, sourcePipelineId?: number) {
+  return useQuery({
+    queryKey: ["contract-publisher-stages", buyer, sourcePipelineId],
+    queryFn: () =>
+      buyer
+        ? get<import("@/types").Stage[]>(`/buyer/contract/publisher-stages`)
+        : get<import("@/types").Stage[]>(`${ns()}/pipelines/${sourcePipelineId}/stages`),
+    enabled: buyer || !!sourcePipelineId,
+  });
 }
 
 // ── Sources & Routes (publisher) ────────────────────────────────────

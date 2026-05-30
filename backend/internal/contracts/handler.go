@@ -25,6 +25,7 @@ func (h *Handler) RegisterPublisher(r chi.Router) {
 		r.Patch("/contracts/{id}", h.update)
 		r.Delete("/contracts/{id}", h.delete)
 		r.Post("/contracts/{id}/return-rules", h.addRule)
+		r.Patch("/return-rules/{ruleId}", h.updateRule)
 		r.Delete("/return-rules/{ruleId}", h.deleteRule)
 	})
 }
@@ -32,8 +33,10 @@ func (h *Handler) RegisterPublisher(r chi.Router) {
 // RegisterBuyer mounts the buyer's read-only contract + return-rule config.
 func (h *Handler) RegisterBuyer(r chi.Router) {
 	r.Get("/contract", h.buyerContract)
+	r.Get("/contract/publisher-stages", h.buyerPublisherStages)
 	r.Get("/contract/return-rules", h.buyerListRules)
 	r.With(auth.RequireRole("admin")).Post("/contract/return-rules", h.buyerAddRule)
+	r.With(auth.RequireRole("admin")).Patch("/contract/return-rules/{ruleId}", h.buyerUpdateRule)
 	r.With(auth.RequireRole("admin")).Delete("/contract/return-rules/{ruleId}", h.deleteRule)
 }
 
@@ -135,17 +138,42 @@ func (h *Handler) addRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		BuyerStageID int64 `json:"buyer_stage_id"`
+		BuyerStageID  int64 `json:"buyer_stage_id"`
+		ReturnStageID int64 `json:"return_stage_id"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	rr, err := h.svc.AddReturnRule(r.Context(), idp(r, "id"), body.BuyerStageID)
+	if body.BuyerStageID == 0 || body.ReturnStageID == 0 {
+		httpx.WriteError(w, httpx.Validation("buyer_stage_id and return_stage_id are required"))
+		return
+	}
+	rr, err := h.svc.AddReturnRule(r.Context(), idp(r, "id"), body.BuyerStageID, body.ReturnStageID)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, rr)
+}
+
+func (h *Handler) updateRule(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		BuyerStageID  int64 `json:"buyer_stage_id"`
+		ReturnStageID int64 `json:"return_stage_id"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	if body.BuyerStageID == 0 || body.ReturnStageID == 0 {
+		httpx.WriteError(w, httpx.Validation("buyer_stage_id and return_stage_id are required"))
+		return
+	}
+	rr, err := h.svc.UpdateReturnRule(r.Context(), idp(r, "ruleId"), body.BuyerStageID, body.ReturnStageID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, rr)
 }
 
 func (h *Handler) deleteRule(w http.ResponseWriter, r *http.Request) {
@@ -189,17 +217,68 @@ func (h *Handler) buyerAddRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		BuyerStageID int64 `json:"buyer_stage_id"`
+		BuyerStageID  int64 `json:"buyer_stage_id"`
+		ReturnStageID int64 `json:"return_stage_id"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	rr, err := h.svc.AddReturnRule(r.Context(), cid, body.BuyerStageID)
+	if body.BuyerStageID == 0 || body.ReturnStageID == 0 {
+		httpx.WriteError(w, httpx.Validation("buyer_stage_id and return_stage_id are required"))
+		return
+	}
+	rr, err := h.svc.AddReturnRule(r.Context(), cid, body.BuyerStageID, body.ReturnStageID)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, rr)
+}
+
+func (h *Handler) buyerUpdateRule(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	cid, err := h.svc.ContractIDForBuyer(r.Context(), p.AccountID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	ruleID := idp(r, "ruleId")
+	ruleContractID, err := h.svc.ReturnRuleContractID(r.Context(), ruleID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if ruleContractID != cid {
+		httpx.WriteError(w, httpx.NotFound("return rule not found"))
+		return
+	}
+	var body struct {
+		BuyerStageID  int64 `json:"buyer_stage_id"`
+		ReturnStageID int64 `json:"return_stage_id"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	if body.BuyerStageID == 0 || body.ReturnStageID == 0 {
+		httpx.WriteError(w, httpx.Validation("buyer_stage_id and return_stage_id are required"))
+		return
+	}
+	rr, err := h.svc.UpdateReturnRule(r.Context(), ruleID, body.BuyerStageID, body.ReturnStageID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, rr)
+}
+
+func (h *Handler) buyerPublisherStages(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	stages, err := h.svc.PublisherReturnStages(r.Context(), p.AccountID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, stages)
 }
 
 func idp(r *http.Request, name string) int64 {

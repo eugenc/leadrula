@@ -11,6 +11,7 @@ import {
   useBuyerPipelines,
   useReturnRules,
   useAddReturnRule,
+  useUpdateReturnRule,
   useDeleteReturnRule,
   useBuyerStages,
 } from "@/features/admin/hooks";
@@ -44,6 +45,7 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
   );
   const { data: rules, isLoading: rulesLoading } = useReturnRules(contract.id);
   const addRule = useAddReturnRule(false);
+  const updateRule = useUpdateReturnRule(false);
   const removeRule = useDeleteReturnRule(false);
 
   const [name, setName] = useState(contract.name);
@@ -60,7 +62,6 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
   const sourceStage = (sourceStages ?? []).find((s) => s.id === contract.source_stage_id);
   const returnStage = (sourceStages ?? []).find((s) => s.id === contract.return_stage_id);
   const buyerPipeline = (buyerPipelines ?? []).find((p) => p.id === contract.buyer_pipeline_id);
-  const ruleByStage = new Map((rules ?? []).map((r) => [r.buyer_stage_id, r.id]));
 
   const unchanged =
     name.trim() === contract.name && rate === contract.rate_per_lead && status === contract.status;
@@ -86,16 +87,22 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
     );
   }
 
-  function toggleReturnRule(stageId: number, on: boolean) {
-    if (on) {
-      addRule.mutate(
-        { contractId: contract.id, buyerStageId: stageId },
-        { onError: (e) => toast.error(apiError(e).message) }
-      );
-    } else {
-      const ruleId = ruleByStage.get(stageId);
-      if (ruleId) removeRule.mutate(ruleId, { onError: (e) => toast.error(apiError(e).message) });
-    }
+  function addReturnRule(buyerStageId: number, returnStageId: number) {
+    addRule.mutate(
+      { contractId: contract.id, buyerStageId, returnStageId },
+      { onError: (e) => toast.error(apiError(e).message) }
+    );
+  }
+
+  function updateReturnRule(ruleId: number, buyerStageId: number, returnStageId: number) {
+    updateRule.mutate(
+      { ruleId, buyerStageId, returnStageId },
+      { onError: (e) => toast.error(apiError(e).message) }
+    );
+  }
+
+  function deleteReturnRule(ruleId: number) {
+    removeRule.mutate(ruleId, { onError: (e) => toast.error(apiError(e).message) });
   }
 
   return (
@@ -159,10 +166,14 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
           <div className="pt-2">
             <SectionLabel className="mb-2">Return Rules</SectionLabel>
             <ContractReturnRulesEditor
-              stages={buyerStages ?? []}
+              buyerStages={buyerStages ?? []}
+              publisherStages={sourceStages ?? []}
               rules={rules ?? []}
+              defaultReturnStageId={contract.return_stage_id}
               loading={stagesLoading || rulesLoading}
-              onToggle={toggleReturnRule}
+              onAdd={addReturnRule}
+              onUpdate={updateReturnRule}
+              onDelete={deleteReturnRule}
             />
           </div>
         </div>

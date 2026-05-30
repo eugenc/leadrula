@@ -116,7 +116,7 @@ func seedBuyer(ctx context.Context, pool *pgxpool.Pool, publisherID, buyerID int
 		log.Fatalf("contract: %v", err)
 	}
 	// return rule: Missed Appointment returns the lead
-	_, _ = pool.Exec(ctx, `INSERT INTO contract_return_rules(contract_id, buyer_stage_id) VALUES ($1,$2)`, contractID, missed)
+	_, _ = pool.Exec(ctx, `INSERT INTO contract_return_rules(contract_id, buyer_stage_id, return_stage_id) VALUES ($1,$2,$3)`, contractID, missed, pubReturned)
 
 	// routing source + route + field maps
 	var sourceID int64

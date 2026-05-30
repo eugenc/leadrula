@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, get } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { queryClient } from "@/lib/queryClient";
@@ -54,9 +54,12 @@ export function LoginPage() {
         <div className="mb-6 flex items-center gap-2.5">
           <Logo className="h-10 w-auto" />
         </div>
-        <h1 className="mb-1 text-lg font-semibold text-gray-800">Sign in</h1>
-        <p className="mb-5 text-base text-gray-400">Welcome back. Enter your credentials.</p>
-        <form onSubmit={submit} className="space-y-4">
+        <h1 className="mb-0.5 text-base font-semibold text-gray-800">Sign in</h1>
+        <p className="mb-5 text-xs text-gray-400">Welcome back. Enter your credentials.</p>
+        <form
+          onSubmit={submit}
+          className="space-y-4 [&_input]:!h-8 [&_input]:!text-sm [&_label]:!mb-1 [&_label]:!text-sm"
+        >
           <div>
             <Label>Email</Label>
             <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
@@ -80,6 +83,18 @@ export function LoginPage() {
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
+            <p className="mt-1.5 text-right text-sm">
+              <Link
+                to={
+                  email
+                    ? `/forgot-password?email=${encodeURIComponent(email)}`
+                    : "/forgot-password"
+                }
+                className="text-jade-600 hover:underline"
+              >
+                Forgot password?
+              </Link>
+            </p>
           </div>
           {error && <p className="text-sm text-danger">{error}</p>}
           <Button type="submit" className="w-full" disabled={loading}>

@@ -9,6 +9,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { LoginPage } from "@/features/auth/LoginPage";
 import { InviteAcceptPage } from "@/features/auth/InviteAcceptPage";
 import { ResetPasswordPage } from "@/features/auth/ResetPasswordPage";
+import { ForgotPasswordPage } from "@/features/auth/ForgotPasswordPage";
 import { Dashboard } from "@/pages/Dashboard";
 import { BoardPage } from "@/pages/BoardPage";
 import { LeadsListPage } from "@/pages/LeadsListPage";
@@ -44,6 +45,7 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/invite/accept" element={<InviteAcceptPage />} />
           <Route path="/reset" element={<ResetPasswordPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/" element={<RootRedirect />} />
 
           <Route element={<RequireAuth />}>
