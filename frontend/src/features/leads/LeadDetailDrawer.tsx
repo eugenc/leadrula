@@ -168,6 +168,14 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
                   <Label>Buyer</Label>
                   <div className="mt-1 text-sm text-gray-700">{lead.buyer_name ?? "—"}</div>
                 </div>
+                <div>
+                  <Label>Pipeline</Label>
+                  <div className="mt-1 text-sm text-gray-700">{lead.pipeline_name ?? "—"}</div>
+                </div>
+                <div>
+                  <Label>Pipeline Stage</Label>
+                  <div className="mt-1 text-sm text-gray-700">{lead.stage_name ?? "—"}</div>
+                </div>
               </div>
             </div>
             <LeadTagsEditor leadId={lead.id} tags={lead.tags ?? []} />

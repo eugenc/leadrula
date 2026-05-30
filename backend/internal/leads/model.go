@@ -34,6 +34,8 @@ type Lead struct {
 	BuyerName         *string                   `json:"buyer_name,omitempty"`
 	AssigneeName      *string                   `json:"assignee_name,omitempty"`
 	AssigneeAvatarURL *string                   `json:"assignee_avatar_url,omitempty"`
+	PipelineName      *string                   `json:"pipeline_name,omitempty"`
+	StageName         *string                   `json:"stage_name,omitempty"`
 	Tags              []string                  `json:"tags"`
 }
 

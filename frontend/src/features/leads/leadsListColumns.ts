@@ -43,6 +43,8 @@ export const SYSTEM_COLUMNS: SystemColumn[] = [
   { id: "campaign", label: "Campaign", sortKey: "campaign_name" },
   { id: "buyer", label: "Buyer", sortKey: "buyer_name" },
   { id: "assignee", label: "Assignee", sortKey: "assignee_name" },
+  { id: "pipeline", label: "Pipeline", sortKey: "pipeline_name" },
+  { id: "stage", label: "Pipeline Stage", sortKey: "stage_name" },
   { id: "status", label: "Status", sortKey: "status" },
   { id: "tags", label: "Tags" },
   { id: "action_at", label: "Action At", sortKey: "action_at" },
@@ -59,6 +61,8 @@ export const DEFAULT_VISIBLE_COLUMNS = [
   "campaign",
   "buyer",
   "assignee",
+  "pipeline",
+  "stage",
   "status",
   "action_at",
   "created_at",
@@ -109,6 +113,10 @@ export function cellValue(lead: Lead, colId: string, customFields: CustomField[]
       return lead.buyer_name ?? "—";
     case "assignee":
       return lead.assignee_name ?? "—";
+    case "pipeline":
+      return lead.pipeline_name ?? "—";
+    case "stage":
+      return lead.stage_name ?? "—";
     case "status":
       return formatStatus(lead.status);
     case "tags":

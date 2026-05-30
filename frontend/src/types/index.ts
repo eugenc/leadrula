@@ -111,6 +111,8 @@ export interface Lead {
   buyer_name?: string | null;
   assignee_name?: string | null;
   assignee_avatar_url?: string | null;
+  pipeline_name?: string | null;
+  stage_name?: string | null;
   tags?: string[];
 }
 

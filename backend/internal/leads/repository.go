@@ -137,11 +137,14 @@ func (r *Repository) Get(ctx context.Context, p *auth.Principal, leadID int64) (
 
 func (r *Repository) attachLeadNames(ctx context.Context, l *Lead) error {
 	return r.pool.QueryRow(ctx,
-		`SELECT CASE WHEN ba.type = 'buyer' THEN ba.name ELSE NULL END, u.full_name, u.prefs->>'avatar_url'
+		`SELECT CASE WHEN ba.type = 'buyer' THEN ba.name ELSE NULL END, u.full_name, u.prefs->>'avatar_url',
+		        pl.name, st.name
 		 FROM leads l
 		 LEFT JOIN accounts ba ON ba.id = l.owner_account_id AND ba.type = 'buyer'
 		 LEFT JOIN users u ON u.id = l.assigned_user_id
-		 WHERE l.id = $1`, l.ID).Scan(&l.BuyerName, &l.AssigneeName, &l.AssigneeAvatarURL)
+		 LEFT JOIN pipelines pl ON pl.id = l.pipeline_id
+		 LEFT JOIN pipeline_stages st ON st.id = l.stage_id
+		 WHERE l.id = $1`, l.ID).Scan(&l.BuyerName, &l.AssigneeName, &l.AssigneeAvatarURL, &l.PipelineName, &l.StageName)
 }
 
 func (r *Repository) attachCustomValues(ctx context.Context, l *Lead) error {
@@ -209,13 +212,17 @@ var listSortCols = map[string]string{
 	"campaign_name": "l.campaign_name",
 	"status":        "l.status",
 	"action_at":     "l.action_at",
-	"buyer_name":    "buyer_name",
-	"assignee_name": "assignee_name",
+	"buyer_name":     "buyer_name",
+	"assignee_name":  "assignee_name",
+	"pipeline_name":  "pl.name",
+	"stage_name":     "st.name",
 }
 
 const listFrom = ` FROM leads l
 	LEFT JOIN accounts ba ON ba.id = l.owner_account_id AND ba.type = 'buyer'
-	LEFT JOIN users u ON u.id = l.assigned_user_id`
+	LEFT JOIN users u ON u.id = l.assigned_user_id
+	LEFT JOIN pipelines pl ON pl.id = l.pipeline_id
+	LEFT JOIN pipeline_stages st ON st.id = l.stage_id`
 
 const listSelect = `l.id, l.public_id, l.owner_account_id, l.publisher_id, l.contract_id,
 	l.first_name, l.last_name, l.phone, l.email, l.address, l.city, l.state, l.zip, l.campaign_name,
@@ -223,14 +230,17 @@ const listSelect = `l.id, l.public_id, l.owner_account_id, l.publisher_id, l.con
 	l.disqualification_reason_id, l.created_at, l.updated_at, l.tags,
 	CASE WHEN ba.type = 'buyer' THEN ba.name ELSE NULL END AS buyer_name,
 	u.full_name AS assignee_name,
-	u.prefs->>'avatar_url' AS assignee_avatar_url`
+	u.prefs->>'avatar_url' AS assignee_avatar_url,
+	pl.name AS pipeline_name,
+	st.name AS stage_name`
 
 func scanListLead(row pgx.Row) (*Lead, error) {
 	l := &Lead{}
 	err := row.Scan(&l.ID, &l.PublicID, &l.OwnerAccountID, &l.PublisherID, &l.ContractID,
 		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.CampaignName,
 		&l.PipelineID, &l.StageID, &l.Position, &l.AssignedUserID, &l.ActionAt, &l.Status,
-		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt, &l.Tags, &l.BuyerName, &l.AssigneeName, &l.AssigneeAvatarURL)
+		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt, &l.Tags, &l.BuyerName, &l.AssigneeName, &l.AssigneeAvatarURL,
+		&l.PipelineName, &l.StageName)
 	if err != nil {
 		return nil, err
 	}
