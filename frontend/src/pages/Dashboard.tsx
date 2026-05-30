@@ -22,14 +22,14 @@ export function Dashboard() {
       <PageHeader title={`Welcome, ${user?.full_name ?? ""}`} subtitle="Here's your overview." />
       <PageBody>
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-          <StatCard label="Total Leads" value={all.length} />
-          <StatCard label="Distributed" value={distributed} />
+          <StatCard label="Total Leads" value={all.length.toLocaleString()} />
+          <StatCard label="Distributed" value={distributed.toLocaleString()} />
           {isBuyer ? (
             <StatCard label="Balance" value={formatMoney(balance?.balance)} />
           ) : (
-            <StatCard label="In Review" value={review} />
+            <StatCard label="In Review" value={review.toLocaleString()} />
           )}
-          <StatCard label="Returned" value={returned} />
+          <StatCard label="Returned" value={returned.toLocaleString()} />
         </div>
       </PageBody>
     </>
