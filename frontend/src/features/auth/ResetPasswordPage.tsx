@@ -52,9 +52,12 @@ export function ResetPasswordPage() {
         <div className="mb-6 flex items-center gap-2.5">
           <Logo className="h-10 w-auto" />
         </div>
-        <h1 className="mb-1 text-lg font-semibold text-gray-800">Reset your password</h1>
-        <p className="mb-5 text-base text-gray-400">Choose a new password for your account.</p>
-        <form onSubmit={submit} className="space-y-4">
+        <h1 className="mb-0.5 text-base font-semibold text-gray-800">Reset your password</h1>
+        <p className="mb-5 text-xs text-gray-400">Choose a new password for your account.</p>
+        <form
+          onSubmit={submit}
+          className="space-y-4 [&_input]:!h-8 [&_input]:!text-sm [&_label]:!mb-1 [&_label]:!text-sm"
+        >
           <div>
             <Label>New Password</Label>
             <Input
