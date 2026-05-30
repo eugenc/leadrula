@@ -325,7 +325,7 @@ func (s *Service) LatestSourceSamplePayload(ctx context.Context, publisherID, so
 	err := s.pool.QueryRow(ctx,
 		`SELECT l.raw_payload, l.created_at
 		 FROM leads l
-		 JOIN routing_sources s ON s.slug = l.campaign_name AND s.publisher_id = l.publisher_id
+		 JOIN routing_sources s ON s.slug = l.source AND s.publisher_id = l.publisher_id
 		 WHERE s.id = $1 AND s.publisher_id = $2
 		 ORDER BY l.created_at DESC
 		 LIMIT 1`,
@@ -678,4 +678,29 @@ func (s *Service) AddRouteFieldMap(ctx context.Context, publisherID, routeID int
 func (s *Service) DeleteRouteFieldMap(ctx context.Context, id int64) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM route_field_map WHERE id=$1`, id)
 	return err
+}
+
+func (s *Service) CreateBuyerCustomField(ctx context.Context, publisherID, routeID int64, name, fieldKey, ftype string, options json.RawMessage) (*customfields.CustomField, error) {
+	rt, err := s.GetRoute(ctx, publisherID, routeID)
+	if err != nil {
+		return nil, err
+	}
+	if rt.Destination != "buyer" {
+		return nil, httpx.Validation("field map is only for buyer routes")
+	}
+	if rt.ContractID == nil {
+		return nil, httpx.Validation("route missing contract")
+	}
+	var buyerID int64
+	err = s.pool.QueryRow(ctx,
+		`SELECT buyer_id FROM contracts WHERE id=$1 AND publisher_id=$2 AND deleted_at IS NULL`,
+		*rt.ContractID, publisherID).Scan(&buyerID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, httpx.NotFound("contract not found")
+	}
+	if err != nil {
+		return nil, err
+	}
+	cf := customfields.NewService(s.pool)
+	return cf.CreateField(ctx, buyerID, name, fieldKey, ftype, options)
 }

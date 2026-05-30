@@ -79,7 +79,7 @@ export function Sheet({
 }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-40">
+    <div className="fixed inset-0 z-[60]">
       <div
         className="absolute inset-0 animate-fadeIn bg-[var(--surface-overlay)]"
         onClick={onClose}

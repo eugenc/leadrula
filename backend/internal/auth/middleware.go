@@ -8,13 +8,11 @@ import (
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 )
 
-// PrincipalLoader resolves a user public_id to a full Principal with internal
-// IDs. The server wires this from the accounts repository to avoid an import
-// cycle.
-type PrincipalLoader func(ctx context.Context, userPublicID string) (*Principal, error)
+// ClaimsLoader resolves JWT claims into a Principal (handles impersonation).
+type ClaimsLoader func(ctx context.Context, claims *Claims) (*Principal, error)
 
 // RequireAuth parses the access token and loads the principal into context.
-func RequireAuth(tm *TokenManager, load PrincipalLoader) func(http.Handler) http.Handler {
+func RequireAuth(tm *TokenManager, load ClaimsLoader) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := bearer(r)
@@ -27,7 +25,7 @@ func RequireAuth(tm *TokenManager, load PrincipalLoader) func(http.Handler) http
 				httpx.Err(w, http.StatusUnauthorized, httpx.CodeUnauthorized, "invalid or expired token")
 				return
 			}
-			p, err := load(r.Context(), claims.Subject)
+			p, err := load(r.Context(), claims)
 			if err != nil || p == nil {
 				httpx.Err(w, http.StatusUnauthorized, httpx.CodeUnauthorized, "user not found")
 				return
@@ -63,6 +61,19 @@ func RequireRole(roles ...string) func(http.Handler) http.Handler {
 			if p == nil || !allowed[p.Role] {
 				httpx.Err(w, http.StatusForbidden, httpx.CodeForbidden, "insufficient role")
 				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// LogImpersonationActions records mutating buyer requests made while impersonating.
+func LogImpersonationActions(logFn func(ctx context.Context, p *Principal, method, path string)) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			p := FromContext(r.Context())
+			if p != nil && p.Impersonator != nil && r.Method != http.MethodGet && r.Method != http.MethodHead {
+				logFn(r.Context(), p, r.Method, r.URL.Path)
 			}
 			next.ServeHTTP(w, r)
 		})

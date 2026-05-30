@@ -19,6 +19,7 @@ import {
   Calendar,
   KeyRound,
   Settings,
+  Handshake,
   type LucideIcon,
 } from "lucide-react";
 
@@ -46,9 +47,16 @@ const publisherNav: NavGroup[] = [
   {
     label: "Pipeline",
     items: [
-      { to: "/p/board", label: "Board", icon: KanbanSquare },
+      { to: "/p/board", label: "Pipeline", icon: KanbanSquare },
       { to: "/p/pipelines", label: "Pipelines", icon: GitBranch, adminOnly: true },
       { to: "/p/reasons", label: "Disqualification", icon: Ban, adminOnly: true },
+    ],
+  },
+  {
+    label: "Buyers",
+    items: [
+      { to: "/p/buyers", label: "Buyers List", icon: Building2, adminOnly: true },
+      { to: "/p/contracts", label: "Contracts", icon: FileText, adminOnly: true },
     ],
   },
   {
@@ -57,13 +65,6 @@ const publisherNav: NavGroup[] = [
       { to: "/p/sources", label: "Sources", icon: Webhook, adminOnly: true },
       { to: "/p/routing", label: "Routing", icon: Route, adminOnly: true },
       { to: "/p/intake", label: "Intake Queue", icon: Inbox, adminOnly: true },
-    ],
-  },
-  {
-    label: "Buyers",
-    items: [
-      { to: "/p/buyers", label: "Buyers List", icon: Building2, adminOnly: true },
-      { to: "/p/contracts", label: "Contracts", icon: FileText, adminOnly: true },
     ],
   },
 ];
@@ -91,7 +92,7 @@ const buyerNav: NavGroup[] = [
   {
     label: "Pipeline",
     items: [
-      { to: "/b/board", label: "Board", icon: KanbanSquare },
+      { to: "/b/board", label: "Pipeline", icon: KanbanSquare },
       { to: "/b/pipelines", label: "Pipelines", icon: GitBranch, adminOnly: true },
       { to: "/b/reasons", label: "Disqualification", icon: Ban, adminOnly: true },
     ],
@@ -102,6 +103,7 @@ const buyerSettings: NavGroup = {
   label: "Settings",
   items: [
     { to: "/b/settings", label: "Profile", icon: Settings },
+    { to: "/b/settings/collaboration", label: "Collaboration", icon: Handshake, adminOnly: true },
     { to: "/b/billing", label: "Billing", icon: CreditCard },
     { to: "/b/contract", label: "Contract", icon: FileText },
     { to: "/b/users", label: "Users", icon: Users, adminOnly: true },

@@ -2,6 +2,7 @@
 package oversight
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 
@@ -16,16 +17,21 @@ import (
 )
 
 type Handler struct {
-	accounts  *accounts.Repository
+	accounts    *accounts.Repository
 	accountsSvc *accounts.Service
-	leads     *leads.Repository
-	pipelines *pipelines.Service
-	billing   *billing.Service
-	calendar  *calendar.Service
+	leads       *leads.Repository
+	pipelines   *pipelines.Service
+	billing     *billing.Service
+	calendar    *calendar.Service
+	collab      CollabGranter
 }
 
-func NewHandler(acc *accounts.Repository, accSvc *accounts.Service, leadRepo *leads.Repository, pl *pipelines.Service, bl *billing.Service, cal *calendar.Service) *Handler {
-	return &Handler{accounts: acc, accountsSvc: accSvc, leads: leadRepo, pipelines: pl, billing: bl, calendar: cal}
+type CollabGranter interface {
+	GrantOnCreate(ctx context.Context, publisherID, buyerID, requestedBy int64) error
+}
+
+func NewHandler(acc *accounts.Repository, accSvc *accounts.Service, leadRepo *leads.Repository, pl *pipelines.Service, bl *billing.Service, cal *calendar.Service, collab CollabGranter) *Handler {
+	return &Handler{accounts: acc, accountsSvc: accSvc, leads: leadRepo, pipelines: pl, billing: bl, calendar: cal, collab: collab}
 }
 
 func (h *Handler) RegisterRoutes(r chi.Router) {
@@ -51,13 +57,14 @@ func (h *Handler) listBuyers(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) createBuyer(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name            string  `json:"name"`
-		Website         string  `json:"website"`
-		Timezone        string  `json:"timezone"`
-		AdminFirstName  string  `json:"admin_first_name"`
-		AdminLastName   string  `json:"admin_last_name"`
-		AdminEmail      string  `json:"admin_email"`
-		StartingBalance float64 `json:"starting_balance"`
+		Name               string  `json:"name"`
+		Website            string  `json:"website"`
+		Timezone           string  `json:"timezone"`
+		AdminFirstName     string  `json:"admin_first_name"`
+		AdminLastName      string  `json:"admin_last_name"`
+		AdminEmail         string  `json:"admin_email"`
+		StartingBalance    float64 `json:"starting_balance"`
+		CollaborateEnabled bool    `json:"collaborate_enabled"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
@@ -75,6 +82,13 @@ func (h *Handler) createBuyer(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, err)
 		return
 	}
+	if body.CollaborateEnabled && h.collab != nil {
+		p := auth.FromContext(r.Context())
+		if err := h.collab.GrantOnCreate(r.Context(), p.AccountID, buyer.ID, p.UserID); err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+	}
 	httpx.JSON(w, http.StatusCreated, buyer)
 }
 
@@ -88,11 +102,7 @@ func (h *Handler) getBuyer(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, httpx.NotFound("buyer not found"))
 		return
 	}
-	bal, _ := h.billing.GetBalance(r.Context(), a.ID)
-	httpx.JSON(w, http.StatusOK, map[string]any{
-		"id": a.ID, "public_id": a.PublicID, "name": a.Name, "type": a.Type,
-		"website": a.Website, "timezone": a.Timezone, "balance": bal,
-	})
+	httpx.JSON(w, http.StatusOK, h.buyerDetail(r.Context(), a))
 }
 
 func (h *Handler) updateBuyer(w http.ResponseWriter, r *http.Request) {
@@ -111,11 +121,22 @@ func (h *Handler) updateBuyer(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, err)
 		return
 	}
-	bal, _ := h.billing.GetBalance(r.Context(), a.ID)
-	httpx.JSON(w, http.StatusOK, map[string]any{
+	httpx.JSON(w, http.StatusOK, h.buyerDetail(r.Context(), a))
+}
+
+func (h *Handler) buyerDetail(ctx context.Context, a *accounts.Account) map[string]any {
+	bal, _ := h.billing.GetBalance(ctx, a.ID)
+	out := map[string]any{
 		"id": a.ID, "public_id": a.PublicID, "name": a.Name, "type": a.Type,
 		"website": a.Website, "timezone": a.Timezone, "balance": bal,
-	})
+		"admin_name": "", "admin_email": "",
+	}
+	admin, err := h.accounts.PrimaryAdminContact(ctx, a.ID)
+	if err == nil && admin != nil {
+		out["admin_name"] = admin.FullName
+		out["admin_email"] = admin.Email
+	}
+	return out
 }
 
 func (h *Handler) buyerLeads(w http.ResponseWriter, r *http.Request) {

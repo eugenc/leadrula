@@ -193,8 +193,10 @@ func legacyFlatToConditions(f map[string]any) []FilterCondition {
 	if s, ok := f["tag"].(string); ok && s != "" {
 		out = append(out, FilterCondition{Field: "tags", Op: "contains", Value: mustJSON(s)})
 	}
-	if s, ok := f["campaign"].(string); ok && s != "" {
-		out = append(out, FilterCondition{Field: "campaign_name", Op: "equals", Value: mustJSON(s)})
+	if s, ok := f["source"].(string); ok && s != "" {
+		out = append(out, FilterCondition{Field: "source", Op: "equals", Value: mustJSON(s)})
+	} else if s, ok := f["campaign"].(string); ok && s != "" {
+		out = append(out, FilterCondition{Field: "source", Op: "equals", Value: mustJSON(s)})
 	}
 	if s, ok := f["action_on"].(string); ok && s != "" {
 		val := s

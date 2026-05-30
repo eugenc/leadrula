@@ -176,19 +176,19 @@ func appendCompiledFilters(where string, args []any, conditions []FilterConditio
 				}
 			}
 			add("l."+field+" =", n)
-		case "campaign_name":
+		case "source", "campaign_name":
 			v := resolveText(c.Value)
 			if v == "" {
-				return "", nil, httpx.Validation("campaign_name value required")
+				return "", nil, httpx.Validation("source value required")
 			}
 			switch op {
 			case "equals":
-				add("l.campaign_name =", v)
+				add("l.source =", v)
 			case "contains":
 				args = append(args, "%"+v+"%")
-				where += fmt.Sprintf(" AND l.campaign_name ILIKE $%d", len(args))
+				where += fmt.Sprintf(" AND l.source ILIKE $%d", len(args))
 			default:
-				return "", nil, httpx.Validation("unsupported operator for campaign_name: " + op)
+				return "", nil, httpx.Validation("unsupported operator for source: " + op)
 			}
 		case "tags":
 			if op != "contains" {
@@ -226,8 +226,8 @@ func flatFiltersToConditions(f ListFilters) []FilterCondition {
 	if f.Status != "" {
 		out = append(out, FilterCondition{Field: "status", Op: "equals", Value: mustJSON(f.Status)})
 	}
-	if f.Campaign != "" {
-		out = append(out, FilterCondition{Field: "campaign_name", Op: "equals", Value: mustJSON(f.Campaign)})
+	if f.Source != "" {
+		out = append(out, FilterCondition{Field: "source", Op: "equals", Value: mustJSON(f.Source)})
 	}
 	if f.PipelineID != 0 {
 		out = append(out, FilterCondition{Field: "pipeline_id", Op: "equals", Value: mustJSON(f.PipelineID)})

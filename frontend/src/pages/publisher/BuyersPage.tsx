@@ -22,6 +22,7 @@ const emptyForm = {
   admin_email: "",
   starting_balance: 0,
   timezone: "America/Toronto",
+  collaborate_enabled: true,
 };
 
 export function BuyersPage() {
@@ -107,6 +108,7 @@ export function BuyersPage() {
                       website: form.website.trim() || undefined,
                       starting_balance: form.starting_balance,
                       timezone: form.timezone,
+                      collaborate_enabled: form.collaborate_enabled,
                     },
                     {
                       onSuccess: () => {
@@ -197,6 +199,15 @@ export function BuyersPage() {
                     onChange={(e) => setForm({ ...form, starting_balance: Number(e.target.value) })}
                   />
                 </div>
+                <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={form.collaborate_enabled}
+                    onChange={(e) => setForm({ ...form, collaborate_enabled: e.target.checked })}
+                    className="rounded border-gray-300"
+                  />
+                  Enable collaboration (publisher admins can log in as buyer admin)
+                </label>
               </div>
             </div>
           </div>

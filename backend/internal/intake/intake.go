@@ -57,9 +57,19 @@ func flattenPayload(raw map[string]any) map[string]any {
 	return sources
 }
 
+func resolveIngestSource(raw map[string]any) string {
+	if s, ok := raw["source"].(string); ok && s != "" {
+		return s
+	}
+	if s, ok := raw["campaign_name"].(string); ok {
+		return s
+	}
+	return ""
+}
+
 // Ingest lands legacy POST /api/v1/leads payloads in the intake queue.
 func (s *Service) Ingest(ctx context.Context, publisherID int64, raw map[string]any) (*IngestResult, error) {
-	campaignName, _ := raw["campaign_name"].(string)
+	source := resolveIngestSource(raw)
 	rawJSON, _ := json.Marshal(raw)
 
 	tx, err := s.pool.Begin(ctx)
@@ -68,7 +78,7 @@ func (s *Service) Ingest(ctx context.Context, publisherID int64, raw map[string]
 	}
 	defer tx.Rollback(ctx)
 
-	leadID, publicID, err := s.leads.InsertLead(ctx, tx, publisherID, publisherID, campaignName, rawJSON)
+	leadID, publicID, err := s.leads.InsertLead(ctx, tx, publisherID, publisherID, source, rawJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -83,8 +93,8 @@ func (s *Service) Ingest(ctx context.Context, publisherID int64, raw map[string]
 		}
 	}
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO lead_intake_queue(lead_id, raw_payload, campaign_name) VALUES ($1,$2,$3)`,
-		leadID, rawJSON, nullStr(campaignName)); err != nil {
+		`INSERT INTO lead_intake_queue(lead_id, raw_payload, source) VALUES ($1,$2,$3)`,
+		leadID, rawJSON, nullStr(source)); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -152,7 +162,7 @@ func (s *Service) IngestFromSource(ctx context.Context, publisherID int64, slug 
 	}
 	if rt == nil {
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO lead_intake_queue(lead_id, raw_payload, campaign_name) VALUES ($1,$2,$3)`,
+			`INSERT INTO lead_intake_queue(lead_id, raw_payload, source) VALUES ($1,$2,$3)`,
 			leadID, rawJSON, slug); err != nil {
 			return nil, err
 		}
@@ -197,7 +207,7 @@ type QueueItem struct {
 	FirstName    string          `json:"first_name"`
 	LastName     string          `json:"last_name"`
 	Phone        *string         `json:"phone"`
-	CampaignName *string         `json:"campaign_name"`
+	Source       *string         `json:"source"`
 	RawPayload   json.RawMessage `json:"raw_payload"`
 	Status       string          `json:"status"`
 	CreatedAt    time.Time       `json:"created_at"`
@@ -208,7 +218,7 @@ func (s *Service) ListQueue(ctx context.Context, status string) ([]QueueItem, er
 		status = "pending_review"
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT q.id, q.lead_id, l.first_name, l.last_name, l.phone, q.campaign_name, q.raw_payload, q.status, q.created_at
+		`SELECT q.id, q.lead_id, l.first_name, l.last_name, l.phone, q.source, q.raw_payload, q.status, q.created_at
 		 FROM lead_intake_queue q JOIN leads l ON l.id = q.lead_id
 		 WHERE q.status = $1::intake_status ORDER BY q.created_at DESC`, status)
 	if err != nil {
@@ -218,7 +228,7 @@ func (s *Service) ListQueue(ctx context.Context, status string) ([]QueueItem, er
 	var out []QueueItem
 	for rows.Next() {
 		var it QueueItem
-		if err := rows.Scan(&it.ID, &it.LeadID, &it.FirstName, &it.LastName, &it.Phone, &it.CampaignName, &it.RawPayload, &it.Status, &it.CreatedAt); err != nil {
+		if err := rows.Scan(&it.ID, &it.LeadID, &it.FirstName, &it.LastName, &it.Phone, &it.Source, &it.RawPayload, &it.Status, &it.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, it)

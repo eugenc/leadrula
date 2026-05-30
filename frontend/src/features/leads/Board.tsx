@@ -12,6 +12,7 @@ import {
   useChangeStage,
   useCustomFields,
 } from "./hooks";
+import { BoardSortPicker } from "./BoardSortPicker";
 import { LeadCard } from "./LeadCard";
 import { LeadsColumnPicker } from "./LeadsColumnPicker";
 import { StagePromptModal, type PromptResult } from "./StagePromptModal";
@@ -34,7 +35,7 @@ import { apiError } from "@/lib/api";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/lib/utils";
 import { stageColorDot, stageColorLine } from "@/features/pipelines/stageColors";
-import { SYSTEM_COLUMNS, boardCardFields, DEFAULT_BOARD_CARD_FIELDS } from "./leadsListColumns";
+import { SYSTEM_COLUMNS, boardCardFields, DEFAULT_BOARD_CARD_FIELDS, PIPELINE_COLUMNS } from "./leadsListColumns";
 import type { Lead, Stage } from "@/types";
 
 export function Board() {
@@ -52,12 +53,16 @@ export function Board() {
 
   const [conditions, setConditions] = useState<FilterCondition[]>([]);
   const [cardFields, setCardFields] = useState<string[]>(DEFAULT_BOARD_CARD_FIELDS);
+  const [sort, setSort] = useState("created_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [colsOpen, setColsOpen] = useState(false);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
 
   const applyView = useCallback((view: SavedLeadView) => {
     setConditions([...view.filters]);
     setCardFields(boardCardFields(view.columns));
+    setSort(view.sort ?? "created_at");
+    setSortDir(view.sort_dir ?? "desc");
   }, []);
 
   useEffect(() => {
@@ -69,8 +74,8 @@ export function Board() {
   const viewChanged = !viewStateEqual(activeView, {
     filters: conditions,
     columns: cardFields,
-    sort: "created_at",
-    sort_dir: "desc",
+    sort,
+    sort_dir: sortDir,
   });
 
   const leadFilters = useMemo(
@@ -79,8 +84,10 @@ export function Board() {
       all: true as const,
       view_id: viewChanged ? undefined : activeId,
       filters: viewChanged ? JSON.stringify(conditions) : undefined,
+      sort,
+      sort_dir: sortDir,
     }),
-    [pipelineId, viewChanged, activeId, conditions]
+    [pipelineId, viewChanged, activeId, conditions, sort, sortDir]
   );
 
   const { data: stages } = useStages(pipelineId);
@@ -93,7 +100,11 @@ export function Board() {
     const custom = (customFields ?? [])
       .filter((f) => f.is_active)
       .map((f) => `custom_${f.id}`);
-    return [...SYSTEM_COLUMNS.map((c) => c.id), ...custom];
+    return [
+      ...SYSTEM_COLUMNS.map((c) => c.id),
+      ...PIPELINE_COLUMNS.filter((c) => c.id !== "position").map((c) => c.id),
+      ...custom,
+    ];
   }, [customFields]);
 
   const activeCardFields = cardFields.filter((id) => allColumnIds.includes(id));
@@ -200,8 +211,17 @@ export function Board() {
           placement="board"
           filters={conditions}
           columns={cardFields}
+          sort={sort}
+          sortDir={sortDir}
           onFiltersChange={setConditions}
           onViewApply={applyView}
+        />
+        <BoardSortPicker
+          sort={sort}
+          sortDir={sortDir}
+          customFields={customFields ?? []}
+          onSortChange={setSort}
+          onSortDirChange={setSortDir}
         />
         <LeadsColumnPicker
           open={colsOpen}

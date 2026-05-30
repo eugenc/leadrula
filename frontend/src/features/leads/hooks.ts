@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { get, ns, patch, post, del } from "@/lib/api";
+import { chunk } from "@/lib/chunk";
+import { toast } from "@/store/toastStore";
 import type {
   Lead,
   LeadListResponse,
@@ -29,7 +31,7 @@ export interface LeadFilters {
   pipeline_id?: number;
   stage_id?: number;
   status?: string;
-  campaign?: string;
+  source?: string;
   assigned?: number;
   tag?: string;
   action_on?: string;
@@ -49,7 +51,7 @@ function normalizeLeadsResponse(raw: LeadListResponse | Lead[] | undefined): Lea
   return { ...raw, items: raw.items ?? [] };
 }
 
-export function useLeads(filters: LeadFilters = {}) {
+function leadsQueryString(filters: LeadFilters): string {
   const qs = new URLSearchParams();
   Object.entries(filters).forEach(([k, v]) => {
     if (k === "all") {
@@ -66,7 +68,11 @@ export function useLeads(filters: LeadFilters = {}) {
     }
     if (v !== undefined && v !== "" && v !== 0) qs.set(k, String(v));
   });
-  const q = qs.toString();
+  return qs.toString();
+}
+
+export function useLeads(filters: LeadFilters = {}) {
+  const q = leadsQueryString(filters);
   return useQuery({
     queryKey: ["leads", filters],
     queryFn: async () =>
@@ -74,6 +80,12 @@ export function useLeads(filters: LeadFilters = {}) {
         await get<LeadListResponse | Lead[]>(`${ns()}/leads${q ? `?${q}` : ""}`)
       ),
   });
+}
+
+export async function fetchAllLeadIds(filters: LeadFilters): Promise<number[]> {
+  const q = leadsQueryString({ ...filters, all: true });
+  const raw = await get<LeadListResponse | Lead[]>(`${ns()}/leads${q ? `?${q}` : ""}`);
+  return normalizeLeadsResponse(raw).items.map((l) => l.id);
 }
 
 export function useLead(id: number | null) {
@@ -165,10 +177,14 @@ export function useCreateLead() {
   });
 }
 
+/** Must match backend maxImportRows — each API call sends at most this many rows. */
+export const IMPORT_BATCH_SIZE = 1000;
+
 export interface ImportLeadsPayload {
   destination: "pipeline" | "intake";
   pipeline_id?: number;
   stage_id?: number;
+  default_tags?: string[];
   mapping: { csv_column: string; target: string }[];
   rows: Record<string, string>[];
 }
@@ -186,6 +202,7 @@ export function useImportLeads() {
       post<ImportLeadsResult>(`${ns()}/leads/import`, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["lead-tags"] });
     },
   });
 }
@@ -246,6 +263,8 @@ export function useTagSuggestions() {
 
 export type BulkLeadAction = "delete" | "assign_user" | "add_follower" | "assign_buyer";
 
+export const DELETE_BATCH_SIZE = 100;
+
 export function useBulkLeads() {
   const qc = useQueryClient();
   return useMutation({
@@ -260,6 +279,44 @@ export function useBulkLeads() {
       qc.invalidateQueries({ queryKey: ["lead"] });
     },
   });
+}
+
+export function useDeleteLead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => del<{ ok: boolean }>(`${ns()}/leads/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["lead"] });
+    },
+  });
+}
+
+export async function deleteLeadsWithProgress(
+  ids: number[],
+  postBulk: (body: { action: "delete"; ids: number[] }) => Promise<{ affected: number }>
+): Promise<number> {
+  if (!ids.length) return 0;
+
+  const batches = chunk(ids, DELETE_BATCH_SIZE);
+  const totalLabel = ids.length.toLocaleString();
+  let progressToastId = toast.progress(`Deleting 0 of ${totalLabel} leads…`);
+  let affected = 0;
+  let processed = 0;
+
+  try {
+    for (const batch of batches) {
+      const res = await postBulk({ action: "delete", ids: batch });
+      affected += res.affected;
+      processed += batch.length;
+      toast.update(progressToastId, `Deleting ${processed.toLocaleString()} of ${totalLabel} leads…`);
+    }
+    toast.dismiss(progressToastId);
+    return affected;
+  } catch (err) {
+    toast.dismiss(progressToastId);
+    throw err;
+  }
 }
 
 export function useMe() {

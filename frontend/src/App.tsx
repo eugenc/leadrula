@@ -30,6 +30,7 @@ import { PublisherBillingPage } from "@/pages/publisher/PublisherBillingPage";
 import { CalendarPage } from "@/pages/buyer/CalendarPage";
 import { ContractPage } from "@/pages/buyer/ContractPage";
 import { BuyerBillingPage } from "@/pages/buyer/BuyerBillingPage";
+import { CollaborationPage } from "@/pages/buyer/CollaborationPage";
 
 function RootRedirect() {
   const user = useAuthStore((s) => s.user);
@@ -85,6 +86,7 @@ export default function App() {
                 <Route path="users" element={<UsersPage />} />
                 <Route path="api" element={<ApiKeysPage />} />
                 <Route path="settings" element={<SettingsPage />} />
+                <Route path="settings/collaboration" element={<CollaborationPage />} />
               </Route>
             </Route>
           </Route>

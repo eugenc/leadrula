@@ -451,6 +451,42 @@ func (r *Repository) ConsumeReset(ctx context.Context, resetID, userID int64, pa
 	return tx.Commit(ctx)
 }
 
+// AdminContact is the primary admin user or pending invite for an account.
+type AdminContact struct {
+	FullName string
+	Email    string
+}
+
+// PrimaryAdminContact returns the earliest admin user, or a pending admin invite if none accepted yet.
+func (r *Repository) PrimaryAdminContact(ctx context.Context, accountID int64) (*AdminContact, error) {
+	const userQ = `
+		SELECT full_name, email FROM users
+		WHERE account_id = $1 AND role = 'admin'
+		ORDER BY created_at
+		LIMIT 1`
+	var c AdminContact
+	err := r.pool.QueryRow(ctx, userQ, accountID).Scan(&c.FullName, &c.Email)
+	if err == nil {
+		return &c, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	const invQ = `
+		SELECT full_name, email FROM invites
+		WHERE account_id = $1 AND role = 'admin' AND accepted_at IS NULL AND expires_at > now()
+		ORDER BY created_at
+		LIMIT 1`
+	err = r.pool.QueryRow(ctx, invQ, accountID).Scan(&c.FullName, &c.Email)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &c, nil
+}
+
 // AdminUsersForAccount returns user IDs of active admins for notifications.
 func (r *Repository) AdminUserIDs(ctx context.Context, q database.Querier, accountID int64) ([]int64, error) {
 	rows, err := q.Query(ctx, `SELECT id FROM users WHERE account_id = $1 AND role = 'admin' AND is_active`, accountID)

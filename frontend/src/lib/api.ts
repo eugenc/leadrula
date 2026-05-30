@@ -1,10 +1,10 @@
 import axios, { AxiosError } from "axios";
 import { useAuthStore } from "@/store/authStore";
+import { toast } from "@/store/toastStore";
 
 function normalizeBaseURL(raw: string): string {
   const trimmed = raw.replace(/\/$/, "");
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  // Production hostnames from env often omit the scheme; localhost keeps http.
   if (trimmed.startsWith("localhost") || trimmed.startsWith("127.0.0.1")) {
     return `http://${trimmed}`;
   }
@@ -43,6 +43,12 @@ api.interceptors.response.use(
     const original = err.config as (typeof err.config & { _retry?: boolean }) | undefined;
     if (err.response?.status === 401 && original && !original._retry) {
       original._retry = true;
+      const imp = useAuthStore.getState().impersonation;
+      if (imp) {
+        useAuthStore.getState().endImpersonation();
+        toast.error("Collaboration access revoked");
+        return Promise.reject(err);
+      }
       if (!refreshing) refreshing = tryRefresh();
       const newToken = await refreshing;
       refreshing = null;
@@ -56,7 +62,6 @@ api.interceptors.response.use(
   }
 );
 
-// Unwrap the { data } envelope. Throws an ApiError on failure.
 export interface ApiErrorShape {
   code: string;
   message: string;
@@ -81,7 +86,6 @@ export function apiError(err: unknown): ApiError {
   return new ApiError(0, "error", "unexpected error");
 }
 
-// Namespace prefix based on the logged-in account type.
 export function ns(): string {
   const user = useAuthStore.getState().user;
   return user?.account_type === "publisher" ? "/publisher" : "/buyer";

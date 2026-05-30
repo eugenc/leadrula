@@ -23,3 +23,12 @@ func IsCheckViolation(err error) bool {
 	}
 	return false
 }
+
+// IsForeignKeyViolation reports whether err is a Postgres foreign_key_violation (23503).
+func IsForeignKeyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23503"
+	}
+	return false
+}

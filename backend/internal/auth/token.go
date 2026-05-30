@@ -9,10 +9,13 @@ import (
 
 // Claims are embedded in the access token.
 type Claims struct {
-	Subject     string `json:"sub"`   // user public_id
-	AccountID   string `json:"acct"`  // account public_id
-	AccountType string `json:"atype"` // publisher | buyer
-	Role        string `json:"role"`  // admin | user | follower
+	Subject          string `json:"sub"`   // user public_id
+	AccountID        string `json:"acct"`  // account public_id (buyer when impersonating)
+	AccountType      string `json:"atype"` // publisher | buyer
+	Role             string `json:"role"`  // admin | user | follower
+	Impersonating    bool   `json:"imp,omitempty"`
+	ImpersonatorAcct string `json:"imp_acct,omitempty"`
+	CollabVersion    int64  `json:"collab_ver,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -45,15 +48,21 @@ type Identity struct {
 	AccountPublicID string
 	AccountType     string
 	Role            string
+	Impersonating   bool
+	ImpersonatorAcct string
+	CollabVersion   int64
 }
 
 func (tm *TokenManager) IssueAccess(id Identity) (string, error) {
 	now := time.Now()
 	claims := Claims{
-		Subject:     id.UserPublicID,
-		AccountID:   id.AccountPublicID,
-		AccountType: id.AccountType,
-		Role:        id.Role,
+		Subject:          id.UserPublicID,
+		AccountID:        id.AccountPublicID,
+		AccountType:      id.AccountType,
+		Role:             id.Role,
+		Impersonating:    id.Impersonating,
+		ImpersonatorAcct: id.ImpersonatorAcct,
+		CollabVersion:    id.CollabVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(tm.accessTTL)),

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useSources,
   useRoutes,
@@ -9,9 +10,14 @@ import {
   useRouteFieldMapOptions,
   useAddRouteFieldMap,
   useDeleteRouteFieldMap,
+  useCreateBuyerRouteField,
+  useCreateField,
   useContracts,
 } from "@/features/admin/hooks";
 import { usePipelines, useStages } from "@/features/leads/hooks";
+import { CreateCustomFieldDrawer } from "@/features/admin/CreateCustomFieldDrawer";
+import { BuiltinCustomFieldSelect } from "@/features/admin/BuiltinCustomFieldSelect";
+import { slugFieldKey } from "@/features/admin/customFieldConstants";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
@@ -44,7 +50,7 @@ function formatTarget(r: Route) {
 }
 
 function deliveryCell(r: Route) {
-  if (r.delivery === "leads") return "Lead only";
+  if (r.delivery === "leads") return "Lead";
   return <Badge variant="distributed">Pipeline</Badge>;
 }
 
@@ -327,7 +333,7 @@ function RouteDrawerContent({
                 <option value={0}>Select…</option>
                 {(contracts ?? []).map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.name} — {c.buyer_name}
+                    {c.buyer_name ?? `Buyer #${c.buyer_id}`}
                   </option>
                 ))}
               </Select>
@@ -336,8 +342,8 @@ function RouteDrawerContent({
           <div>
             <Label>Delivery</Label>
             <Select value={delivery} onChange={(e) => setDelivery(e.target.value as "leads" | "leads_pipeline")}>
-              <option value="leads">Lead only</option>
-              <option value="leads_pipeline">Lead + pipeline + stage</option>
+              <option value="leads">Lead</option>
+              <option value="leads_pipeline">Pipeline</option>
             </Select>
           </div>
           {destination === "publisher" && delivery === "leads_pipeline" && (
@@ -413,12 +419,16 @@ function RouteFieldMapDrawer({
 }
 
 function RouteFieldMapContent({ route, onClose }: { route: Route; onClose: () => void }) {
+  const qc = useQueryClient();
   const { data: entries } = useRouteFieldMap(route.id);
   const { data: options, isLoading: optionsLoading } = useRouteFieldMapOptions(route.id);
   const add = useAddRouteFieldMap();
   const remove = useDeleteRouteFieldMap();
+  const createField = useCreateField();
+  const createBuyerField = useCreateBuyerRouteField(route.id);
   const [src, setSrc] = useState("first_name");
   const [dst, setDst] = useState("first_name");
+  const [createFieldSide, setCreateFieldSide] = useState<"src" | "dst" | null>(null);
 
   const publisherFields = options?.publisher_fields ?? [];
   const buyerFields = options?.buyer_fields ?? [];
@@ -439,6 +449,25 @@ function RouteFieldMapContent({ route, onClose }: { route: Route; onClose: () =>
         onError: (e) => toast.error(apiError(e).message),
       }
     );
+  }
+
+  function defaultNameForSide(side: "src" | "dst"): string {
+    const val = side === "src" ? src : dst;
+    if (val.startsWith("cf:")) {
+      const id = Number(val.slice(3));
+      const fields = side === "src" ? publisherFields : buyerFields;
+      return fields.find((f) => f.id === id)?.name ?? "";
+    }
+    return val.replace(/_/g, " ");
+  }
+
+  function onFieldCreated(field: CustomField) {
+    const val = `cf:${field.id}`;
+    if (createFieldSide === "src") setSrc(val);
+    else if (createFieldSide === "dst") setDst(val);
+    setCreateFieldSide(null);
+    qc.invalidateQueries({ queryKey: ["route-field-map-options", route.id] });
+    return field;
   }
 
   function renderEntry(e: RouteFieldMapEntry) {
@@ -471,22 +500,52 @@ function RouteFieldMapContent({ route, onClose }: { route: Route; onClose: () =>
             renderEntry={renderEntry}
           />
           {buyerFields.length === 0 && (
-            <p className="text-sm text-gray-400">Buyer has no custom fields yet. Built-in fields can still be mapped.</p>
+            <p className="text-sm text-gray-400">
+              Buyer has no custom fields yet — use + Add custom field… or map built-in fields.
+            </p>
           )}
           <div className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
-            <BuiltinCustomSelect
+            <BuiltinCustomFieldSelect
               value={src}
               onChange={setSrc}
               customFields={publisherFields}
+              builtins={BUILTINS}
               label="Publisher field"
+              onAddCustomField={() => setCreateFieldSide("src")}
             />
-            <BuiltinCustomSelect value={dst} onChange={setDst} customFields={buyerFields} label="Buyer field" />
+            <BuiltinCustomFieldSelect
+              value={dst}
+              onChange={setDst}
+              customFields={buyerFields}
+              builtins={BUILTINS}
+              label="Buyer field"
+              onAddCustomField={() => setCreateFieldSide("dst")}
+            />
             <Button onClick={submit} disabled={add.isPending}>
               <Plus className="h-4 w-4" />
             </Button>
           </div>
         </div>
       )}
+      <CreateCustomFieldDrawer
+        open={createFieldSide !== null}
+        onClose={() => setCreateFieldSide(null)}
+        defaultName={createFieldSide ? defaultNameForSide(createFieldSide) : ""}
+        defaultFieldKey={createFieldSide ? slugFieldKey(defaultNameForSide(createFieldSide)) : ""}
+        subtitle={
+          createFieldSide === "src"
+            ? "Publisher field"
+            : createFieldSide === "dst"
+              ? `Buyer field (${buyerName})`
+              : undefined
+        }
+        isPending={createField.isPending || createBuyerField.isPending}
+        onSubmit={(body) =>
+          createFieldSide === "dst"
+            ? createBuyerField.mutateAsync(body).then(onFieldCreated)
+            : createField.mutateAsync(body).then(onFieldCreated)
+        }
+      />
     </FormDrawer>
   );
 }
@@ -514,40 +573,6 @@ function FieldMapList<T extends { id: number }>({
           </IconButton>
         </div>
       ))}
-    </div>
-  );
-}
-
-function BuiltinCustomSelect({
-  value,
-  onChange,
-  customFields,
-  label,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  customFields: { id: number; name: string }[];
-  label: string;
-}) {
-  return (
-    <div>
-      <Label>{label}</Label>
-      <Select value={value} onChange={(e) => onChange(e.target.value)}>
-        <optgroup label="Built-in">
-          {BUILTINS.map((b) => (
-            <option key={b} value={b}>
-              {b}
-            </option>
-          ))}
-        </optgroup>
-        <optgroup label="Custom">
-          {customFields.map((f) => (
-            <option key={f.id} value={`cf:${f.id}`}>
-              {f.name}
-            </option>
-          ))}
-        </optgroup>
-      </Select>
     </div>
   );
 }

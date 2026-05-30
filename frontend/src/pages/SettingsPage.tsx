@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useAuthStore } from "@/store/authStore";
 import { PageBody } from "@/components/layout/PageBody";
 import { Card } from "@/components/ui/misc";
@@ -18,9 +19,11 @@ function Row({ label, value }: { label: string; value: string }) {
 export function SettingsPage() {
   const user = useAuthStore((s) => s.user);
   const upload = useUploadMyAvatar();
+  const isBuyerAdmin = user?.account_type === "buyer" && user.role === "admin";
+
   return (
     <>
-      <PageBody className="max-w-xl">
+      <PageBody className="max-w-xl space-y-4">
         <Card className="p-5">
           <div className="mb-5 border-b border-gray-100 pb-5">
             <AvatarUpload
@@ -43,6 +46,21 @@ export function SettingsPage() {
             value={user?.account_type ? formatRole(user.account_type) : "—"}
           />
         </Card>
+
+        {isBuyerAdmin && (
+          <Card className="p-5">
+            <h2 className="mb-1 text-sm font-semibold text-gray-800">Publisher collaboration</h2>
+            <p className="mb-3 text-sm text-gray-500">
+              Manage publisher access to this buyer account, approve requests, and view audit history.
+            </p>
+            <Link
+              to="/b/settings/collaboration"
+              className="text-sm font-medium text-jade-600 hover:underline"
+            >
+              Open collaboration settings →
+            </Link>
+          </Card>
+        )}
       </PageBody>
     </>
   );

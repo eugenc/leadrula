@@ -10,6 +10,7 @@ type Principal struct {
 	AccountPublicID string
 	AccountType     string // publisher | buyer
 	Role            string // admin | user | follower
+	Impersonator    *Principal
 }
 
 func (p *Principal) IsAdmin() bool    { return p.Role == "admin" }

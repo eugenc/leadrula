@@ -60,22 +60,22 @@ func main() {
 
 	for _, b := range []struct {
 		id           int64
-		campaign     string
+		source       string
 		adminEmail   string
 		startBalance float64
 	}{
 		{solar, "solar_ontario_q2", "admin@solarpros.test", 500},
 		{roofing, "roofing_gta", "admin@roofingco.test", 250},
 	} {
-		seedBuyer(ctx, pool, publisherID, b.id, b.campaign, b.adminEmail, b.startBalance,
+		seedBuyer(ctx, pool, publisherID, b.id, b.source, b.adminEmail, b.startBalance,
 			pubPipeline, pubReady, pubReturned)
 	}
 
 	// An unmatched lead in the intake queue (publisher review)
-	leadID, _ := insertLead(ctx, pool, publisherID, publisherID, "unknown_campaign", "Pat", "Queue",
+	leadID, _ := insertLead(ctx, pool, publisherID, publisherID, "unknown_source", "Pat", "Queue",
 		"+15550000000", &pubPipeline, &pubNew, "review")
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO lead_intake_queue(lead_id, raw_payload, campaign_name) VALUES ($1,'{"campaign_name":"unknown_campaign"}','unknown_campaign')`,
+		`INSERT INTO lead_intake_queue(lead_id, raw_payload, source) VALUES ($1,'{"source":"unknown_source"}','unknown_source')`,
 		leadID); err != nil {
 		log.Fatalf("queue insert: %v", err)
 	}
@@ -83,7 +83,7 @@ func main() {
 	log.Println("seed-demo complete")
 }
 
-func seedBuyer(ctx context.Context, pool *pgxpool.Pool, publisherID, buyerID int64, campaign, adminEmail string, startBalance float64, pubPipeline, pubReady, pubReturned int64) {
+func seedBuyer(ctx context.Context, pool *pgxpool.Pool, publisherID, buyerID int64, source, adminEmail string, startBalance float64, pubPipeline, pubReady, pubReturned int64) {
 	// admin user
 	hash, _ := auth.HashPassword("password123")
 	_, _ = pool.Exec(ctx,
@@ -152,7 +152,7 @@ func seedBuyer(ctx context.Context, pool *pgxpool.Pool, publisherID, buyerID int
 		if i == 1 {
 			stage = appt
 		}
-		lid, _ := insertLead(ctx, pool, buyerID, publisherID, campaign, nm[0], nm[1], "+1555000111"+itoa(i), &pipe, &stage, "distributed")
+		lid, _ := insertLead(ctx, pool, buyerID, publisherID, source, nm[0], nm[1], "+1555000111"+itoa(i), &pipe, &stage, "distributed")
 		_, _ = pool.Exec(ctx, `UPDATE leads SET contract_id=$2 WHERE id=$1`, lid, contractID)
 		// debit
 		debit(ctx, pool, buyerID, 25.00, lid, contractID)
@@ -204,13 +204,13 @@ func insertCustomField(ctx context.Context, pool *pgxpool.Pool, accountID int64,
 	return id
 }
 
-func insertLead(ctx context.Context, pool *pgxpool.Pool, ownerID, publisherID int64, campaign, first, last, phone string, pipelineID, stageID *int64, status string) (int64, string) {
+func insertLead(ctx context.Context, pool *pgxpool.Pool, ownerID, publisherID int64, source, first, last, phone string, pipelineID, stageID *int64, status string) (int64, string) {
 	var id int64
 	var publicID string
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO leads(owner_account_id, publisher_id, campaign_name, first_name, last_name, phone, pipeline_id, stage_id, status)
+		`INSERT INTO leads(owner_account_id, publisher_id, source, first_name, last_name, phone, pipeline_id, stage_id, status)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id, public_id`,
-		ownerID, publisherID, campaign, first, last, phone, pipelineID, stageID, status).Scan(&id, &publicID); err != nil {
+		ownerID, publisherID, source, first, last, phone, pipelineID, stageID, status).Scan(&id, &publicID); err != nil {
 		log.Fatalf("lead %s %s: %v", first, last, err)
 	}
 	return id, publicID

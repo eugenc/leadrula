@@ -113,16 +113,28 @@ func (s *Service) Me(ctx context.Context, p *auth.Principal) (map[string]any, er
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{
+	userRole := p.Role
+	if p.Impersonator != nil {
+		userRole = p.Role
+	}
+	res := map[string]any{
 		"user": map[string]any{
 			"id": u.PublicID, "email": u.Email, "full_name": u.FullName,
-			"role": u.Role, "is_active": u.IsActive, "prefs": rawJSON(u.Prefs),
+			"role": userRole, "is_active": u.IsActive, "prefs": rawJSON(u.Prefs),
 			"avatar_url": avatarURLFromPrefs(u.Prefs),
 		},
 		"account": map[string]any{
 			"id": a.PublicID, "type": a.Type, "name": a.Name, "timezone": a.Timezone,
 		},
-	}, nil
+	}
+	if p.Impersonator != nil {
+		res["impersonating"] = true
+		res["buyer_account_name"] = a.Name
+		res["impersonator"] = map[string]any{
+			"id": p.Impersonator.UserPublicID, "account_id": p.Impersonator.AccountPublicID,
+		}
+	}
+	return res, nil
 }
 
 // PatchPrefs shallow-merges patch into the user's prefs JSON and returns the merged object.

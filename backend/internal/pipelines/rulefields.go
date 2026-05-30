@@ -33,7 +33,7 @@ const (
 // Kept local to avoid importing the leads package (leads imports pipelines).
 var leadTextBuiltins = map[string]bool{
 	"first_name": true, "last_name": true, "phone": true, "email": true,
-	"address": true, "city": true, "state": true, "zip": true, "campaign_name": true,
+	"address": true, "city": true, "state": true, "zip": true, "source": true,
 }
 
 var knownOps = map[string]bool{
@@ -119,12 +119,12 @@ func buildEvalContext(ctx context.Context, q database.Querier, accountID, leadID
 	}
 
 	var firstName, lastName string
-	var phone, email, address, city, state, zip, campaign *string
+	var phone, email, address, city, state, zip, source *string
 	err := q.QueryRow(ctx,
-		`SELECT first_name, last_name, phone, email, address, city, state, zip, campaign_name,
+		`SELECT first_name, last_name, phone, email, address, city, state, zip, source,
 		        status, action_at, assigned_user_id, disqualification_reason_id, tags, stage_id, created_at
 		 FROM leads WHERE id=$1`, leadID).Scan(
-		&firstName, &lastName, &phone, &email, &address, &city, &state, &zip, &campaign,
+		&firstName, &lastName, &phone, &email, &address, &city, &state, &zip, &source,
 		&ec.status, &ec.actionAt, &ec.assignedUser, &ec.disqReason, &ec.tags, &ec.stageID, &ec.createdAt)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ func buildEvalContext(ctx context.Context, q database.Querier, accountID, leadID
 	ec.builtins["city"] = city
 	ec.builtins["state"] = state
 	ec.builtins["zip"] = zip
-	ec.builtins["campaign_name"] = campaign
+	ec.builtins["source"] = source
 
 	defRows, err := q.Query(ctx, `SELECT id, field_key, type FROM custom_fields WHERE account_id=$1`, accountID)
 	if err != nil {

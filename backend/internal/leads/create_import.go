@@ -12,7 +12,39 @@ import (
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 )
 
-const maxImportRows = 500
+const maxImportRows = 1000
+
+// flexInt64 accepts JSON numbers or numeric strings (some clients stringify IDs).
+type flexInt64 int64
+
+func (n *flexInt64) UnmarshalJSON(b []byte) error {
+	if string(b) == "null" {
+		*n = 0
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	switch x := v.(type) {
+	case float64:
+		*n = flexInt64(x)
+		return nil
+	case string:
+		if strings.TrimSpace(x) == "" {
+			*n = 0
+			return nil
+		}
+		i, err := strconv.ParseInt(x, 10, 64)
+		if err != nil {
+			return err
+		}
+		*n = flexInt64(i)
+		return nil
+	default:
+		return fmt.Errorf("invalid int64")
+	}
+}
 
 type CreateLeadInput struct {
 	FirstName      string                     `json:"first_name"`
@@ -23,7 +55,8 @@ type CreateLeadInput struct {
 	City           string                     `json:"city"`
 	State          string                     `json:"state"`
 	Zip            string                     `json:"zip"`
-	CampaignName   string                     `json:"campaign_name"`
+	Source         string                     `json:"source"`
+	CampaignName   string                     `json:"campaign_name"` // deprecated: use source
 	PipelineID     int64                      `json:"pipeline_id"`
 	StageID        int64                      `json:"stage_id"`
 	AssignedUserID *int64                     `json:"assigned_user_id"`
@@ -37,12 +70,63 @@ type ColumnMapping struct {
 	Target    string `json:"target"`
 }
 
+// importRow accepts string, number, or bool cell values from JSON clients.
+// Arrays (e.g. Papa Parse __parsed_extra) are skipped.
+type importRow map[string]string
+
+func (r *importRow) UnmarshalJSON(b []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	out := make(importRow)
+	for k, v := range raw {
+		if k == "__parsed_extra" {
+			continue
+		}
+		var s string
+		if err := json.Unmarshal(v, &s); err == nil {
+			out[k] = s
+			continue
+		}
+		var f float64
+		if err := json.Unmarshal(v, &f); err == nil {
+			out[k] = strconv.FormatFloat(f, 'f', -1, 64)
+			continue
+		}
+		var bval bool
+		if err := json.Unmarshal(v, &bval); err == nil {
+			out[k] = strconv.FormatBool(bval)
+			continue
+		}
+		var arr []json.RawMessage
+		if err := json.Unmarshal(v, &arr); err == nil {
+			var parts []string
+			for _, item := range arr {
+				var s string
+				if json.Unmarshal(item, &s) == nil {
+					s = strings.TrimSpace(s)
+					if s != "" {
+						parts = append(parts, s)
+					}
+				}
+			}
+			if len(parts) > 0 {
+				out[k] = strings.Join(parts, ", ")
+			}
+		}
+	}
+	*r = out
+	return nil
+}
+
 type ImportLeadsInput struct {
-	Destination string              `json:"destination"`
-	PipelineID  int64               `json:"pipeline_id"`
-	StageID     int64               `json:"stage_id"`
-	Mapping     []ColumnMapping     `json:"mapping"`
-	Rows        []map[string]string `json:"rows"`
+	Destination string          `json:"destination"`
+	PipelineID  flexInt64       `json:"pipeline_id"`
+	StageID     flexInt64       `json:"stage_id"`
+	DefaultTags []string        `json:"default_tags"`
+	Mapping     []ColumnMapping `json:"mapping"`
+	Rows        []importRow     `json:"rows"`
 }
 
 type ImportRowError struct {
@@ -100,7 +184,7 @@ func (s *Service) ImportLeads(ctx context.Context, p *auth.Principal, in ImportL
 		return nil, httpx.Validation("no rows to import")
 	}
 	if len(in.Rows) > maxImportRows {
-		return nil, httpx.Validation(fmt.Sprintf("maximum %d rows per import", maxImportRows))
+		return nil, httpx.Validation(fmt.Sprintf("maximum %d rows per import (got %d)", maxImportRows, len(in.Rows)))
 	}
 	dest := strings.TrimSpace(in.Destination)
 	if dest != "pipeline" && dest != "intake" {
@@ -113,13 +197,19 @@ func (s *Service) ImportLeads(ctx context.Context, p *auth.Principal, in ImportL
 		return nil, httpx.Validation("pipeline_id and stage_id required for pipeline import")
 	}
 
+	pipelineID := int64(in.PipelineID)
+	stageID := int64(in.StageID)
+
 	result := &ImportLeadsResult{Errors: []ImportRowError{}}
 	for i, row := range in.Rows {
-		input, err := mapImportRow(row, in.Mapping, in.PipelineID, in.StageID, dest == "intake")
+		input, err := mapImportRow(row, in.Mapping, pipelineID, stageID, dest == "intake")
 		if err != nil {
 			result.Skipped++
 			result.Errors = append(result.Errors, ImportRowError{Row: i + 1, Message: err.Error()})
 			continue
+		}
+		if len(in.DefaultTags) > 0 {
+			input.Tags = append(append([]string{}, in.DefaultTags...), input.Tags...)
 		}
 		if _, err := s.insertLead(ctx, p, input); err != nil {
 			result.Skipped++
@@ -131,7 +221,7 @@ func (s *Service) ImportLeads(ctx context.Context, p *auth.Principal, in ImportL
 	return result, nil
 }
 
-func mapImportRow(row map[string]string, mapping []ColumnMapping, pipelineID, stageID int64, toIntake bool) (CreateLeadInput, error) {
+func mapImportRow(row importRow, mapping []ColumnMapping, pipelineID, stageID int64, toIntake bool) (CreateLeadInput, error) {
 	in := CreateLeadInput{
 		PipelineID: pipelineID,
 		StageID:    stageID,
@@ -157,9 +247,13 @@ func mapImportRow(row map[string]string, mapping []ColumnMapping, pipelineID, st
 		case "last_name":
 			in.LastName = val
 		case "phone":
-			in.Phone = val
+			if val != "" && in.Phone == "" {
+				in.Phone = val
+			}
 		case "email":
-			in.Email = val
+			if val != "" && in.Email == "" {
+				in.Email = val
+			}
 		case "address":
 			in.Address = val
 		case "city":
@@ -168,16 +262,27 @@ func mapImportRow(row map[string]string, mapping []ColumnMapping, pipelineID, st
 			in.State = val
 		case "zip":
 			in.Zip = val
-		case "campaign_name":
-			in.CampaignName = val
+		case "source", "campaign_name":
+			in.Source = val
 		case "tags":
-			in.Tags = append(in.Tags, val)
+			for _, part := range strings.Split(val, ",") {
+				if t := strings.TrimSpace(part); t != "" {
+					in.Tags = append(in.Tags, t)
+				}
+			}
 		}
 	}
 	if err := validateCreateInput(&in); err != nil {
 		return in, err
 	}
 	return in, nil
+}
+
+func (in *CreateLeadInput) resolvedSource() string {
+	if s := strings.TrimSpace(in.Source); s != "" {
+		return s
+	}
+	return strings.TrimSpace(in.CampaignName)
 }
 
 func (s *Service) insertLead(ctx context.Context, p *auth.Principal, in CreateLeadInput) (int64, error) {
@@ -201,7 +306,8 @@ func (s *Service) insertLead(ctx context.Context, p *auth.Principal, in CreateLe
 	}
 
 	raw, _ := json.Marshal(in)
-	leadID, _, err := s.repo.InsertLead(ctx, tx, p.AccountID, p.AccountID, in.CampaignName, raw)
+	source := in.resolvedSource()
+	leadID, _, err := s.repo.InsertLead(ctx, tx, p.AccountID, p.AccountID, source, raw)
 	if err != nil {
 		return 0, err
 	}
@@ -211,8 +317,8 @@ func (s *Service) insertLead(ctx context.Context, p *auth.Principal, in CreateLe
 		"phone": in.Phone, "email": in.Email,
 		"address": in.Address, "city": in.City, "state": in.State, "zip": in.Zip,
 	}
-	if in.CampaignName != "" {
-		builtins["campaign_name"] = in.CampaignName
+	if source != "" {
+		builtins["source"] = source
 	}
 	for field, val := range builtins {
 		if val == "" {
@@ -246,7 +352,7 @@ func (s *Service) insertLead(ctx context.Context, p *auth.Principal, in CreateLe
 	}
 
 	if in.ToIntake {
-		if err := s.repo.EnqueueIntake(ctx, tx, leadID, in.CampaignName, raw); err != nil {
+		if err := s.repo.EnqueueIntake(ctx, tx, leadID, source, raw); err != nil {
 			return 0, err
 		}
 	} else if in.PipelineID != 0 && in.StageID != 0 {
@@ -262,16 +368,16 @@ func (s *Service) insertLead(ctx context.Context, p *auth.Principal, in CreateLe
 }
 
 // EnqueueIntake adds a lead to the publisher intake queue.
-func (r *Repository) EnqueueIntake(ctx context.Context, q database.Querier, leadID int64, campaignName string, rawPayload []byte) error {
+func (r *Repository) EnqueueIntake(ctx context.Context, q database.Querier, leadID int64, source string, rawPayload []byte) error {
 	if len(rawPayload) == 0 {
 		rawPayload = []byte("{}")
 	}
-	var cn interface{}
-	if campaignName != "" {
-		cn = campaignName
+	var src interface{}
+	if source != "" {
+		src = source
 	}
 	_, err := q.Exec(ctx,
-		`INSERT INTO lead_intake_queue(lead_id, raw_payload, campaign_name) VALUES ($1,$2,$3)`,
-		leadID, rawPayload, cn)
+		`INSERT INTO lead_intake_queue(lead_id, raw_payload, source) VALUES ($1,$2,$3)`,
+		leadID, rawPayload, src)
 	return err
 }

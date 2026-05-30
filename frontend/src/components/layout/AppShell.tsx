@@ -2,12 +2,13 @@ import { useEffect } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
+import { ImpersonationBanner } from "./ImpersonationBanner";
 import { LeadDetailDrawer } from "@/features/leads/LeadDetailDrawer";
 import { useMe } from "@/features/leads/hooks";
 import { useAuthStore } from "@/store/authStore";
 
 const titles: Record<string, string> = {
-  board: "Board",
+  board: "Pipeline",
   leads: "Leads",
   intake: "Intake Queue",
   pipelines: "Pipelines",
@@ -23,6 +24,7 @@ const titles: Record<string, string> = {
   api: "API Keys",
   calendar: "Calendar",
   settings: "Settings",
+  collaboration: "Collaboration",
 };
 
 export function AppShell() {
@@ -47,6 +49,7 @@ export function AppShell() {
     <div className="flex h-screen overflow-hidden bg-gray-50">
       <Sidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
+        <ImpersonationBanner />
         <Topbar title={title} />
         <main className="flex flex-1 flex-col overflow-y-auto">
           <Outlet />

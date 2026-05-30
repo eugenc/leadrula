@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
+import { apiError } from "@/lib/api";
 import {
   useLead,
   useNotes,
@@ -19,7 +20,9 @@ import {
   useSetActionAt,
   useUsers,
   useCustomFields,
+  useDeleteLead,
 } from "./hooks";
+import { DeleteLeadConfirmDialog } from "./DeleteLeadConfirmDialog";
 import type { Lead } from "@/types";
 import { formatStatus } from "./leadsListColumns";
 import { LeadTagsEditor } from "./LeadTagsEditor";
@@ -61,9 +64,12 @@ export function LeadDetailDrawer() {
 
 function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   const user = useAuthStore((s) => s.user);
+  const isAdmin = user?.role === "admin";
   const [tab, setTab] = useState<"details" | "notes" | "history">("details");
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const update = useUpdateLead();
   const setAction = useSetActionAt();
+  const removeLead = useDeleteLead();
   const { data: users } = useUsers();
   const { data: customFields } = useCustomFields();
 
@@ -95,11 +101,22 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
 
   const overdue = lead.action_at && isPast(new Date(lead.action_at));
 
+  async function handleDeleteLead() {
+    try {
+      await removeLead.mutateAsync(lead.id);
+      toast.success("Lead deleted");
+      setConfirmDelete(false);
+      onClose();
+    } catch (err) {
+      toast.error(apiError(err).message);
+    }
+  }
+
   return (
     <div className="flex h-full flex-col">
       <DrawerHeader
         title={`${lead.first_name} ${lead.last_name}`}
-        subtitle={`${lead.campaign_name ?? "—"} · ${formatStatus(lead.status)}`}
+        subtitle={`${lead.source ?? "—"} · ${formatStatus(lead.status)}`}
         onClose={onClose}
       />
 
@@ -244,6 +261,22 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
         {tab === "notes" && <NotesTab leadId={lead.id} />}
         {tab === "history" && <HistoryTab leadId={lead.id} />}
       </DrawerBody>
+
+      {isAdmin && (
+        <div className="border-t border-gray-100 px-5 py-4">
+          <Button variant="danger" size="sm" onClick={() => setConfirmDelete(true)}>
+            Delete lead
+          </Button>
+        </div>
+      )}
+
+      <DeleteLeadConfirmDialog
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        count={1}
+        loading={removeLead.isPending}
+        onConfirm={handleDeleteLead}
+      />
     </div>
   );
 }

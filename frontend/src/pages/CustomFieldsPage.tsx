@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useCustomFields } from "@/features/leads/hooks";
 import { useCreateField, useUpdateField, useDeleteField } from "@/features/admin/hooks";
+import { ImportCustomFieldsModal } from "@/features/admin/ImportCustomFieldsModal";
+import { slugFieldKey } from "@/features/admin/customFieldConstants";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
@@ -9,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Switch, Spinner } from "@/components/ui/misc";
 import { FormDrawer } from "@/components/ui/dialog";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Upload } from "lucide-react";
 import { toast } from "@/store/toastStore";
 import { apiError } from "@/lib/api";
 import type { CustomField } from "@/types";
@@ -42,12 +44,15 @@ export function CustomFieldsPage() {
   const update = useUpdateField();
   const remove = useDeleteField();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [editing, setEditing] = useState<CustomField | null>(null);
   const [form, setForm] = useState<FieldForm>(emptyForm());
+  const [fieldKeyTouched, setFieldKeyTouched] = useState(false);
 
   useEffect(() => {
     if (!drawerOpen) return;
     setForm(editing ? fieldToForm(editing) : emptyForm());
+    setFieldKeyTouched(false);
   }, [drawerOpen, editing]);
 
   function openCreate() {
@@ -109,9 +114,14 @@ export function CustomFieldsPage() {
     <>
       <PageHeader
         action={
-          <Button onClick={openCreate}>
-            <Plus className="h-4 w-4" /> New Field
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setImportOpen(true)}>
+              <Upload className="h-4 w-4" /> Import CSV
+            </Button>
+            <Button onClick={openCreate}>
+              <Plus className="h-4 w-4" /> New Field
+            </Button>
+          </div>
         }
       />
       <PageBody>
@@ -177,13 +187,26 @@ export function CustomFieldsPage() {
           <div className="space-y-3">
             <div>
               <Label>Name</Label>
-              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              <Input
+                value={form.name}
+                onChange={(e) => {
+                  const name = e.target.value;
+                  setForm((f) => ({
+                    ...f,
+                    name,
+                    field_key: !editing && !fieldKeyTouched ? slugFieldKey(name) : f.field_key,
+                  }));
+                }}
+              />
             </div>
             <div>
               <Label>Field Key</Label>
               <Input
                 value={form.field_key}
-                onChange={(e) => setForm({ ...form, field_key: e.target.value })}
+                onChange={(e) => {
+                  setFieldKeyTouched(true);
+                  setForm({ ...form, field_key: e.target.value });
+                }}
                 placeholder="utility_provider"
               />
               {editing && editing.field_key !== form.field_key && (
@@ -217,6 +240,8 @@ export function CustomFieldsPage() {
           </div>
         </FormDrawer>
       </PageBody>
+
+      <ImportCustomFieldsModal open={importOpen} onClose={() => setImportOpen(false)} />
     </>
   );
 }

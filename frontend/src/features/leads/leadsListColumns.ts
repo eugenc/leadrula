@@ -40,7 +40,7 @@ export const SYSTEM_COLUMNS: SystemColumn[] = [
   { id: "name", label: "Name", sortKey: "first_name" },
   { id: "phone", label: "Phone", sortKey: "phone" },
   { id: "email", label: "Email", sortKey: "email" },
-  { id: "campaign", label: "Campaign", sortKey: "campaign_name" },
+  { id: "source", label: "Source", sortKey: "source" },
   { id: "buyer", label: "Buyer", sortKey: "buyer_name" },
   { id: "assignee", label: "Assignee", sortKey: "assignee_name" },
   { id: "pipeline", label: "Pipeline", sortKey: "pipeline_name" },
@@ -55,10 +55,15 @@ export const SYSTEM_COLUMNS: SystemColumn[] = [
   { id: "zip", label: "Zip", sortKey: "zip" },
 ];
 
+export const PIPELINE_COLUMNS: SystemColumn[] = [
+  { id: "stage_entered_at", label: "Time in stage", sortKey: "stage_entered_at" },
+  { id: "position", label: "Manual order", sortKey: "position" },
+];
+
 export const DEFAULT_VISIBLE_COLUMNS = [
   "name",
   "phone",
-  "campaign",
+  "source",
   "buyer",
   "assignee",
   "pipeline",
@@ -82,7 +87,8 @@ export function loadVisibleColumns(): string[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_VISIBLE_COLUMNS;
     const parsed = JSON.parse(raw) as string[];
-    return parsed.length ? parsed : DEFAULT_VISIBLE_COLUMNS;
+    const cols = parsed.map((c) => (c === "campaign" ? "source" : c));
+    return cols.length ? cols : DEFAULT_VISIBLE_COLUMNS;
   } catch {
     return DEFAULT_VISIBLE_COLUMNS;
   }
@@ -90,6 +96,18 @@ export function loadVisibleColumns(): string[] {
 
 export function saveVisibleColumns(cols: string[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(cols));
+}
+
+export function formatTimeInStage(enteredAt: string): string {
+  const ms = Date.now() - new Date(enteredAt).getTime();
+  if (ms < 0) return "—";
+  const days = Math.floor(ms / 86400000);
+  if (days >= 1) return `${days} day${days === 1 ? "" : "s"}`;
+  const hours = Math.floor(ms / 3600000);
+  if (hours >= 1) return `${hours} hour${hours === 1 ? "" : "s"}`;
+  const mins = Math.floor(ms / 60000);
+  if (mins >= 1) return `${mins} min${mins === 1 ? "" : "s"}`;
+  return "Just now";
 }
 
 function renderCustomValue(v: unknown): string {
@@ -107,8 +125,8 @@ export function cellValue(lead: Lead, colId: string, customFields: CustomField[]
       return lead.phone ?? "—";
     case "email":
       return lead.email ?? "—";
-    case "campaign":
-      return lead.campaign_name ?? "—";
+    case "source":
+      return lead.source ?? "—";
     case "buyer":
       return lead.buyer_name ?? "—";
     case "assignee":
@@ -125,6 +143,8 @@ export function cellValue(lead: Lead, colId: string, customFields: CustomField[]
       return lead.action_at ? format(new Date(lead.action_at), "MMM d, h:mma") : "—";
     case "created_at":
       return format(new Date(lead.created_at), "MMM d, yyyy");
+    case "stage_entered_at":
+      return lead.stage_entered_at ? formatTimeInStage(lead.stage_entered_at) : "—";
     case "address":
       return lead.address ?? "—";
     case "city":
@@ -149,23 +169,56 @@ export function columnLabel(colId: string, customFields: CustomField[]): string 
     const field = customFields.find((f) => String(f.id) === colId.slice(7));
     return field?.name ?? colId;
   }
-  return SYSTEM_COLUMNS.find((c) => c.id === colId)?.label ?? colId;
+  return [...SYSTEM_COLUMNS, ...PIPELINE_COLUMNS].find((c) => c.id === colId)?.label ?? colId;
 }
 
 export function columnSortKey(colId: string): string | undefined {
-  return SYSTEM_COLUMNS.find((c) => c.id === colId)?.sortKey;
+  if (colId.startsWith("custom_")) return colId;
+  return [...SYSTEM_COLUMNS, ...PIPELINE_COLUMNS].find((c) => c.id === colId)?.sortKey;
+}
+
+export function sortKeyLabel(sortKey: string, customFields: CustomField[]): string {
+  if (sortKey.startsWith("custom_")) {
+    return columnLabel(sortKey, customFields);
+  }
+  for (const c of [...SYSTEM_COLUMNS, ...PIPELINE_COLUMNS]) {
+    if (c.sortKey === sortKey) return c.label;
+  }
+  return sortKey;
+}
+
+export function boardSortOptions(customFields: CustomField[]): { group: string; sortKey: string; label: string }[] {
+  const lead = SYSTEM_COLUMNS.filter((c) => c.sortKey).map((c) => ({
+    group: "Lead fields",
+    sortKey: c.sortKey!,
+    label: c.label,
+  }));
+  const custom = customFields
+    .filter((f) => f.is_active)
+    .map((f) => ({
+      group: "Lead fields",
+      sortKey: `custom_${f.id}`,
+      label: f.name,
+    }));
+  const pipeline = PIPELINE_COLUMNS.filter((c) => c.sortKey).map((c) => ({
+    group: "Pipeline",
+    sortKey: c.sortKey!,
+    label: c.label,
+  }));
+  return [...lead, ...custom, ...pipeline];
 }
 
 const SYSTEM_COLUMN_ICONS: Record<string, LucideIcon> = {
   phone: Phone,
   email: Mail,
-  campaign: Megaphone,
+  source: Megaphone,
   buyer: Building2,
   assignee: User,
   status: CircleDot,
   tags: Tag,
   action_at: CalendarClock,
   created_at: Calendar,
+  stage_entered_at: CalendarClock,
   address: MapPin,
   city: MapPin,
   state: MapPin,

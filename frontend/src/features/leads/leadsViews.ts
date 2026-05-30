@@ -77,8 +77,8 @@ export const FILTER_FIELDS: {
     ops: [{ op: "contains", label: "contains", needsValue: true, valueType: "text" }],
   },
   {
-    field: "campaign_name",
-    label: "Campaign",
+    field: "source",
+    label: "Source",
     ops: [
       { op: "equals", label: "is", needsValue: true, valueType: "text" },
       { op: "contains", label: "contains", needsValue: true, valueType: "text" },

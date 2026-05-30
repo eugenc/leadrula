@@ -208,9 +208,9 @@ func builtinValue(l *Lead, field string) string {
 		if l.Zip != nil {
 			return *l.Zip
 		}
-	case "campaign_name":
-		if l.CampaignName != nil {
-			return *l.CampaignName
+	case "source", "campaign_name":
+		if l.Source != nil {
+			return *l.Source
 		}
 	}
 	return ""

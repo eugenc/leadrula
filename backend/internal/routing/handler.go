@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -34,6 +35,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Patch("/routes/{id}", h.updateRoute)
 		r.Delete("/routes/{id}", h.deleteRoute)
 		r.Post("/routes/{id}/field-map", h.addRouteFieldMap)
+		r.Post("/routes/{id}/buyer-custom-fields", h.createBuyerCustomField)
 		r.Delete("/route-field-map/{mapId}", h.deleteRouteFieldMap)
 	})
 }
@@ -270,6 +272,31 @@ func (h *Handler) deleteRouteFieldMap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) createBuyerCustomField(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	rid := idp(r, "id")
+	ok, err := h.svc.RouteOwnedBy(r.Context(), p.AccountID, rid)
+	if err != nil || !ok {
+		httpx.Err(w, http.StatusNotFound, httpx.CodeNotFound, "route not found")
+		return
+	}
+	var body struct {
+		Name     string          `json:"name"`
+		FieldKey string          `json:"field_key"`
+		Type     string          `json:"type"`
+		Options  json.RawMessage `json:"options"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	f, err := h.svc.CreateBuyerCustomField(r.Context(), p.AccountID, rid, body.Name, body.FieldKey, body.Type, body.Options)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, f)
 }
 
 func idp(r *http.Request, name string) int64 {

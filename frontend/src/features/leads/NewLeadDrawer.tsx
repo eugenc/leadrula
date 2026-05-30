@@ -45,7 +45,7 @@ export function NewLeadDrawer({ open, onClose }: Props) {
     city: "",
     state: "",
     zip: "",
-    campaign_name: "",
+    source: "",
   });
   const [pipelineId, setPipelineId] = useState(0);
   const [stageId, setStageId] = useState(0);
@@ -71,7 +71,7 @@ export function NewLeadDrawer({ open, onClose }: Props) {
       city: "",
       state: "",
       zip: "",
-      campaign_name: "",
+      source: "",
     });
     setPipelineId(0);
     setStageId(0);
@@ -112,7 +112,7 @@ export function NewLeadDrawer({ open, onClose }: Props) {
       city: fields.city?.trim() || undefined,
       state: fields.state?.trim() || undefined,
       zip: fields.zip?.trim() || undefined,
-      campaign_name: fields.campaign_name?.trim() || undefined,
+      source: fields.source?.trim() || undefined,
     };
     if (pipelineId && stageId) {
       body.pipeline_id = pipelineId;
@@ -209,10 +209,10 @@ export function NewLeadDrawer({ open, onClose }: Props) {
               </div>
             )}
             <div>
-              <Label>Campaign</Label>
+              <Label>Source</Label>
               <Input
-                value={fields.campaign_name ?? ""}
-                onChange={(e) => setField("campaign_name", e.target.value)}
+                value={fields.source ?? ""}
+                onChange={(e) => setField("source", e.target.value)}
               />
             </div>
             <div>

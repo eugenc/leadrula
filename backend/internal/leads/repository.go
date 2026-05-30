@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,18 +26,18 @@ func (r *Repository) Pool() *pgxpool.Pool { return r.pool }
 
 var builtinFields = map[string]bool{
 	"first_name": true, "last_name": true, "phone": true, "email": true,
-	"address": true, "city": true, "state": true, "zip": true, "campaign_name": true,
+	"address": true, "city": true, "state": true, "zip": true, "source": true,
 }
 
 const leadCols = `id, public_id, owner_account_id, publisher_id, contract_id,
-	first_name, last_name, phone, email, address, city, state, zip, campaign_name,
+	first_name, last_name, phone, email, address, city, state, zip, source,
 	pipeline_id, stage_id, position, assigned_user_id, action_at, status,
 	disqualification_reason_id, created_at, updated_at, tags`
 
 func scanLead(row pgx.Row) (*Lead, error) {
 	l := &Lead{}
 	err := row.Scan(&l.ID, &l.PublicID, &l.OwnerAccountID, &l.PublisherID, &l.ContractID,
-		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.CampaignName,
+		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.Source,
 		&l.PipelineID, &l.StageID, &l.Position, &l.AssignedUserID, &l.ActionAt, &l.Status,
 		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt, &l.Tags)
 	if err != nil {
@@ -52,20 +53,20 @@ func scanLead(row pgx.Row) (*Lead, error) {
 }
 
 // InsertLead creates a lead in review status owned by the publisher.
-func (r *Repository) InsertLead(ctx context.Context, q database.Querier, ownerAccountID, publisherID int64, campaignName string, rawPayload []byte) (int64, string, error) {
+func (r *Repository) InsertLead(ctx context.Context, q database.Querier, ownerAccountID, publisherID int64, source string, rawPayload []byte) (int64, string, error) {
 	var id int64
 	var publicID string
-	var cn interface{}
-	if campaignName != "" {
-		cn = campaignName
+	var src interface{}
+	if source != "" {
+		src = source
 	}
 	if len(rawPayload) == 0 {
 		rawPayload = []byte("{}")
 	}
 	err := q.QueryRow(ctx,
-		`INSERT INTO leads(owner_account_id, publisher_id, campaign_name, raw_payload, status)
+		`INSERT INTO leads(owner_account_id, publisher_id, source, raw_payload, status)
 		 VALUES ($1,$2,$3,$4,'review') RETURNING id, public_id`,
-		ownerAccountID, publisherID, cn, rawPayload).Scan(&id, &publicID)
+		ownerAccountID, publisherID, src, rawPayload).Scan(&id, &publicID)
 	return id, publicID, err
 }
 
@@ -181,7 +182,7 @@ func (r *Repository) visible(ctx context.Context, p *auth.Principal, l *Lead) bo
 
 type ListFilters struct {
 	Status        string
-	Campaign      string
+	Source        string
 	PipelineID    int64
 	StageID       int64
 	Assigned      int64
@@ -209,13 +210,15 @@ var listSortCols = map[string]string{
 	"last_name":     "l.last_name",
 	"phone":         "l.phone",
 	"email":         "l.email",
-	"campaign_name": "l.campaign_name",
+	"source": "l.source",
 	"status":        "l.status",
 	"action_at":     "l.action_at",
 	"buyer_name":     "buyer_name",
 	"assignee_name":  "assignee_name",
-	"pipeline_name":  "pl.name",
-	"stage_name":     "st.name",
+	"pipeline_name":    "pl.name",
+	"stage_name":       "st.name",
+	"stage_entered_at": "stage_entered_at",
+	"position":         "l.position",
 }
 
 const listFrom = ` FROM leads l
@@ -225,22 +228,28 @@ const listFrom = ` FROM leads l
 	LEFT JOIN pipeline_stages st ON st.id = l.stage_id`
 
 const listSelect = `l.id, l.public_id, l.owner_account_id, l.publisher_id, l.contract_id,
-	l.first_name, l.last_name, l.phone, l.email, l.address, l.city, l.state, l.zip, l.campaign_name,
+	l.first_name, l.last_name, l.phone, l.email, l.address, l.city, l.state, l.zip, l.source,
 	l.pipeline_id, l.stage_id, l.position, l.assigned_user_id, l.action_at, l.status,
 	l.disqualification_reason_id, l.created_at, l.updated_at, l.tags,
 	CASE WHEN ba.type = 'buyer' THEN ba.name ELSE NULL END AS buyer_name,
 	u.full_name AS assignee_name,
 	u.prefs->>'avatar_url' AS assignee_avatar_url,
 	pl.name AS pipeline_name,
-	st.name AS stage_name`
+	st.name AS stage_name,
+	COALESCE(
+		(SELECT h.created_at FROM lead_stage_history h
+		 WHERE h.lead_id = l.id AND h.to_stage_id = l.stage_id
+		 ORDER BY h.created_at DESC, h.id DESC LIMIT 1),
+		l.created_at
+	) AS stage_entered_at`
 
 func scanListLead(row pgx.Row) (*Lead, error) {
 	l := &Lead{}
 	err := row.Scan(&l.ID, &l.PublicID, &l.OwnerAccountID, &l.PublisherID, &l.ContractID,
-		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.CampaignName,
+		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.Source,
 		&l.PipelineID, &l.StageID, &l.Position, &l.AssignedUserID, &l.ActionAt, &l.Status,
 		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt, &l.Tags, &l.BuyerName, &l.AssigneeName, &l.AssigneeAvatarURL,
-		&l.PipelineName, &l.StageName)
+		&l.PipelineName, &l.StageName, &l.StageEnteredAt)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +279,7 @@ func (r *Repository) listWhere(p *auth.Principal, f ListFilters) (string, []any)
 	if len(f.Conditions) > 0 {
 		conditions := append([]FilterCondition{}, f.Conditions...)
 		extra := flatFiltersToConditions(ListFilters{
-			Status: f.Status, Campaign: f.Campaign, PipelineID: f.PipelineID,
+			Status: f.Status, Source: f.Source, PipelineID: f.PipelineID,
 			StageID: f.StageID, Assigned: f.Assigned, Tag: f.Tag,
 			ActionOn: f.ActionOn, ActionTZ: f.ActionTZ, ActionOverdue: f.ActionOverdue,
 		})
@@ -293,8 +302,8 @@ func (r *Repository) listWhere(p *auth.Principal, f ListFilters) (string, []any)
 	if f.Status != "" {
 		add("l.status =", f.Status)
 	}
-	if f.Campaign != "" {
-		add("l.campaign_name =", f.Campaign)
+	if f.Source != "" {
+		add("l.source =", f.Source)
 	}
 	if f.PipelineID != 0 {
 		add("l.pipeline_id =", f.PipelineID)
@@ -324,16 +333,53 @@ func (r *Repository) listWhere(p *auth.Principal, f ListFilters) (string, []any)
 	return where, args
 }
 
+func sortDirection(sortDir string) string {
+	if sortDir == "desc" {
+		return "DESC"
+	}
+	return "ASC"
+}
+
+func defaultListOrderBy() string {
+	return "l.created_at DESC, l.id DESC"
+}
+
 func listOrderBy(sort, sortDir string) string {
 	col, ok := listSortCols[sort]
 	if !ok {
-		return "l.created_at DESC, l.id DESC"
+		return defaultListOrderBy()
 	}
-	dir := "ASC"
-	if sortDir == "desc" {
-		dir = "DESC"
+	return col + " " + sortDirection(sortDir) + " NULLS LAST, l.id DESC"
+}
+
+func (r *Repository) resolveListSort(ctx context.Context, accountID int64, sort, sortDir string, argLen int) (orderBy, extraJoin string, extraArgs []any) {
+	if !strings.HasPrefix(sort, "custom_") {
+		return listOrderBy(sort, sortDir), "", nil
 	}
-	return col + " " + dir + " NULLS LAST, l.id DESC"
+	fieldID, err := strconv.ParseInt(strings.TrimPrefix(sort, "custom_"), 10, 64)
+	if err != nil {
+		return defaultListOrderBy(), "", nil
+	}
+	var fieldType string
+	err = r.pool.QueryRow(ctx,
+		`SELECT type FROM custom_fields WHERE id=$1 AND account_id=$2`, fieldID, accountID).Scan(&fieldType)
+	if err != nil {
+		return defaultListOrderBy(), "", nil
+	}
+	dir := sortDirection(sortDir)
+	var orderExpr string
+	switch fieldType {
+	case "number":
+		orderExpr = "(sort_cv.value)::text::numeric"
+	case "date", "datetime":
+		orderExpr = "(sort_cv.value #>> '{}')::timestamptz"
+	default:
+		orderExpr = "sort_cv.value #>> '{}'"
+	}
+	joinArg := argLen + 1
+	return orderExpr + " " + dir + " NULLS LAST, l.id DESC",
+		fmt.Sprintf(" LEFT JOIN lead_custom_values sort_cv ON sort_cv.lead_id = l.id AND sort_cv.custom_field_id = $%d", joinArg),
+		[]any{fieldID}
 }
 
 // List returns leads for the principal's account honoring role visibility.
@@ -359,8 +405,10 @@ func (r *Repository) List(ctx context.Context, p *auth.Principal, o ListOptions)
 	}
 	offset := (page - 1) * limit
 
-	q := `SELECT ` + listSelect + listFrom + ` WHERE ` + where + ` ORDER BY ` + listOrderBy(o.Sort, o.SortDir)
+	orderBy, extraJoin, sortArgs := r.resolveListSort(ctx, p.AccountID, o.Sort, o.SortDir, len(args))
 	qArgs := append([]any{}, args...)
+	qArgs = append(qArgs, sortArgs...)
+	q := `SELECT ` + listSelect + listFrom + extraJoin + ` WHERE ` + where + ` ORDER BY ` + orderBy
 	if !o.All && o.Limit > 0 {
 		q += fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(qArgs)+1, len(qArgs)+2)
 		qArgs = append(qArgs, limit, offset)
@@ -668,6 +716,9 @@ func (r *Repository) Delete(ctx context.Context, accountID int64, leadIDs []int6
 	tag, err := r.pool.Exec(ctx,
 		`DELETE FROM leads WHERE owner_account_id=$1 AND id = ANY($2)`, accountID, leadIDs)
 	if err != nil {
+		if database.IsForeignKeyViolation(err) {
+			return 0, httpx.BusinessRule("lead cannot be deleted while referenced by billing records")
+		}
 		return 0, err
 	}
 	return tag.RowsAffected(), nil

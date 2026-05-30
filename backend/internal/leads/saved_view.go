@@ -32,7 +32,7 @@ type SavedView struct {
 }
 
 var defaultListColumns = []string{
-	"name", "phone", "campaign", "buyer", "assignee", "status", "action_at", "created_at",
+	"name", "phone", "source", "buyer", "assignee", "status", "action_at", "created_at",
 }
 
 var BuiltinViews = map[string]SavedView{

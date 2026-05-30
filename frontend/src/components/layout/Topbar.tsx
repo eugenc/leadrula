@@ -8,12 +8,35 @@ import { useNotifications, useMarkRead } from "@/hooks/useNotifications";
 import { queryClient } from "@/lib/queryClient";
 import { cn, formatRole } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
+import type { NotificationItem } from "@/types";
 
 const labels: Record<string, string> = {
   new_lead: "New lead received",
   lead_returned: "A lead was returned",
   dispute_update: "Dispute resolved",
+  collaboration_request: "Collaboration request",
 };
+
+function notifLabel(n: NotificationItem) {
+  if (n.type === "collaboration_request") {
+    const dir = n.payload.direction as string | undefined;
+    if (dir === "publisher_to_buyer") {
+      return `${n.payload.publisher_name ?? "Publisher"} requested collaboration`;
+    }
+    if (dir === "buyer_to_publisher") {
+      return `${n.payload.buyer_name ?? "Buyer"} invited you to collaborate`;
+    }
+  }
+  return labels[n.type] ?? n.type;
+}
+
+function notifPath(n: NotificationItem, accountType: string | undefined) {
+  if (n.type === "collaboration_request") {
+    if (accountType === "buyer") return "/b/settings/collaboration";
+    if (accountType === "publisher") return "/p/buyers";
+  }
+  return null;
+}
 
 export function Topbar({ title }: { title: string }) {
   const user = useAuthStore((s) => s.user);
@@ -56,13 +79,20 @@ export function Topbar({ title }: { title: string }) {
             {(notifs ?? []).map((n) => (
               <DropdownItem
                 key={n.id}
-                onClick={() => markRead.mutate(n.id)}
+                onClick={() => {
+                  markRead.mutate(n.id);
+                  const path = notifPath(n, user?.account_type);
+                  if (path) {
+                    setOpen(false);
+                    navigate(path);
+                  }
+                }}
                 className={cn(
                   "h-auto flex-col items-start py-2",
                   !n.read_at && "bg-info-bg/50"
                 )}
               >
-                <span className="text-sm font-medium">{labels[n.type] ?? n.type}</span>
+                <span className="text-sm font-medium">{notifLabel(n)}</span>
                 <span className="text-xs text-gray-400">
                   {formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}
                 </span>

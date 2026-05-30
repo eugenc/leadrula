@@ -5,6 +5,8 @@ import type {
   ApiKey,
   BuyerSummary,
   BuyerDetail,
+  BuyerCollabSummary,
+  CollaborationStatus,
   CalendarEvent,
   Source,
   Route,
@@ -21,6 +23,7 @@ import type {
   StageRule,
   Transaction,
   UserRow,
+  CustomField,
 } from "@/types";
 
 function useInvalidate(keys: string[]) {
@@ -113,7 +116,10 @@ export function useDeleteStageRule() {
 // ── Custom fields ─────────────────────────────────────────────────
 export function useCreateField() {
   const inv = useInvalidate(["custom-fields"]);
-  return useMutation({ mutationFn: (body: Record<string, unknown>) => post(`${ns()}/custom-fields`, body), onSuccess: inv });
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) => post<CustomField>(`${ns()}/custom-fields`, body),
+    onSuccess: inv,
+  });
 }
 export function useUpdateField() {
   const qc = useQueryClient();
@@ -129,6 +135,29 @@ export function useUpdateField() {
 export function useDeleteField() {
   const inv = useInvalidate(["custom-fields"]);
   return useMutation({ mutationFn: (id: number) => del(`${ns()}/custom-fields/${id}`), onSuccess: inv });
+}
+
+export const CUSTOM_FIELD_IMPORT_BATCH_SIZE = 1000;
+
+export interface ImportCustomFieldsResult {
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: { row: number; message: string }[];
+}
+
+export interface ImportCustomFieldsPayload {
+  mapping: { csv_column: string; target: string }[];
+  rows: Record<string, string>[];
+}
+
+export function useImportCustomFields() {
+  const inv = useInvalidate(["custom-fields"]);
+  return useMutation({
+    mutationFn: (body: ImportCustomFieldsPayload) =>
+      post<ImportCustomFieldsResult>(`${ns()}/custom-fields/import`, body),
+    onSuccess: inv,
+  });
 }
 
 // ── Disqualification reasons ──────────────────────────────────────
@@ -423,6 +452,14 @@ export function useDeleteRouteFieldMap() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["route-field-map"] }),
   });
 }
+export function useCreateBuyerRouteField(routeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      post<CustomField>(`/publisher/routes/${routeId}/buyer-custom-fields`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["route-field-map-options", routeId] }),
+  });
+}
 
 // ── Intake queue (publisher) ──────────────────────────────────────
 export function useIntakeQueue(status = "pending_review") {
@@ -459,6 +496,7 @@ export function useCreateBuyer() {
       website?: string;
       starting_balance?: number;
       timezone?: string;
+      collaborate_enabled?: boolean;
     }) => post<BuyerSummary>("/publisher/buyers", body),
     onSuccess: inv,
   });
@@ -585,4 +623,105 @@ export function useCalendar(scope: "global" | "me") {
 // ── Users list (re-export convenience) ────────────────────────────
 export function useUsersList() {
   return useQuery({ queryKey: ["users"], queryFn: () => get<UserRow[]>(`${ns()}/users`) });
+}
+
+// ── Collaboration ─────────────────────────────────────────────────
+export function useCollabSummaries() {
+  return useQuery({
+    queryKey: ["collab-summaries"],
+    queryFn: () => get<BuyerCollabSummary[]>("/publisher/collaboration/summaries"),
+  });
+}
+
+export function useBuyerCollaboration(buyerId: number | null) {
+  return useQuery({
+    queryKey: ["collaboration", "buyer", buyerId],
+    queryFn: () => get<CollaborationStatus>(`/publisher/collaboration/buyers/${buyerId}`),
+    enabled: !!buyerId,
+  });
+}
+
+export function useBuyerCollabStatus() {
+  return useQuery({
+    queryKey: ["collaboration", "self"],
+    queryFn: () => get<CollaborationStatus>("/buyer/collaboration"),
+  });
+}
+
+export function useRequestCollaboration() {
+  const inv = useInvalidate(["collaboration", "collab-summaries"]);
+  return useMutation({
+    mutationFn: (buyerId: number) => post<CollaborationStatus>(`/publisher/collaboration/buyers/${buyerId}/request`),
+    onSuccess: inv,
+  });
+}
+
+export function useAcceptCollaborationPublisher() {
+  const inv = useInvalidate(["collaboration", "collab-summaries"]);
+  return useMutation({
+    mutationFn: (buyerId: number) => post<CollaborationStatus>(`/publisher/collaboration/buyers/${buyerId}/accept`),
+    onSuccess: inv,
+  });
+}
+
+export function useAcceptCollaborationByPublicId() {
+  const inv = useInvalidate(["collaboration", "collab-summaries"]);
+  return useMutation({
+    mutationFn: (buyerPublicId: string) =>
+      post<CollaborationStatus>("/publisher/collaboration/accept", { buyer_id: buyerPublicId }),
+    onSuccess: inv,
+  });
+}
+
+export function useRejectCollaborationPublisher() {
+  const inv = useInvalidate(["collaboration", "collab-summaries"]);
+  return useMutation({
+    mutationFn: (buyerId: number) => post<CollaborationStatus>(`/publisher/collaboration/buyers/${buyerId}/reject`),
+    onSuccess: inv,
+  });
+}
+
+export function useInvitePublisherCollaboration() {
+  const inv = useInvalidate(["collaboration"]);
+  return useMutation({
+    mutationFn: (email: string) => post<CollaborationStatus>("/buyer/collaboration/invite", { email }),
+    onSuccess: inv,
+  });
+}
+
+export function useAcceptCollaborationBuyer() {
+  const inv = useInvalidate(["collaboration"]);
+  return useMutation({
+    mutationFn: () => post<CollaborationStatus>("/buyer/collaboration/accept"),
+    onSuccess: inv,
+  });
+}
+
+export function useRejectCollaborationBuyer() {
+  const inv = useInvalidate(["collaboration"]);
+  return useMutation({
+    mutationFn: () => post<CollaborationStatus>("/buyer/collaboration/reject"),
+    onSuccess: inv,
+  });
+}
+
+export function useRevokeCollaboration() {
+  const inv = useInvalidate(["collaboration"]);
+  return useMutation({
+    mutationFn: () => del<CollaborationStatus>("/buyer/collaboration"),
+    onSuccess: inv,
+  });
+}
+
+export function useImpersonateBuyer() {
+  return useMutation({
+    mutationFn: (buyerPublicId: string) =>
+      post<{ access: string; user: Record<string, unknown> }>("/auth/impersonate", { buyer_id: buyerPublicId }),
+  });
+}
+
+export function useEndImpersonation() {
+  return useMutation({
+    mutationFn: () => post<{ ok: boolean }>("/auth/impersonate/end"),
+  });
 }

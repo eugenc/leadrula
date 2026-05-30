@@ -29,7 +29,7 @@ export function IntakeQueuePage() {
               <tr>
                 <TH>Name</TH>
                 <TH>Phone</TH>
-                <TH>Campaign</TH>
+                <TH>Source</TH>
                 <TH>Received</TH>
                 <TH />
               </tr>
@@ -41,7 +41,7 @@ export function IntakeQueuePage() {
                     {q.first_name} {q.last_name}
                   </TD>
                   <TD>{q.phone ?? "—"}</TD>
-                  <TD>{q.campaign_name ?? "—"}</TD>
+                  <TD>{q.source ?? "—"}</TD>
                   <TD>{format(new Date(q.created_at), "MMM d, h:mma")}</TD>
                   <TD>
                     <div className="flex justify-end gap-2">

@@ -114,7 +114,9 @@ export function LeadViewsMenu({
       placement: placement === "list" ? "list" : "board",
       shared: isAdmin && shared,
       filters: draftFilters,
-      ...(placement === "list" ? { columns, sort, sort_dir: sortDir } : { columns }),
+      ...(placement === "list" || placement === "board"
+        ? { columns, sort, sort_dir: sortDir }
+        : { columns }),
     };
     try {
       if (editView && !saveAsNew) {

@@ -82,12 +82,14 @@ npm run dev                    # http://localhost:5173
 POST /api/v1/leads
 Authorization: Bearer <api_key>
 {
-  "campaign_name": "solar_ontario_q2",
+  "source": "solar_ontario_q2",
   "first_name": "Jane", "last_name": "Doe",
   "phone": "+1...", "email": "...",
   "custom": { "utility_provider": "Hydro One" }
 }
 → 202 { "lead_id": "<uuid>", "status": "distributed" | "review" }
 ```
+
+`campaign_name` is still accepted for backward compatibility.
 
 See [backend/README routes](backend) and the spec docs for the full surface.

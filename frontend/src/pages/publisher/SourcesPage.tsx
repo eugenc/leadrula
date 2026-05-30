@@ -8,8 +8,12 @@ import {
   useSourceSamplePayload,
   useAddSourceFieldMap,
   useDeleteSourceFieldMap,
+  useCreateField,
 } from "@/features/admin/hooks";
 import { useCustomFields } from "@/features/leads/hooks";
+import { CreateCustomFieldDrawer } from "@/features/admin/CreateCustomFieldDrawer";
+import { BuiltinCustomFieldSelect } from "@/features/admin/BuiltinCustomFieldSelect";
+import { slugFieldKey } from "@/features/admin/customFieldConstants";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
@@ -293,15 +297,23 @@ function SourceFieldMapContent({
   const remove = useDeleteSourceFieldMap();
   const [sourceKey, setSourceKey] = useState("");
   const [target, setTarget] = useState("first_name");
+  const [createFieldOpen, setCreateFieldOpen] = useState(false);
+
+  const createField = useCreateField();
 
   const payload = sample?.payload ?? null;
   const mappableKeys = payload ? mappablePayloadKeys(payload) : [];
 
-  function submit() {
-    const isCustom = target.startsWith("cf:");
+  function customFieldName(id: number | null): string | null {
+    if (!id) return null;
+    return (customFields ?? []).find((f) => f.id === id)?.name ?? null;
+  }
+
+  function addMapping(key: string, targetVal: string) {
+    const isCustom = targetVal.startsWith("cf:");
     const body: Record<string, unknown> = isCustom
-      ? { source_key: sourceKey, target_type: "custom", custom_field_id: Number(target.slice(3)) }
-      : { source_key: sourceKey, target_type: "builtin", builtin_field: target };
+      ? { source_key: key, target_type: "custom", custom_field_id: Number(targetVal.slice(3)) }
+      : { source_key: key, target_type: "builtin", builtin_field: targetVal };
     add.mutate(
       { sourceId, body },
       {
@@ -309,6 +321,11 @@ function SourceFieldMapContent({
         onError: (e) => toast.error(apiError(e).message),
       }
     );
+  }
+
+  function submit() {
+    if (!sourceKey) return;
+    addMapping(sourceKey, target);
   }
 
   return (
@@ -377,7 +394,9 @@ function SourceFieldMapContent({
                 {e.target_type === "builtin" ? (
                   <Badge variant="review">{e.builtin_field}</Badge>
                 ) : (
-                  <Badge variant="distributed">custom #{e.custom_field_id}</Badge>
+                  <Badge variant="distributed">
+                    {customFieldName(e.custom_field_id) ?? `custom #${e.custom_field_id}`}
+                  </Badge>
                 )}
               </span>
               <IconButton variant="danger" onClick={() => remove.mutate(e.id)}>
@@ -392,30 +411,35 @@ function SourceFieldMapContent({
             <Label>Payload key</Label>
             <Input value={sourceKey} onChange={(e) => setSourceKey(e.target.value)} placeholder="phone_number" />
           </div>
-          <div>
-            <Label>Lead field</Label>
-            <Select value={target} onChange={(e) => setTarget(e.target.value)}>
-              <optgroup label="Built-in">
-                {BUILTINS.map((b) => (
-                  <option key={b} value={b}>
-                    {b}
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="Custom">
-                {(customFields ?? []).map((f) => (
-                  <option key={f.id} value={`cf:${f.id}`}>
-                    {f.name}
-                  </option>
-                ))}
-              </optgroup>
-            </Select>
-          </div>
+          <BuiltinCustomFieldSelect
+            value={target}
+            onChange={setTarget}
+            customFields={customFields ?? []}
+            builtins={BUILTINS}
+            label="Lead field"
+            onAddCustomField={() => setCreateFieldOpen(true)}
+          />
           <Button onClick={submit} disabled={!sourceKey}>
             <Plus className="h-4 w-4" />
           </Button>
         </div>
       </div>
+      <CreateCustomFieldDrawer
+        open={createFieldOpen}
+        onClose={() => setCreateFieldOpen(false)}
+        defaultName={sourceKey.replace(/_/g, " ")}
+        defaultFieldKey={sourceKey ? slugFieldKey(sourceKey) : ""}
+        subtitle={sourceKey ? `Payload key: ${sourceKey}` : undefined}
+        isPending={createField.isPending}
+        onSubmit={(body) =>
+          createField.mutateAsync(body).then((field) => {
+            const val = `cf:${field.id}`;
+            setTarget(val);
+            if (sourceKey) addMapping(sourceKey, val);
+            return field;
+          })
+        }
+      />
     </FormDrawer>
   );
 }

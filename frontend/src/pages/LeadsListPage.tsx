@@ -4,8 +4,11 @@ import {
   useCustomFields,
   useBulkLeads,
   useUsers,
+  fetchAllLeadIds,
+  deleteLeadsWithProgress,
   type BulkLeadAction,
 } from "@/features/leads/hooks";
+import { DeleteLeadConfirmDialog } from "@/features/leads/DeleteLeadConfirmDialog";
 import { LeadTagBadges } from "@/features/leads/LeadTagsEditor";
 import { LeadsColumnPicker } from "@/features/leads/LeadsColumnPicker";
 import { LeadFilterBuilder } from "@/features/leads/LeadFilterBuilder";
@@ -90,6 +93,8 @@ export function LeadsListPage() {
   const [colsOpen, setColsOpen] = useState(false);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [selectAllMatching, setSelectAllMatching] = useState(false);
+  const [fetchingIds, setFetchingIds] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [assignOpen, setAssignOpen] = useState<"user" | "follower" | "buyer" | null>(null);
@@ -132,6 +137,16 @@ export function LeadsListPage() {
     [viewChanged, activeId, conditions, page, limit, sort, sortDir]
   );
 
+  const bulkListFilters = useMemo(
+    () => ({
+      view_id: viewChanged ? undefined : activeId,
+      filters: viewChanged ? JSON.stringify(conditions) : undefined,
+      sort,
+      sort_dir: sortDir,
+    }),
+    [viewChanged, activeId, conditions, sort, sortDir]
+  );
+
   const { data, isLoading, isError, error } = useLeads(filters);
   const bulk = useBulkLeads();
   const openDetail = useUIStore((s) => s.openDetail);
@@ -139,6 +154,20 @@ export function LeadsListPage() {
   const leads = data?.items ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / limit));
+  const selectedCount = selectAllMatching ? total : selected.size;
+  const hasSelection = selectAllMatching || selected.size > 0;
+  const showSelectAllBanner =
+    isAdmin &&
+    !selectAllMatching &&
+    selected.size === leads.length &&
+    leads.length > 0 &&
+    total > leads.length;
+  const showAllSelectedBanner = isAdmin && selectAllMatching && total > 0;
+
+  function clearSelection() {
+    setSelected(new Set());
+    setSelectAllMatching(false);
+  }
 
   useEffect(() => {
     setPage(1);
@@ -146,7 +175,8 @@ export function LeadsListPage() {
 
   useEffect(() => {
     setSelected(new Set());
-  }, [filters]);
+    setSelectAllMatching(false);
+  }, [conditions, limit, sort, sortDir, activeId, viewChanged]);
 
   const allColumnIds = useMemo(() => {
     const custom = (customFields ?? [])
@@ -169,6 +199,11 @@ export function LeadsListPage() {
   }
 
   function toggleRow(id: number) {
+    if (selectAllMatching) {
+      setSelectAllMatching(false);
+      setSelected(new Set(leads.map((l) => l.id).filter((x) => x !== id)));
+      return;
+    }
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -178,25 +213,36 @@ export function LeadsListPage() {
   }
 
   function toggleAll() {
-    if (selected.size === leads.length) {
-      setSelected(new Set());
+    if (selectAllMatching || (selected.size === leads.length && leads.length > 0)) {
+      clearSelection();
     } else {
       setSelected(new Set(leads.map((l) => l.id)));
+      setSelectAllMatching(false);
     }
   }
 
   async function runBulk(action: BulkLeadAction, extra?: { user_id?: number; contract_id?: number }) {
-    const ids = [...selected];
-    if (!ids.length) return;
     try {
-      const result = await bulk.mutateAsync({ action, ids, ...extra });
-      toast.success(`${result.affected} lead${result.affected === 1 ? "" : "s"} updated`);
-      setSelected(new Set());
+      setFetchingIds(true);
+      const ids = selectAllMatching ? await fetchAllLeadIds(bulkListFilters) : [...selected];
+      if (!ids.length) return;
+
+      if (action === "delete") {
+        const affected = await deleteLeadsWithProgress(ids, (body) => bulk.mutateAsync(body));
+        toast.success(`Deleted ${affected.toLocaleString()} lead${affected === 1 ? "" : "s"}`);
+      } else {
+        const result = await bulk.mutateAsync({ action, ids, ...extra });
+        toast.success(`${result.affected} lead${result.affected === 1 ? "" : "s"} updated`);
+      }
+
+      clearSelection();
       setConfirmDelete(false);
       setAssignOpen(null);
       setBulkOpen(false);
     } catch (err) {
       toast.error(apiError(err).message);
+    } finally {
+      setFetchingIds(false);
     }
   }
 
@@ -231,13 +277,13 @@ export function LeadsListPage() {
                 </Button>
               </>
             )}
-            {isAdmin && selected.size > 0 && (
+            {isAdmin && hasSelection && (
               <Dropdown
                 open={bulkOpen}
                 onClose={() => setBulkOpen(false)}
                 trigger={
                   <Button variant="secondary" size="sm" onClick={() => setBulkOpen((o) => !o)}>
-                    Bulk actions ({selected.size})
+                    Bulk actions ({selectedCount})
                     <ChevronDown className="h-4 w-4" />
                   </Button>
                 }
@@ -295,6 +341,33 @@ export function LeadsListPage() {
           <EmptyState title="No leads match these filters." />
         ) : (
           <>
+            {(showSelectAllBanner || showAllSelectedBanner) && (
+              <div className="mb-2 rounded-lg border border-blue-100 bg-blue-50 px-4 py-2 text-sm text-gray-700">
+                {showSelectAllBanner ? (
+                  <>
+                    All {leads.length} leads on this page are selected.{" "}
+                    <button
+                      type="button"
+                      className="font-medium text-blue-600 hover:underline"
+                      onClick={() => setSelectAllMatching(true)}
+                    >
+                      Select all {total} leads in {activeView.name}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    All {total} leads selected.{" "}
+                    <button
+                      type="button"
+                      className="font-medium text-blue-600 hover:underline"
+                      onClick={clearSelection}
+                    >
+                      Clear selection
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
             <Table>
               <THead>
                 <tr>
@@ -302,7 +375,10 @@ export function LeadsListPage() {
                     <TH className="w-10">
                       <input
                         type="checkbox"
-                        checked={selected.size === leads.length && leads.length > 0}
+                        checked={
+                          selectAllMatching ||
+                          (selected.size === leads.length && leads.length > 0)
+                        }
                         onChange={toggleAll}
                         aria-label="Select all"
                       />
@@ -347,7 +423,7 @@ export function LeadsListPage() {
                         <div onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
-                            checked={selected.has(l.id)}
+                            checked={selectAllMatching || selected.has(l.id)}
                             onChange={() => toggleRow(l.id)}
                             aria-label={`Select lead ${l.id}`}
                           />
@@ -417,37 +493,26 @@ export function LeadsListPage() {
         )}
       </PageBody>
 
-      <Dialog
+      <DeleteLeadConfirmDialog
         open={confirmDelete}
         onClose={() => setConfirmDelete(false)}
-        title="Delete leads?"
-        subtitle={`Permanently delete ${selected.size} selected lead${selected.size === 1 ? "" : "s"}?`}
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setConfirmDelete(false)}>
-              Cancel
-            </Button>
-            <Button variant="danger" disabled={bulk.isPending} onClick={() => runBulk("delete")}>
-              Delete
-            </Button>
-          </>
-        }
-      >
-        <span />
-      </Dialog>
+        count={selectedCount}
+        loading={bulk.isPending || fetchingIds}
+        onConfirm={() => runBulk("delete")}
+      />
 
       <Dialog
         open={assignOpen === "user"}
         onClose={() => setAssignOpen(null)}
         title="Assign to user"
-        subtitle={`Assign ${selected.size} lead${selected.size === 1 ? "" : "s"} to a team member.`}
+        subtitle={`Assign ${selectedCount} lead${selectedCount === 1 ? "" : "s"} to a team member.`}
         footer={
           <>
             <Button variant="secondary" onClick={() => setAssignOpen(null)}>
               Cancel
             </Button>
             <Button
-              disabled={!assignTarget || bulk.isPending}
+              disabled={!assignTarget || bulk.isPending || fetchingIds}
               onClick={() => runBulk("assign_user", { user_id: assignTarget })}
             >
               Assign
@@ -473,14 +538,14 @@ export function LeadsListPage() {
         open={assignOpen === "follower"}
         onClose={() => setAssignOpen(null)}
         title="Add follower"
-        subtitle={`Add a follower to ${selected.size} selected lead${selected.size === 1 ? "" : "s"}.`}
+        subtitle={`Add a follower to ${selectedCount} selected lead${selectedCount === 1 ? "" : "s"}.`}
         footer={
           <>
             <Button variant="secondary" onClick={() => setAssignOpen(null)}>
               Cancel
             </Button>
             <Button
-              disabled={!assignTarget || bulk.isPending}
+              disabled={!assignTarget || bulk.isPending || fetchingIds}
               onClick={() => runBulk("add_follower", { user_id: assignTarget })}
             >
               Add follower
@@ -506,14 +571,14 @@ export function LeadsListPage() {
         open={assignOpen === "buyer"}
         onClose={() => setAssignOpen(null)}
         title="Assign to buyer"
-        subtitle={`Re-distribute ${selected.size} returned lead${selected.size === 1 ? "" : "s"} via contract.`}
+        subtitle={`Re-distribute ${selectedCount} returned lead${selectedCount === 1 ? "" : "s"} via contract.`}
         footer={
           <>
             <Button variant="secondary" onClick={() => setAssignOpen(null)}>
               Cancel
             </Button>
             <Button
-              disabled={!assignTarget || bulk.isPending}
+              disabled={!assignTarget || bulk.isPending || fetchingIds}
               onClick={() => runBulk("assign_buyer", { contract_id: assignTarget })}
             >
               Assign

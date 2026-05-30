@@ -2,6 +2,7 @@ package leads
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -51,9 +52,13 @@ func (h *Handler) registerCommon(r chi.Router) {
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	q := r.URL.Query()
+	src := q.Get("source")
+	if src == "" {
+		src = q.Get("campaign")
+	}
 	f := ListFilters{
 		Status:     q.Get("status"),
-		Campaign:   q.Get("campaign"),
+		Source:     src,
 		PipelineID: parseInt(q.Get("pipeline_id")),
 		StageID:    parseInt(q.Get("stage_id")),
 		Assigned:   parseInt(q.Get("assigned")),
@@ -405,11 +410,15 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) importLeads(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body ImportLeadsInput
-	if !httpx.DecodeJSON(w, r, &body) {
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		log.Printf("leads/import decode failed: %v", err)
+		httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, "invalid JSON body: "+err.Error())
 		return
 	}
 	result, err := h.svc.ImportLeads(r.Context(), p, body)
 	if err != nil {
+		log.Printf("leads/import failed: rows=%d dest=%q pipeline=%d stage=%d: %v",
+			len(body.Rows), body.Destination, body.PipelineID, body.StageID, err)
 		httpx.WriteError(w, err)
 		return
 	}

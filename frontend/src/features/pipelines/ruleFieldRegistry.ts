@@ -80,7 +80,7 @@ const LEAD_TEXT_BUILTINS: FieldDef[] = [
   { field: "city", label: "City", kind: "text" },
   { field: "state", label: "State", kind: "text" },
   { field: "zip", label: "Zip", kind: "text" },
-  { field: "campaign_name", label: "Campaign", kind: "text" },
+  { field: "source", label: "Source", kind: "text" },
 ];
 
 function customFieldKind(t: CustomField["type"]): FieldKind {

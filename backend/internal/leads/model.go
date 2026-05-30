@@ -19,7 +19,7 @@ type Lead struct {
 	City             *string         `json:"city"`
 	State            *string         `json:"state"`
 	Zip              *string         `json:"zip"`
-	CampaignName     *string         `json:"campaign_name"`
+	Source           *string         `json:"source"`
 	PipelineID       *int64          `json:"pipeline_id"`
 	StageID          *int64          `json:"stage_id"`
 	Position         int             `json:"position"`
@@ -36,6 +36,7 @@ type Lead struct {
 	AssigneeAvatarURL *string                   `json:"assignee_avatar_url,omitempty"`
 	PipelineName      *string                   `json:"pipeline_name,omitempty"`
 	StageName         *string                   `json:"stage_name,omitempty"`
+	StageEnteredAt    time.Time                 `json:"stage_entered_at"`
 	Tags              []string                  `json:"tags"`
 }
 

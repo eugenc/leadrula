@@ -9,6 +9,9 @@ export interface CurrentUser {
   account_type: AccountType;
   account_id: string;
   avatar_url?: string | null;
+  impersonating?: boolean;
+  buyer_account_name?: string;
+  impersonator?: { id: string; full_name?: string; account_id: string };
 }
 
 export interface Me {
@@ -97,7 +100,7 @@ export interface Lead {
   city: string | null;
   state: string | null;
   zip: string | null;
-  campaign_name: string | null;
+  source: string | null;
   pipeline_id: number | null;
   stage_id: number | null;
   position: number;
@@ -113,6 +116,7 @@ export interface Lead {
   assignee_avatar_url?: string | null;
   pipeline_name?: string | null;
   stage_name?: string | null;
+  stage_entered_at?: string | null;
   tags?: string[];
 }
 
@@ -250,7 +254,7 @@ export interface QueueItem {
   first_name: string;
   last_name: string;
   phone: string | null;
-  campaign_name: string | null;
+  source: string | null;
   raw_payload: Record<string, unknown>;
   status: string;
   created_at: string;
@@ -297,6 +301,8 @@ export interface BuyerDetail {
   timezone: string;
   balance: number;
   type: string;
+  admin_name: string;
+  admin_email: string;
 }
 
 export type UserStatus = "pending" | "active" | "inactive";
@@ -338,4 +344,33 @@ export interface NotificationItem {
   payload: Record<string, unknown>;
   read_at: string | null;
   created_at: string;
+}
+
+export interface CollaborationAuditEntry {
+  id: number;
+  event_type: string;
+  actor_user_id?: number;
+  actor_name?: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface CollaborationStatus {
+  status: "none" | "active" | "revoked" | "pending_buyer" | "pending_publisher";
+  version?: number;
+  auto_granted?: boolean;
+  publisher_name?: string;
+  buyer_name?: string;
+  buyer_id?: string;
+  target_publisher_user_name?: string;
+  requested_by_name?: string;
+  created_at?: string;
+  revoked_at?: string;
+  audit_log?: CollaborationAuditEntry[];
+}
+
+export interface BuyerCollabSummary {
+  buyer_id: number;
+  status: string;
+  version: number;
 }

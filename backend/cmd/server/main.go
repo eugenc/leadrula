@@ -12,6 +12,7 @@ import (
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/internal/billing"
 	"github.com/echayko/leadrula/backend/internal/calendar"
+	"github.com/echayko/leadrula/backend/internal/collaboration"
 	"github.com/echayko/leadrula/backend/internal/config"
 	"github.com/echayko/leadrula/backend/internal/contracts"
 	"github.com/echayko/leadrula/backend/internal/customfields"
@@ -58,6 +59,10 @@ func main() {
 	notifSvc := notifications.NewService(pool)
 	notifH := notifications.NewHandler(notifSvc)
 
+	collabRepo := collaboration.NewRepository(pool)
+	collabSvc := collaboration.NewService(collabRepo, notifSvc, tokens)
+	collabH := collaboration.NewHandler(collabSvc)
+
 	apikeysSvc := apikeys.NewService(pool)
 	apikeysH := apikeys.NewHandler(apikeysSvc)
 
@@ -86,7 +91,7 @@ func main() {
 	intakeSvc := intake.NewService(pool, leadsRepo, notifSvc, accountsRepo)
 	intakeH := intake.NewHandler(intakeSvc, publisherID)
 
-	oversightH := oversight.NewHandler(accountsRepo, accountsSvc, leadsRepo, pipelinesSvc, billingSvc, calSvc)
+	oversightH := oversight.NewHandler(accountsRepo, accountsSvc, leadsRepo, pipelinesSvc, billingSvc, calSvc, collabSvc)
 
 	// ── router ───────────────────────────────────────────────────
 	r := chi.NewRouter()
@@ -103,12 +108,13 @@ func main() {
 	// public auth
 	accountsH.RegisterAuthRoutes(r)
 
-	requireAuth := auth.RequireAuth(tokens, accountsRepo.LoadPrincipal)
+	requireAuth := auth.RequireAuth(tokens, collabSvc.ResolvePrincipal)
 
 	// /auth/me (any authenticated account)
 	r.Group(func(a chi.Router) {
 		a.Use(requireAuth)
 		accountsH.RegisterMeRoute(a)
+		collabH.RegisterAuthRoutes(a)
 	})
 
 	// publisher namespace
@@ -122,6 +128,7 @@ func main() {
 		routingH.RegisterRoutes(p)
 		intakeH.RegisterQueueRoutes(p)
 		oversightH.RegisterRoutes(p)
+		collabH.RegisterPublisherRoutes(p)
 		accountsH.RegisterUserRoutes(p)
 		apikeysH.RegisterRoutes(p)
 		notifH.RegisterRoutes(p)
@@ -130,12 +137,14 @@ func main() {
 	// buyer namespace
 	r.Route("/buyer", func(b chi.Router) {
 		b.Use(requireAuth, auth.RequireAccountType("buyer"))
+		b.Use(auth.LogImpersonationActions(collabSvc.LogImpersonationAction))
 		leadsH.RegisterBuyer(b)
 		pipelinesH.RegisterRoutes(b)
 		cfH.RegisterRoutes(b)
 		contractsH.RegisterBuyer(b)
 		billingH.RegisterBuyer(b)
 		calH.RegisterRoutes(b)
+		collabH.RegisterBuyerRoutes(b)
 		accountsH.RegisterUserRoutes(b)
 		apikeysH.RegisterRoutes(b)
 		notifH.RegisterRoutes(b)

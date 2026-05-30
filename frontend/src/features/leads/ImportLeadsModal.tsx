@@ -1,15 +1,58 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type KeyboardEvent } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import Papa from "papaparse";
+import { X } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Label, FilterSelect } from "@/components/ui/input";
+import { Input, Label, FilterSelect } from "@/components/ui/input";
+import { Badge } from "@/components/ui/misc";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
-import { useImportLeads, usePipelines, useStages, useCustomFields } from "./hooks";
+import { apiError, ns, post } from "@/lib/api";
+import { chunk } from "@/lib/chunk";
+import {
+  IMPORT_BATCH_SIZE,
+  usePipelines,
+  useStages,
+  useCustomFields,
+  useTagSuggestions,
+  type ImportLeadsResult,
+} from "./hooks";
 import { buildInitialMapping, mappingTargetsWithCustom } from "./csvMapping";
+import { ADD_CUSTOM_FIELD, slugFieldKey } from "@/features/admin/customFieldConstants";
+import { CreateCustomFieldDrawer } from "@/features/admin/CreateCustomFieldDrawer";
+import { useCreateField } from "@/features/admin/hooks";
 
 type Step = "upload" | "map" | "destination" | "preview" | "done";
+
+function normalizeTags(tags: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of tags) {
+    const t = raw.trim();
+    if (!t) continue;
+    const key = t.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  return out;
+}
+
+function sanitizeImportRows(rows: Record<string, unknown>[]): Record<string, string>[] {
+  return rows
+    .map((row) => {
+      const out: Record<string, string> = {};
+      for (const [key, val] of Object.entries(row)) {
+        if (key === "__parsed_extra") continue;
+        if (val == null) continue;
+        if (typeof val === "string") out[key] = val;
+        else if (typeof val === "number" || typeof val === "boolean") out[key] = String(val);
+      }
+      return out;
+    })
+    .filter((row) => Object.values(row).some((v) => v.trim()));
+}
 
 interface Props {
   open: boolean;
@@ -18,9 +61,10 @@ interface Props {
 
 export function ImportLeadsModal({ open, onClose }: Props) {
   const isPublisher = useAuthStore((s) => s.user?.account_type === "publisher");
-  const importLeads = useImportLeads();
+  const qc = useQueryClient();
   const { data: pipelines } = usePipelines();
   const { data: customFields } = useCustomFields();
+  const { data: tagSuggestions } = useTagSuggestions();
 
   const [step, setStep] = useState<Step>("upload");
   const [headers, setHeaders] = useState<string[]>([]);
@@ -29,7 +73,13 @@ export function ImportLeadsModal({ open, onClose }: Props) {
   const [destination, setDestination] = useState<"pipeline" | "intake">("pipeline");
   const [pipelineId, setPipelineId] = useState(0);
   const [stageId, setStageId] = useState(0);
+  const [importTags, setImportTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState("");
   const [result, setResult] = useState<{ created: number; skipped: number; errors: { row: number; message: string }[] } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [createFieldHeader, setCreateFieldHeader] = useState<string | null>(null);
+
+  const createField = useCreateField();
 
   const { data: stages } = useStages(pipelineId || undefined);
   const targets = useMemo(
@@ -45,10 +95,33 @@ export function ImportLeadsModal({ open, onClose }: Props) {
     setDestination("pipeline");
     setPipelineId(0);
     setStageId(0);
+    setImportTags([]);
+    setTagInput("");
     setResult(null);
+    setImporting(false);
+    setCreateFieldHeader(null);
+  }
+
+  function addImportTag(raw: string) {
+    const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!parts.length) return;
+    setImportTags((prev) => normalizeTags([...prev, ...parts]));
+    setTagInput("");
+  }
+
+  function removeImportTag(tag: string) {
+    setImportTags((prev) => prev.filter((t) => t !== tag));
+  }
+
+  function onTagKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      addImportTag(tagInput);
+    }
   }
 
   function handleClose() {
+    if (importing) return;
     reset();
     onClose();
   }
@@ -59,17 +132,18 @@ export function ImportLeadsModal({ open, onClose }: Props) {
       toast.error("Please upload a .csv file");
       return;
     }
-    Papa.parse<Record<string, string>>(file, {
+    Papa.parse<Record<string, unknown>>(file, {
       header: true,
       skipEmptyLines: true,
       complete: (res) => {
         const cols = res.meta.fields ?? [];
-        if (!cols.length || !res.data.length) {
+        const data = sanitizeImportRows(res.data);
+        if (!cols.length || !data.length) {
           toast.error("CSV has no data");
           return;
         }
         setHeaders(cols);
-        setRows(res.data);
+        setRows(data);
         setMapping(buildInitialMapping(cols, customFields ?? []));
         setStep("map");
       },
@@ -82,29 +156,72 @@ export function ImportLeadsModal({ open, onClose }: Props) {
       toast.error("Select pipeline and stage");
       return;
     }
+    if (tagInput.trim()) addImportTag(tagInput);
+
+    const cleanRows = sanitizeImportRows(rows as Record<string, unknown>[]);
+    if (!cleanRows.length) {
+      toast.error("No rows to import — check your CSV has data");
+      return;
+    }
+
     const mappingArr = headers
       .filter((h) => mapping[h] && mapping[h] !== "skip")
       .map((h) => ({ csv_column: h, target: mapping[h]! }));
 
+    const batches = chunk(cleanRows, IMPORT_BATCH_SIZE);
+    const payload = {
+      destination,
+      pipeline_id: destination === "pipeline" ? Number(pipelineId) : undefined,
+      stage_id: destination === "pipeline" ? Number(stageId) : undefined,
+      default_tags: importTags.length ? importTags : undefined,
+      mapping: mappingArr,
+    };
+
+    const total = cleanRows.length;
+    const totalLabel = total.toLocaleString();
+    let progressToastId = toast.progress(`Importing 0 of ${totalLabel} contacts…`);
+
+    setImporting(true);
+
+    let created = 0;
+    let skipped = 0;
+    let processed = 0;
+    const errors: { row: number; message: string }[] = [];
+
     try {
-      const res = await importLeads.mutateAsync({
-        destination,
-        pipeline_id: pipelineId || undefined,
-        stage_id: stageId || undefined,
-        mapping: mappingArr,
-        rows,
-      });
-      setResult(res);
+      for (let i = 0; i < batches.length; i++) {
+        const res = await post<ImportLeadsResult>(`${ns()}/leads/import`, {
+          ...payload,
+          rows: batches[i],
+        });
+        created += res.created;
+        skipped += res.skipped;
+        processed += batches[i].length;
+        toast.update(progressToastId, `Importing ${processed.toLocaleString()} of ${totalLabel} contacts…`);
+        const rowOffset = i * IMPORT_BATCH_SIZE;
+        for (const e of res.errors) {
+          errors.push({ row: rowOffset + e.row, message: e.message });
+        }
+      }
+      toast.dismiss(progressToastId);
+      progressToastId = 0;
+      qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["lead-tags"] });
+      setResult({ created, skipped, errors });
       setStep("done");
-      if (res.created > 0) toast.success(`Imported ${res.created} lead${res.created === 1 ? "" : "s"}`);
+      if (created > 0) toast.success(`Imported ${created.toLocaleString()} lead${created === 1 ? "" : "s"}`);
     } catch (err) {
+      if (progressToastId) toast.dismiss(progressToastId);
       toast.error(apiError(err).message);
+    } finally {
+      setImporting(false);
     }
   }
 
   const previewRows = rows.slice(0, 5);
 
   return (
+    <>
     <Dialog
       open={open}
       onClose={handleClose}
@@ -117,7 +234,7 @@ export function ImportLeadsModal({ open, onClose }: Props) {
             : step === "destination"
               ? "Choose where imported leads go."
               : step === "preview"
-                ? `${rows.length} rows ready to import.`
+                ? `${rows.length.toLocaleString()} rows ready to import.`
                 : "Import complete."
       }
       className="max-w-xl"
@@ -138,15 +255,25 @@ export function ImportLeadsModal({ open, onClose }: Props) {
             <Button variant="secondary" onClick={() => setStep("map")}>
               Back
             </Button>
-            <Button onClick={() => setStep("preview")}>Next</Button>
+            <Button
+              onClick={() => {
+                if (destination === "pipeline" && (!pipelineId || !stageId)) {
+                  toast.error("Select pipeline and stage");
+                  return;
+                }
+                setStep("preview");
+              }}
+            >
+              Next
+            </Button>
           </>
         ) : step === "preview" ? (
           <>
-            <Button variant="secondary" onClick={() => setStep("destination")}>
+            <Button variant="secondary" disabled={importing} onClick={() => setStep("destination")}>
               Back
             </Button>
-            <Button disabled={importLeads.isPending} onClick={runImport}>
-              Import {rows.length} leads
+            <Button disabled={importing} onClick={runImport}>
+              {importing ? "Importing…" : `Import ${rows.length.toLocaleString()} leads`}
             </Button>
           </>
         ) : (
@@ -175,7 +302,13 @@ export function ImportLeadsModal({ open, onClose }: Props) {
               </span>
               <FilterSelect
                 value={mapping[h] ?? "skip"}
-                onChange={(e) => setMapping((m) => ({ ...m, [h]: e.target.value }))}
+                onChange={(e) => {
+                  if (e.target.value === ADD_CUSTOM_FIELD) {
+                    setCreateFieldHeader(h);
+                    return;
+                  }
+                  setMapping((m) => ({ ...m, [h]: e.target.value }));
+                }}
                 className="flex-1"
               >
                 {targets.map((t) => (
@@ -249,11 +382,52 @@ export function ImportLeadsModal({ open, onClose }: Props) {
               </div>
             </div>
           )}
+          <div>
+            <Label>Tags (optional)</Label>
+            <p className="mt-0.5 text-xs text-gray-500">Applied to every imported lead.</p>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {importTags.map((tag) => (
+                <Badge key={tag} variant="default" className="gap-1 pr-1">
+                  {tag}
+                  <button
+                    type="button"
+                    onClick={() => removeImportTag(tag)}
+                    className="rounded-full p-0.5 hover:bg-gray-200"
+                    aria-label={`Remove tag ${tag}`}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+            <Input
+              value={tagInput}
+              onChange={(e) => setTagInput(e.target.value)}
+              onKeyDown={onTagKeyDown}
+              onBlur={() => tagInput.trim() && addImportTag(tagInput)}
+              placeholder="Add tag…"
+              list="import-tag-suggestions"
+              className="mt-2"
+            />
+            <datalist id="import-tag-suggestions">
+              {(tagSuggestions ?? [])
+                .filter((s) => !importTags.some((t) => t.toLowerCase() === s.toLowerCase()))
+                .map((s) => (
+                  <option key={s} value={s} />
+                ))}
+            </datalist>
+          </div>
         </div>
       )}
 
       {step === "preview" && (
-        <div className="overflow-x-auto">
+        <div>
+          {importTags.length > 0 && (
+            <p className="mb-3 text-sm text-gray-600">
+              Tags applied to all leads: {importTags.join(", ")}
+            </p>
+          )}
+          <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-gray-100">
@@ -279,6 +453,7 @@ export function ImportLeadsModal({ open, onClose }: Props) {
           {rows.length > 5 && (
             <p className="mt-2 text-xs text-gray-400">Showing 5 of {rows.length} rows</p>
           )}
+          </div>
         </div>
       )}
 
@@ -305,5 +480,22 @@ export function ImportLeadsModal({ open, onClose }: Props) {
         </div>
       )}
     </Dialog>
+    <CreateCustomFieldDrawer
+      open={createFieldHeader !== null}
+      onClose={() => setCreateFieldHeader(null)}
+      defaultName={createFieldHeader ?? ""}
+      defaultFieldKey={createFieldHeader ? slugFieldKey(createFieldHeader) : ""}
+      subtitle={createFieldHeader ? `CSV column: ${createFieldHeader}` : undefined}
+      isPending={createField.isPending}
+      onSubmit={(body) =>
+        createField.mutateAsync(body).then((field) => {
+          if (createFieldHeader) {
+            setMapping((m) => ({ ...m, [createFieldHeader]: `custom_${field.id}` }));
+          }
+          return field;
+        })
+      }
+    />
+  </>
   );
 }
