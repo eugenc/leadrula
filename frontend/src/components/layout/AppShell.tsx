@@ -1,7 +1,10 @@
+import { useEffect } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { LeadDetailDrawer } from "@/features/leads/LeadDetailDrawer";
+import { useMe } from "@/features/leads/hooks";
+import { useAuthStore } from "@/store/authStore";
 
 const titles: Record<string, string> = {
   board: "Board",
@@ -11,6 +14,7 @@ const titles: Record<string, string> = {
   fields: "Custom Fields",
   reasons: "Disqualification Reasons",
   routing: "Routing",
+  sources: "Sources",
   contracts: "Contracts",
   contract: "Contract",
   buyers: "Buyers",
@@ -26,13 +30,25 @@ export function AppShell() {
   const seg = loc.pathname.split("/").filter(Boolean);
   const last = seg[seg.length - 1];
   const title = titles[last] ?? "Dashboard";
+  const { data: me } = useMe();
+  const syncUserProfile = useAuthStore((s) => s.syncUserProfile);
+
+  useEffect(() => {
+    if (!me) return;
+    syncUserProfile({
+      full_name: me.user.full_name,
+      email: me.user.email,
+      role: me.user.role,
+      avatar_url: me.user.avatar_url,
+    });
+  }, [me, syncUserProfile]);
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen overflow-hidden bg-gray-50">
       <Sidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar title={title} />
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex flex-1 flex-col overflow-y-auto">
           <Outlet />
         </main>
       </div>

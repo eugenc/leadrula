@@ -8,6 +8,7 @@ export interface CurrentUser {
   role: Role;
   account_type: AccountType;
   account_id: string;
+  avatar_url?: string | null;
 }
 
 export interface Me {
@@ -18,6 +19,7 @@ export interface Me {
     role: Role;
     is_active: boolean;
     prefs: Record<string, unknown>;
+    avatar_url?: string | null;
   };
   account: {
     id: string;
@@ -40,8 +42,45 @@ export interface Stage {
   pipeline_id: number;
   name: string;
   position: number;
+  color: string;
   prompt_action_datetime: boolean;
   prompt_disqualification: boolean;
+}
+
+export type RuleConditionOp =
+  | "eq"
+  | "neq"
+  | "gt"
+  | "lt"
+  | "contains"
+  | "empty"
+  | "not_empty";
+
+export type RuleConditionDomain = "lead" | "pipeline";
+export type RuleActionDomain = "lead" | "pipeline" | "user";
+
+export interface RuleCondition {
+  domain: RuleConditionDomain;
+  field: string;
+  op: RuleConditionOp;
+  value?: unknown;
+}
+
+export interface RuleAction {
+  verb: "update";
+  domain: RuleActionDomain;
+  field: string;
+  value?: unknown;
+}
+
+export interface StageRule {
+  id: number;
+  stage_id: number;
+  position: number;
+  condition_logic: "and" | "or";
+  conditions: RuleCondition[];
+  actions: RuleAction[];
+  created_at: string;
 }
 
 export interface Lead {
@@ -69,6 +108,17 @@ export interface Lead {
   created_at: string;
   updated_at: string;
   custom_values: Record<string, unknown>;
+  buyer_name?: string | null;
+  assignee_name?: string | null;
+  assignee_avatar_url?: string | null;
+  tags?: string[];
+}
+
+export interface LeadListResponse {
+  items: Lead[];
+  total: number;
+  page: number;
+  limit: number;
 }
 
 export interface Note {
@@ -129,21 +179,66 @@ export interface ReturnRule {
   buyer_stage_id: number;
 }
 
-export interface Campaign {
+export interface Source {
   id: number;
-  campaign_name: string;
-  target_pipeline_id: number;
-  target_stage_id: number;
+  name: string;
+  slug: string;
+  is_active: boolean;
+}
+
+export interface Route {
+  id: number;
+  name: string;
+  origin: "source" | "pipeline";
+  source_id: number | null;
+  source_name?: string | null;
+  origin_pipeline_id: number | null;
+  origin_stage_id: number | null;
+  origin_pipeline_name?: string | null;
+  origin_stage_name?: string | null;
+  destination: "publisher" | "buyer";
+  contract_id: number | null;
+  contract_name?: string | null;
+  buyer_name?: string | null;
+  delivery: "leads" | "leads_pipeline";
+  target_pipeline_id: number | null;
+  target_stage_id: number | null;
+  target_pipeline_name?: string | null;
+  target_stage_name?: string | null;
   is_active: boolean;
 }
 
 export interface FieldMapEntry {
   id: number;
-  campaign_id: number;
+  source_id: number;
   source_key: string;
   target_type: "builtin" | "custom";
   builtin_field: string | null;
   custom_field_id: number | null;
+}
+
+export interface SourceSamplePayload {
+  payload: Record<string, unknown> | null;
+  received_at?: string;
+}
+
+export interface RouteFieldMapEntry {
+  id: number;
+  route_id: number;
+  src_type: "builtin" | "custom";
+  src_builtin: string | null;
+  src_custom_field_id: number | null;
+  src_label?: string | null;
+  dst_type: "builtin" | "custom";
+  dst_builtin: string | null;
+  dst_custom_field_id: number | null;
+  dst_label?: string | null;
+}
+
+export interface RouteFieldMapOptions {
+  buyer_name: string;
+  publisher_fields: CustomField[];
+  buyer_fields: CustomField[];
 }
 
 export interface QueueItem {
@@ -191,13 +286,17 @@ export interface BuyerSummary {
   lead_count: number;
 }
 
+export type UserStatus = "pending" | "active" | "inactive";
+
 export interface UserRow {
   id: number;
-  public_id: string;
+  invite_id: number;
+  public_id?: string;
   email: string;
   full_name: string;
   role: Role;
-  is_active: boolean;
+  status: UserStatus;
+  avatar_url?: string | null;
 }
 
 export interface ApiKey {

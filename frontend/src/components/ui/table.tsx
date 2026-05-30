@@ -2,22 +2,31 @@ import { cn } from "@/lib/utils";
 
 export function Table({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={cn("overflow-x-auto rounded border border-pd-border bg-white", className)}>
-      <table className="w-full border-collapse text-sm">{children}</table>
+    <div className={cn("overflow-hidden rounded-lg border border-gray-100 bg-white", className)}>
+      <table className="w-full border-collapse">{children}</table>
     </div>
   );
 }
 
 export function THead({ children }: { children: React.ReactNode }) {
   return (
-    <thead className="border-b border-pd-border bg-pd-stage/60 text-left text-xs font-semibold uppercase tracking-wide text-pd-muted">
+    <thead className="h-10 border-b border-gray-100 bg-gray-50 text-left">
       {children}
     </thead>
   );
 }
 
 export function TH({ children, className }: { children?: React.ReactNode; className?: string }) {
-  return <th className={cn("px-3 py-2 font-semibold", className)}>{children}</th>;
+  return (
+    <th
+      className={cn(
+        "px-4 text-xs font-semibold uppercase tracking-wide text-gray-500",
+        className
+      )}
+    >
+      {children}
+    </th>
+  );
 }
 
 export function TBody({ children }: { children: React.ReactNode }) {
@@ -37,8 +46,8 @@ export function TR({
     <tr
       onClick={onClick}
       className={cn(
-        "border-b border-pd-border last:border-0",
-        onClick && "cursor-pointer hover:bg-pd-stage/50",
+        "h-11 border-b border-gray-100 transition-colors last:border-0",
+        onClick && "cursor-pointer hover:bg-jade-50",
         className
       )}
     >
@@ -48,5 +57,7 @@ export function TR({
 }
 
 export function TD({ children, className }: { children?: React.ReactNode; className?: string }) {
-  return <td className={cn("px-3 py-2 align-middle", className)}>{children}</td>;
+  return (
+    <td className={cn("px-4 align-middle text-sm text-gray-700", className)}>{children}</td>
+  );
 }

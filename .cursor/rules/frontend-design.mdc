@@ -1,0 +1,45 @@
+---
+description: LeadRula frontend styling — jade tokens and component hierarchy
+globs: frontend/**/*.{tsx,css}
+alwaysApply: false
+---
+
+# Frontend Design (LeadRula)
+
+## Token hierarchy
+
+```
+index.css :root  →  tailwind.config.cjs  →  components/ui/  →  pages/
+```
+
+- Use **jade/gray/semantic** Tailwind classes (`jade-500`, `gray-400`, `text-danger`, `bg-success-bg`).
+- **No `pd-*` tokens** — removed; do not reintroduce.
+- **No raw hex** in TSX (`#1A9268`, `rgba(...)`).
+
+## Component rules
+
+| Layer | Use for |
+|-------|---------|
+| `components/ui/` | Button, Input, Badge, Table, Dialog, Dropdown, Card |
+| `components/layout/` | AppShell, Sidebar, Topbar, PageHeader, **PageBody**, SectionLabel, IconButton |
+| `pages/` / `features/` | Data, layout structure, business copy only |
+
+**Pages must:**
+- Wrap content in `PageHeader` + `PageBody` (Board is full-bleed exception).
+- Use `<Button>`, `<Badge variant="distributed">`, `<IconButton>`, not styled raw elements.
+- Map domain status → Badge variant once per page, not scattered color classes.
+
+**Pages must not:**
+- Use Tailwind default palette in pages (`bg-red-500`, `text-green-600`).
+- Duplicate table/button/badge styling inline.
+
+## Badge variants (semantic)
+
+`review` | `distributed` | `returned` | `closed` | `overdue` | `pending` | `default`
+
+## Layout constants
+
+- Sidebar: `w-sidebar` (200px)
+- Topbar: `h-13` (52px)
+- Drawer: `w-drawer` (480px)
+- Page padding: `PageBody` → `px-8 pt-5 pb-8`

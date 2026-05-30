@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { Sheet } from "@/components/ui/dialog";
+import { Sheet, DrawerHeader, DrawerBody } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea, Select } from "@/components/ui/input";
 import { Avatar, Badge, Spinner } from "@/components/ui/misc";
-import { X } from "lucide-react";
-import { format } from "date-fns";
+import { SectionLabel } from "@/components/layout/SectionLabel";
+import { ActionDot } from "./ActionDot";
+import { format, isPast } from "date-fns";
+import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
@@ -18,6 +20,8 @@ import {
   useCustomFields,
 } from "./hooks";
 import type { Lead } from "@/types";
+import { formatStatus } from "./leadsListColumns";
+import { LeadTagsEditor } from "./LeadTagsEditor";
 
 const BUILTINS: { key: keyof Lead; label: string }[] = [
   { key: "first_name", label: "First Name" },
@@ -36,7 +40,7 @@ export function LeadDetailDrawer() {
   const { data: lead, isLoading } = useLead(leadId);
 
   return (
-    <Sheet open={!!leadId} onClose={close} width={520}>
+    <Sheet open={!!leadId} onClose={close}>
       {isLoading || !lead ? (
         <div className="flex justify-center py-20">
           <Spinner className="h-6 w-6" />
@@ -69,92 +73,146 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
     );
   }
 
+  const overdue = lead.action_at && isPast(new Date(lead.action_at));
+
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-pd-border px-5 py-3">
-        <div>
-          <div className="text-base font-bold">
-            {lead.first_name} {lead.last_name}
-          </div>
-          <div className="text-xs text-pd-muted">
-            {lead.campaign_name ?? "—"} · <span className="capitalize">{lead.status}</span>
+      <DrawerHeader
+        title={`${lead.first_name} ${lead.last_name}`}
+        subtitle={`${lead.campaign_name ?? "—"} · ${formatStatus(lead.status)}`}
+        onClose={onClose}
+      />
+
+      {lead.action_at && (
+        <div className="border-b border-gray-100 px-5 py-2">
+          <div
+            className={cn(
+              "flex items-center gap-2 rounded-md border px-2.5 py-1.5",
+              overdue
+                ? "border-danger-border bg-danger-bg"
+                : "border-gray-100 bg-gray-50"
+            )}
+          >
+            <ActionDot actionAt={lead.action_at} variant="dot" />
+            <span className={cn("text-xs", overdue ? "font-semibold text-danger" : "text-gray-700")}>
+              Action {format(new Date(lead.action_at), "MMM d, h:mma")}
+              {overdue && " — overdue"}
+            </span>
           </div>
         </div>
-        <button onClick={onClose} className="text-pd-muted hover:text-pd-text">
-          <X className="h-4 w-4" />
-        </button>
-      </div>
+      )}
 
-      <div className="flex border-b border-pd-border px-5">
+      <div className="flex border-b border-gray-100 px-5">
         {(["details", "notes", "history"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold capitalize ${
-              tab === t ? "border-pd-green text-pd-green" : "border-transparent text-pd-muted"
-            }`}
+            className={cn(
+              "-mb-px border-b-2 px-2.5 py-1.5 text-sm font-semibold capitalize transition-colors",
+              tab === t ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400"
+            )}
           >
             {t}
           </button>
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-5">
+      <DrawerBody>
         {tab === "details" && (
-          <div className="space-y-4">
-            {user?.role === "admin" && (
+          <div className="flex flex-col gap-4">
+            <div>
+              <SectionLabel className="mb-2">Lead</SectionLabel>
+              <div className="flex flex-col gap-2.5">
+                {user?.role === "admin" ? (
+                  <div>
+                    <Label>Assigned To</Label>
+                    <Select
+                      value={lead.assigned_user_id ?? ""}
+                      onChange={(e) =>
+                        update.mutate({
+                          leadId: lead.id,
+                          body: e.target.value
+                            ? { assigned_user_id: Number(e.target.value) }
+                            : { clear_assignee: true },
+                        })
+                      }
+                    >
+                      <option value="">Unassigned</option>
+                      {(users ?? []).filter((u) => u.status === "active").map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.full_name}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                ) : (
+                  <div>
+                    <Label>Assigned To</Label>
+                    <div className="mt-1 flex items-center gap-2 text-sm text-gray-700">
+                      {lead.assignee_name ? (
+                        <>
+                          <Avatar
+                            name={lead.assignee_name}
+                            src={lead.assignee_avatar_url}
+                            variant="card"
+                          />
+                          {lead.assignee_name}
+                        </>
+                      ) : (
+                        "Unassigned"
+                      )}
+                    </div>
+                  </div>
+                )}
+                <div>
+                  <Label>Buyer</Label>
+                  <div className="mt-1 text-sm text-gray-700">{lead.buyer_name ?? "—"}</div>
+                </div>
+              </div>
+            </div>
+            <LeadTagsEditor leadId={lead.id} tags={lead.tags ?? []} />
+            <div>
+              <SectionLabel className="mb-2">Contact</SectionLabel>
+              <div className="flex flex-col gap-2.5">
+                {BUILTINS.map((b) => (
+                  <div key={b.key as string}>
+                    <Label>{b.label}</Label>
+                    <Input
+                      value={fields[b.key as string] ?? ""}
+                      onChange={(e) => setFields((f) => ({ ...f, [b.key as string]: e.target.value }))}
+                      onBlur={() => saveField(b.key as string)}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+            {(customFields ?? []).filter((f) => f.is_active).length > 0 && (
               <div>
-                <Label>Assigned To</Label>
-                <Select
-                  value={lead.assigned_user_id ?? ""}
-                  onChange={(e) =>
-                    update.mutate({
-                      leadId: lead.id,
-                      body: e.target.value
-                        ? { assigned_user_id: Number(e.target.value) }
-                        : { clear_assignee: true },
-                    })
-                  }
-                >
-                  <option value="">Unassigned</option>
-                  {(users ?? []).map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.full_name}
-                    </option>
-                  ))}
-                </Select>
+                <SectionLabel className="mb-2">Custom Fields</SectionLabel>
+                <div className="flex flex-col gap-2.5">
+                  {(customFields ?? [])
+                    .filter((f) => f.is_active)
+                    .map((f) => (
+                      <div key={f.id}>
+                        <Label>{f.name}</Label>
+                        <CustomFieldValue
+                          leadId={lead.id}
+                          fieldId={f.id}
+                          type={f.type}
+                          options={f.options}
+                          value={lead.custom_values?.[String(f.id)]}
+                        />
+                      </div>
+                    ))}
+                </div>
               </div>
             )}
-            {BUILTINS.map((b) => (
-              <div key={b.key as string}>
-                <Label>{b.label}</Label>
-                <Input
-                  value={fields[b.key as string] ?? ""}
-                  onChange={(e) => setFields((f) => ({ ...f, [b.key as string]: e.target.value }))}
-                  onBlur={() => saveField(b.key as string)}
-                />
-              </div>
-            ))}
-            {(customFields ?? [])
-              .filter((f) => f.is_active)
-              .map((f) => (
-                <div key={f.id}>
-                  <Label>{f.name}</Label>
-                  <CustomFieldValue
-                    leadId={lead.id}
-                    fieldId={f.id}
-                    type={f.type}
-                    options={f.options}
-                    value={lead.custom_values?.[String(f.id)]}
-                  />
-                </div>
-              ))}
             <RedistributeBox lead={lead} />
           </div>
         )}
         {tab === "notes" && <NotesTab leadId={lead.id} />}
         {tab === "history" && <HistoryTab leadId={lead.id} />}
-      </div>
+      </DrawerBody>
     </div>
   );
 }
@@ -212,35 +270,34 @@ function NotesTab({ leadId }: { leadId: number }) {
   const addNote = useAddNote();
   const [body, setBody] = useState("");
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-4">
       <div>
-        <Textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Add a note…" />
-        <div className="mt-2 flex justify-end">
+        <Textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="Add a note…"
+        />
+        <div className="mt-1.5 flex justify-end">
           <Button
             size="sm"
             disabled={!body.trim()}
-            onClick={() =>
-              addNote.mutate(
-                { leadId, body },
-                { onSuccess: () => setBody("") }
-              )
-            }
+            onClick={() => addNote.mutate({ leadId, body }, { onSuccess: () => setBody("") })}
           >
             Add Note
           </Button>
         </div>
       </div>
-      <div className="space-y-2">
+      <div>
+        <SectionLabel className="mb-2">Notes</SectionLabel>
         {(notes ?? []).map((n) => (
-          <div key={n.id} className="rounded border border-pd-border p-3">
-            <div className="mb-1 flex items-center gap-2">
-              <Avatar name={n.author_name || "?"} className="h-6 w-6 text-[10px]" />
-              <span className="text-sm font-semibold">{n.author_name || "System"}</span>
-              <span className="text-xs text-pd-muted">
+          <div key={n.id} className="border-b border-gray-100 py-2 last:border-0">
+            <div className="mb-0.5 flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-gray-600">{n.author_name || "System"}</span>
+              <span className="text-xs text-gray-400">
                 {format(new Date(n.created_at), "MMM d, h:mma")}
               </span>
             </div>
-            <p className="whitespace-pre-wrap text-sm">{n.body}</p>
+            <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-700">{n.body}</p>
           </div>
         ))}
       </div>
@@ -251,20 +308,24 @@ function NotesTab({ leadId }: { leadId: number }) {
 function HistoryTab({ leadId }: { leadId: number }) {
   const { data: history } = useStageHistory(leadId);
   return (
-    <div className="space-y-2">
-      {(history ?? []).length === 0 && <p className="text-sm text-pd-muted">No stage changes yet.</p>}
+    <div>
+      <SectionLabel className="mb-2">Stage History</SectionLabel>
+      {(history ?? []).length === 0 && (
+        <p className="text-sm text-gray-400">No stage changes yet.</p>
+      )}
       {(history ?? []).map((h) => (
-        <div key={h.id} className="rounded border border-pd-border p-3 text-sm">
-          <div className="flex items-center gap-2">
-            <span className="text-pd-muted">{h.from_stage_name ?? "Created"}</span>
-            <span>→</span>
-            <span className="font-semibold">{h.to_stage_name}</span>
-          </div>
-          <div className="mt-1 text-xs text-pd-muted">
-            {h.moved_by_name ?? "System"} · {format(new Date(h.created_at), "MMM d, h:mma")}
-            {h.action_at_captured &&
-              ` · action ${format(new Date(h.action_at_captured), "MMM d, h:mma")}`}
-            {h.disqualification_reason && ` · ${h.disqualification_reason}`}
+        <div key={h.id} className="flex items-start gap-2.5 py-1.5 text-sm text-gray-500">
+          <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-jade-300" />
+          <div>
+            <div>
+              {h.from_stage_name ?? "Created"} → <span className="font-medium">{h.to_stage_name}</span>
+            </div>
+            <div className="text-xs text-gray-400">
+              {h.moved_by_name ?? "System"} · {format(new Date(h.created_at), "MMM d, h:mma")}
+              {h.action_at_captured &&
+                ` · action ${format(new Date(h.action_at_captured), "MMM d, h:mma")}`}
+              {h.disqualification_reason && ` · ${h.disqualification_reason}`}
+            </div>
           </div>
         </div>
       ))}
@@ -276,12 +337,12 @@ function RedistributeBox({ lead }: { lead: Lead }) {
   const user = useAuthStore((s) => s.user);
   if (user?.account_type !== "publisher" || lead.status !== "returned") return null;
   return (
-    <div className="rounded border border-pd-amber/40 bg-pd-amber/10 p-3">
-      <div className="mb-1 flex items-center gap-2">
-        <Badge variant="amber">Returned</Badge>
-        <span className="text-sm font-semibold">Re-distribute this lead</span>
+    <div className="rounded-md border border-warning-border bg-warning-bg p-2.5">
+      <div className="mb-0.5 flex items-center gap-2">
+        <Badge variant="returned">Returned</Badge>
+        <span className="text-xs font-semibold text-gray-800">Re-distribute this lead</span>
       </div>
-      <p className="text-xs text-pd-muted">
+      <p className="text-xs text-gray-400">
         Send this returned lead to another buyer from the Contracts page.
       </p>
     </div>

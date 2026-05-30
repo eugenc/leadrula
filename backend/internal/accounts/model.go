@@ -36,6 +36,31 @@ type Invite struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// UserListItem is a member or pending invite for the admin users table.
+type UserListItem struct {
+	ID        int64   `json:"id"`
+	InviteID  int64   `json:"invite_id"`
+	PublicID  string  `json:"public_id,omitempty"`
+	Email     string  `json:"email"`
+	FullName  string  `json:"full_name"`
+	Role      string  `json:"role"`
+	Status    string  `json:"status"`
+	AvatarURL *string `json:"avatar_url,omitempty"`
+}
+
+type UpdateUserParams struct {
+	Role     *string
+	FullName *string
+	Email    *string
+	IsActive *bool
+}
+
+type UpdateInviteParams struct {
+	FullName *string
+	Email    *string
+	Role     *string
+}
+
 type CreateBuyerParams struct {
 	Name            string
 	Website         string

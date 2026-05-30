@@ -20,11 +20,16 @@ type Config struct {
 	AppBaseURL       string
 	CORSOrigins      []string
 
-	SMTPHost string
-	SMTPPort string
-	SMTPUser string
-	SMTPPass string
-	SMTPFrom string
+	MailgunAPIKey  string
+	MailgunDomain  string
+	MailgunFrom    string
+	MailgunAPIBase string
+
+	S3Endpoint  string
+	S3Bucket    string
+	S3AccessKey string
+	S3SecretKey string
+	S3PublicURL string
 }
 
 // Load reads configuration from a .env file (if present) and the environment.
@@ -39,12 +44,16 @@ func Load() *Config {
 		AccessTokenTTL:   getdur("ACCESS_TOKEN_TTL", 15*time.Minute),
 		RefreshTokenTTL:  getdur("REFRESH_TOKEN_TTL", 720*time.Hour),
 		AppBaseURL:       getenv("APP_BASE_URL", "http://localhost:5173"),
-		CORSOrigins:      splitCSV(getenv("CORS_ORIGINS", "http://localhost:5173")),
-		SMTPHost:         os.Getenv("SMTP_HOST"),
-		SMTPPort:         getenv("SMTP_PORT", "587"),
-		SMTPUser:         os.Getenv("SMTP_USER"),
-		SMTPPass:         os.Getenv("SMTP_PASS"),
-		SMTPFrom:         getenv("SMTP_FROM", "no-reply@leadrula.local"),
+		CORSOrigins:      splitCSV(getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:5174")),
+		MailgunAPIKey:  os.Getenv("MAILGUN_API_KEY"),
+		MailgunDomain:  os.Getenv("MAILGUN_DOMAIN"),
+		MailgunFrom:    getenv("MAILGUN_FROM", "no-reply@leadrula.local"),
+		MailgunAPIBase: getenv("MAILGUN_API_BASE", "https://api.mailgun.net"),
+		S3Endpoint:     os.Getenv("S3_ENDPOINT"),
+		S3Bucket:       os.Getenv("S3_BUCKET"),
+		S3AccessKey:    os.Getenv("S3_ACCESS_KEY"),
+		S3SecretKey:    os.Getenv("S3_SECRET_KEY"),
+		S3PublicURL:    os.Getenv("S3_PUBLIC_URL"),
 	}
 	return cfg
 }

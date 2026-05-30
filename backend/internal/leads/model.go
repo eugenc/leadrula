@@ -31,6 +31,17 @@ type Lead struct {
 	CreatedAt        time.Time       `json:"created_at"`
 	UpdatedAt        time.Time       `json:"updated_at"`
 	CustomValues     map[string]json.RawMessage `json:"custom_values"`
+	BuyerName         *string                   `json:"buyer_name,omitempty"`
+	AssigneeName      *string                   `json:"assignee_name,omitempty"`
+	AssigneeAvatarURL *string                   `json:"assignee_avatar_url,omitempty"`
+	Tags              []string                  `json:"tags"`
+}
+
+type ListResult struct {
+	Items []Lead `json:"items"`
+	Total int    `json:"total"`
+	Page  int    `json:"page"`
+	Limit int    `json:"limit"`
 }
 
 type Note struct {

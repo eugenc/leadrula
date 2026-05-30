@@ -13,24 +13,34 @@ type Handler struct{ svc *Service }
 
 func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 
-// RegisterRoutes mounts routing campaigns + field map (publisher admin).
+// RegisterRoutes mounts sources, routes, and field maps (publisher admin).
 func (h *Handler) RegisterRoutes(r chi.Router) {
-	r.Get("/routing-campaigns", h.list)
-	r.Get("/routing-campaigns/{id}/field-map", h.listFieldMap)
+	r.Get("/sources", h.listSources)
+	r.Get("/sources/{id}/field-map", h.listSourceFieldMap)
+	r.Get("/sources/{id}/sample-payload", h.getSourceSamplePayload)
+	r.Get("/routes", h.listRoutes)
+	r.Get("/routes/{id}/field-map", h.listRouteFieldMap)
+	r.Get("/routes/{id}/field-map/options", h.getRouteFieldMapOptions)
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireRole("admin"))
-		r.Post("/routing-campaigns", h.create)
-		r.Patch("/routing-campaigns/{id}", h.update)
-		r.Delete("/routing-campaigns/{id}", h.delete)
-		r.Post("/routing-campaigns/{id}/field-map", h.addFieldMap)
-		r.Delete("/field-map/{mapId}", h.deleteFieldMap)
+		r.Post("/sources", h.createSource)
+		r.Patch("/sources/{id}", h.updateSource)
+		r.Delete("/sources/{id}", h.deleteSource)
+		r.Post("/sources/{id}/field-map", h.addSourceFieldMap)
+		r.Delete("/source-field-map/{mapId}", h.deleteSourceFieldMap)
+
+		r.Post("/routes", h.createRoute)
+		r.Patch("/routes/{id}", h.updateRoute)
+		r.Delete("/routes/{id}", h.deleteRoute)
+		r.Post("/routes/{id}/field-map", h.addRouteFieldMap)
+		r.Delete("/route-field-map/{mapId}", h.deleteRouteFieldMap)
 	})
 }
 
-func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) listSources(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	items, err := h.svc.ListCampaigns(r.Context(), p.AccountID)
+	items, err := h.svc.ListSources(r.Context(), p.AccountID)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -38,65 +48,59 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, items)
 }
 
-func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) createSource(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
-		CampaignName     string `json:"campaign_name"`
-		TargetPipelineID int64  `json:"target_pipeline_id"`
-		TargetStageID    int64  `json:"target_stage_id"`
+		Name string `json:"name"`
+		Slug string `json:"slug"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	c, err := h.svc.CreateCampaign(r.Context(), p.AccountID, body.CampaignName, body.TargetPipelineID, body.TargetStageID)
+	src, err := h.svc.CreateSource(r.Context(), p.AccountID, body.Name, body.Slug)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusCreated, c)
+	httpx.JSON(w, http.StatusCreated, src)
 }
 
-func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) updateSource(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
-		CampaignName     *string `json:"campaign_name"`
-		TargetPipelineID *int64  `json:"target_pipeline_id"`
-		TargetStageID    *int64  `json:"target_stage_id"`
-		IsActive         *bool   `json:"is_active"`
+		Name     *string `json:"name"`
+		Slug     *string `json:"slug"`
+		IsActive *bool   `json:"is_active"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	c, err := h.svc.UpdateCampaign(r.Context(), p.AccountID, idp(r, "id"), body.CampaignName, body.TargetPipelineID, body.TargetStageID, body.IsActive)
+	src, err := h.svc.UpdateSource(r.Context(), p.AccountID, idp(r, "id"), body.Name, body.Slug, body.IsActive)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, c)
+	httpx.JSON(w, http.StatusOK, src)
 }
 
-func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) deleteSource(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	if err := h.svc.DeleteCampaign(r.Context(), p.AccountID, idp(r, "id")); err != nil {
+	if err := h.svc.DeleteSource(r.Context(), p.AccountID, idp(r, "id")); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func (h *Handler) listFieldMap(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) listSourceFieldMap(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	cid := idp(r, "id")
-	ok, err := h.svc.CampaignOwnedBy(r.Context(), p.AccountID, cid)
-	if err != nil {
-		httpx.WriteError(w, err)
+	sid := idp(r, "id")
+	ok, err := h.svc.SourceOwnedBy(r.Context(), p.AccountID, sid)
+	if err != nil || !ok {
+		httpx.Err(w, http.StatusNotFound, httpx.CodeNotFound, "source not found")
 		return
 	}
-	if !ok {
-		httpx.Err(w, http.StatusNotFound, httpx.CodeNotFound, "campaign not found")
-		return
-	}
-	items, err := h.svc.ListFieldMap(r.Context(), cid)
+	items, err := h.svc.ListSourceFieldMap(r.Context(), sid)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -104,12 +108,28 @@ func (h *Handler) listFieldMap(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, items)
 }
 
-func (h *Handler) addFieldMap(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) getSourceSamplePayload(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	cid := idp(r, "id")
-	ok, err := h.svc.CampaignOwnedBy(r.Context(), p.AccountID, cid)
+	sid := idp(r, "id")
+	ok, err := h.svc.SourceOwnedBy(r.Context(), p.AccountID, sid)
 	if err != nil || !ok {
-		httpx.Err(w, http.StatusNotFound, httpx.CodeNotFound, "campaign not found")
+		httpx.Err(w, http.StatusNotFound, httpx.CodeNotFound, "source not found")
+		return
+	}
+	out, err := h.svc.LatestSourceSamplePayload(r.Context(), p.AccountID, sid)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) addSourceFieldMap(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	sid := idp(r, "id")
+	ok, err := h.svc.SourceOwnedBy(r.Context(), p.AccountID, sid)
+	if err != nil || !ok {
+		httpx.Err(w, http.StatusNotFound, httpx.CodeNotFound, "source not found")
 		return
 	}
 	var body struct {
@@ -121,7 +141,7 @@ func (h *Handler) addFieldMap(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	e, err := h.svc.AddFieldMap(r.Context(), cid, body.SourceKey, body.TargetType, body.BuiltinField, body.CustomFieldID)
+	e, err := h.svc.AddSourceFieldMap(r.Context(), sid, body.SourceKey, body.TargetType, body.BuiltinField, body.CustomFieldID)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -129,8 +149,123 @@ func (h *Handler) addFieldMap(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, e)
 }
 
-func (h *Handler) deleteFieldMap(w http.ResponseWriter, r *http.Request) {
-	if err := h.svc.DeleteFieldMap(r.Context(), idp(r, "mapId")); err != nil {
+func (h *Handler) deleteSourceFieldMap(w http.ResponseWriter, r *http.Request) {
+	if err := h.svc.DeleteSourceFieldMap(r.Context(), idp(r, "mapId")); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) listRoutes(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	items, err := h.svc.ListRoutes(r.Context(), p.AccountID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, items)
+}
+
+func (h *Handler) createRoute(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body CreateRouteParams
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	rt, err := h.svc.CreateRoute(r.Context(), p.AccountID, body)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, rt)
+}
+
+func (h *Handler) updateRoute(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body UpdateRouteParams
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	rt, err := h.svc.UpdateRoute(r.Context(), p.AccountID, idp(r, "id"), body)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, rt)
+}
+
+func (h *Handler) deleteRoute(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	if err := h.svc.DeleteRoute(r.Context(), p.AccountID, idp(r, "id")); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) listRouteFieldMap(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	rid := idp(r, "id")
+	ok, err := h.svc.RouteOwnedBy(r.Context(), p.AccountID, rid)
+	if err != nil || !ok {
+		httpx.Err(w, http.StatusNotFound, httpx.CodeNotFound, "route not found")
+		return
+	}
+	items, err := h.svc.ListRouteFieldMap(r.Context(), rid)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, items)
+}
+
+func (h *Handler) getRouteFieldMapOptions(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	rid := idp(r, "id")
+	ok, err := h.svc.RouteOwnedBy(r.Context(), p.AccountID, rid)
+	if err != nil || !ok {
+		httpx.Err(w, http.StatusNotFound, httpx.CodeNotFound, "route not found")
+		return
+	}
+	opts, err := h.svc.RouteFieldMapOptions(r.Context(), p.AccountID, rid)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, opts)
+}
+
+func (h *Handler) addRouteFieldMap(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	rid := idp(r, "id")
+	ok, err := h.svc.RouteOwnedBy(r.Context(), p.AccountID, rid)
+	if err != nil || !ok {
+		httpx.Err(w, http.StatusNotFound, httpx.CodeNotFound, "route not found")
+		return
+	}
+	var body struct {
+		SrcType          string  `json:"src_type"`
+		SrcBuiltin       *string `json:"src_builtin"`
+		SrcCustomFieldID *int64  `json:"src_custom_field_id"`
+		DstType          string  `json:"dst_type"`
+		DstBuiltin       *string `json:"dst_builtin"`
+		DstCustomFieldID *int64  `json:"dst_custom_field_id"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	e, err := h.svc.AddRouteFieldMap(r.Context(), p.AccountID, rid, body.SrcType, body.SrcBuiltin, body.SrcCustomFieldID,
+		body.DstType, body.DstBuiltin, body.DstCustomFieldID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, e)
+}
+
+func (h *Handler) deleteRouteFieldMap(w http.ResponseWriter, r *http.Request) {
+	if err := h.svc.DeleteRouteFieldMap(r.Context(), idp(r, "mapId")); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}

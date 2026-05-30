@@ -1,76 +1,144 @@
+import type { ReactNode } from "react";
 import type { CustomField, Lead } from "@/types";
 import { Avatar, Badge } from "@/components/ui/misc";
-import { Phone, Clock } from "lucide-react";
+import { ActionIndicator } from "./ActionDot";
+import { cellValue, columnIcon, formatStatus } from "./leadsListColumns";
+import { LeadTagBadges } from "./LeadTagsEditor";
 import { cn } from "@/lib/utils";
-import { format, isPast } from "date-fns";
 
-function renderValue(v: unknown): string {
-  if (v == null) return "";
-  if (typeof v === "string") return v;
-  return JSON.stringify(v);
+const statusVariant: Record<
+  string,
+  "distributed" | "returned" | "review" | "closed" | "default"
+> = {
+  distributed: "distributed",
+  returned: "returned",
+  review: "review",
+  closed: "closed",
+};
+
+function CardFieldLine({
+  colId,
+  customFields,
+  children,
+}: {
+  colId: string;
+  customFields: CustomField[];
+  children: ReactNode;
+}) {
+  const Icon = columnIcon(colId, customFields);
+  return (
+    <div className="flex items-center gap-2 leading-tight">
+      <span className="flex w-4 shrink-0 justify-center">
+        <Icon className="h-3.5 w-3.5 text-gray-300" aria-hidden />
+      </span>
+      <div className="min-w-0 flex-1 text-xs text-gray-500">{children}</div>
+    </div>
+  );
+}
+
+function CardFieldRow({
+  colId,
+  lead,
+  customFields,
+}: {
+  colId: string;
+  lead: Lead;
+  customFields: CustomField[];
+}) {
+  if (colId === "name") return null;
+
+  if (colId === "tags") {
+    if (!(lead.tags ?? []).length) return null;
+    return (
+      <CardFieldLine colId={colId} customFields={customFields}>
+        <LeadTagBadges tags={lead.tags ?? []} limit={2} />
+      </CardFieldLine>
+    );
+  }
+
+  if (colId === "status") {
+    return (
+      <CardFieldLine colId={colId} customFields={customFields}>
+        <Badge variant={statusVariant[lead.status] ?? "default"}>{formatStatus(lead.status)}</Badge>
+      </CardFieldLine>
+    );
+  }
+
+  const value = cellValue(lead, colId, customFields);
+  if (!value || value === "—") return null;
+
+  return (
+    <CardFieldLine colId={colId} customFields={customFields}>
+      <span className="truncate">{value}</span>
+    </CardFieldLine>
+  );
 }
 
 export function LeadCard({
   lead,
   customFields,
+  cardFields,
   onClick,
   dragging,
 }: {
   lead: Lead;
   customFields: CustomField[];
+  cardFields: string[];
   onClick: () => void;
   dragging?: boolean;
 }) {
-  // show the first 1-2 active custom fields by position
-  const shown = [...customFields]
-    .filter((f) => f.is_active)
-    .sort((a, b) => a.position - b.position)
-    .slice(0, 2)
-    .map((f) => ({ field: f, value: renderValue(lead.custom_values?.[String(f.id)]) }))
-    .filter((x) => x.value);
-
-  const overdue = lead.action_at && isPast(new Date(lead.action_at));
+  const activeFields = cardFields.filter((id) => id !== "name");
+  const showReturnedInHeader =
+    lead.status === "returned" && !activeFields.includes("status");
 
   return (
     <div
       onClick={onClick}
       className={cn(
-        "cursor-pointer rounded border border-pd-border bg-white p-3 shadow-sm transition-shadow hover:shadow-md",
-        dragging && "rotate-1 shadow-lg"
+        "cursor-pointer rounded-lg border border-gray-100 bg-white p-3 shadow-xs transition-[box-shadow,transform] hover:-translate-y-px hover:shadow-md",
+        dragging && "rotate-[2deg] scale-[1.02] opacity-[0.92] shadow-xl"
       )}
     >
-      <div className="mb-1 flex items-start justify-between gap-2">
-        <span className="font-semibold text-pd-text">
+      <div className="mb-2 flex items-center gap-2">
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold leading-snug text-gray-800">
           {lead.first_name} {lead.last_name}
         </span>
-        {lead.status === "returned" && <Badge variant="amber">Returned</Badge>}
+        <div className="flex shrink-0 items-center gap-1">
+          {showReturnedInHeader && (
+            <Badge variant="returned">{formatStatus(lead.status)}</Badge>
+          )}
+          <ActionIndicator actionAt={lead.action_at} size="sm" />
+          {lead.assigned_user_id && (
+            <span
+              className="group/avatar relative shrink-0"
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <Avatar
+                name={lead.assignee_name ?? ""}
+                src={lead.assignee_avatar_url}
+                variant="card"
+              />
+              {lead.assignee_name && (
+                <span
+                  role="tooltip"
+                  className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-800 px-2 py-1 text-xs font-medium text-white opacity-0 shadow-sm transition-opacity duration-150 group-hover/avatar:opacity-100"
+                >
+                  {lead.assignee_name}
+                </span>
+              )}
+            </span>
+          )}
+        </div>
       </div>
-      {lead.phone && (
-        <div className="mb-1 flex items-center gap-1.5 text-xs text-pd-muted">
-          <Phone className="h-3 w-3" /> {lead.phone}
+
+      {activeFields.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          {activeFields.map((colId) => (
+            <CardFieldRow key={colId} colId={colId} lead={lead} customFields={customFields} />
+          ))}
         </div>
       )}
-      {shown.map((x) => (
-        <div key={x.field.id} className="text-xs text-pd-muted">
-          <span className="font-medium">{x.field.name}:</span> {x.value}
-        </div>
-      ))}
-      <div className="mt-2 flex items-center justify-between">
-        {lead.action_at ? (
-          <span
-            className={cn(
-              "flex items-center gap-1 text-xs",
-              overdue ? "font-semibold text-pd-red" : "text-pd-muted"
-            )}
-          >
-            <Clock className="h-3 w-3" />
-            {format(new Date(lead.action_at), "MMM d, h:mma")}
-          </span>
-        ) : (
-          <span />
-        )}
-        {lead.assigned_user_id && <Avatar name={`U${lead.assigned_user_id}`} className="h-6 w-6 text-[10px]" />}
-      </div>
     </div>
   );
 }

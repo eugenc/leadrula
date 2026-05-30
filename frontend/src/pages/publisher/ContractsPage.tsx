@@ -5,37 +5,40 @@ import {
   useDeleteContract,
   useBuyers,
   useBuyerPipelines,
-  useReturnRules,
 } from "@/features/admin/hooks";
 import { usePipelines, useStages } from "@/features/leads/hooks";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { PageBody } from "@/components/layout/PageBody";
+import { IconButton } from "@/components/layout/IconButton";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
-import { Badge, Spinner, EmptyState } from "@/components/ui/misc";
+import { Spinner, EmptyState } from "@/components/ui/misc";
 import { Dialog } from "@/components/ui/dialog";
 import { Plus, Trash2 } from "lucide-react";
 import { formatMoney } from "@/lib/utils";
 import { toast } from "@/store/toastStore";
 import { apiError } from "@/lib/api";
+import { ContractDetailDrawer } from "@/features/admin/ContractDetailDrawer";
+import { ContractStatusBadge } from "@/features/admin/contractStatus";
+import type { Contract } from "@/types";
 
 export function ContractsPage() {
   const { data: contracts, isLoading } = useContracts();
   const remove = useDeleteContract();
   const [open, setOpen] = useState(false);
-  const [rulesFor, setRulesFor] = useState<number | null>(null);
+  const [selected, setSelected] = useState<Contract | null>(null);
 
   return (
-    <div>
+    <>
       <PageHeader
-        title="Contracts"
-        subtitle="Routing + pricing agreements with buyers."
         action={
           <Button onClick={() => setOpen(true)}>
             <Plus className="h-4 w-4" /> New Contract
           </Button>
         }
       />
+      <PageBody>
       {isLoading ? (
         <Spinner className="h-6 w-6" />
       ) : (contracts ?? []).length === 0 ? (
@@ -53,24 +56,24 @@ export function ContractsPage() {
           </THead>
           <TBody>
             {(contracts ?? []).map((c) => (
-              <TR key={c.id}>
+              <TR key={c.id} onClick={() => setSelected(c)}>
                 <TD className="font-semibold">{c.buyer_name}</TD>
                 <TD>{c.name}</TD>
                 <TD>{formatMoney(c.rate_per_lead)}</TD>
                 <TD>
-                  <Badge variant={c.status === "active" ? "green" : "muted"}>{c.status}</Badge>
+                  <ContractStatusBadge status={c.status} />
                 </TD>
                 <TD>
-                  <div className="flex justify-end gap-2">
-                    <Button size="sm" variant="outline" onClick={() => setRulesFor(c.id)}>
-                      Return Rules
-                    </Button>
-                    <button
-                      onClick={() => remove.mutate(c.id, { onError: (e) => toast.error(apiError(e).message) })}
-                      className="text-pd-muted hover:text-pd-red"
+                  <div className="flex justify-end">
+                    <IconButton
+                      variant="danger"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        remove.mutate(c.id, { onError: (err) => toast.error(apiError(err).message) });
+                      }}
                     >
                       <Trash2 className="h-4 w-4" />
-                    </button>
+                    </IconButton>
                   </div>
                 </TD>
               </TR>
@@ -80,8 +83,9 @@ export function ContractsPage() {
       )}
 
       {open && <CreateContractDialog onClose={() => setOpen(false)} />}
-      {rulesFor && <ReturnRulesDialog contractId={rulesFor} onClose={() => setRulesFor(null)} />}
-    </div>
+      <ContractDetailDrawer contract={selected} onClose={() => setSelected(null)} />
+      </PageBody>
+    </>
   );
 }
 
@@ -180,7 +184,7 @@ function CreateContractDialog({ onClose }: { onClose: () => void }) {
           />
         </div>
         <div className="flex justify-end gap-2 pt-2">
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
           <Button
@@ -199,28 +203,6 @@ function CreateContractDialog({ onClose }: { onClose: () => void }) {
           </Button>
         </div>
       </div>
-    </Dialog>
-  );
-}
-
-function ReturnRulesDialog({ contractId, onClose }: { contractId: number; onClose: () => void }) {
-  const { data: rules } = useReturnRules(contractId);
-  return (
-    <Dialog open onClose={onClose} title="Return Rules">
-      <p className="mb-3 text-sm text-pd-muted">
-        Return rules are configured by the buyer from their own stages. Current rules:
-      </p>
-      {(rules ?? []).length === 0 ? (
-        <EmptyState title="No return rules configured." />
-      ) : (
-        <ul className="space-y-1 text-sm">
-          {(rules ?? []).map((r) => (
-            <li key={r.id} className="rounded border border-pd-border px-3 py-2">
-              Buyer stage #{r.buyer_stage_id} triggers a return
-            </li>
-          ))}
-        </ul>
-      )}
     </Dialog>
   );
 }

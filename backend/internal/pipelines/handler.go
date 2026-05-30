@@ -1,6 +1,7 @@
 package pipelines
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -17,6 +18,7 @@ func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/pipelines", h.list)
 	r.Get("/pipelines/{id}/stages", h.listStages)
+	r.Get("/stages/{id}/rules", h.listRules)
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireRole("admin"))
@@ -27,6 +29,10 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Post("/pipelines/{id}/stages/reorder", h.reorder)
 		r.Patch("/stages/{id}", h.updateStage)
 		r.Delete("/stages/{id}", h.deleteStage)
+		r.Post("/stages/{id}/rules", h.createRule)
+		r.Patch("/stage-rules/{id}", h.updateRule)
+		r.Delete("/stage-rules/{id}", h.deleteRule)
+		r.Post("/stages/{id}/rules/reorder", h.reorderRules)
 	})
 }
 
@@ -96,9 +102,10 @@ func (h *Handler) listStages(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) createStage(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
-		Name                   string `json:"name"`
-		PromptActionDatetime   *bool  `json:"prompt_action_datetime"`
-		PromptDisqualification *bool  `json:"prompt_disqualification"`
+		Name                   string  `json:"name"`
+		Color                  string  `json:"color"`
+		PromptActionDatetime   *bool   `json:"prompt_action_datetime"`
+		PromptDisqualification *bool   `json:"prompt_disqualification"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
@@ -111,7 +118,7 @@ func (h *Handler) createStage(w http.ResponseWriter, r *http.Request) {
 	if body.PromptDisqualification != nil {
 		promptDisq = *body.PromptDisqualification
 	}
-	st, err := h.svc.CreateStage(r.Context(), p.AccountID, idParam(r, "id"), body.Name, promptAction, promptDisq)
+	st, err := h.svc.CreateStage(r.Context(), p.AccountID, idParam(r, "id"), body.Name, body.Color, promptAction, promptDisq)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -123,13 +130,14 @@ func (h *Handler) updateStage(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
 		Name                   *string `json:"name"`
+		Color                  *string `json:"color"`
 		PromptActionDatetime   *bool   `json:"prompt_action_datetime"`
 		PromptDisqualification *bool   `json:"prompt_disqualification"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	st, err := h.svc.UpdateStage(r.Context(), p.AccountID, idParam(r, "id"), body.Name, body.PromptActionDatetime, body.PromptDisqualification)
+	st, err := h.svc.UpdateStage(r.Context(), p.AccountID, idParam(r, "id"), body.Name, body.Color, body.PromptActionDatetime, body.PromptDisqualification)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -164,4 +172,81 @@ func (h *Handler) reorder(w http.ResponseWriter, r *http.Request) {
 func idParam(r *http.Request, name string) int64 {
 	id, _ := strconv.ParseInt(chi.URLParam(r, name), 10, 64)
 	return id
+}
+
+func (h *Handler) listRules(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	items, err := h.svc.ListRules(r.Context(), p.AccountID, idParam(r, "id"))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, items)
+}
+
+func (h *Handler) createRule(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		ConditionLogic string          `json:"condition_logic"`
+		Conditions     json.RawMessage `json:"conditions"`
+		Actions        json.RawMessage `json:"actions"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	rule, err := h.svc.CreateRule(r.Context(), p.AccountID, idParam(r, "id"), body.ConditionLogic, body.Conditions, body.Actions)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, rule)
+}
+
+func (h *Handler) updateRule(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		ConditionLogic *string         `json:"condition_logic"`
+		Conditions     json.RawMessage `json:"conditions"`
+		Actions        json.RawMessage `json:"actions"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	var conds, acts json.RawMessage
+	if body.Conditions != nil {
+		conds = body.Conditions
+	}
+	if body.Actions != nil {
+		acts = body.Actions
+	}
+	rule, err := h.svc.UpdateRule(r.Context(), p.AccountID, idParam(r, "id"), body.ConditionLogic, conds, acts)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, rule)
+}
+
+func (h *Handler) deleteRule(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	if err := h.svc.DeleteRule(r.Context(), p.AccountID, idParam(r, "id")); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) reorderRules(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		OrderedRuleIDs []int64 `json:"ordered_rule_ids"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	if err := h.svc.ReorderRules(r.Context(), p.AccountID, idParam(r, "id"), body.OrderedRuleIDs); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }

@@ -1,16 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { get, ns, post, patch, del } from "@/lib/api";
+import { get, ns, post, postForm, patch, del } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import type {
   ApiKey,
   BuyerSummary,
   CalendarEvent,
-  Campaign,
+  Source,
+  Route,
+  RouteFieldMapEntry,
+  RouteFieldMapOptions,
   Contract,
   Dispute,
   FieldMapEntry,
+  SourceSamplePayload,
   QueueItem,
   ReturnRule,
+  RuleAction,
+  RuleCondition,
+  StageRule,
   Transaction,
   UserRow,
 } from "@/types";
@@ -28,6 +35,14 @@ export function useCreatePipeline() {
 export function useDeletePipeline() {
   const inv = useInvalidate(["pipelines"]);
   return useMutation({ mutationFn: (id: number) => del(`${ns()}/pipelines/${id}`), onSuccess: inv });
+}
+export function useUpdatePipeline() {
+  const inv = useInvalidate(["pipelines"]);
+  return useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) =>
+      patch(`${ns()}/pipelines/${id}`, { name }),
+    onSuccess: inv,
+  });
 }
 export function useCreateStage() {
   const qc = useQueryClient();
@@ -50,6 +65,47 @@ export function useDeleteStage() {
   return useMutation({
     mutationFn: (id: number) => del(`${ns()}/stages/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["stages"] }),
+  });
+}
+
+export function useStageRules(stageId: number | null) {
+  return useQuery({
+    queryKey: ["stage-rules", stageId],
+    queryFn: () => get<StageRule[]>(`${ns()}/stages/${stageId}/rules`),
+    enabled: !!stageId,
+  });
+}
+export function useCreateStageRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      stageId,
+      body,
+    }: {
+      stageId: number;
+      body: { condition_logic: string; conditions: RuleCondition[]; actions: RuleAction[] };
+    }) => post(`${ns()}/stages/${stageId}/rules`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["stage-rules"] }),
+  });
+}
+export function useUpdateStageRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: number;
+      body: Partial<{ condition_logic: string; conditions: RuleCondition[]; actions: RuleAction[] }>;
+    }) => patch(`${ns()}/stage-rules/${id}`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["stage-rules"] }),
+  });
+}
+export function useDeleteStageRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => del(`${ns()}/stage-rules/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["stage-rules"] }),
   });
 }
 
@@ -95,10 +151,31 @@ export function useInviteUser() {
   return useMutation({ mutationFn: (body: Record<string, unknown>) => post(`${ns()}/users/invite`, body), onSuccess: inv });
 }
 export function useUpdateUser() {
+  const qc = useQueryClient();
   const inv = useInvalidate(["users"]);
   return useMutation({
     mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
-      patch(`${ns()}/users/${id}`, body),
+      patch<UserRow>(`${ns()}/users/${id}`, body),
+    onSuccess: (data) => {
+      inv();
+      qc.invalidateQueries({ queryKey: ["me"] });
+      const user = useAuthStore.getState().user;
+      if (user && data.public_id === user.id) {
+        useAuthStore.getState().syncUserProfile({
+          full_name: data.full_name,
+          email: data.email,
+          role: data.role,
+          avatar_url: data.avatar_url,
+        });
+      }
+    },
+  });
+}
+export function useUpdateInvite() {
+  const inv = useInvalidate(["users"]);
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
+      patch(`${ns()}/users/invites/${id}`, body),
     onSuccess: inv,
   });
 }
@@ -106,10 +183,56 @@ export function useDeleteUser() {
   const inv = useInvalidate(["users"]);
   return useMutation({ mutationFn: (id: number) => del(`${ns()}/users/${id}`), onSuccess: inv });
 }
+export function useDeleteInvite() {
+  const inv = useInvalidate(["users"]);
+  return useMutation({ mutationFn: (id: number) => del(`${ns()}/users/invites/${id}`), onSuccess: inv });
+}
+export function useResendInvite() {
+  const inv = useInvalidate(["users"]);
+  return useMutation({
+    mutationFn: (id: number) => post(`${ns()}/users/invites/${id}/resend`),
+    onSuccess: inv,
+  });
+}
+export function useRequestPasswordReset() {
+  return useMutation({
+    mutationFn: (email: string) => post("/auth/password-reset/request", { email }),
+  });
+}
+export function useUploadMyAvatar() {
+  const qc = useQueryClient();
+  const setUserAvatar = useAuthStore((s) => s.setUserAvatar);
+  return useMutation({
+    mutationFn: (file: File) => {
+      const form = new FormData();
+      form.append("avatar", file);
+      return postForm<{ avatar_url: string }>("/auth/me/avatar", form);
+    },
+    onSuccess: (res) => {
+      setUserAvatar(res.avatar_url);
+      qc.invalidateQueries({ queryKey: ["me"] });
+    },
+  });
+}
+export function useUploadUserAvatar() {
+  const inv = useInvalidate(["users", "leads"]);
+  return useMutation({
+    mutationFn: ({ id, file }: { id: number; file: File }) => {
+      const form = new FormData();
+      form.append("avatar", file);
+      return postForm<{ avatar_url: string }>(`${ns()}/users/${id}/avatar`, form);
+    },
+    onSuccess: inv,
+  });
+}
 
 // ── Contracts (publisher) ─────────────────────────────────────────
-export function useContracts() {
-  return useQuery({ queryKey: ["contracts"], queryFn: () => get<Contract[]>(`/publisher/contracts`) });
+export function useContracts(enabled = true) {
+  return useQuery({
+    queryKey: ["contracts"],
+    queryFn: () => get<Contract[]>(`/publisher/contracts`),
+    enabled,
+  });
 }
 export function useCreateContract() {
   const inv = useInvalidate(["contracts"]);
@@ -158,46 +281,104 @@ export function useMyContract() {
   return useQuery({ queryKey: ["my-contract"], queryFn: () => get<Contract>(`/buyer/contract`) });
 }
 
-// ── Routing (publisher) ───────────────────────────────────────────
-export function useCampaigns() {
-  return useQuery({ queryKey: ["campaigns"], queryFn: () => get<Campaign[]>(`/publisher/routing-campaigns`) });
+// ── Sources & Routes (publisher) ────────────────────────────────────
+export function useSources() {
+  return useQuery({ queryKey: ["sources"], queryFn: () => get<Source[]>(`/publisher/sources`) });
 }
-export function useCreateCampaign() {
-  const inv = useInvalidate(["campaigns"]);
-  return useMutation({ mutationFn: (body: Record<string, unknown>) => post(`/publisher/routing-campaigns`, body), onSuccess: inv });
+export function useCreateSource() {
+  const inv = useInvalidate(["sources"]);
+  return useMutation({ mutationFn: (body: Record<string, unknown>) => post(`/publisher/sources`, body), onSuccess: inv });
 }
-export function useUpdateCampaign() {
-  const inv = useInvalidate(["campaigns"]);
+export function useUpdateSource() {
+  const inv = useInvalidate(["sources"]);
   return useMutation({
-    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
-      patch(`/publisher/routing-campaigns/${id}`, body),
+    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) => patch(`/publisher/sources/${id}`, body),
     onSuccess: inv,
   });
 }
-export function useDeleteCampaign() {
-  const inv = useInvalidate(["campaigns"]);
-  return useMutation({ mutationFn: (id: number) => del(`/publisher/routing-campaigns/${id}`), onSuccess: inv });
+export function useDeleteSource() {
+  const inv = useInvalidate(["sources"]);
+  return useMutation({ mutationFn: (id: number) => del(`/publisher/sources/${id}`), onSuccess: inv });
 }
-export function useFieldMap(campaignId: number | null) {
+export function useSourceFieldMap(sourceId: number | null) {
   return useQuery({
-    queryKey: ["field-map", campaignId],
-    queryFn: () => get<FieldMapEntry[]>(`/publisher/routing-campaigns/${campaignId}/field-map`),
-    enabled: !!campaignId,
+    queryKey: ["source-field-map", sourceId],
+    queryFn: () => get<FieldMapEntry[]>(`/publisher/sources/${sourceId}/field-map`),
+    enabled: !!sourceId,
   });
 }
-export function useAddFieldMap() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ campaignId, body }: { campaignId: number; body: Record<string, unknown> }) =>
-      post(`/publisher/routing-campaigns/${campaignId}/field-map`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["field-map"] }),
+export function useSourceSamplePayload(sourceId: number | null, poll = false) {
+  return useQuery({
+    queryKey: ["source-sample-payload", sourceId],
+    queryFn: () => get<SourceSamplePayload>(`/publisher/sources/${sourceId}/sample-payload`),
+    enabled: !!sourceId,
+    refetchInterval: poll ? 5000 : false,
   });
 }
-export function useDeleteFieldMap() {
+export function useAddSourceFieldMap() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) => del(`/publisher/field-map/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["field-map"] }),
+    mutationFn: ({ sourceId, body }: { sourceId: number; body: Record<string, unknown> }) =>
+      post(`/publisher/sources/${sourceId}/field-map`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["source-field-map"] }),
+  });
+}
+export function useDeleteSourceFieldMap() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => del(`/publisher/source-field-map/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["source-field-map"] }),
+  });
+}
+
+export function useRoutes() {
+  return useQuery({ queryKey: ["routes"], queryFn: () => get<Route[]>(`/publisher/routes`) });
+}
+export function useCreateRoute() {
+  const inv = useInvalidate(["routes"]);
+  return useMutation({ mutationFn: (body: Record<string, unknown>) => post(`/publisher/routes`, body), onSuccess: inv });
+}
+export function useUpdateRoute() {
+  const inv = useInvalidate(["routes"]);
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) => patch(`/publisher/routes/${id}`, body),
+    onSuccess: inv,
+  });
+}
+export function useDeleteRoute() {
+  const inv = useInvalidate(["routes"]);
+  return useMutation({ mutationFn: (id: number) => del(`/publisher/routes/${id}`), onSuccess: inv });
+}
+export function useRouteFieldMap(routeId: number | null) {
+  return useQuery({
+    queryKey: ["route-field-map", routeId],
+    queryFn: () => get<RouteFieldMapEntry[]>(`/publisher/routes/${routeId}/field-map`),
+    enabled: !!routeId,
+  });
+}
+export function useRouteFieldMapOptions(routeId: number | null) {
+  return useQuery({
+    queryKey: ["route-field-map-options", routeId],
+    queryFn: () => get<RouteFieldMapOptions>(`/publisher/routes/${routeId}/field-map/options`),
+    enabled: routeId != null,
+  });
+}
+export function useAddRouteFieldMap() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ routeId, body }: { routeId: number; body: Record<string, unknown> }) =>
+      post(`/publisher/routes/${routeId}/field-map`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["route-field-map"] });
+      qc.invalidateQueries({ queryKey: ["route-field-map-options"] });
+    },
+  });
+}
+export function useDeleteRouteFieldMap() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => del(`/publisher/route-field-map/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["route-field-map"] }),
   });
 }
 

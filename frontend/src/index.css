@@ -1,23 +1,82 @@
-@import "@fontsource/source-sans-3/400.css";
-@import "@fontsource/source-sans-3/600.css";
-@import "@fontsource/source-sans-3/700.css";
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --pd-green: #1a7f37;
-  --pd-green-dark: #156b2e;
-  --pd-bg: #f4f5f7;
-  --pd-surface: #ffffff;
-  --pd-border: #e3e6ea;
-  --pd-text: #25292e;
-  --pd-text-muted: #6b7280;
-  --pd-stage-bg: #edeff2;
-  --pd-blue: #2d7ff9;
-  --pd-amber: #e8a33d;
-  --pd-red: #d64545;
+  /* Jade brand */
+  --jade-50: #F0FAF5;
+  --jade-100: #D6F2E4;
+  --jade-200: #AEDEC9;
+  --jade-300: #77C5A8;
+  --jade-400: #3DAB83;
+  --jade-500: #1A9268;
+  --jade-600: #157A57;
+  --jade-700: #0F5E41;
+  --jade-800: #0A3F2C;
+  --jade-900: #052015;
+
+  /* Neutrals */
+  --gray-0: #FFFFFF;
+  --gray-50: #F4F5F7;
+  --gray-100: #EAECF0;
+  --gray-200: #D0D5DD;
+  --gray-300: #98A2B3;
+  --gray-400: #667085;
+  --gray-500: #475467;
+  --gray-600: #344054;
+  --gray-700: #1D2939;
+  --gray-800: #101828;
+
+  /* Semantic */
+  --color-success: #1A9268;
+  --color-success-bg: #F0FAF5;
+  --color-success-border: #AEDEC9;
+  --color-warning: #B54708;
+  --color-warning-bg: #FFF6ED;
+  --color-warning-border: #FDDCAB;
+  --color-danger: #C01048;
+  --color-danger-bg: #FFF1F3;
+  --color-danger-border: #FECDD6;
+  --color-info: #175CD3;
+  --color-info-bg: #EFF8FF;
+  --color-info-border: #B2DDFF;
+  --color-neutral: #344054;
+  --color-neutral-bg: #F4F5F7;
+  --color-neutral-border: #D0D5DD;
+
+  /* Surfaces */
+  --surface-app: #F4F5F7;
+  --surface-card: #FFFFFF;
+  --surface-overlay: rgba(16, 24, 40, 0.5);
+  --surface-hover: #F0FAF5;
+  --surface-active: #D6F2E4;
+
+  /* Borders */
+  --border-default: #EAECF0;
+  --border-strong: #D0D5DD;
+  --border-focus: #3DAB83;
+  --border-brand: #1A9268;
+
+  /* Typography */
+  --font-family-base: "Inter", system-ui, sans-serif;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  --text-3xl: 30px;
+
+  /* Layout */
+  --sidebar-width: 200px;
+  --topbar-height: 52px;
+  --drawer-width: 480px;
+
+  /* Durations */
+  --duration-fast: 80ms;
+  --duration-normal: 150ms;
+  --duration-slow: 250ms;
 }
 
 html,
@@ -28,13 +87,53 @@ body,
 
 body {
   margin: 0;
-  background: var(--pd-bg);
-  color: var(--pd-text);
-  font-family: "Source Sans 3", system-ui, sans-serif;
-  font-size: 14px;
+  background: var(--surface-app);
+  color: var(--gray-800);
+  font-family: var(--font-family-base);
+  font-size: var(--text-base);
   -webkit-font-smoothing: antialiased;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Native date/time pickers — jade brand accent */
+input[type="date"],
+input[type="datetime-local"],
+input[type="time"],
+input[type="month"],
+input[type="week"] {
+  accent-color: var(--jade-500);
+  color-scheme: light;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator,
+input[type="month"]::-webkit-calendar-picker-indicator,
+input[type="week"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.55;
+}
+
+input[type="date"]:hover::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]:hover::-webkit-calendar-picker-indicator,
+input[type="time"]:hover::-webkit-calendar-picker-indicator,
+input[type="month"]:hover::-webkit-calendar-picker-indicator,
+input[type="week"]:hover::-webkit-calendar-picker-indicator {
+  opacity: 0.85;
+}
+
+input[type="datetime-local"]::-webkit-datetime-edit-hour-field:focus,
+input[type="datetime-local"]::-webkit-datetime-edit-minute-field:focus,
+input[type="datetime-local"]::-webkit-datetime-edit-second-field:focus,
+input[type="datetime-local"]::-webkit-datetime-edit-ampm-field:focus,
+input[type="time"]::-webkit-datetime-edit-hour-field:focus,
+input[type="time"]::-webkit-datetime-edit-minute-field:focus,
+input[type="time"]::-webkit-datetime-edit-second-field:focus,
+input[type="time"]::-webkit-datetime-edit-ampm-field:focus {
+  background-color: var(--jade-500);
+  color: var(--gray-0);
+  outline: none;
 }

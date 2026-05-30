@@ -2,52 +2,95 @@
 package notifications
 
 import (
+	"bytes"
+	"encoding/base64"
 	"fmt"
+	"io"
 	"log"
-	"net/smtp"
+	"mime/multipart"
+	"net/http"
+	"strings"
 )
 
-// EmailSender sends transactional email over SMTP (Mailgun in production).
-// If SMTP is not configured, it logs the message instead (dev mode).
+// EmailSender sends transactional email via the Mailgun Messages API.
+// If MAILGUN_API_KEY is not configured, it logs the message instead (dev mode).
 type EmailSender struct {
-	host    string
-	port    string
-	user    string
-	pass    string
+	apiKey  string
+	domain  string
 	from    string
+	apiBase string
 	baseURL string
+	client  *http.Client
 }
 
-func NewEmailSender(host, port, user, pass, from, baseURL string) *EmailSender {
-	return &EmailSender{host: host, port: port, user: user, pass: pass, from: from, baseURL: baseURL}
+func NewEmailSender(apiKey, domain, from, apiBase, baseURL string) *EmailSender {
+	return &EmailSender{
+		apiKey:  apiKey,
+		domain:  domain,
+		from:    from,
+		apiBase: strings.TrimRight(apiBase, "/"),
+		baseURL: baseURL,
+		client:  http.DefaultClient,
+	}
 }
 
 func (e *EmailSender) send(to, subject, body string) error {
-	if e.host == "" {
+	if e.apiKey == "" {
 		log.Printf("[email:dev] to=%s subject=%q\n%s", to, subject, body)
 		return nil
 	}
-	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
-		e.from, to, subject, body)
-	addr := e.host + ":" + e.port
-	authClient := smtp.PlainAuth("", e.user, e.pass, e.host)
-	if err := smtp.SendMail(addr, authClient, e.from, []string{to}, []byte(msg)); err != nil {
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	for _, field := range []struct{ name, value string }{
+		{"from", e.from},
+		{"to", to},
+		{"subject", subject},
+		{"html", body},
+	} {
+		if err := w.WriteField(field.name, field.value); err != nil {
+			return err
+		}
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("%s/v3/%s/messages", e.apiBase, e.domain)
+	req, err := http.NewRequest(http.MethodPost, url, &buf)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set("Authorization", "Basic "+basicAuth("api", e.apiKey))
+
+	resp, err := e.client.Do(req)
+	if err != nil {
 		log.Printf("email send failed to %s: %v", to, err)
 		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		log.Printf("email send failed to %s: status=%d body=%s", to, resp.StatusCode, strings.TrimSpace(string(respBody)))
+		return fmt.Errorf("mailgun returned status %d", resp.StatusCode)
 	}
 	return nil
 }
 
-func (e *EmailSender) SendInvite(to, token string) error {
+func basicAuth(user, pass string) string {
+	return base64.StdEncoding.EncodeToString([]byte(user + ":" + pass))
+}
+
+func (e *EmailSender) SendInvite(to, fullName, token string) error {
 	link := fmt.Sprintf("%s/invite/accept?token=%s", e.baseURL, token)
-	body := fmt.Sprintf(`<p>You have been invited to the Lead Distribution CRM.</p>
-<p><a href="%s">Accept your invite</a></p>`, link)
+	body := inviteEmail(e.baseURL, fullName, link)
 	return e.send(to, "You're invited to LeadRula", body)
 }
 
-func (e *EmailSender) SendPasswordReset(to, token string) error {
+func (e *EmailSender) SendPasswordReset(to, fullName, token string) error {
 	link := fmt.Sprintf("%s/reset?token=%s", e.baseURL, token)
-	body := fmt.Sprintf(`<p>Reset your password using the link below:</p>
-<p><a href="%s">Reset password</a></p>`, link)
+	body := passwordResetEmail(e.baseURL, fullName, link)
 	return e.send(to, "Reset your LeadRula password", body)
 }

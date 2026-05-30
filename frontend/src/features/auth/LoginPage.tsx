@@ -6,6 +6,7 @@ import { queryClient } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/misc";
+import { Logo } from "@/components/layout/Logo";
 import type { Me } from "@/types";
 
 export function LoginPage() {
@@ -24,7 +25,7 @@ export function LoginPage() {
     try {
       const res = await api.post("/auth/login", { email, password });
       const { access, refresh } = res.data.data;
-      queryClient.clear(); // drop any cached data from a prior session
+      queryClient.clear();
       setTokens(access, refresh);
       const me = await get<Me>("/auth/me");
       setAuth(access, refresh, {
@@ -34,6 +35,7 @@ export function LoginPage() {
         role: me.user.role,
         account_type: me.account.type,
         account_id: me.account.id,
+        avatar_url: me.user.avatar_url,
       });
       navigate(me.account.type === "publisher" ? "/p" : "/b");
     } catch {
@@ -45,16 +47,13 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-pd-bg">
-      <div className="w-full max-w-sm rounded-lg border border-pd-border bg-white p-8 shadow-sm">
-        <div className="mb-6 flex items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded bg-pd-green text-lg font-bold text-white">
-            L
-          </div>
-          <span className="text-xl font-bold">LeadRula</span>
+    <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <div className="w-full max-w-sm rounded-lg border border-gray-100 bg-white p-8 shadow-sm">
+        <div className="mb-6 flex items-center gap-2.5">
+          <Logo className="h-10 w-auto" />
         </div>
-        <h1 className="mb-1 text-lg font-bold">Sign in</h1>
-        <p className="mb-5 text-sm text-pd-muted">Welcome back. Enter your credentials.</p>
+        <h1 className="mb-1 text-lg font-semibold text-gray-800">Sign in</h1>
+        <p className="mb-5 text-base text-gray-400">Welcome back. Enter your credentials.</p>
         <form onSubmit={submit} className="space-y-4">
           <div>
             <Label>Email</Label>
@@ -69,7 +68,7 @@ export function LoginPage() {
               required
             />
           </div>
-          {error && <p className="text-sm text-pd-red">{error}</p>}
+          {error && <p className="text-sm text-danger">{error}</p>}
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? <Spinner className="text-white" /> : "Sign in"}
           </Button>

@@ -6,7 +6,7 @@ publisher and re-distributed; buyers are charged a flat rate per distributed lea
 
 - **Backend:** Go 1.25, go-chi, pgx v5, JWT auth, argon2id passwords
 - **Database:** PostgreSQL 15+ (local dev works on 14+)
-- **Frontend:** React 19 + Vite, Tailwind (Pipedrive tokens), TanStack Query + Zustand
+- **Frontend:** React 19 + Vite, Tailwind (jade design tokens), TanStack Query + Zustand
 - **Deploy:** Railway (Postgres + API via Dockerfile), Vercel (frontend SPA)
 
 ## Repository layout
@@ -65,7 +65,7 @@ npm run dev                    # http://localhost:5173
 2. Create a service with root directory `backend/`. It deploys via `backend/Dockerfile`
    (configured in `backend/railway.json`), which also builds the `bootstrap` and `seed-demo` binaries.
 3. Set env vars: `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `APP_BASE_URL` (the Vercel URL),
-   `CORS_ORIGINS` (the Vercel URL), and the Mailgun `SMTP_*` values.
+   `CORS_ORIGINS` (the Vercel URL), and Mailgun API vars (`MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, `MAILGUN_FROM`).
 4. Migrations run automatically on startup (`/healthz` is the health check). Create the first
    publisher admin once by opening a shell on the service and running
    `BOOTSTRAP_EMAIL=... BOOTSTRAP_PASSWORD=... /app/bootstrap` (optionally `/app/seed-demo`).

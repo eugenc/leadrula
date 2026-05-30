@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
@@ -30,19 +31,22 @@ var builtinFields = map[string]bool{
 const leadCols = `id, public_id, owner_account_id, publisher_id, contract_id,
 	first_name, last_name, phone, email, address, city, state, zip, campaign_name,
 	pipeline_id, stage_id, position, assigned_user_id, action_at, status,
-	disqualification_reason_id, created_at, updated_at`
+	disqualification_reason_id, created_at, updated_at, tags`
 
 func scanLead(row pgx.Row) (*Lead, error) {
 	l := &Lead{}
 	err := row.Scan(&l.ID, &l.PublicID, &l.OwnerAccountID, &l.PublisherID, &l.ContractID,
 		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.CampaignName,
 		&l.PipelineID, &l.StageID, &l.Position, &l.AssignedUserID, &l.ActionAt, &l.Status,
-		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt)
+		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt, &l.Tags)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, httpx.NotFound("lead not found")
 		}
 		return nil, err
+	}
+	if l.Tags == nil {
+		l.Tags = []string{}
 	}
 	return l, nil
 }
@@ -84,12 +88,21 @@ func (r *Repository) UpsertCustomValue(ctx context.Context, q database.Querier, 
 }
 
 // PlaceInPipeline assigns owner + pipeline/stage + contract.
-func (r *Repository) PlaceInPipeline(ctx context.Context, q database.Querier, leadID, ownerAccountID, pipelineID, stageID, contractID int64) error {
+func (r *Repository) PlaceInPipeline(ctx context.Context, q database.Querier, leadID, ownerAccountID, pipelineID, stageID int64, contractID *int64) error {
 	_, err := q.Exec(ctx,
 		`UPDATE leads SET owner_account_id=$2, pipeline_id=$3, stage_id=$4, contract_id=$5,
 		   position = COALESCE((SELECT MAX(position)+1 FROM leads WHERE stage_id=$4),0)
 		 WHERE id=$1`,
 		leadID, ownerAccountID, pipelineID, stageID, contractID)
+	return err
+}
+
+// TransferOwner reassigns a lead to a buyer without placing it in a pipeline.
+func (r *Repository) TransferOwner(ctx context.Context, q database.Querier, leadID, buyerID int64, contractID *int64) error {
+	_, err := q.Exec(ctx,
+		`UPDATE leads SET owner_account_id=$2, contract_id=$3, pipeline_id=NULL, stage_id=NULL, position=0
+		 WHERE id=$1`,
+		leadID, buyerID, contractID)
 	return err
 }
 
@@ -116,7 +129,19 @@ func (r *Repository) Get(ctx context.Context, p *auth.Principal, leadID int64) (
 	if err := r.attachCustomValues(ctx, l); err != nil {
 		return nil, err
 	}
+	if err := r.attachLeadNames(ctx, l); err != nil {
+		return nil, err
+	}
 	return l, nil
+}
+
+func (r *Repository) attachLeadNames(ctx context.Context, l *Lead) error {
+	return r.pool.QueryRow(ctx,
+		`SELECT CASE WHEN ba.type = 'buyer' THEN ba.name ELSE NULL END, u.full_name, u.prefs->>'avatar_url'
+		 FROM leads l
+		 LEFT JOIN accounts ba ON ba.id = l.owner_account_id AND ba.type = 'buyer'
+		 LEFT JOIN users u ON u.id = l.assigned_user_id
+		 WHERE l.id = $1`, l.ID).Scan(&l.BuyerName, &l.AssigneeName, &l.AssigneeAvatarURL)
 }
 
 func (r *Repository) attachCustomValues(ctx context.Context, l *Lead) error {
@@ -152,65 +177,209 @@ func (r *Repository) visible(ctx context.Context, p *auth.Principal, l *Lead) bo
 }
 
 type ListFilters struct {
-	Status     string
-	Campaign   string
-	PipelineID int64
-	StageID    int64
-	Assigned   int64
+	Status        string
+	Campaign      string
+	PipelineID    int64
+	StageID       int64
+	Assigned      int64
+	Tag           string
+	ActionOn      string
+	ActionTZ      string
+	ActionOverdue bool
+	Conditions    []FilterCondition
+	FilterTZ      string
 }
 
-// List returns leads for the principal's account honoring role visibility.
-func (r *Repository) List(ctx context.Context, p *auth.Principal, f ListFilters) ([]Lead, error) {
+type ListOptions struct {
+	ListFilters
+	Page    int
+	Limit   int
+	Sort    string
+	SortDir string
+	All     bool
+}
+
+var listSortCols = map[string]string{
+	"created_at":    "l.created_at",
+	"updated_at":    "l.updated_at",
+	"first_name":    "l.first_name",
+	"last_name":     "l.last_name",
+	"phone":         "l.phone",
+	"email":         "l.email",
+	"campaign_name": "l.campaign_name",
+	"status":        "l.status",
+	"action_at":     "l.action_at",
+	"buyer_name":    "buyer_name",
+	"assignee_name": "assignee_name",
+}
+
+const listFrom = ` FROM leads l
+	LEFT JOIN accounts ba ON ba.id = l.owner_account_id AND ba.type = 'buyer'
+	LEFT JOIN users u ON u.id = l.assigned_user_id`
+
+const listSelect = `l.id, l.public_id, l.owner_account_id, l.publisher_id, l.contract_id,
+	l.first_name, l.last_name, l.phone, l.email, l.address, l.city, l.state, l.zip, l.campaign_name,
+	l.pipeline_id, l.stage_id, l.position, l.assigned_user_id, l.action_at, l.status,
+	l.disqualification_reason_id, l.created_at, l.updated_at, l.tags,
+	CASE WHEN ba.type = 'buyer' THEN ba.name ELSE NULL END AS buyer_name,
+	u.full_name AS assignee_name,
+	u.prefs->>'avatar_url' AS assignee_avatar_url`
+
+func scanListLead(row pgx.Row) (*Lead, error) {
+	l := &Lead{}
+	err := row.Scan(&l.ID, &l.PublicID, &l.OwnerAccountID, &l.PublisherID, &l.ContractID,
+		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.CampaignName,
+		&l.PipelineID, &l.StageID, &l.Position, &l.AssignedUserID, &l.ActionAt, &l.Status,
+		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt, &l.Tags, &l.BuyerName, &l.AssigneeName, &l.AssigneeAvatarURL)
+	if err != nil {
+		return nil, err
+	}
+	if l.Tags == nil {
+		l.Tags = []string{}
+	}
+	return l, nil
+}
+
+func (r *Repository) listWhere(p *auth.Principal, f ListFilters) (string, []any) {
 	args := []any{p.AccountID}
-	where := "owner_account_id = $1"
+	where := "l.owner_account_id = $1"
 	add := func(cond string, val any) {
 		args = append(args, val)
 		where += fmt.Sprintf(" AND %s $%d", cond, len(args))
 	}
-	if f.Status != "" {
-		add("status =", f.Status)
-	}
-	if f.Campaign != "" {
-		add("campaign_name =", f.Campaign)
-	}
-	if f.PipelineID != 0 {
-		add("pipeline_id =", f.PipelineID)
-	}
-	if f.StageID != 0 {
-		add("stage_id =", f.StageID)
-	}
-	if f.Assigned != 0 {
-		add("assigned_user_id =", f.Assigned)
-	}
-	// role visibility
+
 	switch p.Role {
 	case "user":
 		args = append(args, p.UserID)
-		where += fmt.Sprintf(" AND assigned_user_id = $%d", len(args))
+		where += fmt.Sprintf(" AND l.assigned_user_id = $%d", len(args))
 	case "follower":
 		args = append(args, p.UserID)
-		where += fmt.Sprintf(" AND id IN (SELECT lead_id FROM lead_followers WHERE user_id = $%d)", len(args))
+		where += fmt.Sprintf(" AND l.id IN (SELECT lead_id FROM lead_followers WHERE user_id = $%d)", len(args))
 	}
 
-	rows, err := r.pool.Query(ctx, `SELECT `+leadCols+` FROM leads WHERE `+where+` ORDER BY stage_id, position, id`, args...)
+	if len(f.Conditions) > 0 {
+		conditions := append([]FilterCondition{}, f.Conditions...)
+		extra := flatFiltersToConditions(ListFilters{
+			Status: f.Status, Campaign: f.Campaign, PipelineID: f.PipelineID,
+			StageID: f.StageID, Assigned: f.Assigned, Tag: f.Tag,
+			ActionOn: f.ActionOn, ActionTZ: f.ActionTZ, ActionOverdue: f.ActionOverdue,
+		})
+		conditions = append(conditions, extra...)
+		tz := f.FilterTZ
+		if tz == "" {
+			tz = f.ActionTZ
+		}
+		if tz == "" {
+			tz = "UTC"
+		}
+		var err error
+		where, args, err = appendCompiledFilters(where, args, conditions, FilterContext{UserID: p.UserID, TZ: tz})
+		if err != nil {
+			where += " AND false"
+		}
+		return where, args
+	}
+
+	if f.Status != "" {
+		add("l.status =", f.Status)
+	}
+	if f.Campaign != "" {
+		add("l.campaign_name =", f.Campaign)
+	}
+	if f.PipelineID != 0 {
+		add("l.pipeline_id =", f.PipelineID)
+	}
+	if f.StageID != 0 {
+		add("l.stage_id =", f.StageID)
+	}
+	if f.Assigned != 0 {
+		add("l.assigned_user_id =", f.Assigned)
+	}
+	if f.Tag != "" {
+		args = append(args, f.Tag)
+		where += fmt.Sprintf(" AND $%d = ANY(l.tags)", len(args))
+	}
+	if f.ActionOverdue {
+		where += " AND l.action_at IS NOT NULL AND l.action_at < now()"
+	}
+	if f.ActionOn != "" && f.ActionTZ != "" {
+		args = append(args, f.ActionOn, f.ActionTZ)
+		dateArg := len(args) - 1
+		tzArg := len(args)
+		where += fmt.Sprintf(
+			" AND l.action_at >= ($%d::date AT TIME ZONE $%d) AND l.action_at < (($%d::date + interval '1 day') AT TIME ZONE $%d)",
+			dateArg, tzArg, dateArg, tzArg,
+		)
+	}
+	return where, args
+}
+
+func listOrderBy(sort, sortDir string) string {
+	col, ok := listSortCols[sort]
+	if !ok {
+		return "l.created_at DESC, l.id DESC"
+	}
+	dir := "ASC"
+	if sortDir == "desc" {
+		dir = "DESC"
+	}
+	return col + " " + dir + " NULLS LAST, l.id DESC"
+}
+
+// List returns leads for the principal's account honoring role visibility.
+func (r *Repository) List(ctx context.Context, p *auth.Principal, o ListOptions) (*ListResult, error) {
+	where, args := r.listWhere(p, o.ListFilters)
+
+	var total int
+	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) `+listFrom+` WHERE `+where, args...).Scan(&total); err != nil {
+		return nil, err
+	}
+
+	page := o.Page
+	if page < 1 {
+		page = 1
+	}
+	limit := o.Limit
+	if o.All || limit <= 0 {
+		limit = total
+		if limit == 0 {
+			limit = 1
+		}
+		page = 1
+	}
+	offset := (page - 1) * limit
+
+	q := `SELECT ` + listSelect + listFrom + ` WHERE ` + where + ` ORDER BY ` + listOrderBy(o.Sort, o.SortDir)
+	qArgs := append([]any{}, args...)
+	if !o.All && o.Limit > 0 {
+		q += fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(qArgs)+1, len(qArgs)+2)
+		qArgs = append(qArgs, limit, offset)
+	}
+
+	rows, err := r.pool.Query(ctx, q, qArgs...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []Lead
-	var ids []int64
 	for rows.Next() {
-		l, err := scanLead(rows)
+		l, err := scanListLead(rows)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, *l)
-		ids = append(ids, l.ID)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return r.attachCustomValuesBatch(ctx, out)
+	items, err := r.attachCustomValuesBatch(ctx, out)
+	if err != nil {
+		return nil, err
+	}
+	if items == nil {
+		items = []Lead{}
+	}
+	return &ListResult{Items: items, Total: total, Page: page, Limit: limit}, nil
 }
 
 // ListByAccount returns all leads for an account (publisher oversight; no role filter).
@@ -282,8 +451,67 @@ func (r *Repository) UpdateBuiltins(ctx context.Context, accountID, leadID int64
 }
 
 func (r *Repository) SetAssignee(ctx context.Context, accountID, leadID int64, userID *int64) error {
-	_, err := r.pool.Exec(ctx, `UPDATE leads SET assigned_user_id=$3 WHERE id=$1 AND owner_account_id=$2`, leadID, accountID, userID)
+	return r.setAssignee(ctx, r.pool, accountID, leadID, userID)
+}
+
+func (r *Repository) setAssignee(ctx context.Context, q database.Querier, accountID, leadID int64, userID *int64) error {
+	_, err := q.Exec(ctx, `UPDATE leads SET assigned_user_id=$3 WHERE id=$1 AND owner_account_id=$2`, leadID, accountID, userID)
 	return err
+}
+
+func normalizeTags(tags []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, t := range tags {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
+		key := strings.ToLower(t)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, t)
+	}
+	if out == nil {
+		return []string{}
+	}
+	return out
+}
+
+func (r *Repository) SetTags(ctx context.Context, accountID, leadID int64, tags []string) error {
+	return r.setTags(ctx, r.pool, accountID, leadID, tags)
+}
+
+func (r *Repository) setTags(ctx context.Context, q database.Querier, accountID, leadID int64, tags []string) error {
+	normalized := normalizeTags(tags)
+	_, err := q.Exec(ctx,
+		`UPDATE leads SET tags=$3 WHERE id=$1 AND owner_account_id=$2`,
+		leadID, accountID, normalized)
+	return err
+}
+
+func (r *Repository) ListTagSuggestions(ctx context.Context, accountID int64) ([]string, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT DISTINCT t FROM leads, unnest(tags) AS t
+		 WHERE owner_account_id = $1 ORDER BY t`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	if out == nil {
+		return []string{}, rows.Err()
+	}
+	return out, rows.Err()
 }
 
 func (r *Repository) SetActionAt(ctx context.Context, q database.Querier, leadID int64, actionAt *time.Time) error {
@@ -423,6 +651,37 @@ func (r *Repository) AddFollower(ctx context.Context, leadID, userID int64) erro
 func (r *Repository) RemoveFollower(ctx context.Context, leadID, userID int64) error {
 	_, err := r.pool.Exec(ctx, `DELETE FROM lead_followers WHERE lead_id=$1 AND user_id=$2`, leadID, userID)
 	return err
+}
+
+// Delete removes leads owned by the account.
+func (r *Repository) Delete(ctx context.Context, accountID int64, leadIDs []int64) (int64, error) {
+	tag, err := r.pool.Exec(ctx,
+		`DELETE FROM leads WHERE owner_account_id=$1 AND id = ANY($2)`, accountID, leadIDs)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// BulkSetAssignee sets assignee on leads owned by the account.
+func (r *Repository) BulkSetAssignee(ctx context.Context, accountID int64, leadIDs []int64, userID *int64) (int64, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE leads SET assigned_user_id=$3 WHERE owner_account_id=$1 AND id = ANY($2)`,
+		accountID, leadIDs, userID)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// BulkAddFollowers adds a follower to each lead.
+func (r *Repository) BulkAddFollowers(ctx context.Context, leadIDs []int64, userID int64) error {
+	for _, leadID := range leadIDs {
+		if err := r.AddFollower(ctx, leadID, userID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // AssignedUserIDForLead returns the assignee (for notifications), if any.

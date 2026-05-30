@@ -1,7 +1,6 @@
 package leads
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -24,12 +23,20 @@ func (h *Handler) RegisterBuyer(r chi.Router) {
 // RegisterPublisher mounts the lead routes plus publisher-only extras.
 func (h *Handler) RegisterPublisher(r chi.Router) {
 	h.registerCommon(r)
-	r.With(auth.RequireRole("admin")).Post("/leads", h.create)
 	r.With(auth.RequireRole("admin")).Post("/leads/{id}/redistribute", h.redistribute)
 }
 
 func (h *Handler) registerCommon(r chi.Router) {
+	r.Get("/leads/views", h.listViews)
+	r.Post("/leads/views", h.createView)
+	r.Patch("/leads/views/{viewId}", h.updateView)
+	r.Delete("/leads/views/{viewId}", h.deleteView)
 	r.Get("/leads", h.list)
+	r.Get("/leads/tags", h.listTags)
+	r.With(auth.RequireRole("admin", "user")).Post("/leads", h.create)
+	r.With(auth.RequireRole("admin", "user")).Post("/leads/import", h.importLeads)
+	r.With(auth.RequireRole("admin")).Post("/leads/bulk", h.bulk)
+	r.With(auth.RequireRole("admin")).Delete("/leads/{id}", h.delete)
 	r.Get("/leads/{id}", h.get)
 	r.Patch("/leads/{id}", h.update)
 	r.Patch("/leads/{id}/stage", h.changeStage)
@@ -50,13 +57,158 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		PipelineID: parseInt(q.Get("pipeline_id")),
 		StageID:    parseInt(q.Get("stage_id")),
 		Assigned:   parseInt(q.Get("assigned")),
+		Tag:        q.Get("tag"),
 	}
-	items, err := h.svc.repo.List(r.Context(), p, f)
+	tz := h.svc.AccountTimezone(r.Context(), p.AccountID)
+	f.FilterTZ = tz
+
+	actionOn := q.Get("action_on")
+	if actionOn != "" {
+		if actionOn == "today" {
+			actionOn = todayInTZ(tz)
+		}
+		f.ActionOn = actionOn
+		f.ActionTZ = tz
+	}
+	if q.Get("action_overdue") == "1" {
+		f.ActionOverdue = true
+	}
+
+	if filtersRaw := q.Get("filters"); filtersRaw != "" {
+		conditions, err := ParseFiltersJSON(filtersRaw)
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		f.Conditions = conditions
+	}
+
+	opts := ListOptions{
+		ListFilters: f,
+		Page:        int(parseInt(q.Get("page"))),
+		Limit:       int(parseInt(q.Get("limit"))),
+		Sort:        q.Get("sort"),
+		SortDir:     q.Get("sort_dir"),
+		All:         q.Get("all") == "1",
+	}
+
+	if viewID := q.Get("view_id"); viewID != "" {
+		conditions, view, err := h.svc.ResolveViewFilters(r.Context(), p, viewID)
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		f.Conditions = conditions
+		opts.ListFilters = f
+		if opts.Sort == "" && view != nil && view.Sort != "" {
+			opts.Sort = view.Sort
+		}
+		if opts.SortDir == "" && view != nil && view.SortDir != "" {
+			opts.SortDir = view.SortDir
+		}
+	}
+
+	result, err := h.svc.repo.List(r.Context(), p, opts)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, items)
+	httpx.JSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) listViews(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	views, err := h.svc.ListViews(r.Context(), p, r.URL.Query().Get("placement"))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, views)
+}
+
+func (h *Handler) createView(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body CreateViewInput
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	v, err := h.svc.CreateView(r.Context(), p, body)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, v)
+}
+
+func (h *Handler) updateView(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body UpdateViewInput
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	v, err := h.svc.UpdateView(r.Context(), p, chi.URLParam(r, "viewId"), body)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, v)
+}
+
+func (h *Handler) deleteView(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	if err := h.svc.DeleteView(r.Context(), p, chi.URLParam(r, "viewId")); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) listTags(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	tags, err := h.svc.repo.ListTagSuggestions(r.Context(), p.AccountID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, tags)
+}
+
+func (h *Handler) bulk(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		Action     string  `json:"action"`
+		IDs        []int64 `json:"ids"`
+		UserID     int64   `json:"user_id"`
+		ContractID int64   `json:"contract_id"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	result, err := h.svc.Bulk(r.Context(), p, BulkParams{
+		Action:     BulkAction(body.Action),
+		LeadIDs:    body.IDs,
+		UserID:     body.UserID,
+		ContractID: body.ContractID,
+	})
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	n, err := h.svc.repo.Delete(r.Context(), p.AccountID, []int64{id(r)})
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if n == 0 {
+		httpx.WriteError(w, httpx.NotFound("lead not found"))
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
@@ -77,6 +229,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		AssignedUserID *int64                     `json:"assigned_user_id"`
 		ClearAssignee  bool                       `json:"clear_assignee"`
 		CustomValues   map[string]json.RawMessage `json:"custom_values"`
+		Tags           *[]string                    `json:"tags"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
@@ -104,6 +257,12 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if err := h.svc.repo.UpsertCustomValue(r.Context(), h.svc.repo.pool, leadID, fid, val); err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+	}
+	if body.Tags != nil {
+		if err := h.svc.repo.SetTags(r.Context(), p.AccountID, leadID, *body.Tags); err != nil {
 			httpx.WriteError(w, err)
 			return
 		}
@@ -231,23 +390,11 @@ func (h *Handler) removeFollower(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	var body struct {
-		FirstName  string `json:"first_name"`
-		LastName   string `json:"last_name"`
-		Phone      string `json:"phone"`
-		Email      string `json:"email"`
-		PipelineID int64  `json:"pipeline_id"`
-		StageID    int64  `json:"stage_id"`
-	}
+	var body CreateLeadInput
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	leadID, err := h.createLead(r.Context(), p.AccountID, body.FirstName, body.LastName, body.Phone, body.Email, body.PipelineID, body.StageID)
-	if err != nil {
-		httpx.WriteError(w, err)
-		return
-	}
-	l, err := h.svc.repo.Get(r.Context(), p, leadID)
+	l, err := h.svc.CreateLead(r.Context(), p, body)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -255,31 +402,18 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, l)
 }
 
-func (h *Handler) createLead(ctx context.Context, accountID int64, first, last, phone, email string, pipelineID, stageID int64) (int64, error) {
-	pool := h.svc.repo.pool
-	tx, err := pool.Begin(ctx)
+func (h *Handler) importLeads(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body ImportLeadsInput
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	result, err := h.svc.ImportLeads(r.Context(), p, body)
 	if err != nil {
-		return 0, err
+		httpx.WriteError(w, err)
+		return
 	}
-	defer tx.Rollback(ctx)
-	leadID, _, err := h.svc.repo.InsertLead(ctx, tx, accountID, accountID, "", nil)
-	if err != nil {
-		return 0, err
-	}
-	_ = h.svc.repo.SetBuiltinField(ctx, tx, leadID, "first_name", first)
-	_ = h.svc.repo.SetBuiltinField(ctx, tx, leadID, "last_name", last)
-	if phone != "" {
-		_ = h.svc.repo.SetBuiltinField(ctx, tx, leadID, "phone", phone)
-	}
-	if email != "" {
-		_ = h.svc.repo.SetBuiltinField(ctx, tx, leadID, "email", email)
-	}
-	if pipelineID != 0 && stageID != 0 {
-		if _, err := tx.Exec(ctx, `UPDATE leads SET pipeline_id=$2, stage_id=$3 WHERE id=$1`, leadID, pipelineID, stageID); err != nil {
-			return 0, err
-		}
-	}
-	return leadID, tx.Commit(ctx)
+	httpx.JSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) redistribute(w http.ResponseWriter, r *http.Request) {
@@ -306,4 +440,12 @@ func id(r *http.Request) int64 {
 func parseInt(s string) int64 {
 	v, _ := strconv.ParseInt(s, 10, 64)
 	return v
+}
+
+func todayInTZ(tz string) string {
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		loc = time.UTC
+	}
+	return time.Now().In(loc).Format("2006-01-02")
 }

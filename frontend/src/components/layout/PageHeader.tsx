@@ -1,19 +1,25 @@
+import { cn } from "@/lib/utils";
+
 export function PageHeader({
   title,
   subtitle,
   action,
+  className,
 }: {
-  title: string;
+  title?: string;
   subtitle?: string;
   action?: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <div className="mb-5 flex items-end justify-between">
+    <div className={cn("flex items-start justify-between px-8 pt-6", className)}>
       <div>
-        <h2 className="text-xl font-bold text-pd-text">{title}</h2>
-        {subtitle && <p className="text-sm text-pd-muted">{subtitle}</p>}
+        {title && <h2 className="text-xl font-semibold text-gray-800">{title}</h2>}
+        {subtitle && (
+          <p className={cn(title ? "mt-0.5" : "", "text-base text-gray-400")}>{subtitle}</p>
+        )}
       </div>
-      {action}
+      {action && <div className="shrink-0">{action}</div>}
     </div>
   );
 }

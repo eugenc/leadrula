@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useIntakeQueue, useRouteQueue, useRejectQueue, useBuyers } from "@/features/admin/hooks";
-import { PageHeader } from "@/components/layout/PageHeader";
+import { PageBody } from "@/components/layout/PageBody";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Label, Select } from "@/components/ui/input";
@@ -17,54 +17,55 @@ export function IntakeQueuePage() {
   const [routing, setRouting] = useState<QueueItem | null>(null);
 
   return (
-    <div>
-      <PageHeader title="Intake Queue" subtitle="Leads awaiting manual routing." />
-      {isLoading ? (
-        <Spinner className="h-6 w-6" />
-      ) : (queue ?? []).length === 0 ? (
-        <EmptyState title="The intake queue is empty." />
-      ) : (
-        <Table>
-          <THead>
-            <tr>
-              <TH>Name</TH>
-              <TH>Phone</TH>
-              <TH>Campaign</TH>
-              <TH>Received</TH>
-              <TH />
-            </tr>
-          </THead>
-          <TBody>
-            {(queue ?? []).map((q) => (
-              <TR key={q.id}>
-                <TD className="font-semibold">
-                  {q.first_name} {q.last_name}
-                </TD>
-                <TD>{q.phone ?? "—"}</TD>
-                <TD>{q.campaign_name ?? "—"}</TD>
-                <TD>{format(new Date(q.created_at), "MMM d, h:mma")}</TD>
-                <TD>
-                  <div className="flex justify-end gap-2">
-                    <Button size="sm" onClick={() => setRouting(q)}>
-                      Route
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => reject.mutate(q.id, { onError: (e) => toast.error(apiError(e).message) })}
-                    >
-                      Reject
-                    </Button>
-                  </div>
-                </TD>
-              </TR>
-            ))}
-          </TBody>
-        </Table>
-      )}
+    <>
+      <PageBody>
+        {isLoading ? (
+          <Spinner className="h-6 w-6" />
+        ) : (queue ?? []).length === 0 ? (
+          <EmptyState title="The intake queue is empty." />
+        ) : (
+          <Table>
+            <THead>
+              <tr>
+                <TH>Name</TH>
+                <TH>Phone</TH>
+                <TH>Campaign</TH>
+                <TH>Received</TH>
+                <TH />
+              </tr>
+            </THead>
+            <TBody>
+              {(queue ?? []).map((q) => (
+                <TR key={q.id}>
+                  <TD className="font-medium text-gray-800">
+                    {q.first_name} {q.last_name}
+                  </TD>
+                  <TD>{q.phone ?? "—"}</TD>
+                  <TD>{q.campaign_name ?? "—"}</TD>
+                  <TD>{format(new Date(q.created_at), "MMM d, h:mma")}</TD>
+                  <TD>
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" onClick={() => setRouting(q)}>
+                        Route
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => reject.mutate(q.id, { onError: (e) => toast.error(apiError(e).message) })}
+                      >
+                        Reject
+                      </Button>
+                    </div>
+                  </TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+        )}
 
-      {routing && <RouteDialog item={routing} onClose={() => setRouting(null)} />}
-    </div>
+        {routing && <RouteDialog item={routing} onClose={() => setRouting(null)} />}
+      </PageBody>
+    </>
   );
 }
 
@@ -86,12 +87,12 @@ function RouteDialog({ item, onClose }: { item: QueueItem; onClose: () => void }
               </option>
             ))}
           </Select>
-          <p className="mt-1 text-xs text-pd-muted">
+          <p className="mt-1 text-xs text-gray-400">
             The lead lands in the buyer's contract pipeline and the buyer is charged the contract rate.
           </p>
         </div>
         <div className="flex justify-end gap-2 pt-2">
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
           <Button

@@ -18,3 +18,8 @@ export function initials(name: string): string {
     .map((p) => p[0]?.toUpperCase())
     .join("");
 }
+
+export function formatRole(role: string): string {
+  if (!role) return "";
+  return role.charAt(0).toUpperCase() + role.slice(1);
+}

@@ -26,6 +26,7 @@ type Stage struct {
 	PipelineID             int64     `json:"pipeline_id"`
 	Name                   string    `json:"name"`
 	Position               int       `json:"position"`
+	Color                  string    `json:"color"`
 	PromptActionDatetime   bool      `json:"prompt_action_datetime"`
 	PromptDisqualification bool      `json:"prompt_disqualification"`
 	CreatedAt              time.Time `json:"created_at"`
@@ -94,7 +95,7 @@ func (s *Service) Delete(ctx context.Context, accountID, id int64) error {
 
 func (s *Service) ListStages(ctx context.Context, accountID, pipelineID int64) ([]Stage, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT st.id, st.public_id, st.pipeline_id, st.name, st.position,
+		`SELECT st.id, st.public_id, st.pipeline_id, st.name, st.position, st.color,
 		        st.prompt_action_datetime, st.prompt_disqualification, st.created_at
 		 FROM pipeline_stages st JOIN pipelines p ON p.id = st.pipeline_id
 		 WHERE st.pipeline_id = $1 AND p.account_id = $2
@@ -106,7 +107,13 @@ func (s *Service) ListStages(ctx context.Context, accountID, pipelineID int64) (
 	return scanStages(rows)
 }
 
-func (s *Service) CreateStage(ctx context.Context, accountID, pipelineID int64, name string, promptAction, promptDisq bool) (*Stage, error) {
+func (s *Service) CreateStage(ctx context.Context, accountID, pipelineID int64, name, color string, promptAction, promptDisq bool) (*Stage, error) {
+	if color == "" {
+		color = "gray"
+	}
+	if err := validateColor(color); err != nil {
+		return nil, err
+	}
 	// verify pipeline ownership
 	var owned bool
 	if err := s.pool.QueryRow(ctx,
@@ -118,28 +125,34 @@ func (s *Service) CreateStage(ctx context.Context, accountID, pipelineID int64, 
 	}
 	st := &Stage{}
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO pipeline_stages(pipeline_id, name, position, prompt_action_datetime, prompt_disqualification)
-		 VALUES ($1, $2, COALESCE((SELECT MAX(position)+1 FROM pipeline_stages WHERE pipeline_id=$1), 0), $3, $4)
-		 RETURNING id, public_id, pipeline_id, name, position, prompt_action_datetime, prompt_disqualification, created_at`,
-		pipelineID, name, promptAction, promptDisq).Scan(
-		&st.ID, &st.PublicID, &st.PipelineID, &st.Name, &st.Position,
+		`INSERT INTO pipeline_stages(pipeline_id, name, position, color, prompt_action_datetime, prompt_disqualification)
+		 VALUES ($1, $2, COALESCE((SELECT MAX(position)+1 FROM pipeline_stages WHERE pipeline_id=$1), 0), $3, $4, $5)
+		 RETURNING id, public_id, pipeline_id, name, position, color, prompt_action_datetime, prompt_disqualification, created_at`,
+		pipelineID, name, color, promptAction, promptDisq).Scan(
+		&st.ID, &st.PublicID, &st.PipelineID, &st.Name, &st.Position, &st.Color,
 		&st.PromptActionDatetime, &st.PromptDisqualification, &st.CreatedAt)
 	return st, err
 }
 
-func (s *Service) UpdateStage(ctx context.Context, accountID, stageID int64, name *string, promptAction, promptDisq *bool) (*Stage, error) {
+func (s *Service) UpdateStage(ctx context.Context, accountID, stageID int64, name, color *string, promptAction, promptDisq *bool) (*Stage, error) {
+	if color != nil {
+		if err := validateColor(*color); err != nil {
+			return nil, err
+		}
+	}
 	st := &Stage{}
 	err := s.pool.QueryRow(ctx,
 		`UPDATE pipeline_stages st SET
 		   name = COALESCE($3, st.name),
-		   prompt_action_datetime = COALESCE($4, st.prompt_action_datetime),
-		   prompt_disqualification = COALESCE($5, st.prompt_disqualification)
+		   color = COALESCE($4, st.color),
+		   prompt_action_datetime = COALESCE($5, st.prompt_action_datetime),
+		   prompt_disqualification = COALESCE($6, st.prompt_disqualification)
 		 FROM pipelines p
 		 WHERE st.id = $1 AND p.id = st.pipeline_id AND p.account_id = $2
-		 RETURNING st.id, st.public_id, st.pipeline_id, st.name, st.position,
+		 RETURNING st.id, st.public_id, st.pipeline_id, st.name, st.position, st.color,
 		           st.prompt_action_datetime, st.prompt_disqualification, st.created_at`,
-		stageID, accountID, name, promptAction, promptDisq).Scan(
-		&st.ID, &st.PublicID, &st.PipelineID, &st.Name, &st.Position,
+		stageID, accountID, name, color, promptAction, promptDisq).Scan(
+		&st.ID, &st.PublicID, &st.PipelineID, &st.Name, &st.Position, &st.Color,
 		&st.PromptActionDatetime, &st.PromptDisqualification, &st.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("stage not found")
@@ -196,7 +209,7 @@ func scanStages(rows pgx.Rows) ([]Stage, error) {
 	var out []Stage
 	for rows.Next() {
 		var st Stage
-		if err := rows.Scan(&st.ID, &st.PublicID, &st.PipelineID, &st.Name, &st.Position,
+		if err := rows.Scan(&st.ID, &st.PublicID, &st.PipelineID, &st.Name, &st.Position, &st.Color,
 			&st.PromptActionDatetime, &st.PromptDisqualification, &st.CreatedAt); err != nil {
 			return nil, err
 		}

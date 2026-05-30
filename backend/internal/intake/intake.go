@@ -29,6 +29,10 @@ func NewService(pool *pgxpool.Pool, leadRepo *leads.Repository, notif *notificat
 	return &Service{pool: pool, leads: leadRepo, notif: notif, accounts: acc}
 }
 
+func (s *Service) routeDeps() leads.RouteApplyDeps {
+	return leads.RouteApplyDeps{Repo: s.leads, Accounts: s.accounts, Notif: s.notif}
+}
+
 // IngestResult is returned to the API caller.
 type IngestResult struct {
 	LeadID string `json:"lead_id"`
@@ -37,11 +41,7 @@ type IngestResult struct {
 
 var builtinKeys = []string{"first_name", "last_name", "phone", "email", "address", "city", "state", "zip"}
 
-// Ingest runs the atomic intake flow (DB spec §4.1).
-func (s *Service) Ingest(ctx context.Context, publisherID int64, raw map[string]any) (*IngestResult, error) {
-	campaignName, _ := raw["campaign_name"].(string)
-
-	// flatten: top-level keys plus any "custom" object keys are matchable sources
+func flattenPayload(raw map[string]any) map[string]any {
 	sources := map[string]any{}
 	for k, v := range raw {
 		if k == "custom" {
@@ -54,7 +54,12 @@ func (s *Service) Ingest(ctx context.Context, publisherID int64, raw map[string]
 			sources[k] = v
 		}
 	}
+	return sources
+}
 
+// Ingest lands legacy POST /api/v1/leads payloads in the intake queue.
+func (s *Service) Ingest(ctx context.Context, publisherID int64, raw map[string]any) (*IngestResult, error) {
+	campaignName, _ := raw["campaign_name"].(string)
 	rawJSON, _ := json.Marshal(raw)
 
 	tx, err := s.pool.Begin(ctx)
@@ -67,8 +72,7 @@ func (s *Service) Ingest(ctx context.Context, publisherID int64, raw map[string]
 	if err != nil {
 		return nil, err
 	}
-
-	// populate well-known builtin contact fields from explicit top-level keys
+	sources := flattenPayload(raw)
 	for _, k := range builtinKeys {
 		if v, ok := sources[k]; ok {
 			if str := toText(v); str != "" {
@@ -78,26 +82,50 @@ func (s *Service) Ingest(ctx context.Context, publisherID int64, raw map[string]
 			}
 		}
 	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO lead_intake_queue(lead_id, raw_payload, campaign_name) VALUES ($1,$2,$3)`,
+		leadID, rawJSON, nullStr(campaignName)); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &IngestResult{LeadID: publicID, Status: "review"}, nil
+}
 
-	match, err := routing.MatchCampaign(ctx, tx, publisherID, campaignName)
+// IngestFromSource handles POST /api/v1/sources/{slug}.
+func (s *Service) IngestFromSource(ctx context.Context, publisherID int64, slug string, raw map[string]any) (*IngestResult, error) {
+	rawJSON, _ := json.Marshal(raw)
+	sources := flattenPayload(raw)
+
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if match == nil {
-		// no campaign → intake queue, stays with publisher in review
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO lead_intake_queue(lead_id, raw_payload, campaign_name) VALUES ($1,$2,$3)`,
-			leadID, rawJSON, nullStr(campaignName)); err != nil {
-			return nil, err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return nil, err
-		}
-		return &IngestResult{LeadID: publicID, Status: "review"}, nil
+	defer tx.Rollback(ctx)
+
+	src, err := routing.MatchSourceBySlug(ctx, tx, publisherID, slug)
+	if err != nil {
+		return nil, err
+	}
+	if src == nil {
+		return nil, httpx.NotFound("source not found")
 	}
 
-	// apply per-campaign field mapping
-	maps, err := routing.FieldMap(ctx, tx, match.CampaignID)
+	leadID, publicID, err := s.leads.InsertLead(ctx, tx, publisherID, publisherID, slug, rawJSON)
+	if err != nil {
+		return nil, err
+	}
+	for _, k := range builtinKeys {
+		if v, ok := sources[k]; ok {
+			if str := toText(v); str != "" {
+				if err := s.leads.SetBuiltinField(ctx, tx, leadID, k, str); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	maps, err := routing.SourceFieldMap(ctx, tx, src.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -118,16 +146,14 @@ func (s *Service) Ingest(ctx context.Context, publisherID int64, raw map[string]
 		}
 	}
 
-	// resolve buyer contract by the campaign's target (buyer) pipeline
-	target, err := contracts.FindByBuyerPipeline(ctx, tx, match.TargetPipelineID)
+	rt, err := routing.RouteForSource(ctx, tx, src.ID)
 	if err != nil {
 		return nil, err
 	}
-	if target == nil {
-		// configured campaign but no contract — fall back to the queue
+	if rt == nil {
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO lead_intake_queue(lead_id, raw_payload, campaign_name) VALUES ($1,$2,$3)`,
-			leadID, rawJSON, nullStr(campaignName)); err != nil {
+			leadID, rawJSON, slug); err != nil {
 			return nil, err
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -136,27 +162,19 @@ func (s *Service) Ingest(ctx context.Context, publisherID int64, raw map[string]
 		return &IngestResult{LeadID: publicID, Status: "review"}, nil
 	}
 
-	if err := s.leads.PlaceInPipeline(ctx, tx, leadID, target.BuyerID, target.BuyerPipelineID, match.TargetStageID, target.ID); err != nil {
+	if err := leads.ApplyRoute(ctx, tx, s.routeDeps(), rt, publisherID, leadID); err != nil {
 		return nil, err
 	}
-	if err := billing.Debit(ctx, tx, target.BuyerID, target.RatePerLead, leadID, target.ID, "lead distributed: "+campaignName); err != nil {
-		return nil, err
+	status := "review"
+	if rt.Destination == "buyer" && rt.Delivery == "leads_pipeline" {
+		status = "distributed"
+	} else if rt.Destination == "publisher" && rt.Delivery == "leads_pipeline" {
+		status = "distributed"
 	}
-	if err := s.leads.SetStatus(ctx, tx, leadID, "distributed"); err != nil {
-		return nil, err
-	}
-	adminIDs, err := s.accounts.AdminUserIDs(ctx, tx, target.BuyerID)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.notif.Enqueue(ctx, tx, adminIDs, "new_lead", map[string]any{"lead_id": leadID}); err != nil {
-		return nil, err
-	}
-
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	return &IngestResult{LeadID: publicID, Status: "distributed"}, nil
+	return &IngestResult{LeadID: publicID, Status: status}, nil
 }
 
 // SetActionByPublicID sets a lead's action_at via the public API.
@@ -232,8 +250,6 @@ func (s *Service) RouteFromQueue(ctx context.Context, queueID, pipelineID, stage
 	if target == nil {
 		return httpx.BusinessRule("selected buyer has no active contract")
 	}
-	// Default to the buyer's contract pipeline + its first stage when the
-	// caller didn't specify an explicit destination.
 	if pipelineID == 0 {
 		pipelineID = target.BuyerPipelineID
 	}
@@ -244,7 +260,8 @@ func (s *Service) RouteFromQueue(ctx context.Context, queueID, pipelineID, stage
 			return httpx.BusinessRule("target pipeline has no stages")
 		}
 	}
-	if err := s.leads.PlaceInPipeline(ctx, tx, leadID, buyerID, pipelineID, stageID, target.ID); err != nil {
+	contractID := target.ID
+	if err := s.leads.PlaceInPipeline(ctx, tx, leadID, buyerID, pipelineID, stageID, &contractID); err != nil {
 		return err
 	}
 	if err := billing.Debit(ctx, tx, buyerID, target.RatePerLead, leadID, target.ID, "lead routed from intake queue"); err != nil {

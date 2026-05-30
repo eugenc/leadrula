@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Label, Select } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
 import type { Stage } from "@/types";
 import { useDisqReasons } from "./hooks";
 
@@ -32,18 +32,40 @@ export function StagePromptModal({
   const valid = (!needAction || actionAt) && (!needDisq || reasonId);
 
   return (
-    <Dialog open={open} onClose={onCancel} title={`Move to "${stage.name}"`}>
+    <Dialog
+      open={open}
+      onClose={onCancel}
+      title={`Move to "${stage.name}"`}
+      subtitle="Complete the required fields to move this lead."
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button
+            disabled={!valid}
+            onClick={() =>
+              onConfirm({
+                action_at: needAction && actionAt ? new Date(actionAt).toISOString() : undefined,
+                disqualification_reason_id: needDisq && reasonId ? Number(reasonId) : undefined,
+              })
+            }
+          >
+            Confirm Move
+          </Button>
+        </>
+      }
+    >
       <div className="space-y-4">
         {needAction && (
           <div>
             <Label>Action Date &amp; Time</Label>
-            <input
+            <Input
               type="datetime-local"
               value={actionAt}
               onChange={(e) => setActionAt(e.target.value)}
-              className="h-9 w-full rounded border border-pd-border px-3 text-sm"
             />
-            <p className="mt-1 text-xs text-pd-muted">When should the next action happen?</p>
+            <p className="mt-1 text-xs text-gray-400">When should the next action happen?</p>
           </div>
         )}
         {needDisq && (
@@ -61,22 +83,6 @@ export function StagePromptModal({
             </Select>
           </div>
         )}
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="outline" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button
-            disabled={!valid}
-            onClick={() =>
-              onConfirm({
-                action_at: needAction && actionAt ? new Date(actionAt).toISOString() : undefined,
-                disqualification_reason_id: needDisq && reasonId ? Number(reasonId) : undefined,
-              })
-            }
-          >
-            Confirm Move
-          </Button>
-        </div>
       </div>
     </Dialog>
   );

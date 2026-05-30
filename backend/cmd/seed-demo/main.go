@@ -1,5 +1,5 @@
 // Command seed-demo populates a development database with buyers, pipelines,
-// contracts, routing campaigns and sample leads. Safe to skip if already seeded.
+// contracts, routing sources/routes and sample leads. Safe to skip if already seeded.
 package main
 
 import (
@@ -118,22 +118,33 @@ func seedBuyer(ctx context.Context, pool *pgxpool.Pool, publisherID, buyerID int
 	// return rule: Missed Appointment returns the lead
 	_, _ = pool.Exec(ctx, `INSERT INTO contract_return_rules(contract_id, buyer_stage_id) VALUES ($1,$2)`, contractID, missed)
 
-	// routing campaign + field map
-	var campaignID int64
+	// routing source + route + field maps
+	var sourceID int64
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO routing_campaigns(publisher_id, campaign_name, target_pipeline_id, target_stage_id)
-		 VALUES ($1,$2,$3,$4) RETURNING id`,
-		publisherID, campaign, pipe, newLead).Scan(&campaignID); err != nil {
-		log.Fatalf("campaign: %v", err)
+		`INSERT INTO routing_sources(publisher_id, name, slug) VALUES ($1,$2,$3) RETURNING id`,
+		publisherID, "Roofing GTA", "roofing-gta").Scan(&sourceID); err != nil {
+		log.Fatalf("source: %v", err)
 	}
 	for _, fm := range []struct{ src, field string }{
 		{"phone_number", "phone"}, {"fname", "first_name"}, {"lname", "last_name"}, {"email", "email"},
 	} {
 		field := fm.field
 		_, _ = pool.Exec(ctx,
-			`INSERT INTO routing_field_map(campaign_id, source_key, target_type, builtin_field) VALUES ($1,$2,'builtin',$3)`,
-			campaignID, fm.src, field)
+			`INSERT INTO routing_source_field_map(source_id, source_key, target_type, builtin_field) VALUES ($1,$2,'builtin',$3)`,
+			sourceID, fm.src, field)
 	}
+	contractIDPtr := contractID
+	delivery := "leads_pipeline"
+	stageIDPtr := newLead
+	_, _ = pool.Exec(ctx,
+		`INSERT INTO routes(publisher_id, name, origin, source_id, destination, contract_id, delivery, target_stage_id)
+		 VALUES ($1,$2,'source',$3,'buyer',$4,$5,$6)`,
+		publisherID, "Roofing GTA → Buyer", sourceID, contractIDPtr, delivery, stageIDPtr)
+	// pipeline-origin route: when lead hits publisher Ready stage, send to buyer
+	_, _ = pool.Exec(ctx,
+		`INSERT INTO routes(publisher_id, name, origin, origin_pipeline_id, origin_stage_id, destination, contract_id, delivery, target_stage_id)
+		 VALUES ($1,$2,'pipeline',$3,$4,'buyer',$5,$6,$7)`,
+		publisherID, "Ready → Buyer", pubPipeline, pubReady, contractID, delivery, newLead)
 
 	// sample distributed leads
 	for i, nm := range [][2]string{{"Jane", "Doe"}, {"John", "Smith"}, {"Maria", "Lopez"}} {

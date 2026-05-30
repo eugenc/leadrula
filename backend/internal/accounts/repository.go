@@ -155,14 +155,16 @@ func (r *Repository) ListUsers(ctx context.Context, accountID int64) ([]User, er
 	return out, rows.Err()
 }
 
-func (r *Repository) UpdateUser(ctx context.Context, accountID, userID int64, role *string, isActive *bool) (*User, error) {
+func (r *Repository) UpdateUser(ctx context.Context, accountID, userID int64, p UpdateUserParams) (*User, error) {
 	const q = `
 		UPDATE users SET
 			role = COALESCE($3, role),
-			is_active = COALESCE($4, is_active)
+			full_name = COALESCE($4, full_name),
+			email = COALESCE($5, email),
+			is_active = COALESCE($6, is_active)
 		WHERE id = $1 AND account_id = $2
 		RETURNING id, public_id, account_id, email, full_name, role, is_active, prefs, last_login_at, created_at`
-	return scanUser(r.pool.QueryRow(ctx, q, userID, accountID, role, isActive))
+	return scanUser(r.pool.QueryRow(ctx, q, userID, accountID, p.Role, p.FullName, p.Email, p.IsActive))
 }
 
 func (r *Repository) UpdatePrefs(ctx context.Context, userID int64, prefs []byte) error {
@@ -186,11 +188,98 @@ func (r *Repository) DeleteUser(ctx context.Context, accountID, userID int64) er
 func (r *Repository) CreateInvite(ctx context.Context, accountID int64, email, fullName, role, token string, expires time.Time) (*Invite, error) {
 	const q = `INSERT INTO invites(account_id, email, full_name, role, token, expires_at)
 		VALUES ($1,$2,$3,$4,$5,$6)
-		RETURNING id, account_id, email, full_name, role, token, expires_at, created_at`
+		RETURNING id, account_id, email, full_name, role, expires_at, created_at`
 	inv := &Invite{}
 	err := r.pool.QueryRow(ctx, q, accountID, email, fullName, role, token, expires).Scan(
-		&inv.ID, &inv.AccountID, &inv.Email, &inv.FullName, &inv.Role, &inv.Token, &inv.ExpiresAt, &inv.CreatedAt)
+		&inv.ID, &inv.AccountID, &inv.Email, &inv.FullName, &inv.Role, &inv.ExpiresAt, &inv.CreatedAt)
 	return inv, err
+}
+
+func (r *Repository) ListPendingInvites(ctx context.Context, accountID int64) ([]Invite, error) {
+	const q = `SELECT id, account_id, email, full_name, role, expires_at, created_at
+		FROM invites
+		WHERE account_id = $1 AND accepted_at IS NULL AND expires_at > now()
+		ORDER BY created_at`
+	rows, err := r.pool.Query(ctx, q, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Invite
+	for rows.Next() {
+		inv := Invite{}
+		if err := rows.Scan(&inv.ID, &inv.AccountID, &inv.Email, &inv.FullName, &inv.Role, &inv.ExpiresAt, &inv.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, inv)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) FindPendingInviteByEmail(ctx context.Context, accountID int64, email string) (*Invite, error) {
+	const q = `SELECT id, account_id, email, full_name, role, expires_at, created_at
+		FROM invites
+		WHERE account_id = $1 AND email = $2 AND accepted_at IS NULL AND expires_at > now()`
+	inv := &Invite{}
+	err := r.pool.QueryRow(ctx, q, accountID, email).Scan(
+		&inv.ID, &inv.AccountID, &inv.Email, &inv.FullName, &inv.Role, &inv.ExpiresAt, &inv.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return inv, nil
+}
+
+func (r *Repository) GetPendingInvite(ctx context.Context, accountID, inviteID int64) (*InviteRow, error) {
+	const q = `SELECT id, account_id, email, full_name, role, token, expires_at, false
+		FROM invites
+		WHERE id = $1 AND account_id = $2 AND accepted_at IS NULL AND expires_at > now()`
+	row := &InviteRow{}
+	err := r.pool.QueryRow(ctx, q, inviteID, accountID).Scan(
+		&row.ID, &row.AccountID, &row.Email, &row.FullName, &row.Role, &row.Token, &row.ExpiresAt, &row.Accepted)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return row, nil
+}
+
+func (r *Repository) UpdateInvite(ctx context.Context, accountID, inviteID int64, email, fullName, role, token *string, expires *time.Time) (*Invite, error) {
+	const q = `
+		UPDATE invites SET
+			email = COALESCE($3, email),
+			full_name = COALESCE($4, full_name),
+			role = COALESCE($5, role),
+			token = COALESCE($6, token),
+			expires_at = COALESCE($7, expires_at)
+		WHERE id = $1 AND account_id = $2 AND accepted_at IS NULL
+		RETURNING id, account_id, email, full_name, role, expires_at, created_at`
+	inv := &Invite{}
+	err := r.pool.QueryRow(ctx, q, inviteID, accountID, email, fullName, role, token, expires).Scan(
+		&inv.ID, &inv.AccountID, &inv.Email, &inv.FullName, &inv.Role, &inv.ExpiresAt, &inv.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return inv, nil
+}
+
+func (r *Repository) DeleteInvite(ctx context.Context, accountID, inviteID int64) error {
+	ct, err := r.pool.Exec(ctx,
+		`DELETE FROM invites WHERE id = $1 AND account_id = $2 AND accepted_at IS NULL`, inviteID, accountID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // CreateBuyer inserts a buyer account, admin invite, balance row, and optional credit txn.
@@ -256,15 +345,17 @@ type InviteRow struct {
 	Email     string
 	FullName  string
 	Role      string
+	Token     string
 	ExpiresAt time.Time
 	Accepted  bool
 }
 
 func (r *Repository) FindInviteByToken(ctx context.Context, token string) (*InviteRow, error) {
-	const q = `SELECT id, account_id, email, full_name, role, expires_at, (accepted_at IS NOT NULL)
+	const q = `SELECT id, account_id, email, full_name, role, token, expires_at, (accepted_at IS NOT NULL)
 		FROM invites WHERE token = $1`
 	row := &InviteRow{}
-	err := r.pool.QueryRow(ctx, q, token).Scan(&row.ID, &row.AccountID, &row.Email, &row.FullName, &row.Role, &row.ExpiresAt, &row.Accepted)
+	err := r.pool.QueryRow(ctx, q, token).Scan(
+		&row.ID, &row.AccountID, &row.Email, &row.FullName, &row.Role, &row.Token, &row.ExpiresAt, &row.Accepted)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound

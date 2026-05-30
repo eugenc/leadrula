@@ -105,6 +105,15 @@ export async function post<T>(path: string, body?: unknown): Promise<T> {
   }
 }
 
+export async function postForm<T>(path: string, form: FormData): Promise<T> {
+  try {
+    const res = await api.post(path, form);
+    return res.data.data as T;
+  } catch (e) {
+    throw apiError(e);
+  }
+}
+
 export async function patch<T>(path: string, body?: unknown): Promise<T> {
   try {
     const res = await api.patch(path, body);

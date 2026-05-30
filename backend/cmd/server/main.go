@@ -22,6 +22,7 @@ import (
 	"github.com/echayko/leadrula/backend/internal/oversight"
 	"github.com/echayko/leadrula/backend/internal/pipelines"
 	"github.com/echayko/leadrula/backend/internal/routing"
+	"github.com/echayko/leadrula/backend/internal/storage"
 	mw "github.com/echayko/leadrula/backend/pkg/middleware"
 	"github.com/go-chi/chi/v5"
 )
@@ -47,10 +48,11 @@ func main() {
 
 	// ── wiring ───────────────────────────────────────────────────
 	tokens := auth.NewTokenManager(cfg.JWTAccessSecret, cfg.JWTRefreshSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
-	email := notifications.NewEmailSender(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom, cfg.AppBaseURL)
+	email := notifications.NewEmailSender(cfg.MailgunAPIKey, cfg.MailgunDomain, cfg.MailgunFrom, cfg.MailgunAPIBase, cfg.AppBaseURL)
+	avatars := storage.NewAvatarStore(cfg.S3Endpoint, cfg.S3Bucket, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3PublicURL)
 
 	accountsRepo := accounts.NewRepository(pool)
-	accountsSvc := accounts.NewService(accountsRepo, tokens, email)
+	accountsSvc := accounts.NewService(accountsRepo, tokens, email, avatars)
 	accountsH := accounts.NewHandler(accountsSvc)
 
 	notifSvc := notifications.NewService(pool)
@@ -72,7 +74,7 @@ func main() {
 	billingH := billing.NewHandler(billingSvc)
 
 	leadsRepo := leads.NewRepository(pool)
-	leadsSvc := leads.NewService(leadsRepo, notifSvc, accountsRepo)
+	leadsSvc := leads.NewService(leadsRepo, notifSvc, accountsRepo, pipelinesSvc)
 	leadsH := leads.NewHandler(leadsSvc)
 
 	routingSvc := routing.NewService(pool)

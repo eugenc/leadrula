@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { get, ns, patch, post, del } from "@/lib/api";
 import type {
   Lead,
+  LeadListResponse,
   Note,
   Pipeline,
   Stage,
@@ -9,6 +10,7 @@ import type {
   CustomField,
   DisqReason,
   UserRow,
+  Me,
 } from "@/types";
 
 export function usePipelines() {
@@ -29,17 +31,48 @@ export interface LeadFilters {
   status?: string;
   campaign?: string;
   assigned?: number;
+  tag?: string;
+  action_on?: string;
+  action_overdue?: boolean;
+  view_id?: string;
+  filters?: string;
+  page?: number;
+  limit?: number;
+  sort?: string;
+  sort_dir?: "asc" | "desc";
+  all?: boolean;
+}
+
+function normalizeLeadsResponse(raw: LeadListResponse | Lead[] | undefined): LeadListResponse {
+  if (!raw) return { items: [], total: 0, page: 1, limit: 0 };
+  if (Array.isArray(raw)) return { items: raw, total: raw.length, page: 1, limit: raw.length };
+  return { ...raw, items: raw.items ?? [] };
 }
 
 export function useLeads(filters: LeadFilters = {}) {
   const qs = new URLSearchParams();
   Object.entries(filters).forEach(([k, v]) => {
+    if (k === "all") {
+      if (v) qs.set("all", "1");
+      return;
+    }
+    if (k === "action_overdue") {
+      if (v) qs.set("action_overdue", "1");
+      return;
+    }
+    if (k === "view_id" || k === "filters") {
+      if (v) qs.set(k, String(v));
+      return;
+    }
     if (v !== undefined && v !== "" && v !== 0) qs.set(k, String(v));
   });
   const q = qs.toString();
   return useQuery({
     queryKey: ["leads", filters],
-    queryFn: () => get<Lead[]>(`${ns()}/leads${q ? `?${q}` : ""}`),
+    queryFn: async () =>
+      normalizeLeadsResponse(
+        await get<LeadListResponse | Lead[]>(`${ns()}/leads${q ? `?${q}` : ""}`)
+      ),
   });
 }
 
@@ -77,6 +110,9 @@ export function useUpdateLead() {
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["lead", v.leadId] });
+      if ("tags" in v.body) {
+        qc.invalidateQueries({ queryKey: ["lead-tags"] });
+      }
     },
   });
 }
@@ -110,7 +146,34 @@ export function useCreateLead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: Record<string, unknown>) => post<Lead>(`${ns()}/leads`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    },
+  });
+}
+
+export interface ImportLeadsPayload {
+  destination: "pipeline" | "intake";
+  pipeline_id?: number;
+  stage_id?: number;
+  mapping: { csv_column: string; target: string }[];
+  rows: Record<string, string>[];
+}
+
+export interface ImportLeadsResult {
+  created: number;
+  skipped: number;
+  errors: { row: number; message: string }[];
+}
+
+export function useImportLeads() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ImportLeadsPayload) =>
+      post<ImportLeadsResult>(`${ns()}/leads/import`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    },
   });
 }
 
@@ -159,4 +222,42 @@ export function useDisqReasons() {
 
 export function useUsers() {
   return useQuery({ queryKey: ["users"], queryFn: () => get<UserRow[]>(`${ns()}/users`) });
+}
+
+export function useTagSuggestions() {
+  return useQuery({
+    queryKey: ["lead-tags"],
+    queryFn: () => get<string[]>(`${ns()}/leads/tags`),
+  });
+}
+
+export type BulkLeadAction = "delete" | "assign_user" | "add_follower" | "assign_buyer";
+
+export function useBulkLeads() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      action: BulkLeadAction;
+      ids: number[];
+      user_id?: number;
+      contract_id?: number;
+    }) => post<{ affected: number }>(`${ns()}/leads/bulk`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["lead"] });
+    },
+  });
+}
+
+export function useMe() {
+  return useQuery({ queryKey: ["me"], queryFn: () => get<Me>("/auth/me") });
+}
+
+export function usePatchPrefs() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patchBody: Record<string, unknown>) =>
+      patch<Record<string, unknown>>("/auth/me/prefs", patchBody),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
+  });
 }

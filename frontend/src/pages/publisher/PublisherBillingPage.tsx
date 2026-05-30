@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useTransactions, useDisputes, useResolveDispute } from "@/features/admin/hooks";
-import { PageHeader } from "@/components/layout/PageHeader";
+import { PageBody } from "@/components/layout/PageBody";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge, Spinner, EmptyState } from "@/components/ui/misc";
+import { cn } from "@/lib/utils";
 import { formatMoney } from "@/lib/utils";
 import { format } from "date-fns";
 import { toast } from "@/store/toastStore";
@@ -12,23 +13,25 @@ import { apiError } from "@/lib/api";
 export function PublisherBillingPage() {
   const [tab, setTab] = useState<"disputes" | "transactions">("disputes");
   return (
-    <div>
-      <PageHeader title="Billing" subtitle="Oversee buyer ledgers and disputes." />
-      <div className="mb-4 flex border-b border-pd-border">
-        {(["disputes", "transactions"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`-mb-px border-b-2 px-4 py-2 text-sm font-semibold capitalize ${
-              tab === t ? "border-pd-green text-pd-green" : "border-transparent text-pd-muted"
-            }`}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
-      {tab === "disputes" ? <Disputes /> : <Transactions />}
-    </div>
+    <>
+      <PageBody>
+        <div className="mb-4 flex border-b border-gray-100">
+          {(["disputes", "transactions"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={cn(
+                "-mb-px border-b-2 px-4 py-2 text-base font-semibold capitalize transition-colors",
+                tab === t ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400"
+              )}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+        {tab === "disputes" ? <Disputes /> : <Transactions />}
+      </PageBody>
+    </>
   );
 }
 
@@ -51,7 +54,7 @@ function Disputes() {
       <TBody>
         {(disputes ?? []).map((d) => (
           <TR key={d.id}>
-            <TD className="font-semibold">{d.buyer_name}</TD>
+            <TD className="font-medium text-gray-800">{d.buyer_name}</TD>
             <TD>{d.reason}</TD>
             <TD>{formatMoney(d.amount)}</TD>
             <TD>{format(new Date(d.created_at), "MMM d")}</TD>
@@ -70,7 +73,7 @@ function Disputes() {
                 </Button>
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="secondary"
                   onClick={() =>
                     resolve.mutate(
                       { id: d.id, accept: false },
@@ -108,10 +111,10 @@ function Transactions() {
         {(txns ?? []).map((t) => (
           <TR key={t.id}>
             <TD>
-              <Badge variant={t.amount < 0 ? "red" : "green"}>{t.type}</Badge>
+              <Badge variant={t.amount < 0 ? "overdue" : "distributed"}>{t.type}</Badge>
             </TD>
             <TD>{t.lead_name ?? "—"}</TD>
-            <TD className={t.amount < 0 ? "text-pd-red" : "text-pd-green"}>{formatMoney(t.amount)}</TD>
+            <TD className={t.amount < 0 ? "text-danger" : "text-jade-700"}>{formatMoney(t.amount)}</TD>
             <TD>{formatMoney(t.balance_after)}</TD>
             <TD>{format(new Date(t.created_at), "MMM d, h:mma")}</TD>
           </TR>

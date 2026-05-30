@@ -3,9 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { Bell, LogOut } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import { Avatar } from "@/components/ui/misc";
+import { Dropdown, DropdownItem } from "@/components/ui/dropdown";
 import { useNotifications, useMarkRead } from "@/hooks/useNotifications";
 import { queryClient } from "@/lib/queryClient";
-import { cn } from "@/lib/utils";
+import { cn, formatRole } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 
 const labels: Record<string, string> = {
@@ -24,54 +25,58 @@ export function Topbar({ title }: { title: string }) {
   const unread = (notifs ?? []).filter((n) => !n.read_at).length;
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-pd-border bg-pd-surface px-6">
-      <h1 className="text-lg font-bold text-pd-text">{title}</h1>
+    <header className="sticky top-0 z-30 flex h-13 shrink-0 items-center justify-between border-b border-gray-100 bg-white px-6">
+      <h1 className="text-xl font-semibold text-gray-800">{title}</h1>
       <div className="flex items-center gap-4">
-        <div className="relative">
-          <button
-            onClick={() => setOpen((o) => !o)}
-            className="relative text-pd-muted hover:text-pd-text"
-          >
-            <Bell className="h-5 w-5" />
-            {unread > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-pd-red px-1 text-[10px] font-bold text-white">
-                {unread}
-              </span>
+        <Dropdown
+          open={open}
+          onClose={() => setOpen(false)}
+          trigger={
+            <button
+              onClick={() => setOpen((o) => !o)}
+              className="relative flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-50 hover:text-gray-800"
+            >
+              <Bell className="h-5 w-5" />
+              {unread > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">
+                  {unread}
+                </span>
+              )}
+            </button>
+          }
+          className="w-80 p-0"
+        >
+          <div className="border-b border-gray-100 px-4 py-2 text-sm font-semibold text-gray-800">
+            Notifications
+          </div>
+          <div className="max-h-80 overflow-y-auto p-1">
+            {(notifs ?? []).length === 0 && (
+              <p className="px-3 py-6 text-center text-sm text-gray-400">No notifications</p>
             )}
-          </button>
-          {open && (
-            <div className="absolute right-0 top-8 z-50 w-80 rounded-lg border border-pd-border bg-white shadow-xl">
-              <div className="border-b border-pd-border px-4 py-2 text-sm font-semibold">
-                Notifications
-              </div>
-              <div className="max-h-80 overflow-y-auto">
-                {(notifs ?? []).length === 0 && (
-                  <p className="px-4 py-6 text-center text-sm text-pd-muted">No notifications</p>
+            {(notifs ?? []).map((n) => (
+              <DropdownItem
+                key={n.id}
+                onClick={() => markRead.mutate(n.id)}
+                className={cn(
+                  "h-auto flex-col items-start py-2",
+                  !n.read_at && "bg-info-bg/50"
                 )}
-                {(notifs ?? []).map((n) => (
-                  <button
-                    key={n.id}
-                    onClick={() => markRead.mutate(n.id)}
-                    className={cn(
-                      "flex w-full flex-col items-start border-b border-pd-border px-4 py-2 text-left last:border-0 hover:bg-pd-stage",
-                      !n.read_at && "bg-pd-blue/5"
-                    )}
-                  >
-                    <span className="text-sm font-medium">{labels[n.type] ?? n.type}</span>
-                    <span className="text-xs text-pd-muted">
-                      {formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
+              >
+                <span className="text-sm font-medium">{labels[n.type] ?? n.type}</span>
+                <span className="text-xs text-gray-400">
+                  {formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}
+                </span>
+              </DropdownItem>
+            ))}
+          </div>
+        </Dropdown>
         <div className="flex items-center gap-2">
-          <Avatar name={user?.full_name ?? "?"} />
+          <Avatar name={user?.full_name ?? "?"} src={user?.avatar_url} />
           <div className="hidden text-right sm:block">
-            <div className="text-sm font-semibold leading-tight">{user?.full_name}</div>
-            <div className="text-xs capitalize text-pd-muted">{user?.role}</div>
+            <div className="text-base font-semibold leading-tight text-gray-800">
+              {user?.full_name}
+            </div>
+            <div className="text-xs text-gray-400">{user?.role ? formatRole(user.role) : ""}</div>
           </div>
         </div>
         <button
@@ -80,7 +85,7 @@ export function Topbar({ title }: { title: string }) {
             queryClient.clear();
             navigate("/login");
           }}
-          className="text-pd-muted hover:text-pd-red"
+          className="text-gray-400 hover:text-danger"
           title="Log out"
         >
           <LogOut className="h-5 w-5" />

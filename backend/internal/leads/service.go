@@ -9,17 +9,20 @@ import (
 	"github.com/echayko/leadrula/backend/internal/billing"
 	"github.com/echayko/leadrula/backend/internal/contracts"
 	"github.com/echayko/leadrula/backend/internal/notifications"
+	"github.com/echayko/leadrula/backend/internal/pipelines"
+	"github.com/echayko/leadrula/backend/internal/routing"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 )
 
 type Service struct {
-	repo     *Repository
-	notif    *notifications.Service
-	accounts *accounts.Repository
+	repo       *Repository
+	notif      *notifications.Service
+	accounts   *accounts.Repository
+	pipelines  *pipelines.Service
 }
 
-func NewService(repo *Repository, notif *notifications.Service, acc *accounts.Repository) *Service {
-	return &Service{repo: repo, notif: notif, accounts: acc}
+func NewService(repo *Repository, notif *notifications.Service, acc *accounts.Repository, pipes *pipelines.Service) *Service {
+	return &Service{repo: repo, notif: notif, accounts: acc, pipelines: pipes}
 }
 
 func (s *Service) Repo() *Repository { return s.repo }
@@ -85,9 +88,40 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		return nil, err
 	}
 
+	if err := s.pipelines.EvaluateStageRules(ctx, tx, p.AccountID, p.UserID, leadID, newStageID, fromStage); err != nil {
+		return nil, err
+	}
+
+	updated, err := s.repo.GetByID(ctx, tx, leadID)
+	if err != nil {
+		return nil, err
+	}
+	finalStageID := updated.StageID
+	if finalStageID == nil {
+		return nil, httpx.BusinessRule("lead has no stage after move")
+	}
+
+	// pipeline-origin route: publisher-owned lead reached a trigger stage
+	if lead.ContractID == nil && lead.OwnerAccountID == lead.PublisherID {
+		rt, err := routing.MatchRouteByStage(ctx, tx, lead.PublisherID, *finalStageID)
+		if err != nil {
+			return nil, err
+		}
+		if rt != nil {
+			deps := RouteApplyDeps{Repo: s.repo, Accounts: s.accounts, Notif: s.notif}
+			if err := ApplyRoute(ctx, tx, deps, rt, lead.PublisherID, leadID); err != nil {
+				return nil, err
+			}
+			updated, err = s.repo.GetByID(ctx, tx, leadID)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	// return rule?
 	if lead.ContractID != nil {
-		ri, err := contracts.FindReturnRule(ctx, tx, *lead.ContractID, newStageID)
+		ri, err := contracts.FindReturnRule(ctx, tx, *lead.ContractID, *finalStageID)
 		if err != nil {
 			return nil, err
 		}
@@ -105,10 +139,6 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		}
 	}
 
-	updated, err := s.repo.GetByID(ctx, tx, leadID)
-	if err != nil {
-		return nil, err
-	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
@@ -144,7 +174,7 @@ func (s *Service) Redistribute(ctx context.Context, p *auth.Principal, leadID, c
 		target.BuyerPipelineID).Scan(&firstStage); err != nil {
 		return nil, httpx.BusinessRule("target pipeline has no stages")
 	}
-	if err := s.repo.PlaceInPipeline(ctx, tx, leadID, target.BuyerID, target.BuyerPipelineID, firstStage, target.ID); err != nil {
+	if err := s.repo.PlaceInPipeline(ctx, tx, leadID, target.BuyerID, target.BuyerPipelineID, firstStage, &target.ID); err != nil {
 		return nil, err
 	}
 	if err := s.repo.SetStatus(ctx, tx, leadID, "distributed"); err != nil {
@@ -169,6 +199,75 @@ func (s *Service) Redistribute(ctx context.Context, p *auth.Principal, leadID, c
 		return nil, err
 	}
 	return updated, nil
+}
+
+type BulkAction string
+
+const (
+	BulkDelete      BulkAction = "delete"
+	BulkAssignUser  BulkAction = "assign_user"
+	BulkAddFollower BulkAction = "add_follower"
+	BulkAssignBuyer BulkAction = "assign_buyer"
+)
+
+type BulkParams struct {
+	Action     BulkAction
+	LeadIDs    []int64
+	UserID     int64
+	ContractID int64
+}
+
+type BulkResult struct {
+	Affected int `json:"affected"`
+}
+
+func (s *Service) Bulk(ctx context.Context, p *auth.Principal, bp BulkParams) (*BulkResult, error) {
+	if len(bp.LeadIDs) == 0 {
+		return nil, httpx.Validation("no leads selected")
+	}
+	switch bp.Action {
+	case BulkDelete:
+		n, err := s.repo.Delete(ctx, p.AccountID, bp.LeadIDs)
+		if err != nil {
+			return nil, err
+		}
+		return &BulkResult{Affected: int(n)}, nil
+	case BulkAssignUser:
+		if bp.UserID == 0 {
+			return nil, httpx.Validation("user_id required")
+		}
+		uid := bp.UserID
+		n, err := s.repo.BulkSetAssignee(ctx, p.AccountID, bp.LeadIDs, &uid)
+		if err != nil {
+			return nil, err
+		}
+		return &BulkResult{Affected: int(n)}, nil
+	case BulkAddFollower:
+		if bp.UserID == 0 {
+			return nil, httpx.Validation("user_id required")
+		}
+		if err := s.repo.BulkAddFollowers(ctx, bp.LeadIDs, bp.UserID); err != nil {
+			return nil, err
+		}
+		return &BulkResult{Affected: len(bp.LeadIDs)}, nil
+	case BulkAssignBuyer:
+		if bp.ContractID == 0 {
+			return nil, httpx.Validation("contract_id required")
+		}
+		affected := 0
+		for _, id := range bp.LeadIDs {
+			if _, err := s.Redistribute(ctx, p, id, bp.ContractID); err != nil {
+				continue
+			}
+			affected++
+		}
+		if affected == 0 {
+			return nil, httpx.BusinessRule("no leads could be assigned to buyer")
+		}
+		return &BulkResult{Affected: affected}, nil
+	default:
+		return nil, httpx.Validation("unknown bulk action")
+	}
 }
 
 func assertCanEdit(p *auth.Principal, l *Lead) error {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DragDropContext,
   Droppable,
@@ -13,12 +13,28 @@ import {
   useCustomFields,
 } from "./hooks";
 import { LeadCard } from "./LeadCard";
+import { LeadsColumnPicker } from "./LeadsColumnPicker";
 import { StagePromptModal, type PromptResult } from "./StagePromptModal";
-import { Select } from "@/components/ui/input";
+import { LeadFilterBuilder } from "./LeadFilterBuilder";
+import { LeadViewsMenu } from "./LeadViewsMenu";
+import {
+  useSavedLeadViews,
+  useActiveViewId,
+  mergeViews,
+  getViewById,
+  viewStateEqual,
+  type FilterCondition,
+  type SavedLeadView,
+} from "./leadsViews";
+import { FilterSelect } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Spinner, EmptyState } from "@/components/ui/misc";
 import { useUIStore } from "@/store/uiStore";
 import { apiError } from "@/lib/api";
 import { toast } from "@/store/toastStore";
+import { cn } from "@/lib/utils";
+import { stageColorDot, stageColorLine } from "@/features/pipelines/stageColors";
+import { SYSTEM_COLUMNS, boardCardFields, DEFAULT_BOARD_CARD_FIELDS } from "./leadsListColumns";
 import type { Lead, Stage } from "@/types";
 
 export function Board() {
@@ -28,23 +44,72 @@ export function Board() {
     if (!pipelineId && pipelines && pipelines.length) setPipelineId(pipelines[0].id);
   }, [pipelines, pipelineId]);
 
+  const { data: apiViews, isLoading: viewsLoading } = useSavedLeadViews("board");
+  const views = useMemo(() => mergeViews(apiViews, "board"), [apiViews]);
+  const { activeId, isLoading: activeLoading } = useActiveViewId("board");
+  const activeView = getViewById(views, activeId);
+  const viewApplied = useRef(false);
+
+  const [conditions, setConditions] = useState<FilterCondition[]>([]);
+  const [cardFields, setCardFields] = useState<string[]>(DEFAULT_BOARD_CARD_FIELDS);
+  const [colsOpen, setColsOpen] = useState(false);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
+
+  const applyView = useCallback((view: SavedLeadView) => {
+    setConditions([...view.filters]);
+    setCardFields(boardCardFields(view.columns));
+  }, []);
+
+  useEffect(() => {
+    if (viewsLoading || activeLoading || viewApplied.current) return;
+    applyView(activeView);
+    viewApplied.current = true;
+  }, [viewsLoading, activeLoading, activeView, applyView]);
+
+  const viewChanged = !viewStateEqual(activeView, {
+    filters: conditions,
+    columns: cardFields,
+    sort: "created_at",
+    sort_dir: "desc",
+  });
+
+  const leadFilters = useMemo(
+    () => ({
+      pipeline_id: pipelineId,
+      all: true as const,
+      view_id: viewChanged ? undefined : activeId,
+      filters: viewChanged ? JSON.stringify(conditions) : undefined,
+    }),
+    [pipelineId, viewChanged, activeId, conditions]
+  );
+
   const { data: stages } = useStages(pipelineId);
-  const { data: leads, isLoading } = useLeads(pipelineId ? { pipeline_id: pipelineId } : {});
+  const { data: leads, isLoading, isError, error } = useLeads(leadFilters);
   const { data: customFields } = useCustomFields();
   const changeStage = useChangeStage();
   const openDetail = useUIStore((s) => s.openDetail);
 
-  // local optimistic board state keyed by stage id
+  const allColumnIds = useMemo(() => {
+    const custom = (customFields ?? [])
+      .filter((f) => f.is_active)
+      .map((f) => `custom_${f.id}`);
+    return [...SYSTEM_COLUMNS.map((c) => c.id), ...custom];
+  }, [customFields]);
+
+  const activeCardFields = cardFields.filter((id) => allColumnIds.includes(id));
+
   const [board, setBoard] = useState<Record<number, Lead[]>>({});
   useEffect(() => {
-    if (!leads) return;
+    if (!leads?.items) return;
     const grouped: Record<number, Lead[]> = {};
-    for (const l of leads) {
+    for (const l of leads.items) {
       const sid = l.stage_id ?? 0;
       (grouped[sid] ??= []).push(l);
     }
     setBoard(grouped);
   }, [leads]);
+
+  const leadItems = leads?.items ?? [];
 
   const [prompt, setPrompt] = useState<{ leadId: number; stage: Stage } | null>(null);
 
@@ -54,9 +119,9 @@ export function Board() {
   );
 
   function revert() {
-    if (!leads) return;
+    if (!leadItems.length) return;
     const grouped: Record<number, Lead[]> = {};
-    for (const l of leads) {
+    for (const l of leadItems) {
       const sid = l.stage_id ?? 0;
       (grouped[sid] ??= []).push(l);
     }
@@ -112,12 +177,16 @@ export function Board() {
     commit(leadId, stage);
   }
 
-  if (plLoading || isLoading) {
+  if (plLoading || isLoading || viewsLoading || activeLoading) {
     return (
       <div className="flex justify-center py-16">
         <Spinner className="h-6 w-6" />
       </div>
     );
+  }
+
+  if (isError) {
+    return <EmptyState title="Could not load leads." subtitle={apiError(error).message} />;
   }
 
   if (!pipelines || pipelines.length === 0) {
@@ -126,22 +195,47 @@ export function Board() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-4 flex items-center gap-3">
-        <Select
+      <div className="relative z-10 mb-4 flex flex-wrap items-center gap-2 px-8 pt-5">
+        <LeadViewsMenu
+          placement="board"
+          filters={conditions}
+          columns={cardFields}
+          onFiltersChange={setConditions}
+          onViewApply={applyView}
+        />
+        <LeadsColumnPicker
+          open={colsOpen}
+          onOpenChange={setColsOpen}
+          visibleCols={activeCardFields}
+          allColumnIds={allColumnIds}
+          customFields={customFields ?? []}
+          onChange={setCardFields}
+          label="Card fields"
+        />
+        <Button variant="ghost" size="sm" onClick={() => setFiltersExpanded((e) => !e)}>
+          {filtersExpanded ? "Hide filters" : "Edit filters"}
+        </Button>
+        <FilterSelect
           value={pipelineId ?? ""}
           onChange={(e) => setPipelineId(Number(e.target.value))}
-          className="w-56"
+          className="ml-auto w-56"
         >
           {pipelines.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
             </option>
           ))}
-        </Select>
+        </FilterSelect>
       </div>
 
+      {filtersExpanded && (
+        <div className="relative z-10 mx-8 mb-4 rounded-lg border border-gray-100 bg-gray-50/50 p-4">
+          <LeadFilterBuilder conditions={conditions} onChange={setConditions} />
+        </div>
+      )}
+
       <DragDropContext onDragEnd={onDragEnd}>
-        <div className="flex flex-1 gap-3 overflow-x-auto pb-4">
+        <div className="relative z-0 flex flex-1 gap-3 overflow-x-auto px-8 pb-8">
           {stageList.map((stage) => {
             const items = board[stage.id] ?? [];
             return (
@@ -150,28 +244,34 @@ export function Board() {
                   <div
                     ref={provided.innerRef}
                     {...provided.droppableProps}
-                    className={`flex w-72 shrink-0 flex-col rounded-lg bg-pd-stage p-2 ${
-                      snapshot.isDraggingOver ? "ring-2 ring-pd-blue/40" : ""
-                    }`}
+                    className={cn(
+                      "flex w-[280px] shrink-0 flex-col rounded-lg bg-gray-50",
+                      snapshot.isDraggingOver && "ring-2 ring-jade-400/40"
+                    )}
                   >
-                    <div className="mb-2 flex items-center justify-between px-1">
-                      <span className="text-sm font-semibold text-pd-text">{stage.name}</span>
-                      <span className="rounded bg-white px-1.5 text-xs font-semibold text-pd-muted">
-                        {items.length}
+                    <div className="flex items-center gap-2 border-b border-gray-100 px-3.5 py-2.5">
+                      <span className={cn("h-2 w-2 shrink-0 rounded-full", stageColorDot(stage.color))} />
+                      <span className="flex-1 text-base font-semibold text-gray-700">
+                        {stage.name}
                       </span>
+                      <span className="text-xs text-gray-400">{items.length}</span>
                     </div>
-                    <div className="flex flex-1 flex-col gap-2">
+                    <div className="relative flex flex-1 flex-col gap-2 p-2 pl-3">
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "pointer-events-none absolute bottom-0 left-0 top-0 w-px",
+                          stageColorLine(stage.color)
+                        )}
+                      />
                       {items.map((lead, i) => (
                         <Draggable draggableId={String(lead.id)} index={i} key={lead.id}>
                           {(p, snap) => (
-                            <div
-                              ref={p.innerRef}
-                              {...p.draggableProps}
-                              {...p.dragHandleProps}
-                            >
+                            <div ref={p.innerRef} {...p.draggableProps} {...p.dragHandleProps}>
                               <LeadCard
                                 lead={lead}
                                 customFields={customFields ?? []}
+                                cardFields={activeCardFields}
                                 onClick={() => openDetail(lead.id)}
                                 dragging={snap.isDragging}
                               />

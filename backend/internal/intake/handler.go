@@ -22,6 +22,7 @@ func NewHandler(svc *Service, publisherID int64) *Handler {
 // RegisterPublicRoutes mounts the API-key-authenticated ingest endpoints.
 func (h *Handler) RegisterPublicRoutes(r chi.Router) {
 	r.Post("/api/v1/leads", h.ingest)
+	r.Post("/api/v1/sources/{slug}", h.ingestSource)
 	r.Post("/api/v1/leads/{id}/action", h.action)
 }
 
@@ -43,6 +44,25 @@ func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res, err := h.svc.Ingest(r.Context(), publisherID, raw)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusAccepted, res)
+}
+
+func (h *Handler) ingestSource(w http.ResponseWriter, r *http.Request) {
+	acct := auth.APIKeyAccountFromContext(r.Context())
+	publisherID := h.publisherID
+	if acct != nil && acct.AccountType == "publisher" {
+		publisherID = acct.AccountID
+	}
+	slug := chi.URLParam(r, "slug")
+	var raw map[string]any
+	if !httpx.DecodeJSON(w, r, &raw) {
+		return
+	}
+	res, err := h.svc.IngestFromSource(r.Context(), publisherID, slug, raw)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return

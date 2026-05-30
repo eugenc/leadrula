@@ -7,6 +7,8 @@ import { AppShell } from "@/components/layout/AppShell";
 import { Toaster } from "@/components/ui/toaster";
 
 import { LoginPage } from "@/features/auth/LoginPage";
+import { InviteAcceptPage } from "@/features/auth/InviteAcceptPage";
+import { ResetPasswordPage } from "@/features/auth/ResetPasswordPage";
 import { Dashboard } from "@/pages/Dashboard";
 import { BoardPage } from "@/pages/BoardPage";
 import { LeadsListPage } from "@/pages/LeadsListPage";
@@ -18,6 +20,7 @@ import { SettingsPage } from "@/pages/SettingsPage";
 import { ApiKeysPage } from "@/pages/buyer/ApiKeysPage";
 
 import { IntakeQueuePage } from "@/pages/publisher/IntakeQueuePage";
+import { SourcesPage } from "@/pages/publisher/SourcesPage";
 import { RoutingPage } from "@/pages/publisher/RoutingPage";
 import { ContractsPage } from "@/pages/publisher/ContractsPage";
 import { BuyersPage } from "@/pages/publisher/BuyersPage";
@@ -39,6 +42,8 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/invite/accept" element={<InviteAcceptPage />} />
+          <Route path="/reset" element={<ResetPasswordPage />} />
           <Route path="/" element={<RootRedirect />} />
 
           <Route element={<RequireAuth />}>
@@ -52,6 +57,7 @@ export default function App() {
                 <Route path="pipelines" element={<PipelinesPage />} />
                 <Route path="fields" element={<CustomFieldsPage />} />
                 <Route path="reasons" element={<DisqReasonsPage />} />
+                <Route path="sources" element={<SourcesPage />} />
                 <Route path="routing" element={<RoutingPage />} />
                 <Route path="contracts" element={<ContractsPage />} />
                 <Route path="buyers" element={<BuyersPage />} />
