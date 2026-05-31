@@ -148,19 +148,23 @@ export function CustomFieldsPage() {
                   <TD className="font-medium text-gray-800">{f.name}</TD>
                   <TD className="font-mono text-xs">{f.field_key}</TD>
                   <TD>{CUSTOM_FIELD_TYPES.find((t) => t.value === f.type)?.label ?? f.type}</TD>
-                  <TD onClick={(e) => e.stopPropagation()}>
-                    <Switch
-                      checked={f.is_active}
-                      onChange={(v) => update.mutate({ id: f.id, body: { is_active: v } })}
-                    />
+                  <TD>
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <Switch
+                        checked={f.is_active}
+                        onChange={(v) => update.mutate({ id: f.id, body: { is_active: v } })}
+                      />
+                    </div>
                   </TD>
-                  <TD onClick={(e) => e.stopPropagation()}>
-                    <IconButton
-                      variant="danger"
-                      onClick={() => remove.mutate(f.id, { onError: (e) => toast.error(apiError(e).message) })}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </IconButton>
+                  <TD>
+                    <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+                      <IconButton
+                        variant="danger"
+                        onClick={() => remove.mutate(f.id, { onError: (e) => toast.error(apiError(e).message) })}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </IconButton>
+                    </div>
                   </TD>
                 </TR>
               ))}
