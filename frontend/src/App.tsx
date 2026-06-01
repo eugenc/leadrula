@@ -27,6 +27,9 @@ import { SourcesPage } from "@/pages/publisher/SourcesPage";
 import { RoutingPage } from "@/pages/publisher/RoutingPage";
 import { ContractsPage } from "@/pages/publisher/ContractsPage";
 import { BuyersPage } from "@/pages/publisher/BuyersPage";
+import { PublisherCollaborationLayout } from "@/pages/publisher/CollaborationLayout";
+import { PublisherCollaborationAccessTab } from "@/pages/publisher/CollaborationAccessTab";
+import { PublisherCollaborationActivityTab } from "@/pages/publisher/CollaborationActivityTab";
 import { PublisherBillingPage } from "@/pages/publisher/PublisherBillingPage";
 
 import { CalendarPage } from "@/pages/buyer/CalendarPage";
@@ -75,6 +78,10 @@ export default function App() {
                 <Route path="routing" element={<RoutingPage />} />
                 <Route path="contracts" element={<ContractsPage />} />
                 <Route path="buyers" element={<BuyersPage />} />
+                <Route path="collaboration" element={<PublisherCollaborationLayout />}>
+                  <Route index element={<PublisherCollaborationAccessTab />} />
+                  <Route path="activity" element={<PublisherCollaborationActivityTab />} />
+                </Route>
                 <Route path="billing" element={<PublisherBillingPage />} />
                 <Route path="users" element={<UsersPage />} />
                 <Route path="api" element={<ApiKeysPage />} />

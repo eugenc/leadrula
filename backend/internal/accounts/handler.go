@@ -240,7 +240,7 @@ func (h *Handler) deleteUser(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, "invalid user id")
 		return
 	}
-	if err := h.svc.DeleteUser(r.Context(), p.AccountID, id); err != nil {
+	if err := h.svc.DeleteUser(r.Context(), p.AccountID, p.UserID, id); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}

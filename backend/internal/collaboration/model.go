@@ -28,17 +28,20 @@ type AuditEntry struct {
 	EventType   string         `json:"event_type"`
 	ActorUserID *int64         `json:"actor_user_id,omitempty"`
 	ActorName   string         `json:"actor_name,omitempty"`
+	BuyerName   string         `json:"buyer_name,omitempty"`
 	Metadata    map[string]any `json:"metadata"`
 	CreatedAt   time.Time      `json:"created_at"`
 }
 
 type AuditListParams struct {
-	BuyerID     int64
-	Page        int
-	Limit       int
-	From        *time.Time
-	To          *time.Time
-	ActorUserID *int64
+	BuyerID        int64
+	PublisherID    int64
+	FilterBuyerID  *int64
+	Page           int
+	Limit          int
+	From           *time.Time
+	To             *time.Time
+	ActorUserID    *int64
 }
 
 type AuditListResult struct {

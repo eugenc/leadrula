@@ -103,7 +103,7 @@ function DrawerContent({ user, onClose }: { user: UserRow; onClose: () => void }
 
   function revoke() {
     const onSuccess = () => {
-      toast.success(user.status === "pending" ? "Invite revoked" : "User removed");
+      toast.success(user.status === "pending" ? "Invite revoked" : "User deactivated");
       onClose();
     };
     const onError = (e: unknown) => toast.error(errorMessage(e));
@@ -202,10 +202,10 @@ function DrawerContent({ user, onClose }: { user: UserRow; onClose: () => void }
         )}
         <Button
           variant="danger"
-          disabled={remove.isPending || removeInvite.isPending}
+          disabled={user.status === "inactive" || remove.isPending || removeInvite.isPending}
           onClick={revoke}
         >
-          {user.status === "pending" ? "Revoke invite" : "Remove user"}
+          {user.status === "pending" ? "Revoke invite" : "Deactivate user"}
         </Button>
       </DrawerFooter>
     </div>

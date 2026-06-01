@@ -321,6 +321,118 @@ func (r *Repository) ListAuditForBuyer(ctx context.Context, p AuditListParams) (
 	return &AuditListResult{Items: items, Total: total, Page: page, Limit: limit}, nil
 }
 
+const publisherAuditSelect = `SELECT l.id, l.event_type, l.actor_user_id, COALESCE(u.full_name, ''), COALESCE(ba.name, ''), l.metadata, l.created_at
+ FROM collaboration_audit_log l
+ LEFT JOIN users u ON u.id = l.actor_user_id
+ LEFT JOIN accounts ba ON ba.id = l.buyer_id`
+
+func scanPublisherAuditRows(rows pgx.Rows) ([]AuditEntry, error) {
+	var out []AuditEntry
+	for rows.Next() {
+		var e AuditEntry
+		var raw []byte
+		var actorID *int64
+		if err := rows.Scan(&e.ID, &e.EventType, &actorID, &e.ActorName, &e.BuyerName, &raw, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		e.ActorUserID = actorID
+		_ = json.Unmarshal(raw, &e.Metadata)
+		if e.Metadata == nil {
+			e.Metadata = map[string]any{}
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) publisherAuditWhere(p AuditListParams) (string, []any) {
+	args := []any{p.PublisherID}
+	where := "l.publisher_id = $1"
+	add := func(cond string, val any) {
+		args = append(args, val)
+		where += fmt.Sprintf(" AND %s $%d", cond, len(args))
+	}
+	if p.FilterBuyerID != nil {
+		add("l.buyer_id =", *p.FilterBuyerID)
+	}
+	if p.From != nil {
+		add("l.created_at >=", *p.From)
+	}
+	if p.To != nil {
+		add("l.created_at <=", *p.To)
+	}
+	if p.ActorUserID != nil {
+		add("l.actor_user_id =", *p.ActorUserID)
+	}
+	return where, args
+}
+
+func (r *Repository) ListAuditForPublisher(ctx context.Context, p AuditListParams) (*AuditListResult, error) {
+	page := p.Page
+	if page < 1 {
+		page = 1
+	}
+	limit := p.Limit
+	if limit <= 0 {
+		limit = 25
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	where, args := r.publisherAuditWhere(p)
+
+	var total int
+	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM collaboration_audit_log l WHERE `+where, args...).Scan(&total); err != nil {
+		return nil, err
+	}
+
+	offset := (page - 1) * limit
+	qArgs := append([]any{}, args...)
+	qArgs = append(qArgs, limit, offset)
+	q := publisherAuditSelect + ` WHERE ` + where + fmt.Sprintf(` ORDER BY l.created_at DESC LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2)
+
+	rows, err := r.pool.Query(ctx, q, qArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items, err := scanPublisherAuditRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	if items == nil {
+		items = []AuditEntry{}
+	}
+	return &AuditListResult{Items: items, Total: total, Page: page, Limit: limit}, nil
+}
+
+func (r *Repository) ListAuditActorsForPublisher(ctx context.Context, publisherID int64) ([]AuditActor, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT DISTINCT u.id, u.full_name
+		 FROM collaboration_audit_log l
+		 JOIN users u ON u.id = l.actor_user_id
+		 WHERE l.publisher_id = $1
+		 ORDER BY u.full_name`, publisherID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AuditActor
+	for rows.Next() {
+		var a AuditActor
+		if err := rows.Scan(&a.ID, &a.Name); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	if out == nil {
+		out = []AuditActor{}
+	}
+	return out, rows.Err()
+}
+
 func (r *Repository) ListAuditActors(ctx context.Context, buyerID int64) ([]AuditActor, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT DISTINCT u.id, u.full_name

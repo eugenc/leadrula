@@ -28,6 +28,8 @@ func (h *Handler) RegisterPublisherRoutes(r chi.Router) {
 		r.With(auth.RequireRole("admin")).Post("/buyers/{buyerId}/reject", h.publisherReject)
 		r.With(auth.RequireRole("admin")).Post("/accept", h.publisherAcceptByPublicID)
 		r.With(auth.RequireRole("admin")).Post("/reject", h.publisherRejectByPublicID)
+		r.With(auth.RequireRole("admin")).Get("/logs/actors", h.publisherLogActors)
+		r.With(auth.RequireRole("admin")).Get("/logs", h.publisherLogs)
 	})
 }
 
@@ -173,20 +175,41 @@ func (h *Handler) buyerPublisher(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, res)
 }
 
-func (h *Handler) buyerLogs(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) publisherLogs(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	q := r.URL.Query()
+	params, ok := parseAuditListParams(w, r)
+	if !ok {
+		return
+	}
+	res, err := h.svc.AuditLogListForPublisher(r.Context(), p.AccountID, params)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, res)
+}
 
+func (h *Handler) publisherLogActors(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	items, err := h.svc.AuditActorsForPublisher(r.Context(), p.AccountID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, items)
+}
+
+func parseAuditListParams(w http.ResponseWriter, r *http.Request) (AuditListParams, bool) {
+	q := r.URL.Query()
 	page, _ := strconv.Atoi(q.Get("page"))
 	limit, _ := strconv.Atoi(q.Get("limit"))
-
 	params := AuditListParams{Page: page, Limit: limit}
 
 	if fromRaw := q.Get("from"); fromRaw != "" {
 		t, err := time.Parse(time.RFC3339, fromRaw)
 		if err != nil {
 			httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, "invalid from datetime")
-			return
+			return params, false
 		}
 		params.From = &t
 	}
@@ -194,7 +217,7 @@ func (h *Handler) buyerLogs(w http.ResponseWriter, r *http.Request) {
 		t, err := time.Parse(time.RFC3339, toRaw)
 		if err != nil {
 			httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, "invalid to datetime")
-			return
+			return params, false
 		}
 		params.To = &t
 	}
@@ -202,11 +225,27 @@ func (h *Handler) buyerLogs(w http.ResponseWriter, r *http.Request) {
 		actorID, err := strconv.ParseInt(actorRaw, 10, 64)
 		if err != nil || actorID <= 0 {
 			httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, "invalid actor_user_id")
-			return
+			return params, false
 		}
 		params.ActorUserID = &actorID
 	}
+	if buyerRaw := q.Get("buyer_id"); buyerRaw != "" {
+		buyerID, err := strconv.ParseInt(buyerRaw, 10, 64)
+		if err != nil || buyerID <= 0 {
+			httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, "invalid buyer_id")
+			return params, false
+		}
+		params.FilterBuyerID = &buyerID
+	}
+	return params, true
+}
 
+func (h *Handler) buyerLogs(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	params, ok := parseAuditListParams(w, r)
+	if !ok {
+		return
+	}
 	res, err := h.svc.AuditLogListForBuyer(r.Context(), p.AccountID, params)
 	if err != nil {
 		httpx.WriteError(w, err)

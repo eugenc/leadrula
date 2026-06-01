@@ -13,6 +13,8 @@ import {
   useBuyerCollaboration,
   useImpersonateBuyer,
   useRequestCollaboration,
+  useAcceptCollaborationPublisher,
+  useRejectCollaborationPublisher,
   useUpdateBuyer,
 } from "@/features/admin/hooks";
 import { useAuthStore } from "@/store/authStore";
@@ -62,6 +64,8 @@ function DrawerContent({
   const { data: collab } = useBuyerCollaboration(buyerId);
   const update = useUpdateBuyer();
   const requestCollab = useRequestCollaboration();
+  const acceptCollab = useAcceptCollaborationPublisher();
+  const rejectCollab = useRejectCollaborationPublisher();
   const impersonate = useImpersonateBuyer();
   const startImpersonation = useAuthStore((s) => s.startImpersonation);
   const navigate = useNavigate();
@@ -151,6 +155,38 @@ function DrawerContent({
               <Button size="sm" disabled={impersonate.isPending} onClick={loginAsBuyer}>
                 Login as Buyer
               </Button>
+            )}
+            {collabStatus === "pending_publisher" && (
+              <>
+                <Button
+                  size="sm"
+                  disabled={acceptCollab.isPending}
+                  onClick={() =>
+                    acceptCollab.mutate(buyerId, {
+                      onSuccess: () => toast.success("Collaboration enabled"),
+                      onError: (e) => toast.error(errorMessage(e)),
+                    })
+                  }
+                >
+                  Accept invitation
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={rejectCollab.isPending}
+                  onClick={() =>
+                    rejectCollab.mutate(buyerId, {
+                      onSuccess: () => toast.success("Invitation rejected"),
+                      onError: (e) => toast.error(errorMessage(e)),
+                    })
+                  }
+                >
+                  Reject
+                </Button>
+              </>
+            )}
+            {collabStatus === "pending_buyer" && (
+              <p className="text-sm text-gray-600">Awaiting buyer approval.</p>
             )}
             {(collabStatus === "none" || collabStatus === "revoked") && (
               <Button

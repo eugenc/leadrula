@@ -385,6 +385,7 @@ export interface CollaborationAuditEntry {
   event_type: string;
   actor_user_id?: number;
   actor_name?: string;
+  buyer_name?: string;
   metadata: Record<string, unknown>;
   created_at: string;
 }

@@ -79,6 +79,15 @@ func (s *Service) AuditActorsForBuyer(ctx context.Context, buyerID int64) ([]Aud
 	return s.repo.ListAuditActors(ctx, buyerID)
 }
 
+func (s *Service) AuditLogListForPublisher(ctx context.Context, publisherID int64, p AuditListParams) (*AuditListResult, error) {
+	p.PublisherID = publisherID
+	return s.repo.ListAuditForPublisher(ctx, p)
+}
+
+func (s *Service) AuditActorsForPublisher(ctx context.Context, publisherID int64) ([]AuditActor, error) {
+	return s.repo.ListAuditActorsForPublisher(ctx, publisherID)
+}
+
 func (s *Service) StatusForPublisher(ctx context.Context, publisherID, buyerID int64) (*StatusResponse, error) {
 	return s.status(ctx, publisherID, buyerID)
 }

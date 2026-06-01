@@ -479,8 +479,38 @@ func (s *Service) UpdateUser(ctx context.Context, accountID, userID int64, p Upd
 	}, nil
 }
 
-func (s *Service) DeleteUser(ctx context.Context, accountID, userID int64) error {
-	if err := s.repo.DeleteUser(ctx, accountID, userID); err != nil {
+func (s *Service) DeleteUser(ctx context.Context, accountID, actorUserID, userID int64) error {
+	if actorUserID == userID {
+		return httpx.BusinessRule("cannot remove yourself")
+	}
+
+	u, err := s.repo.GetUserInAccount(ctx, accountID, userID)
+	if err != nil {
+		if err == ErrNotFound {
+			return httpx.NotFound("user not found")
+		}
+		return err
+	}
+	if !u.IsActive {
+		return nil
+	}
+
+	if u.Role == "admin" {
+		adminIDs, err := s.repo.ActiveAdminIDs(ctx, accountID)
+		if err != nil {
+			return err
+		}
+		if len(adminIDs) == 1 && adminIDs[0] == userID {
+			return httpx.BusinessRule("cannot remove the last admin")
+		}
+	}
+
+	if err := s.repo.ClearUserLiveRefs(ctx, accountID, userID); err != nil {
+		return err
+	}
+
+	inactive := false
+	if _, err := s.repo.UpdateUser(ctx, accountID, userID, UpdateUserParams{IsActive: &inactive}); err != nil {
 		if err == ErrNotFound {
 			return httpx.NotFound("user not found")
 		}
@@ -578,12 +608,13 @@ func (s *Service) ResendInvite(ctx context.Context, accountID, inviteID int64) e
 		return err
 	}
 
+	token := randomToken()
 	expires := time.Now().Add(72 * time.Hour)
-	if _, err := s.repo.UpdateInvite(ctx, accountID, inviteID, nil, nil, nil, nil, &expires); err != nil {
+	if _, err := s.repo.UpdateInvite(ctx, accountID, inviteID, nil, nil, nil, &token, &expires); err != nil {
 		return err
 	}
 	if s.mail != nil {
-		_ = s.mail.SendInvite(inv.Email, inv.FullName, inv.Token)
+		_ = s.mail.SendInvite(inv.Email, inv.FullName, token)
 	}
 	return nil
 }

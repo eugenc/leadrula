@@ -209,6 +209,12 @@ func (r *Repository) GetUser(ctx context.Context, id int64) (*User, error) {
 	return scanUser(r.pool.QueryRow(ctx, q, id))
 }
 
+func (r *Repository) GetUserInAccount(ctx context.Context, accountID, userID int64) (*User, error) {
+	const q = `SELECT id, public_id, account_id, email, full_name, role, is_active, prefs, last_login_at, created_at
+		FROM users WHERE id = $1 AND account_id = $2`
+	return scanUser(r.pool.QueryRow(ctx, q, userID, accountID))
+}
+
 func (r *Repository) ListUsers(ctx context.Context, accountID int64) ([]User, error) {
 	const q = `SELECT id, public_id, account_id, email, full_name, role, is_active, prefs, last_login_at, created_at
 		FROM users WHERE account_id = $1 ORDER BY created_at`
@@ -245,15 +251,14 @@ func (r *Repository) UpdatePrefs(ctx context.Context, userID int64, prefs []byte
 	return err
 }
 
-func (r *Repository) DeleteUser(ctx context.Context, accountID, userID int64) error {
-	ct, err := r.pool.Exec(ctx, `DELETE FROM users WHERE id = $1 AND account_id = $2`, userID, accountID)
-	if err != nil {
+func (r *Repository) ClearUserLiveRefs(ctx context.Context, accountID, userID int64) error {
+	if _, err := r.pool.Exec(ctx,
+		`UPDATE leads SET assigned_user_id = NULL WHERE assigned_user_id = $1 AND owner_account_id = $2`,
+		userID, accountID); err != nil {
 		return err
 	}
-	if ct.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
+	_, err := r.pool.Exec(ctx, `DELETE FROM lead_followers WHERE user_id = $1`, userID)
+	return err
 }
 
 // Invites
@@ -548,6 +553,10 @@ func (r *Repository) PrimaryAdminContact(ctx context.Context, accountID int64) (
 		return nil, err
 	}
 	return &c, nil
+}
+
+func (r *Repository) ActiveAdminIDs(ctx context.Context, accountID int64) ([]int64, error) {
+	return r.AdminUserIDs(ctx, r.pool, accountID)
 }
 
 // AdminUsersForAccount returns user IDs of active admins for notifications.

@@ -53,7 +53,7 @@ function notifLabel(n: NotificationItem) {
 function notifPath(n: NotificationItem, accountType: string | undefined) {
   if (n.type === "collaboration_request") {
     if (accountType === "buyer") return "/b/collaboration";
-    if (accountType === "publisher") return "/p/buyers";
+    if (accountType === "publisher") return "/p/collaboration";
   }
   if (n.type === "partnership_request" || n.type === "partnership_accepted") {
     if (accountType === "buyer") return "/b/publishers";

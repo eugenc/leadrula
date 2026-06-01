@@ -372,7 +372,11 @@ export interface BuyerLogsFilters {
   actor_user_id?: number;
 }
 
-function buyerLogsQueryString(filters: BuyerLogsFilters): string {
+export interface PublisherLogsFilters extends BuyerLogsFilters {
+  buyer_id?: number;
+}
+
+function auditLogsQueryString(filters: BuyerLogsFilters): string {
   const qs = new URLSearchParams();
   Object.entries(filters).forEach(([k, v]) => {
     if (v !== undefined && v !== "" && v !== 0) qs.set(k, String(v));
@@ -381,7 +385,7 @@ function buyerLogsQueryString(filters: BuyerLogsFilters): string {
 }
 
 export function useBuyerLogs(filters: BuyerLogsFilters = { page: 1, limit: 25 }) {
-  const q = buyerLogsQueryString(filters);
+  const q = auditLogsQueryString(filters);
   return useQuery({
     queryKey: ["buyer-logs", filters],
     queryFn: () => get<AuditLogListResponse>(`/buyer/logs?${q}`),
@@ -392,6 +396,21 @@ export function useBuyerLogActors() {
   return useQuery({
     queryKey: ["buyer-logs", "actors"],
     queryFn: () => get<AuditLogActor[]>("/buyer/logs/actors"),
+  });
+}
+
+export function usePublisherLogs(filters: PublisherLogsFilters = { page: 1, limit: 25 }) {
+  const q = auditLogsQueryString(filters);
+  return useQuery({
+    queryKey: ["publisher-logs", filters],
+    queryFn: () => get<AuditLogListResponse>(`/publisher/collaboration/logs?${q}`),
+  });
+}
+
+export function usePublisherLogActors() {
+  return useQuery({
+    queryKey: ["publisher-logs", "actors"],
+    queryFn: () => get<AuditLogActor[]>("/publisher/collaboration/logs/actors"),
   });
 }
 export function useContractPublisherStages(buyer = false, sourcePipelineId?: number) {

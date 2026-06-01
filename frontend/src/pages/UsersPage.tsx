@@ -1,14 +1,15 @@
 import { useState } from "react";
-import { useUsersList, useInviteUser } from "@/features/admin/hooks";
+import { useUsersList, useInviteUser, useResendInvite } from "@/features/admin/hooks";
 import { UserDetailDrawer } from "@/features/admin/UserDetailDrawer";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
+import { IconButton } from "@/components/layout/IconButton";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Badge, Spinner } from "@/components/ui/misc";
 import { FormDrawer } from "@/components/ui/dialog";
-import { Plus } from "lucide-react";
+import { Mail, Plus } from "lucide-react";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import { formatRole } from "@/lib/utils";
@@ -37,7 +38,9 @@ function statusBadge(u: UserRow) {
 export function UsersPage() {
   const { data: users, isLoading } = useUsersList();
   const invite = useInviteUser();
+  const resend = useResendInvite();
   const [selectedUser, setSelectedUser] = useState<UserRow | null>(null);
+  const [resendingId, setResendingId] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ email: "", full_name: "", role: "user" as Role });
 
@@ -61,6 +64,7 @@ export function UsersPage() {
                 <TH>Email</TH>
                 <TH>Role</TH>
                 <TH>Status</TH>
+                <TH />
               </tr>
             </THead>
             <TBody>
@@ -70,6 +74,26 @@ export function UsersPage() {
                   <TD>{u.email}</TD>
                   <TD>{formatRole(u.role)}</TD>
                   <TD>{statusBadge(u)}</TD>
+                  <TD>
+                    {u.status === "pending" && (
+                      <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+                        <IconButton
+                          aria-label="Resend invitation"
+                          disabled={resend.isPending && resendingId === u.invite_id}
+                          onClick={() => {
+                            setResendingId(u.invite_id);
+                            resend.mutate(u.invite_id, {
+                              onSuccess: () => toast.success("Invite resent"),
+                              onError: (e) => toast.error(errorMessage(e)),
+                              onSettled: () => setResendingId(null),
+                            });
+                          }}
+                        >
+                          <Mail className="h-4 w-4" />
+                        </IconButton>
+                      </div>
+                    )}
+                  </TD>
                 </TR>
               ))}
             </TBody>

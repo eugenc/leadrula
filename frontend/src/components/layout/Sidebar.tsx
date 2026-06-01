@@ -57,6 +57,7 @@ const publisherNav: NavGroup[] = [
     items: [
       { to: "/p/buyers", label: "Buyers", icon: Building2, adminOnly: true },
       { to: "/p/contracts", label: "Contracts", icon: FileText, adminOnly: true },
+      { to: "/p/collaboration", label: "Collaboration", icon: Handshake, adminOnly: true },
     ],
   },
   {
