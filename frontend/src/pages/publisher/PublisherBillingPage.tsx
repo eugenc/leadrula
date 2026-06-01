@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { formatMoney } from "@/lib/utils";
 import { format } from "date-fns";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 
 export function PublisherBillingPage() {
   const [tab, setTab] = useState<"disputes" | "transactions">("disputes");
@@ -65,7 +65,7 @@ function Disputes() {
                   onClick={() =>
                     resolve.mutate(
                       { id: d.id, accept: true },
-                      { onSuccess: () => toast.success("Refunded"), onError: (e) => toast.error(apiError(e).message) }
+                      { onSuccess: () => toast.success("Refunded"), onError: (e) => toast.error(errorMessage(e)) }
                     )
                   }
                 >
@@ -77,7 +77,7 @@ function Disputes() {
                   onClick={() =>
                     resolve.mutate(
                       { id: d.id, accept: false },
-                      { onSuccess: () => toast.info("Rejected"), onError: (e) => toast.error(apiError(e).message) }
+                      { onSuccess: () => toast.info("Rejected"), onError: (e) => toast.error(errorMessage(e)) }
                     )
                   }
                 >

@@ -67,17 +67,37 @@ func RequireRole(roles ...string) func(http.Handler) http.Handler {
 	}
 }
 
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
 // LogImpersonationActions records mutating buyer requests made while impersonating.
-func LogImpersonationActions(logFn func(ctx context.Context, p *Principal, method, path string)) func(http.Handler) http.Handler {
+func LogImpersonationActions(logFn func(ctx context.Context, p *Principal, method, path string, changes []ImpersonationChange)) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			p := FromContext(r.Context())
-			if p != nil && p.Impersonator != nil && r.Method != http.MethodGet && r.Method != http.MethodHead {
-				logFn(r.Context(), p, r.Method, r.URL.Path)
+			mutating := r.Method != http.MethodGet && r.Method != http.MethodHead
+			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+			next.ServeHTTP(rec, r)
+			if p != nil && p.Impersonator != nil && mutating && rec.status < 400 {
+				logFn(r.Context(), p, r.Method, r.URL.Path, ImpersonationChangesFromContext(r.Context()))
 			}
-			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// ApplyImpersonationChanges attaches field diffs to the request for post-handler audit logging.
+func ApplyImpersonationChanges(r *http.Request, changes []ImpersonationChange) {
+	if len(changes) == 0 {
+		return
+	}
+	*r = *r.WithContext(SetImpersonationChanges(r.Context(), changes))
 }
 
 func bearer(r *http.Request) string {

@@ -78,12 +78,40 @@ export class ApiError extends Error {
 }
 
 export function apiError(err: unknown): ApiError {
+  if (err instanceof ApiError) return err;
   if (axios.isAxiosError(err)) {
     const status = err.response?.status ?? 0;
     const e = (err.response?.data as { error?: ApiErrorShape } | undefined)?.error;
     return new ApiError(status, e?.code ?? "error", e?.message ?? err.message);
   }
   return new ApiError(0, "error", "unexpected error");
+}
+
+export function errorMessage(err: unknown): string {
+  const e = apiError(err);
+
+  if (e.message && e.message !== "unexpected error" && e.message !== "Network Error") {
+    return e.message.charAt(0).toUpperCase() + e.message.slice(1);
+  }
+
+  if (e.status === 0) return "Can't reach the server. Check your connection.";
+  switch (e.code) {
+    case "validation_error":
+      return "Check your input and try again.";
+    case "conflict":
+      return "That already exists.";
+    case "not_found":
+      return "Not found.";
+    case "forbidden":
+      return "You don't have permission to do that.";
+    case "insufficient_balance":
+      return "Insufficient balance.";
+    case "business_rule":
+      return "This action isn't allowed.";
+    case "internal":
+    default:
+      return "Something went wrong. Please try again.";
+  }
 }
 
 export function ns(): string {

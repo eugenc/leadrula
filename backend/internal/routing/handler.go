@@ -14,6 +14,11 @@ type Handler struct{ svc *Service }
 
 func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 
+// RegisterBuyer mounts read-only inbound routes for buyer accounts.
+func (h *Handler) RegisterBuyer(r chi.Router) {
+	r.Get("/routes", h.buyerListRoutes)
+}
+
 // RegisterRoutes mounts sources, routes, and field maps (publisher admin).
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/sources", h.listSources)
@@ -143,7 +148,7 @@ func (h *Handler) addSourceFieldMap(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	e, err := h.svc.AddSourceFieldMap(r.Context(), sid, body.SourceKey, body.TargetType, body.BuiltinField, body.CustomFieldID)
+	e, err := h.svc.AddSourceFieldMap(r.Context(), p.AccountID, sid, body.SourceKey, body.TargetType, body.BuiltinField, body.CustomFieldID)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -162,6 +167,16 @@ func (h *Handler) deleteSourceFieldMap(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listRoutes(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	items, err := h.svc.ListRoutes(r.Context(), p.AccountID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, items)
+}
+
+func (h *Handler) buyerListRoutes(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	items, err := h.svc.ListRoutesForBuyer(r.Context(), p.AccountID)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return

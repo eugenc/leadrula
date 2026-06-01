@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 
 export function DisqReasonsPage() {
   const { data: reasons, isLoading } = useDisqReasons();
@@ -38,7 +38,7 @@ export function DisqReasonsPage() {
                     />
                     <IconButton
                       variant="danger"
-                      onClick={() => remove.mutate(r.id, { onError: (e) => toast.error(apiError(e).message) })}
+                      onClick={() => remove.mutate(r.id, { onError: (e) => toast.error(errorMessage(e)) })}
                     >
                       <Trash2 className="h-4 w-4" />
                     </IconButton>

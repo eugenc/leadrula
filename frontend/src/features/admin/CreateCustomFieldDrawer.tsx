@@ -3,7 +3,7 @@ import { FormDrawer } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 import type { CustomField } from "@/types";
 import { CUSTOM_FIELD_TYPES, slugFieldKey } from "./customFieldConstants";
 
@@ -55,7 +55,7 @@ export function CreateCustomFieldDrawer({
       toast.success(`Custom field "${field.name}" created`);
       onClose();
     } catch (e) {
-      toast.error(apiError(e).message);
+      toast.error(errorMessage(e));
     }
   }
 

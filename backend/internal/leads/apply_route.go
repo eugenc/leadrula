@@ -55,14 +55,14 @@ func applyBuyerRoute(ctx context.Context, q database.Querier, deps RouteApplyDep
 	if err != nil {
 		return err
 	}
-	if err := loadCustomValuesTx(ctx, q, lead); err != nil {
+	if err := LoadCustomValues(ctx, q, lead); err != nil {
 		return err
 	}
 	maps, err := routing.RouteFieldMap(ctx, q, route.ID)
 	if err != nil {
 		return err
 	}
-	if err := applyRouteFieldMap(ctx, q, deps.Repo, lead, maps); err != nil {
+	if err := ApplyRouteFieldMap(ctx, q, deps.Repo, lead, maps); err != nil {
 		return err
 	}
 
@@ -100,7 +100,8 @@ func applyBuyerRoute(ctx context.Context, q database.Querier, deps RouteApplyDep
 	return deps.Notif.Enqueue(ctx, q, adminIDs, "new_lead", map[string]any{"lead_id": leadID})
 }
 
-func loadCustomValuesTx(ctx context.Context, q database.Querier, l *Lead) error {
+// LoadCustomValues fills lead.CustomValues from lead_custom_values.
+func LoadCustomValues(ctx context.Context, q database.Querier, l *Lead) error {
 	rows, err := q.Query(ctx, `SELECT custom_field_id, value FROM lead_custom_values WHERE lead_id=$1`, l.ID)
 	if err != nil {
 		return err
@@ -118,7 +119,8 @@ func loadCustomValuesTx(ctx context.Context, q database.Querier, l *Lead) error 
 	return rows.Err()
 }
 
-func applyRouteFieldMap(ctx context.Context, q database.Querier, repo *Repository, lead *Lead, maps []routing.RouteFieldMapEntry) error {
+// ApplyRouteFieldMap copies publisher lead field values onto the lead per route_field_map rows.
+func ApplyRouteFieldMap(ctx context.Context, q database.Querier, repo *Repository, lead *Lead, maps []routing.RouteFieldMapEntry) error {
 	for _, m := range maps {
 		if m.DstType == "builtin" && m.DstBuiltin != nil {
 			val, ok := readLeadBuiltinForRoute(lead, m.SrcType, m.SrcBuiltin, m.SrcCustomFieldID)

@@ -2,7 +2,7 @@ import { useRef } from "react";
 import { Avatar, Spinner } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 
 const ACCEPT = "image/jpeg,image/png,image/webp";
 
@@ -56,5 +56,5 @@ export function AvatarUpload({
 }
 
 export function uploadError(e: unknown) {
-  toast.error(apiError(e).message);
+  toast.error(errorMessage(e));
 }

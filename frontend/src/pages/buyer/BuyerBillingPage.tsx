@@ -16,7 +16,7 @@ import { formatMoney } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 import type { Transaction } from "@/types";
 
 export function BuyerBillingPage() {
@@ -50,7 +50,7 @@ export function BuyerBillingPage() {
               onClick={() =>
                 topup.mutate(amount, {
                   onSuccess: () => toast.success("Balance topped up"),
-                  onError: (e) => toast.error(apiError(e).message),
+                  onError: (e) => toast.error(errorMessage(e)),
                 })
               }
             >
@@ -132,7 +132,7 @@ function DisputeDialog({ txn, onClose }: { txn: Transaction; onClose: () => void
                     toast.success("Dispute submitted");
                     onClose();
                   },
-                  onError: (e) => toast.error(apiError(e).message),
+                  onError: (e) => toast.error(errorMessage(e)),
                 }
               )
             }

@@ -5,7 +5,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/misc";
 import { KeyRound, Mail } from "lucide-react";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 import { formatRole } from "@/lib/utils";
 import {
   useUpdateUser,
@@ -92,7 +92,7 @@ function DrawerContent({ user, onClose }: { user: UserRow; onClose: () => void }
       toast.success("Saved");
       onClose();
     };
-    const onError = (e: unknown) => toast.error(apiError(e).message);
+    const onError = (e: unknown) => toast.error(errorMessage(e));
 
     if (user.status === "pending") {
       updateInvite.mutate({ id: user.invite_id, body }, { onSuccess, onError });
@@ -106,7 +106,7 @@ function DrawerContent({ user, onClose }: { user: UserRow; onClose: () => void }
       toast.success(user.status === "pending" ? "Invite revoked" : "User removed");
       onClose();
     };
-    const onError = (e: unknown) => toast.error(apiError(e).message);
+    const onError = (e: unknown) => toast.error(errorMessage(e));
 
     if (user.status === "pending") {
       removeInvite.mutate(user.invite_id, { onSuccess, onError });
@@ -177,7 +177,7 @@ function DrawerContent({ user, onClose }: { user: UserRow; onClose: () => void }
             onClick={() =>
               resend.mutate(user.invite_id, {
                 onSuccess: () => toast.success("Invite resent"),
-                onError: (e) => toast.error(apiError(e).message),
+                onError: (e) => toast.error(errorMessage(e)),
               })
             }
           >
@@ -192,7 +192,7 @@ function DrawerContent({ user, onClose }: { user: UserRow; onClose: () => void }
             onClick={() =>
               resetPassword.mutate(user.email, {
                 onSuccess: () => toast.success("Password reset email sent"),
-                onError: (e) => toast.error(apiError(e).message),
+                onError: (e) => toast.error(errorMessage(e)),
               })
             }
           >

@@ -5,7 +5,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label, FilterSelect } from "@/components/ui/input";
 import { toast } from "@/store/toastStore";
-import { apiError, ns, post } from "@/lib/api";
+import { ns, post, errorMessage } from "@/lib/api";
 import { chunk } from "@/lib/chunk";
 import {
   CUSTOM_FIELD_IMPORT_BATCH_SIZE,
@@ -146,7 +146,7 @@ export function ImportCustomFieldsModal({ open, onClose }: Props) {
       }
     } catch (err) {
       if (progressToastId) toast.dismiss(progressToastId);
-      toast.error(apiError(err).message);
+      toast.error(errorMessage(err));
     } finally {
       setImporting(false);
     }

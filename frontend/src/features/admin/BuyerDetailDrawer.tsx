@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/misc";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 import { cn, formatMoney } from "@/lib/utils";
 import { TIMEZONES } from "@/lib/timezones";
 import {
@@ -104,7 +104,7 @@ function DrawerContent({
           toast.success("Saved");
           onClose();
         },
-        onError: (e) => toast.error(apiError(e).message),
+        onError: (e) => toast.error(errorMessage(e)),
       }
     );
   }
@@ -118,7 +118,7 @@ function DrawerContent({
         onClose();
         navigate("/b");
       },
-      onError: (e) => toast.error(apiError(e).message),
+      onError: (e) => toast.error(errorMessage(e)),
     });
   }
 
@@ -134,7 +134,7 @@ function DrawerContent({
     <div className="flex h-full flex-col">
       <DrawerHeader
         title={buyer.name}
-        subtitle={`${leadCount} leads · ${formatMoney(buyer.balance)}`}
+        subtitle={`${buyer.handler_id} · ${leadCount} leads · ${formatMoney(buyer.balance)}`}
         onClose={onClose}
       />
 
@@ -160,7 +160,7 @@ function DrawerContent({
                 onClick={() =>
                   requestCollab.mutate(buyerId, {
                     onSuccess: () => toast.success("Collaboration request sent"),
-                    onError: (e) => toast.error(apiError(e).message),
+                    onError: (e) => toast.error(errorMessage(e)),
                   })
                 }
               >

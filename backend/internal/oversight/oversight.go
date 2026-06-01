@@ -24,14 +24,29 @@ type Handler struct {
 	billing     *billing.Service
 	calendar    *calendar.Service
 	collab      CollabGranter
+	partners    PartnerGranter
+	partnerChk  PartnerChecker
 }
 
 type CollabGranter interface {
 	GrantOnCreate(ctx context.Context, publisherID, buyerID, requestedBy int64) error
 }
 
-func NewHandler(acc *accounts.Repository, accSvc *accounts.Service, leadRepo *leads.Repository, pl *pipelines.Service, bl *billing.Service, cal *calendar.Service, collab CollabGranter) *Handler {
-	return &Handler{accounts: acc, accountsSvc: accSvc, leads: leadRepo, pipelines: pl, billing: bl, calendar: cal, collab: collab}
+type PartnerGranter interface {
+	GrantOnCreate(ctx context.Context, publisherID, buyerID, requestedBy int64) error
+}
+
+type PartnerChecker interface {
+	HasActive(ctx context.Context, publisherID, buyerID int64) (bool, error)
+}
+
+func NewHandler(acc *accounts.Repository, accSvc *accounts.Service, leadRepo *leads.Repository, pl *pipelines.Service, bl *billing.Service, cal *calendar.Service, collab CollabGranter, partners PartnerGranter, partnerChk PartnerChecker) *Handler {
+	return &Handler{accounts: acc, accountsSvc: accSvc, leads: leadRepo, pipelines: pl, billing: bl, calendar: cal, collab: collab, partners: partners, partnerChk: partnerChk}
+}
+
+func (h *Handler) RegisterBuyerRoutes(r chi.Router) {
+	r.Get("/publishers", h.listPublishers)
+	r.Get("/publishers/{id}", h.getPublisher)
 }
 
 func (h *Handler) RegisterRoutes(r chi.Router) {
@@ -46,8 +61,62 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/buyers/{id}/billing", h.buyerBilling)
 }
 
+func (h *Handler) listPublishers(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	items, err := h.accounts.ListPublishers(r.Context(), p.AccountID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if items == nil {
+		items = []accounts.PublisherSummary{}
+	}
+	httpx.JSON(w, http.StatusOK, items)
+}
+
+func (h *Handler) getPublisher(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	pubID := id(r)
+	if h.partnerChk != nil {
+		ok, err := h.partnerChk.HasActive(r.Context(), pubID, p.AccountID)
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		if !ok {
+			httpx.WriteError(w, httpx.NotFound("publisher not found"))
+			return
+		}
+	}
+	a, err := h.accounts.GetAccount(r.Context(), pubID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if a.Type != "publisher" {
+		httpx.WriteError(w, httpx.NotFound("publisher not found"))
+		return
+	}
+	httpx.JSON(w, http.StatusOK, h.publisherDetail(r.Context(), a))
+}
+
+func (h *Handler) publisherDetail(ctx context.Context, a *accounts.Account) map[string]any {
+	out := map[string]any{
+		"id": a.ID, "public_id": a.PublicID, "handler_id": a.HandlerID, "name": a.Name, "type": a.Type,
+		"website": a.Website, "timezone": a.Timezone,
+		"admin_name": "", "admin_email": "",
+	}
+	admin, err := h.accounts.PrimaryAdminContact(ctx, a.ID)
+	if err == nil && admin != nil {
+		out["admin_name"] = admin.FullName
+		out["admin_email"] = admin.Email
+	}
+	return out
+}
+
 func (h *Handler) listBuyers(w http.ResponseWriter, r *http.Request) {
-	items, err := h.accounts.ListBuyers(r.Context())
+	p := auth.FromContext(r.Context())
+	items, err := h.accounts.ListBuyers(r.Context(), p.AccountID)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -85,6 +154,13 @@ func (h *Handler) createBuyer(w http.ResponseWriter, r *http.Request) {
 	if body.CollaborateEnabled && h.collab != nil {
 		p := auth.FromContext(r.Context())
 		if err := h.collab.GrantOnCreate(r.Context(), p.AccountID, buyer.ID, p.UserID); err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+	}
+	if h.partners != nil {
+		p := auth.FromContext(r.Context())
+		if err := h.partners.GrantOnCreate(r.Context(), p.AccountID, buyer.ID, p.UserID); err != nil {
 			httpx.WriteError(w, err)
 			return
 		}
@@ -127,7 +203,7 @@ func (h *Handler) updateBuyer(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) buyerDetail(ctx context.Context, a *accounts.Account) map[string]any {
 	bal, _ := h.billing.GetBalance(ctx, a.ID)
 	out := map[string]any{
-		"id": a.ID, "public_id": a.PublicID, "name": a.Name, "type": a.Type,
+		"id": a.ID, "public_id": a.PublicID, "handler_id": a.HandlerID, "name": a.Name, "type": a.Type,
 		"website": a.Website, "timezone": a.Timezone, "balance": bal,
 		"admin_name": "", "admin_email": "",
 	}

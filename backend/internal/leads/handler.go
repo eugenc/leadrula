@@ -189,7 +189,7 @@ func (h *Handler) bulk(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	result, err := h.svc.Bulk(r.Context(), p, BulkParams{
+	result, auditChanges, err := h.svc.Bulk(r.Context(), p, BulkParams{
 		Action:     BulkAction(body.Action),
 		LeadIDs:    body.IDs,
 		UserID:     body.UserID,
@@ -199,6 +199,7 @@ func (h *Handler) bulk(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, err)
 		return
 	}
+	auth.ApplyImpersonationChanges(r, auditChanges)
 	httpx.JSON(w, http.StatusOK, result)
 }
 
@@ -229,12 +230,17 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	leadID := id(r)
+	before, err := h.svc.repo.Get(r.Context(), p, leadID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
 	var body struct {
 		Fields         map[string]*string         `json:"fields"`
 		AssignedUserID *int64                     `json:"assigned_user_id"`
 		ClearAssignee  bool                       `json:"clear_assignee"`
 		CustomValues   map[string]json.RawMessage `json:"custom_values"`
-		Tags           *[]string                    `json:"tags"`
+		Tags           *[]string                  `json:"tags"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
@@ -254,6 +260,12 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		if err := h.svc.repo.SetAssignee(r.Context(), p.AccountID, leadID, body.AssignedUserID); err != nil {
 			httpx.WriteError(w, err)
 			return
+		}
+	}
+	var customFieldIDs []int64
+	for fidStr := range body.CustomValues {
+		if fid := parseInt(fidStr); fid != 0 {
+			customFieldIDs = append(customFieldIDs, fid)
 		}
 	}
 	for fidStr, val := range body.CustomValues {
@@ -277,6 +289,21 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, err)
 		return
 	}
+	if p.Impersonator != nil {
+		fieldNames, err := h.svc.repo.CustomFieldNames(r.Context(), p.AccountID, customFieldIDs)
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		in := leadUpdateInput{
+			Fields:         body.Fields,
+			AssignedUserID: body.AssignedUserID,
+			ClearAssignee:  body.ClearAssignee,
+			CustomValues:   body.CustomValues,
+			Tags:           body.Tags,
+		}
+		auth.ApplyImpersonationChanges(r, diffLeadUpdate(before, l, in, fieldNames))
+	}
 	httpx.JSON(w, http.StatusOK, l)
 }
 
@@ -290,29 +317,35 @@ func (h *Handler) changeStage(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	l, err := h.svc.ChangeStage(r.Context(), p, id(r), body.StageID, body.ActionAt, body.DisqReasonID)
+	l, auditChanges, err := h.svc.ChangeStage(r.Context(), p, id(r), body.StageID, body.ActionAt, body.DisqReasonID)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
+	auth.ApplyImpersonationChanges(r, auditChanges)
 	httpx.JSON(w, http.StatusOK, l)
 }
 
 func (h *Handler) setAction(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
+	leadID := id(r)
+	before, err := h.svc.repo.Get(r.Context(), p, leadID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
 	var body struct {
 		ActionAt *time.Time `json:"action_at"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	if _, err := h.svc.repo.Get(r.Context(), p, id(r)); err != nil {
+	if err := h.svc.repo.SetActionAt(r.Context(), h.svc.repo.pool, leadID, body.ActionAt); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
-	if err := h.svc.repo.SetActionAt(r.Context(), h.svc.repo.pool, id(r), body.ActionAt); err != nil {
-		httpx.WriteError(w, err)
-		return
+	if p.Impersonator != nil {
+		auth.ApplyImpersonationChanges(r, actionAtChange(before.ActionAt, body.ActionAt))
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }

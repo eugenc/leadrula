@@ -15,6 +15,8 @@ const labels: Record<string, string> = {
   lead_returned: "A lead was returned",
   dispute_update: "Dispute resolved",
   collaboration_request: "Collaboration request",
+  partnership_request: "Partnership request",
+  partnership_accepted: "Partnership accepted",
 };
 
 function notifLabel(n: NotificationItem) {
@@ -27,12 +29,34 @@ function notifLabel(n: NotificationItem) {
       return `${n.payload.buyer_name ?? "Buyer"} invited you to collaborate`;
     }
   }
+  if (n.type === "partnership_request") {
+    const dir = n.payload.direction as string | undefined;
+    if (dir === "publisher_to_buyer") {
+      return `${n.payload.publisher_name ?? "Publisher"} requested a partnership`;
+    }
+    if (dir === "buyer_to_publisher") {
+      return `${n.payload.buyer_name ?? "Buyer"} requested a partnership`;
+    }
+  }
+  if (n.type === "partnership_accepted") {
+    const by = n.payload.accepted_by as string | undefined;
+    if (by === "publisher") {
+      return `${n.payload.publisher_name ?? "Publisher"} accepted your partnership request`;
+    }
+    if (by === "buyer") {
+      return `${n.payload.buyer_name ?? "Buyer"} accepted your partnership request`;
+    }
+  }
   return labels[n.type] ?? n.type;
 }
 
 function notifPath(n: NotificationItem, accountType: string | undefined) {
   if (n.type === "collaboration_request") {
-    if (accountType === "buyer") return "/b/settings/collaboration";
+    if (accountType === "buyer") return "/b/collaboration";
+    if (accountType === "publisher") return "/p/buyers";
+  }
+  if (n.type === "partnership_request" || n.type === "partnership_accepted") {
+    if (accountType === "buyer") return "/b/publishers";
     if (accountType === "publisher") return "/p/buyers";
   }
   return null;

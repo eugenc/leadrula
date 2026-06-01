@@ -27,8 +27,8 @@ export function StagePromptModal({
 
   if (!stage) return null;
 
-  const needAction = stage.prompt_action_datetime;
-  const needDisq = stage.prompt_disqualification;
+  const needAction = stage.stage_type === "action";
+  const needDisq = stage.stage_type === "disqualification";
   const valid = (!needAction || actionAt) && (!needDisq || reasonId);
 
   return (

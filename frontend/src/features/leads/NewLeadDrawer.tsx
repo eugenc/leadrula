@@ -6,7 +6,7 @@ import { SectionLabel } from "@/components/layout/SectionLabel";
 import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 import { useCreateLead, usePipelines, useStages, useUsers, useCustomFields } from "./hooks";
 import type { CustomField } from "@/types";
 
@@ -129,7 +129,7 @@ export function NewLeadDrawer({ open, onClose }: Props) {
       onClose();
       openDetail(lead.id);
     } catch (err) {
-      toast.error(apiError(err).message);
+      toast.error(errorMessage(err));
     }
   }
 

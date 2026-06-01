@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/echayko/leadrula/backend/internal/database"
 	"github.com/jackc/pgx/v5"
@@ -234,6 +235,10 @@ func (r *Repository) ListAudit(ctx context.Context, publisherID, buyerID int64, 
 		return nil, err
 	}
 	defer rows.Close()
+	return scanAuditRows(rows)
+}
+
+func scanAuditRows(rows pgx.Rows) ([]AuditEntry, error) {
 	var out []AuditEntry
 	for rows.Next() {
 		var e AuditEntry
@@ -252,10 +257,106 @@ func (r *Repository) ListAudit(ctx context.Context, publisherID, buyerID int64, 
 	return out, rows.Err()
 }
 
+const auditSelect = `SELECT l.id, l.event_type, l.actor_user_id, COALESCE(u.full_name, ''), l.metadata, l.created_at
+ FROM collaboration_audit_log l
+ LEFT JOIN users u ON u.id = l.actor_user_id`
+
+func (r *Repository) auditWhere(p AuditListParams) (string, []any) {
+	args := []any{p.BuyerID}
+	where := "l.buyer_id = $1"
+	add := func(cond string, val any) {
+		args = append(args, val)
+		where += fmt.Sprintf(" AND %s $%d", cond, len(args))
+	}
+	if p.From != nil {
+		add("l.created_at >=", *p.From)
+	}
+	if p.To != nil {
+		add("l.created_at <=", *p.To)
+	}
+	if p.ActorUserID != nil {
+		add("l.actor_user_id =", *p.ActorUserID)
+	}
+	return where, args
+}
+
+func (r *Repository) ListAuditForBuyer(ctx context.Context, p AuditListParams) (*AuditListResult, error) {
+	page := p.Page
+	if page < 1 {
+		page = 1
+	}
+	limit := p.Limit
+	if limit <= 0 {
+		limit = 25
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	where, args := r.auditWhere(p)
+
+	var total int
+	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM collaboration_audit_log l WHERE `+where, args...).Scan(&total); err != nil {
+		return nil, err
+	}
+
+	offset := (page - 1) * limit
+	qArgs := append([]any{}, args...)
+	qArgs = append(qArgs, limit, offset)
+	q := auditSelect + ` WHERE ` + where + fmt.Sprintf(` ORDER BY l.created_at DESC LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2)
+
+	rows, err := r.pool.Query(ctx, q, qArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items, err := scanAuditRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	if items == nil {
+		items = []AuditEntry{}
+	}
+	return &AuditListResult{Items: items, Total: total, Page: page, Limit: limit}, nil
+}
+
+func (r *Repository) ListAuditActors(ctx context.Context, buyerID int64) ([]AuditActor, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT DISTINCT u.id, u.full_name
+		 FROM collaboration_audit_log l
+		 JOIN users u ON u.id = l.actor_user_id
+		 WHERE l.buyer_id = $1
+		 ORDER BY u.full_name`, buyerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AuditActor
+	for rows.Next() {
+		var a AuditActor
+		if err := rows.Scan(&a.ID, &a.Name); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	if out == nil {
+		out = []AuditActor{}
+	}
+	return out, rows.Err()
+}
+
 func (r *Repository) AccountName(ctx context.Context, accountID int64) (string, error) {
 	var name string
 	err := r.pool.QueryRow(ctx, `SELECT name FROM accounts WHERE id = $1`, accountID).Scan(&name)
 	return name, err
+}
+
+func (r *Repository) GetAccountProfile(ctx context.Context, accountID int64) (publicID, name, website string, err error) {
+	err = r.pool.QueryRow(ctx,
+		`SELECT public_id, name, COALESCE(website, '') FROM accounts WHERE id = $1`, accountID).
+		Scan(&publicID, &name, &website)
+	return
 }
 
 func (r *Repository) UserName(ctx context.Context, userID int64) (string, error) {
@@ -270,11 +371,10 @@ func (r *Repository) PublisherAccountID(ctx context.Context) (int64, error) {
 	return id, err
 }
 
-func (r *Repository) FindPublisherUserByEmail(ctx context.Context, email string) (userID int64, role string, active bool, err error) {
+func (r *Repository) FindPublisherUserByEmail(ctx context.Context, publisherID int64, email string) (userID int64, role string, active bool, err error) {
 	err = r.pool.QueryRow(ctx,
 		`SELECT u.id, u.role, u.is_active FROM users u
-		 JOIN accounts a ON a.id = u.account_id
-		 WHERE u.email = $1 AND a.type = 'publisher'`, email).Scan(&userID, &role, &active)
+		 WHERE u.email = $1 AND u.account_id = $2`, email, publisherID).Scan(&userID, &role, &active)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, "", false, ErrNotFound
 	}

@@ -8,11 +8,14 @@ import (
 
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/internal/database"
+	"github.com/echayko/leadrula/backend/internal/handlerid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var ErrNotFound = errors.New("not found")
+
+const accountCols = `id, public_id, handler_id, type, name, website, timezone, created_at`
 
 type Repository struct {
 	pool *pgxpool.Pool
@@ -88,20 +91,21 @@ func (r *Repository) TouchLogin(ctx context.Context, userID int64) error {
 type BuyerSummary struct {
 	ID        int64   `json:"id"`
 	PublicID  string  `json:"public_id"`
+	HandlerID string  `json:"handler_id"`
 	Name      string  `json:"name"`
 	Balance   float64 `json:"balance"`
 	LeadCount int     `json:"lead_count"`
 }
 
-func (r *Repository) ListBuyers(ctx context.Context) ([]BuyerSummary, error) {
+func (r *Repository) ListBuyers(ctx context.Context, publisherID int64) ([]BuyerSummary, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT a.id, a.public_id, a.name,
+		`SELECT a.id, a.public_id, a.handler_id, a.name,
 		        COALESCE(b.balance,0)::float8,
 		        (SELECT count(*) FROM leads l WHERE l.owner_account_id = a.id)
 		 FROM accounts a
+		 JOIN partnerships p ON p.buyer_id = a.id AND p.publisher_id = $1 AND p.status = 'active'
 		 LEFT JOIN buyer_balances b ON b.buyer_id = a.id
-		 WHERE a.type = 'buyer'
-		 ORDER BY a.name`)
+		 ORDER BY a.name`, publisherID)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +113,41 @@ func (r *Repository) ListBuyers(ctx context.Context) ([]BuyerSummary, error) {
 	var out []BuyerSummary
 	for rows.Next() {
 		var s BuyerSummary
-		if err := rows.Scan(&s.ID, &s.PublicID, &s.Name, &s.Balance, &s.LeadCount); err != nil {
+		if err := rows.Scan(&s.ID, &s.PublicID, &s.HandlerID, &s.Name, &s.Balance, &s.LeadCount); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// PublisherSummary is a buyer-oversight row: an active publisher with lead count.
+type PublisherSummary struct {
+	ID                   int64  `json:"id"`
+	PublicID             string `json:"public_id"`
+	HandlerID            string `json:"handler_id"`
+	Name                 string `json:"name"`
+	LeadCount            int    `json:"lead_count"`
+	CollaborationStatus  string `json:"collaboration_status"`
+}
+
+func (r *Repository) ListPublishers(ctx context.Context, buyerID int64) ([]PublisherSummary, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT a.id, a.public_id, a.handler_id, a.name,
+		        (SELECT count(*) FROM leads l WHERE l.owner_account_id = $1 AND l.publisher_id = a.id),
+		        COALESCE(c.status::text, 'none')
+		 FROM accounts a
+		 JOIN partnerships p ON p.publisher_id = a.id AND p.buyer_id = $1 AND p.status = 'active'
+		 LEFT JOIN buyer_collaborations c ON c.publisher_id = a.id AND c.buyer_id = $1
+		 ORDER BY a.name`, buyerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PublisherSummary
+	for rows.Next() {
+		var s PublisherSummary
+		if err := rows.Scan(&s.ID, &s.PublicID, &s.HandlerID, &s.Name, &s.LeadCount, &s.CollaborationStatus); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -118,9 +156,24 @@ func (r *Repository) ListBuyers(ctx context.Context) ([]BuyerSummary, error) {
 }
 
 func (r *Repository) GetAccount(ctx context.Context, id int64) (*Account, error) {
-	const q = `SELECT id, public_id, type, name, website, timezone, created_at FROM accounts WHERE id = $1`
+	const q = `SELECT ` + accountCols + ` FROM accounts WHERE id = $1`
 	a := &Account{}
-	err := r.pool.QueryRow(ctx, q, id).Scan(&a.ID, &a.PublicID, &a.Type, &a.Name, &a.Website, &a.Timezone, &a.CreatedAt)
+	err := r.pool.QueryRow(ctx, q, id).Scan(
+		&a.ID, &a.PublicID, &a.HandlerID, &a.Type, &a.Name, &a.Website, &a.Timezone, &a.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return a, nil
+}
+
+func (r *Repository) GetAccountByHandlerID(ctx context.Context, handlerID string) (*Account, error) {
+	const q = `SELECT ` + accountCols + ` FROM accounts WHERE handler_id = $1`
+	a := &Account{}
+	err := r.pool.QueryRow(ctx, q, handlerID).Scan(
+		&a.ID, &a.PublicID, &a.HandlerID, &a.Type, &a.Name, &a.Website, &a.Timezone, &a.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -137,10 +190,10 @@ func (r *Repository) UpdateBuyer(ctx context.Context, id int64, p UpdateBuyerPar
 			website = COALESCE($3, website),
 			timezone = COALESCE($4, timezone)
 		WHERE id = $1 AND type = 'buyer'
-		RETURNING id, public_id, type, name, website, timezone, created_at`
+		RETURNING ` + accountCols
 	a := &Account{}
 	err := r.pool.QueryRow(ctx, q, id, p.Name, p.Website, p.Timezone).Scan(
-		&a.ID, &a.PublicID, &a.Type, &a.Name, &a.Website, &a.Timezone, &a.CreatedAt)
+		&a.ID, &a.PublicID, &a.HandlerID, &a.Type, &a.Name, &a.Website, &a.Timezone, &a.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -311,11 +364,20 @@ func (r *Repository) CreateBuyer(ctx context.Context, p CreateBuyerParams, token
 	defer tx.Rollback(ctx)
 
 	a := &Account{}
-	err = tx.QueryRow(ctx,
-		`INSERT INTO accounts(type, name, website, timezone) VALUES ('buyer', $1, $2, $3)
-		 RETURNING id, public_id, type, name, website, timezone, created_at`,
-		p.Name, p.Website, p.Timezone).Scan(
-		&a.ID, &a.PublicID, &a.Type, &a.Name, &a.Website, &a.Timezone, &a.CreatedAt)
+	for range 10 {
+		hid := handlerid.Generate("B")
+		err = tx.QueryRow(ctx,
+			`INSERT INTO accounts(type, name, website, timezone, handler_id) VALUES ('buyer', $1, $2, $3, $4)
+			 RETURNING `+accountCols,
+			p.Name, p.Website, p.Timezone, hid).Scan(
+			&a.ID, &a.PublicID, &a.HandlerID, &a.Type, &a.Name, &a.Website, &a.Timezone, &a.CreatedAt)
+		if err == nil {
+			break
+		}
+		if !database.IsUniqueViolation(err) {
+			return nil, err
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -350,6 +412,7 @@ func (r *Repository) CreateBuyer(ctx context.Context, p CreateBuyerParams, token
 		Buyer: BuyerSummary{
 			ID:        a.ID,
 			PublicID:  a.PublicID,
+			HandlerID: a.HandlerID,
 			Name:      a.Name,
 			Balance:   p.StartingBalance,
 			LeadCount: 0,

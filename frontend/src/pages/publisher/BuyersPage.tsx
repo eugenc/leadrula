@@ -1,18 +1,26 @@
 import { useState } from "react";
-import { useBuyers, useCreateBuyer } from "@/features/admin/hooks";
+import {
+  useBuyers,
+  useCreateBuyer,
+  usePartnerships,
+  useRequestPartnership,
+  useAcceptPartnership,
+  useRejectPartnership,
+} from "@/features/admin/hooks";
 import { BuyerDetailDrawer } from "@/features/admin/BuyerDetailDrawer";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
-import { Spinner, EmptyState } from "@/components/ui/misc";
+import { Spinner, EmptyState, Card } from "@/components/ui/misc";
 import { FormDrawer } from "@/components/ui/dialog";
 import { cn, formatMoney } from "@/lib/utils";
 import { TIMEZONES } from "@/lib/timezones";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
-import { Plus } from "lucide-react";
+import { errorMessage } from "@/lib/api";
+import { Link2, Plus } from "lucide-react";
+import type { Partnership } from "@/types";
 
 const emptyForm = {
   name: "",
@@ -25,36 +33,122 @@ const emptyForm = {
   collaborate_enabled: true,
 };
 
+function PendingPartnerships({
+  items,
+  onAccept,
+  onReject,
+  accepting,
+  rejecting,
+}: {
+  items: Partnership[];
+  onAccept: (id: number) => void;
+  onReject: (id: number) => void;
+  accepting: boolean;
+  rejecting: boolean;
+}) {
+  const pending = items.filter((p) => p.status === "pending_publisher");
+  if (pending.length === 0) return null;
+
+  return (
+    <Card className="mb-4 p-4">
+      <h2 className="mb-3 text-sm font-semibold text-gray-800">Pending partnership requests</h2>
+      <div className="space-y-3">
+        {pending.map((p) => (
+          <div key={p.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-100 bg-amber-50 px-3 py-2">
+            <div>
+              <div className="text-sm font-medium text-gray-800">{p.partner_name}</div>
+              <div className="text-xs text-gray-500">{p.partner_handler_id}</div>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" disabled={accepting} onClick={() => onAccept(p.id)}>
+                Accept
+              </Button>
+              <Button size="sm" variant="secondary" disabled={rejecting} onClick={() => onReject(p.id)}>
+                Reject
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 export function BuyersPage() {
   const { data: buyers, isLoading } = useBuyers();
+  const { data: partnerships } = usePartnerships();
   const create = useCreateBuyer();
+  const request = useRequestPartnership();
+  const accept = useAcceptPartnership();
+  const reject = useRejectPartnership();
   const [selectedBuyerId, setSelectedBuyerId] = useState<number | null>(null);
   const [selectedLeadCount, setSelectedLeadCount] = useState(0);
   const [open, setOpen] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkHandlerId, setLinkHandlerId] = useState("");
   const [form, setForm] = useState(emptyForm);
+
+  const startingBalance = Number.isNaN(form.starting_balance) ? 0 : form.starting_balance;
 
   const canSubmit =
     form.name.trim() &&
     form.admin_first_name.trim() &&
     form.admin_last_name.trim() &&
     form.admin_email.trim() &&
-    form.starting_balance >= 0;
+    startingBalance >= 0;
 
   function openBuyer(id: number, leadCount: number) {
     setSelectedBuyerId(id);
     setSelectedLeadCount(leadCount);
   }
 
+  function submitLink() {
+    request.mutate(
+      { buyer_handler_id: linkHandlerId.trim().toUpperCase() },
+      {
+        onSuccess: () => {
+          toast.success("Partnership request sent");
+          setLinkOpen(false);
+          setLinkHandlerId("");
+        },
+        onError: (e) => toast.error(errorMessage(e)),
+      }
+    );
+  }
+
   return (
     <>
       <PageHeader
         action={
-          <Button onClick={() => setOpen(true)}>
-            <Plus className="h-4 w-4" /> Add Buyer
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={() => setLinkOpen(true)}>
+              <Link2 className="h-4 w-4" /> Link Buyer
+            </Button>
+            <Button onClick={() => setOpen(true)}>
+              <Plus className="h-4 w-4" /> Add Buyer
+            </Button>
+          </div>
         }
       />
       <PageBody>
+        <PendingPartnerships
+          items={partnerships ?? []}
+          onAccept={(id) =>
+            accept.mutate(id, {
+              onSuccess: () => toast.success("Partnership accepted"),
+              onError: (e) => toast.error(errorMessage(e)),
+            })
+          }
+          onReject={(id) =>
+            reject.mutate(id, {
+              onSuccess: () => toast.success("Request rejected"),
+              onError: (e) => toast.error(errorMessage(e)),
+            })
+          }
+          accepting={accept.isPending}
+          rejecting={reject.isPending}
+        />
+
         {isLoading ? (
           <Spinner className="h-6 w-6" />
         ) : (buyers ?? []).length === 0 ? (
@@ -64,6 +158,7 @@ export function BuyersPage() {
             <THead>
               <tr>
                 <TH>Buyer</TH>
+                <TH>Handler ID</TH>
                 <TH>Leads</TH>
                 <TH>Balance</TH>
               </tr>
@@ -72,6 +167,7 @@ export function BuyersPage() {
               {(buyers ?? []).map((b) => (
                 <TR key={b.id} onClick={() => openBuyer(b.id, b.lead_count)}>
                   <TD className="font-medium text-gray-800">{b.name}</TD>
+                  <TD className="font-mono text-xs text-gray-500">{b.handler_id}</TD>
                   <TD>{b.lead_count}</TD>
                   <TD className={cn(b.balance < 0 && "font-semibold text-danger")}>{formatMoney(b.balance)}</TD>
                 </TR>
@@ -85,6 +181,33 @@ export function BuyersPage() {
           leadCount={selectedLeadCount}
           onClose={() => setSelectedBuyerId(null)}
         />
+
+        <FormDrawer
+          open={linkOpen}
+          onClose={() => setLinkOpen(false)}
+          title="Link Buyer"
+          width={420}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setLinkOpen(false)}>
+                Cancel
+              </Button>
+              <Button disabled={!linkHandlerId.trim() || request.isPending} onClick={submitLink}>
+                Send Request
+              </Button>
+            </>
+          }
+        >
+          <p className="mb-3 text-sm text-gray-500">
+            Enter an existing buyer&apos;s handler ID. They must accept before you can create a contract.
+          </p>
+          <Label>Buyer handler ID</Label>
+          <Input
+            placeholder="B-XXXXX"
+            value={linkHandlerId}
+            onChange={(e) => setLinkHandlerId(e.target.value.toUpperCase())}
+          />
+        </FormDrawer>
 
         <FormDrawer
           open={open}
@@ -106,7 +229,7 @@ export function BuyersPage() {
                       admin_last_name: form.admin_last_name.trim(),
                       admin_email: form.admin_email.trim(),
                       website: form.website.trim() || undefined,
-                      starting_balance: form.starting_balance,
+                      starting_balance: startingBalance,
                       timezone: form.timezone,
                       collaborate_enabled: form.collaborate_enabled,
                     },
@@ -116,7 +239,7 @@ export function BuyersPage() {
                         setOpen(false);
                         setForm(emptyForm);
                       },
-                      onError: (e) => toast.error(apiError(e).message),
+                      onError: (e) => toast.error(errorMessage(e)),
                     }
                   )
                 }
@@ -195,8 +318,16 @@ export function BuyersPage() {
                     type="number"
                     min={0}
                     step={0.01}
-                    value={form.starting_balance}
-                    onChange={(e) => setForm({ ...form, starting_balance: Number(e.target.value) })}
+                    value={Number.isNaN(form.starting_balance) ? "" : form.starting_balance}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setForm({ ...form, starting_balance: v === "" ? NaN : Number(v) });
+                    }}
+                    onBlur={() => {
+                      if (Number.isNaN(form.starting_balance)) {
+                        setForm({ ...form, starting_balance: 0 });
+                      }
+                    }}
                   />
                 </div>
                 <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">

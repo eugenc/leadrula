@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useSources,
@@ -28,7 +29,7 @@ import { Switch, Spinner, EmptyState, Badge } from "@/components/ui/misc";
 import { FormDrawer } from "@/components/ui/dialog";
 import { ArrowRightLeft, Plus, Trash2 } from "lucide-react";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 import type { CustomField, Route, RouteFieldMapEntry } from "@/types";
 
 const BUILTINS = ["first_name", "last_name", "phone", "email", "address", "city", "state", "zip"];
@@ -55,10 +56,23 @@ function deliveryCell(r: Route) {
 }
 
 export function RoutingPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [drawerRoute, setDrawerRoute] = useState<Route | null | undefined>(undefined);
   const [routeMapFor, setRouteMapFor] = useState<Route | null>(null);
 
   const { data: routes, isLoading: routesLoading } = useRoutes();
+
+  useEffect(() => {
+    const openId = (location.state as { openRouteFieldMapId?: number } | null)?.openRouteFieldMapId;
+    if (!openId || !routes?.length) return;
+    const route = routes.find((r) => r.id === openId);
+    if (route) {
+      setDrawerRoute(undefined);
+      setRouteMapFor(route);
+    }
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.state, location.pathname, routes, navigate]);
   const updateRoute = useUpdateRoute();
   const removeRoute = useDeleteRoute();
 
@@ -126,7 +140,7 @@ export function RoutingPage() {
                       )}
                       <IconButton
                         variant="danger"
-                        onClick={() => removeRoute.mutate(r.id, { onError: (e) => toast.error(apiError(e).message) })}
+                        onClick={() => removeRoute.mutate(r.id, { onError: (e) => toast.error(errorMessage(e)) })}
                       >
                         <Trash2 className="h-4 w-4" />
                       </IconButton>
@@ -230,7 +244,7 @@ function RouteDrawerContent({
             toast.success("Route updated");
             onClose();
           },
-          onError: (e) => toast.error(apiError(e).message),
+          onError: (e) => toast.error(errorMessage(e)),
         }
       );
     } else {
@@ -239,7 +253,7 @@ function RouteDrawerContent({
           toast.success("Route created");
           onClose();
         },
-        onError: (e) => toast.error(apiError(e).message),
+        onError: (e) => toast.error(errorMessage(e)),
       });
     }
   }
@@ -446,7 +460,7 @@ function RouteFieldMapContent({ route, onClose }: { route: Route; onClose: () =>
       { routeId: route.id, body: { ...fieldBody("src", src), ...fieldBody("dst", dst) } },
       {
         onSuccess: () => toast.success("Mapping added"),
-        onError: (e) => toast.error(apiError(e).message),
+        onError: (e) => toast.error(errorMessage(e)),
       }
     );
   }
@@ -461,12 +475,26 @@ function RouteFieldMapContent({ route, onClose }: { route: Route; onClose: () =>
     return val.replace(/_/g, " ");
   }
 
+  function addRouteMapping(srcVal: string, dstVal: string) {
+    add.mutate(
+      { routeId: route.id, body: { ...fieldBody("src", srcVal), ...fieldBody("dst", dstVal) } },
+      {
+        onSuccess: () => toast.success("Mapping added"),
+        onError: (e) => toast.error(errorMessage(e)),
+      }
+    );
+  }
+
   function onFieldCreated(field: CustomField) {
     const val = `cf:${field.id}`;
-    if (createFieldSide === "src") setSrc(val);
-    else if (createFieldSide === "dst") setDst(val);
+    const side = createFieldSide;
+    const srcVal = side === "src" ? val : src;
+    const dstVal = side === "dst" ? val : dst;
+    if (side === "src") setSrc(val);
+    else if (side === "dst") setDst(val);
     setCreateFieldSide(null);
     qc.invalidateQueries({ queryKey: ["route-field-map-options", route.id] });
+    if (side) addRouteMapping(srcVal, dstVal);
     return field;
   }
 
@@ -496,7 +524,7 @@ function RouteFieldMapContent({ route, onClose }: { route: Route; onClose: () =>
         <div className="space-y-4">
           <FieldMapList
             entries={entries ?? []}
-            onDelete={(id) => remove.mutate(id, { onError: (e) => toast.error(apiError(e).message) })}
+            onDelete={(id) => remove.mutate(id, { onError: (e) => toast.error(errorMessage(e)) })}
             renderEntry={renderEntry}
           />
           {buyerFields.length === 0 && (

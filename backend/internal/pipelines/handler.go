@@ -102,23 +102,14 @@ func (h *Handler) listStages(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) createStage(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
-		Name                   string  `json:"name"`
-		Color                  string  `json:"color"`
-		PromptActionDatetime   *bool   `json:"prompt_action_datetime"`
-		PromptDisqualification *bool   `json:"prompt_disqualification"`
+		Name      string `json:"name"`
+		Color     string `json:"color"`
+		StageType string `json:"stage_type"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	promptAction := true
-	if body.PromptActionDatetime != nil {
-		promptAction = *body.PromptActionDatetime
-	}
-	promptDisq := false
-	if body.PromptDisqualification != nil {
-		promptDisq = *body.PromptDisqualification
-	}
-	st, err := h.svc.CreateStage(r.Context(), p.AccountID, idParam(r, "id"), body.Name, body.Color, promptAction, promptDisq)
+	st, err := h.svc.CreateStage(r.Context(), p.AccountID, idParam(r, "id"), body.Name, body.Color, body.StageType)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -129,15 +120,14 @@ func (h *Handler) createStage(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) updateStage(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
-		Name                   *string `json:"name"`
-		Color                  *string `json:"color"`
-		PromptActionDatetime   *bool   `json:"prompt_action_datetime"`
-		PromptDisqualification *bool   `json:"prompt_disqualification"`
+		Name      *string `json:"name"`
+		Color     *string `json:"color"`
+		StageType *string `json:"stage_type"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	st, err := h.svc.UpdateStage(r.Context(), p.AccountID, idParam(r, "id"), body.Name, body.Color, body.PromptActionDatetime, body.PromptDisqualification)
+	st, err := h.svc.UpdateStage(r.Context(), p.AccountID, idParam(r, "id"), body.Name, body.Color, body.StageType)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return

@@ -10,7 +10,7 @@ import { Badge, Spinner } from "@/components/ui/misc";
 import { FormDrawer } from "@/components/ui/dialog";
 import { Plus } from "lucide-react";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 import { formatRole } from "@/lib/utils";
 import type { Role, UserRow } from "@/types";
 
@@ -96,7 +96,7 @@ export function UsersPage() {
                       setOpen(false);
                       setForm({ email: "", full_name: "", role: "user" });
                     },
-                    onError: (e) => toast.error(apiError(e).message),
+                    onError: (e) => toast.error(errorMessage(e)),
                   })
                 }
               >

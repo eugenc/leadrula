@@ -14,13 +14,14 @@ import { PageBody } from "@/components/layout/PageBody";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { IconButton } from "@/components/layout/IconButton";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
+import { STAGE_TYPES } from "@/features/pipelines/stageTypes";
 import { Card, Spinner, EmptyState } from "@/components/ui/misc";
 import { cn } from "@/lib/utils";
 import { Plus, Settings2, Trash2 } from "lucide-react";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
-import type { Stage } from "@/types";
+import { errorMessage } from "@/lib/api";
+import type { Stage, StageType } from "@/types";
 
 export function PipelinesPage() {
   const { data: pipelines, isLoading } = usePipelines();
@@ -63,7 +64,7 @@ export function PipelinesPage() {
                       if (name !== p.name) {
                         updatePipeline.mutate(
                           { id: p.id, name },
-                          { onError: (err) => toast.error(apiError(err).message) }
+                          { onError: (err) => toast.error(errorMessage(err)) }
                         );
                       }
                     }}
@@ -72,7 +73,7 @@ export function PipelinesPage() {
                     variant="danger"
                     onClick={() =>
                       deletePipeline.mutate(p.id, {
-                        onError: (e) => toast.error(apiError(e).message),
+                        onError: (e) => toast.error(errorMessage(e)),
                       })
                     }
                   >
@@ -121,6 +122,7 @@ function StagesEditor({ pipelineId }: { pipelineId: number }) {
   const updateStage = useUpdateStage();
   const deleteStage = useDeleteStage();
   const [name, setName] = useState("");
+  const [newStageType, setNewStageType] = useState<StageType>("standard");
   const [settingsStage, setSettingsStage] = useState<Stage | null>(null);
 
   const sorted = [...(stages ?? [])].sort((a, b) => a.position - b.position);
@@ -128,9 +130,10 @@ function StagesEditor({ pipelineId }: { pipelineId: number }) {
   return (
     <>
       <Card className="p-4">
-        <div className="mb-3 grid grid-cols-[auto_1fr_auto_auto] items-center gap-3">
+        <div className="mb-3 grid grid-cols-[auto_1fr_9rem_auto_auto] items-center gap-3">
           <SectionLabel className="col-span-1"> </SectionLabel>
           <SectionLabel>Stage</SectionLabel>
+          <SectionLabel>Type</SectionLabel>
           <SectionLabel>Settings</SectionLabel>
           <span />
         </div>
@@ -138,7 +141,7 @@ function StagesEditor({ pipelineId }: { pipelineId: number }) {
           {sorted.map((s) => (
             <div
               key={s.id}
-              className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 rounded-md hover:bg-gray-50"
+              className="grid grid-cols-[auto_1fr_9rem_auto_auto] items-center gap-3 rounded-md hover:bg-gray-50"
             >
               <span className={cn("ml-1 h-3 w-3 shrink-0 rounded-full", stageColorDot(s.color))} />
               <Input
@@ -149,6 +152,25 @@ function StagesEditor({ pipelineId }: { pipelineId: number }) {
                   updateStage.mutate({ id: s.id, body: { name: e.target.value } })
                 }
               />
+              <Select
+                value={s.stage_type}
+                className="h-8 text-sm"
+                onChange={(e) => {
+                  const stage_type = e.target.value as StageType;
+                  if (stage_type !== s.stage_type) {
+                    updateStage.mutate(
+                      { id: s.id, body: { stage_type } },
+                      { onError: (err) => toast.error(errorMessage(err)) }
+                    );
+                  }
+                }}
+              >
+                {STAGE_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </Select>
               <Button
                 size="sm"
                 variant="outline"
@@ -160,7 +182,7 @@ function StagesEditor({ pipelineId }: { pipelineId: number }) {
               <IconButton
                 variant="danger"
                 onClick={() =>
-                  deleteStage.mutate(s.id, { onError: (e) => toast.error(apiError(e).message) })
+                  deleteStage.mutate(s.id, { onError: (e) => toast.error(errorMessage(e)) })
                 }
               >
                 <Trash2 className="h-4 w-4" />
@@ -168,18 +190,31 @@ function StagesEditor({ pipelineId }: { pipelineId: number }) {
             </div>
           ))}
         </div>
-        <div className="mt-4 flex gap-2">
+        <div className="mt-4 grid grid-cols-[auto_1fr_9rem_auto_auto] items-center gap-3">
+          <span />
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="New stage name"
             className="h-8 text-sm"
           />
+          <Select
+            value={newStageType}
+            className="h-8 text-sm"
+            onChange={(e) => setNewStageType(e.target.value as StageType)}
+          >
+            {STAGE_TYPES.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </Select>
           <Button
+            className="col-span-2"
+            disabled={!name.trim()}
             onClick={() =>
-              name &&
               createStage.mutate(
-                { pipelineId, body: { name } },
+                { pipelineId, body: { name: name.trim(), stage_type: newStageType } },
                 { onSuccess: () => setName("") }
               )
             }

@@ -20,7 +20,9 @@ import { UsersPage } from "@/pages/UsersPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { ApiKeysPage } from "@/pages/buyer/ApiKeysPage";
 
-import { IntakeQueuePage } from "@/pages/publisher/IntakeQueuePage";
+import { IntakeLogLayout } from "@/pages/publisher/IntakeLogLayout";
+import { IntakeLogTab } from "@/pages/publisher/IntakeLogTab";
+import { IntakeReviewTab } from "@/pages/publisher/IntakeReviewTab";
 import { SourcesPage } from "@/pages/publisher/SourcesPage";
 import { RoutingPage } from "@/pages/publisher/RoutingPage";
 import { ContractsPage } from "@/pages/publisher/ContractsPage";
@@ -30,7 +32,12 @@ import { PublisherBillingPage } from "@/pages/publisher/PublisherBillingPage";
 import { CalendarPage } from "@/pages/buyer/CalendarPage";
 import { ContractPage } from "@/pages/buyer/ContractPage";
 import { BuyerBillingPage } from "@/pages/buyer/BuyerBillingPage";
-import { CollaborationPage } from "@/pages/buyer/CollaborationPage";
+import { CollaborationLayout } from "@/pages/buyer/CollaborationLayout";
+import { CollaborationAccessTab } from "@/pages/buyer/CollaborationAccessTab";
+import { CollaborationActivityTab } from "@/pages/buyer/CollaborationActivityTab";
+import { PublishersPage } from "@/pages/buyer/PublishersPage";
+import { RoutesPage } from "@/pages/buyer/RoutesPage";
+import { LogsPage } from "@/pages/buyer/LogsPage";
 
 function RootRedirect() {
   const user = useAuthStore((s) => s.user);
@@ -56,7 +63,11 @@ export default function App() {
                 <Route index element={<Dashboard />} />
                 <Route path="board" element={<BoardPage />} />
                 <Route path="leads" element={<LeadsListPage />} />
-                <Route path="intake" element={<IntakeQueuePage />} />
+                <Route path="log" element={<IntakeLogLayout />}>
+                  <Route index element={<IntakeLogTab />} />
+                  <Route path="review" element={<IntakeReviewTab />} />
+                </Route>
+                <Route path="intake" element={<Navigate to="/p/log" replace />} />
                 <Route path="pipelines" element={<PipelinesPage />} />
                 <Route path="fields" element={<CustomFieldsPage />} />
                 <Route path="reasons" element={<DisqReasonsPage />} />
@@ -81,12 +92,19 @@ export default function App() {
                 <Route path="pipelines" element={<PipelinesPage />} />
                 <Route path="fields" element={<CustomFieldsPage />} />
                 <Route path="reasons" element={<DisqReasonsPage />} />
+                <Route path="publishers" element={<PublishersPage />} />
                 <Route path="contract" element={<ContractPage />} />
+                <Route path="routes" element={<RoutesPage />} />
+                <Route path="collaboration" element={<CollaborationLayout />}>
+                  <Route index element={<CollaborationAccessTab />} />
+                  <Route path="activity" element={<CollaborationActivityTab />} />
+                </Route>
+                <Route path="logs" element={<LogsPage />} />
                 <Route path="billing" element={<BuyerBillingPage />} />
                 <Route path="users" element={<UsersPage />} />
                 <Route path="api" element={<ApiKeysPage />} />
                 <Route path="settings" element={<SettingsPage />} />
-                <Route path="settings/collaboration" element={<CollaborationPage />} />
+                <Route path="settings/collaboration" element={<Navigate to="/b/collaboration" replace />} />
               </Route>
             </Route>
           </Route>

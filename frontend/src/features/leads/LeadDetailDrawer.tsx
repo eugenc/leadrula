@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { useUIStore } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 import {
   useLead,
   useNotes,
@@ -85,7 +85,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   function saveField(key: string) {
     update.mutate(
       { leadId: lead.id, body: { fields: { [key]: fields[key] } } },
-      { onSuccess: () => toast.success("Saved"), onError: () => toast.error("Save failed") }
+      { onSuccess: () => toast.success("Saved"), onError: (e) => toast.error(errorMessage(e)) }
     );
   }
 
@@ -95,7 +95,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
     const payload = actionAtLocal ? new Date(actionAtLocal).toISOString() : null;
     setAction.mutate(
       { leadId: lead.id, action_at: payload },
-      { onSuccess: () => toast.success("Saved"), onError: () => toast.error("Save failed") }
+      { onSuccess: () => toast.success("Saved"), onError: (e) => toast.error(errorMessage(e)) }
     );
   }
 
@@ -108,7 +108,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
       setConfirmDelete(false);
       onClose();
     } catch (err) {
-      toast.error(apiError(err).message);
+      toast.error(errorMessage(err));
     }
   }
 

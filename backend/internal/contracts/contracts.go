@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/database"
+	"github.com/echayko/leadrula/backend/internal/handlerid"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -15,6 +16,7 @@ import (
 type Contract struct {
 	ID               int64     `json:"id"`
 	PublicID         string    `json:"public_id"`
+	HandlerID        string    `json:"handler_id"`
 	PublisherID      int64     `json:"-"`
 	BuyerID          int64     `json:"buyer_id"`
 	BuyerName        string    `json:"buyer_name,omitempty"`
@@ -38,14 +40,13 @@ type ReturnRule struct {
 
 // PublisherStage is a pipeline stage exposed to buyers for return-rule To Stage picks.
 type PublisherStage struct {
-	ID                     int64  `json:"id"`
-	PublicID               string `json:"public_id"`
-	PipelineID             int64  `json:"pipeline_id"`
-	Name                   string `json:"name"`
-	Position               int    `json:"position"`
-	Color                  string `json:"color"`
-	PromptActionDatetime   bool   `json:"prompt_action_datetime"`
-	PromptDisqualification bool   `json:"prompt_disqualification"`
+	ID         int64  `json:"id"`
+	PublicID   string `json:"public_id"`
+	PipelineID int64  `json:"pipeline_id"`
+	Name       string `json:"name"`
+	Position   int    `json:"position"`
+	Color      string `json:"color"`
+	StageType  string `json:"stage_type"`
 }
 
 // Target is the minimal contract info the intake flow needs.
@@ -64,13 +65,13 @@ func NewService(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
 
 func (s *Service) Pool() *pgxpool.Pool { return s.pool }
 
-const contractCols = `id, public_id, publisher_id, buyer_id, name,
+const contractCols = `id, public_id, handler_id, publisher_id, buyer_id, name,
 	source_pipeline_id, source_stage_id, buyer_pipeline_id, return_stage_id,
 	rate_per_lead::float8, status, created_at`
 
 func scanContract(row pgx.Row) (*Contract, error) {
 	c := &Contract{}
-	err := row.Scan(&c.ID, &c.PublicID, &c.PublisherID, &c.BuyerID, &c.Name,
+	err := row.Scan(&c.ID, &c.PublicID, &c.HandlerID, &c.PublisherID, &c.BuyerID, &c.Name,
 		&c.SourcePipelineID, &c.SourceStageID, &c.BuyerPipelineID, &c.ReturnStageID,
 		&c.RatePerLead, &c.Status, &c.CreatedAt)
 	if err != nil {
@@ -84,7 +85,7 @@ func scanContract(row pgx.Row) (*Contract, error) {
 
 func (s *Service) List(ctx context.Context, publisherID int64) ([]Contract, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT c.id, c.public_id, c.publisher_id, c.buyer_id, c.name,
+		`SELECT c.id, c.public_id, c.handler_id, c.publisher_id, c.buyer_id, c.name,
 		        c.source_pipeline_id, c.source_stage_id, c.buyer_pipeline_id, c.return_stage_id,
 		        c.rate_per_lead::float8, c.status, c.created_at, a.name
 		 FROM contracts c JOIN accounts a ON a.id = c.buyer_id
@@ -97,7 +98,7 @@ func (s *Service) List(ctx context.Context, publisherID int64) ([]Contract, erro
 	var out []Contract
 	for rows.Next() {
 		var c Contract
-		if err := rows.Scan(&c.ID, &c.PublicID, &c.PublisherID, &c.BuyerID, &c.Name,
+		if err := rows.Scan(&c.ID, &c.PublicID, &c.HandlerID, &c.PublisherID, &c.BuyerID, &c.Name,
 			&c.SourcePipelineID, &c.SourceStageID, &c.BuyerPipelineID, &c.ReturnStageID,
 			&c.RatePerLead, &c.Status, &c.CreatedAt, &c.BuyerName); err != nil {
 			return nil, err
@@ -130,20 +131,62 @@ type CreateParams struct {
 }
 
 func (s *Service) Create(ctx context.Context, publisherID int64, p CreateParams) (*Contract, error) {
-	c, err := scanContract(s.pool.QueryRow(ctx,
-		`INSERT INTO contracts(publisher_id, buyer_id, name, source_pipeline_id, source_stage_id,
-		    buyer_pipeline_id, return_stage_id, rate_per_lead)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-		 RETURNING `+contractCols,
-		publisherID, p.BuyerID, p.Name, p.SourcePipelineID, p.SourceStageID,
-		p.BuyerPipelineID, p.ReturnStageID, p.RatePerLead))
-	if err != nil {
+	var exists bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM contracts WHERE publisher_id = $1 AND buyer_id = $2 AND deleted_at IS NULL)`,
+		publisherID, p.BuyerID).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if exists {
+		return nil, httpx.Conflict("a contract already exists for this buyer")
+	}
+
+	var ok bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM partnerships WHERE publisher_id = $1 AND buyer_id = $2 AND status = 'active')`,
+		publisherID, p.BuyerID).Scan(&ok); err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, httpx.Validation("no active partnership with this buyer")
+	}
+
+	var c *Contract
+	var err error
+	for range 10 {
+		hid := handlerid.Generate("C")
+		c, err = scanContract(s.pool.QueryRow(ctx,
+			`INSERT INTO contracts(publisher_id, buyer_id, name, source_pipeline_id, source_stage_id,
+			    buyer_pipeline_id, return_stage_id, rate_per_lead, handler_id)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+			 RETURNING `+contractCols,
+			publisherID, p.BuyerID, p.Name, p.SourcePipelineID, p.SourceStageID,
+			p.BuyerPipelineID, p.ReturnStageID, p.RatePerLead, hid))
+		if err == nil {
+			return c, nil
+		}
 		if database.IsUniqueViolation(err) {
-			return nil, httpx.Conflict("a contract already exists for this buyer")
+			continue
 		}
 		return nil, err
 	}
-	return c, nil
+	return nil, err
+}
+
+func (s *Service) LookupBuyerIDByHandler(ctx context.Context, handlerID string) (int64, error) {
+	var id int64
+	var typ string
+	err := s.pool.QueryRow(ctx, `SELECT id, type FROM accounts WHERE handler_id = $1`, handlerID).Scan(&id, &typ)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, httpx.NotFound("buyer not found")
+	}
+	if err != nil {
+		return 0, err
+	}
+	if typ != "buyer" {
+		return 0, httpx.NotFound("buyer not found")
+	}
+	return id, nil
 }
 
 func (s *Service) Update(ctx context.Context, publisherID, id int64, name *string, rate *float64, status *string) (*Contract, error) {
@@ -282,8 +325,7 @@ func (s *Service) PublisherReturnStages(ctx context.Context, buyerID int64) ([]P
 		return nil, err
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, public_id, pipeline_id, name, position, color,
-		        prompt_action_datetime, prompt_disqualification
+		`SELECT id, public_id, pipeline_id, name, position, color, stage_type
 		 FROM pipeline_stages WHERE pipeline_id = $1 ORDER BY position, id`, c.SourcePipelineID)
 	if err != nil {
 		return nil, err
@@ -292,8 +334,7 @@ func (s *Service) PublisherReturnStages(ctx context.Context, buyerID int64) ([]P
 	var out []PublisherStage
 	for rows.Next() {
 		var st PublisherStage
-		if err := rows.Scan(&st.ID, &st.PublicID, &st.PipelineID, &st.Name, &st.Position, &st.Color,
-			&st.PromptActionDatetime, &st.PromptDisqualification); err != nil {
+		if err := rows.Scan(&st.ID, &st.PublicID, &st.PipelineID, &st.Name, &st.Position, &st.Color, &st.StageType); err != nil {
 			return nil, err
 		}
 		out = append(out, st)

@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useQueries } from "@tanstack/react-query";
 import {
   useSources,
   useCreateSource,
@@ -9,7 +11,9 @@ import {
   useAddSourceFieldMap,
   useDeleteSourceFieldMap,
   useCreateField,
+  useRoutes,
 } from "@/features/admin/hooks";
+import { get } from "@/lib/api";
 import { useCustomFields } from "@/features/leads/hooks";
 import { CreateCustomFieldDrawer } from "@/features/admin/CreateCustomFieldDrawer";
 import { BuiltinCustomFieldSelect } from "@/features/admin/BuiltinCustomFieldSelect";
@@ -19,14 +23,14 @@ import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Input, Label } from "@/components/ui/input";
 import { Switch, Spinner, EmptyState, Badge } from "@/components/ui/misc";
 import { FormDrawer } from "@/components/ui/dialog";
 import { format } from "date-fns";
 import { ArrowRightLeft, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
-import type { Source } from "@/types";
+import { errorMessage } from "@/lib/api";
+import type { Route, RouteFieldMapEntry, Source } from "@/types";
 
 const BUILTINS = ["first_name", "last_name", "phone", "email", "address", "city", "state", "zip"];
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
@@ -36,6 +40,10 @@ function slugify(name: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+}
+
+function mappedSourceKeys(entries: { source_key: string }[]): Set<string> {
+  return new Set(entries.map((e) => e.source_key));
 }
 
 export function SourcesPage() {
@@ -109,7 +117,7 @@ export function SourcesPage() {
                       </IconButton>
                       <IconButton
                         variant="danger"
-                        onClick={() => remove.mutate(s.id, { onError: (e) => toast.error(apiError(e).message) })}
+                        onClick={() => remove.mutate(s.id, { onError: (e) => toast.error(errorMessage(e)) })}
                       >
                         <Trash2 className="h-4 w-4" />
                       </IconButton>
@@ -126,6 +134,10 @@ export function SourcesPage() {
         source={drawerSource ?? null}
         open={drawerOpen}
         onClose={() => setDrawerSource(undefined)}
+        onCreated={(src) => {
+          toast.success("Source created");
+          openMapDrawer(src.id, src.slug);
+        }}
       />
       <SourceFieldMapDrawer
         sourceId={mapFor?.id ?? null}
@@ -141,16 +153,26 @@ function SourceDrawer({
   source,
   open,
   onClose,
+  onCreated,
 }: {
   source: Source | null;
   open: boolean;
   onClose: () => void;
+  onCreated?: (src: Source) => void;
 }) {
   if (!open) return null;
-  return <SourceDrawerContent source={source} onClose={onClose} />;
+  return <SourceDrawerContent source={source} onClose={onClose} onCreated={onCreated} />;
 }
 
-function SourceDrawerContent({ source, onClose }: { source: Source | null; onClose: () => void }) {
+function SourceDrawerContent({
+  source,
+  onClose,
+  onCreated,
+}: {
+  source: Source | null;
+  onClose: () => void;
+  onCreated?: (src: Source) => void;
+}) {
   const editing = source !== null;
   const create = useCreateSource();
   const update = useUpdateSource();
@@ -176,18 +198,18 @@ function SourceDrawerContent({ source, onClose }: { source: Source | null; onClo
             toast.success("Source updated");
             onClose();
           },
-          onError: (e) => toast.error(apiError(e).message),
+          onError: (e) => toast.error(errorMessage(e)),
         }
       );
     } else {
       create.mutate(
         { name, slug },
         {
-          onSuccess: () => {
-            toast.success("Source created");
+          onSuccess: (src) => {
+            onCreated?.(src);
             onClose();
           },
-          onError: (e) => toast.error(apiError(e).message),
+          onError: (e) => toast.error(errorMessage(e)),
         }
       );
     }
@@ -290,9 +312,11 @@ function SourceFieldMapContent({
   slug: string;
   onClose: () => void;
 }) {
+  const navigate = useNavigate();
   const { data: entries } = useSourceFieldMap(sourceId);
   const { data: sample, isLoading: sampleLoading, refetch } = useSourceSamplePayload(sourceId, true);
   const { data: customFields } = useCustomFields();
+  const { data: routes } = useRoutes();
   const add = useAddSourceFieldMap();
   const remove = useDeleteSourceFieldMap();
   const [sourceKey, setSourceKey] = useState("");
@@ -303,6 +327,52 @@ function SourceFieldMapContent({
 
   const payload = sample?.payload ?? null;
   const mappableKeys = payload ? mappablePayloadKeys(payload) : [];
+  const mappedKeys = mappedSourceKeys(entries ?? []);
+  const unmappedKeys = mappableKeys.filter((k) => !mappedKeys.has(k));
+
+  const buyerRoutes = useMemo(
+    () =>
+      (routes ?? []).filter(
+        (r) =>
+          r.origin === "source" &&
+          r.source_id === sourceId &&
+          r.destination === "buyer" &&
+          r.is_active
+      ),
+    [routes, sourceId]
+  );
+
+  const routeMapQueries = useQueries({
+    queries: buyerRoutes.map((r) => ({
+      queryKey: ["route-field-map", r.id],
+      queryFn: () => get<RouteFieldMapEntry[]>(`/publisher/routes/${r.id}/field-map`),
+    })),
+  });
+
+  const publisherCustomIdsInSource = useMemo(
+    () =>
+      new Set(
+        (entries ?? [])
+          .filter((e) => e.target_type === "custom" && e.custom_field_id != null)
+          .map((e) => e.custom_field_id as number)
+      ),
+    [entries]
+  );
+
+  const routeBridge = useMemo(() => {
+    return buyerRoutes
+      .map((route, i) => {
+        const routeEntries = routeMapQueries[i]?.data ?? [];
+        const mappedOnRoute = new Set(
+          routeEntries
+            .filter((e) => e.src_type === "custom" && e.src_custom_field_id != null)
+            .map((e) => e.src_custom_field_id as number)
+        );
+        const unmappedCount = [...publisherCustomIdsInSource].filter((id) => !mappedOnRoute.has(id)).length;
+        return { route, unmappedCount };
+      })
+      .filter((x) => x.unmappedCount > 0);
+  }, [buyerRoutes, routeMapQueries, publisherCustomIdsInSource]);
 
   function customFieldName(id: number | null): string | null {
     if (!id) return null;
@@ -318,7 +388,7 @@ function SourceFieldMapContent({
       { sourceId, body },
       {
         onSuccess: () => setSourceKey(""),
-        onError: (e) => toast.error(apiError(e).message),
+        onError: (e) => toast.error(errorMessage(e)),
       }
     );
   }
@@ -326,6 +396,16 @@ function SourceFieldMapContent({
   function submit() {
     if (!sourceKey) return;
     addMapping(sourceKey, target);
+  }
+
+  function openCreateForKey(key: string) {
+    setSourceKey(key);
+    setCreateFieldOpen(true);
+  }
+
+  function openBuyerRouteMap(route: Route) {
+    onClose();
+    navigate("/p/routing", { state: { openRouteFieldMapId: route.id } });
   }
 
   return (
@@ -364,17 +444,56 @@ function SourceFieldMapContent({
                 {JSON.stringify(payload, null, 2)}
               </pre>
               {mappableKeys.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {mappableKeys.map((k) => (
-                    <button
-                      key={k}
-                      type="button"
-                      onClick={() => setSourceKey(k)}
-                      className="rounded-full border border-gray-200 bg-white px-2 py-0.5 font-mono text-xs text-gray-700 hover:border-teal-300 hover:bg-teal-50"
-                    >
-                      {k}
-                    </button>
-                  ))}
+                <div className="space-y-1.5">
+                  <p className="text-xs text-gray-500">Payload keys — click to select</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {mappableKeys.map((k) => {
+                      const mapped = mappedKeys.has(k);
+                      return (
+                        <button
+                          key={k}
+                          type="button"
+                          onClick={() => setSourceKey(k)}
+                          className={
+                            mapped
+                              ? "rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 font-mono text-xs text-gray-400"
+                              : "rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-mono text-xs text-amber-900 hover:border-teal-300 hover:bg-teal-50"
+                          }
+                        >
+                          {k}
+                          {mapped ? " ✓" : ""}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {unmappedKeys.length > 0 && (
+                <div className="rounded-md border border-amber-100 bg-amber-50/50 p-3 space-y-2">
+                  <Label className="text-amber-900">Unmapped keys</Label>
+                  <p className="text-xs text-amber-800/80">
+                    These payload keys are not mapped yet. Create a custom field or map to a built-in.
+                  </p>
+                  <div className="flex flex-col gap-2">
+                    {unmappedKeys.map((k) => (
+                      <div key={k} className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-xs text-gray-800">{k}</span>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => {
+                            setSourceKey(k);
+                            setTarget("first_name");
+                          }}
+                        >
+                          Map…
+                        </Button>
+                        <Button size="sm" onClick={() => openCreateForKey(k)}>
+                          Create custom field
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </>
@@ -423,6 +542,26 @@ function SourceFieldMapContent({
             <Plus className="h-4 w-4" />
           </Button>
         </div>
+
+        {routeBridge.length > 0 && (
+          <div className="rounded-md border border-gray-100 bg-gray-50 p-3 space-y-2">
+            <Label>Buyer route mapping</Label>
+            <p className="text-xs text-gray-500">
+              Publisher custom fields mapped above still need a publisher → buyer field map on each route.
+            </p>
+            {routeBridge.map(({ route, unmappedCount }) => (
+              <div key={route.id} className="flex items-center justify-between gap-2 text-sm">
+                <span>
+                  {unmappedCount} field{unmappedCount === 1 ? "" : "s"} not mapped to{" "}
+                  <span className="font-medium">{route.buyer_name ?? "buyer"}</span>
+                </span>
+                <Button size="sm" variant="secondary" onClick={() => openBuyerRouteMap(route)}>
+                  Open route map
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <CreateCustomFieldDrawer
         open={createFieldOpen}

@@ -26,6 +26,7 @@ export interface Me {
   };
   account: {
     id: string;
+    handler_id: string;
     type: AccountType;
     name: string;
     timezone: string;
@@ -39,6 +40,8 @@ export interface Pipeline {
   position: number;
 }
 
+export type StageType = "standard" | "action" | "disqualification" | "won";
+
 export interface Stage {
   id: number;
   public_id: string;
@@ -46,8 +49,7 @@ export interface Stage {
   name: string;
   position: number;
   color: string;
-  prompt_action_datetime: boolean;
-  prompt_disqualification: boolean;
+  stage_type: StageType;
 }
 
 export type RuleConditionOp =
@@ -168,6 +170,7 @@ export interface DisqReason {
 export interface Contract {
   id: number;
   public_id: string;
+  handler_id: string;
   buyer_id: number;
   buyer_name?: string;
   name: string;
@@ -257,7 +260,15 @@ export interface QueueItem {
   source: string | null;
   raw_payload: Record<string, unknown>;
   status: string;
+  unmapped_keys?: string[];
   created_at: string;
+}
+
+export interface QueueListResponse {
+  items: QueueItem[];
+  total: number;
+  page: number;
+  limit: number;
 }
 
 export interface Transaction {
@@ -288,6 +299,7 @@ export interface Dispute {
 export interface BuyerSummary {
   id: number;
   public_id: string;
+  handler_id: string;
   name: string;
   balance: number;
   lead_count: number;
@@ -296,10 +308,32 @@ export interface BuyerSummary {
 export interface BuyerDetail {
   id: number;
   public_id: string;
+  handler_id: string;
   name: string;
   website: string;
   timezone: string;
   balance: number;
+  type: string;
+  admin_name: string;
+  admin_email: string;
+}
+
+export interface PublisherSummary {
+  id: number;
+  public_id: string;
+  handler_id: string;
+  name: string;
+  lead_count: number;
+  collaboration_status: string;
+}
+
+export interface PublisherDetail {
+  id: number;
+  public_id: string;
+  handler_id: string;
+  name: string;
+  website: string;
+  timezone: string;
   type: string;
   admin_name: string;
   admin_email: string;
@@ -355,6 +389,18 @@ export interface CollaborationAuditEntry {
   created_at: string;
 }
 
+export interface AuditLogListResponse {
+  items: CollaborationAuditEntry[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface AuditLogActor {
+  id: number;
+  name: string;
+}
+
 export interface CollaborationStatus {
   status: "none" | "active" | "revoked" | "pending_buyer" | "pending_publisher";
   version?: number;
@@ -373,4 +419,20 @@ export interface BuyerCollabSummary {
   buyer_id: number;
   status: string;
   version: number;
+}
+
+export interface BuyerPublisher {
+  id: string;
+  name: string;
+  website?: string;
+  collaboration_status: string;
+}
+
+export interface Partnership {
+  id: number;
+  status: string;
+  requested_by: string;
+  partner_name: string;
+  partner_handler_id: string;
+  created_at: string;
 }

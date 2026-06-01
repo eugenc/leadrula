@@ -4,7 +4,7 @@ import { Input, Label } from "@/components/ui/input";
 import { Badge } from "@/components/ui/misc";
 import { useTagSuggestions, useUpdateLead } from "./hooks";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 
 function normalizeTags(tags: string[]): string[] {
   const seen = new Set<string>();
@@ -29,7 +29,7 @@ export function LeadTagsEditor({ leadId, tags }: { leadId: number; tags: string[
     update.mutate(
       { leadId, body: { tags: normalizeTags(next) } },
       {
-        onError: (err) => toast.error(apiError(err).message),
+        onError: (err) => toast.error(errorMessage(err)),
       }
     );
   }

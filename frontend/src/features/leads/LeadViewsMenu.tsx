@@ -6,7 +6,7 @@ import { Dropdown, DropdownItem } from "@/components/ui/dropdown";
 import { Input, Label } from "@/components/ui/input";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 import { LeadFilterBuilder } from "./LeadFilterBuilder";
 import {
   useSavedLeadViews,
@@ -69,7 +69,7 @@ export function LeadViewsMenu({
   function switchView(view: SavedLeadView) {
     onFiltersChange(view.filters);
     onViewApply?.(view);
-    setActiveId(view.public_id).catch((err) => toast.error(apiError(err).message));
+    setActiveId(view.public_id).catch((err) => toast.error(errorMessage(err)));
     setOpen(false);
   }
 
@@ -131,7 +131,7 @@ export function LeadViewsMenu({
       }
       setDialogOpen(false);
     } catch (err) {
-      toast.error(apiError(err).message);
+      toast.error(errorMessage(err));
     }
   }
 
@@ -145,7 +145,7 @@ export function LeadViewsMenu({
       toast.success("View deleted");
       setOpen(false);
     } catch (err) {
-      toast.error(apiError(err).message);
+      toast.error(errorMessage(err));
     }
   }
 

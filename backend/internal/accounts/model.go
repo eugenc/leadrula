@@ -5,6 +5,7 @@ import "time"
 type Account struct {
 	ID        int64     `json:"-"`
 	PublicID  string    `json:"id"`
+	HandlerID string    `json:"handler_id"`
 	Type      string    `json:"type"`
 	Name      string    `json:"name"`
 	Website   string    `json:"website"`

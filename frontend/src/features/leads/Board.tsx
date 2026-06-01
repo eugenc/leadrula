@@ -13,6 +13,7 @@ import {
   useCustomFields,
 } from "./hooks";
 import { BoardSortPicker } from "./BoardSortPicker";
+import { stageNeedsPrompt } from "@/features/pipelines/stageTypes";
 import { LeadCard } from "./LeadCard";
 import { LeadsColumnPicker } from "./LeadsColumnPicker";
 import { StagePromptModal, type PromptResult } from "./StagePromptModal";
@@ -31,7 +32,7 @@ import { FilterSelect } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Spinner, EmptyState } from "@/components/ui/misc";
 import { useUIStore } from "@/store/uiStore";
-import { apiError } from "@/lib/api";
+import { apiError, errorMessage } from "@/lib/api";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/lib/utils";
 import { stageColorDot, stageColorLine } from "@/features/pipelines/stageColors";
@@ -158,10 +159,10 @@ export function Board() {
       {
         onError: (err) => {
           const e = apiError(err);
-          if (e.code === "business_rule" && (stage.prompt_action_datetime || stage.prompt_disqualification)) {
+          if (e.code === "business_rule" && stageNeedsPrompt(stage.stage_type)) {
             setPrompt({ leadId, stage });
           } else {
-            toast.error(e.message);
+            toast.error(errorMessage(err));
             revert();
           }
         },
@@ -181,7 +182,7 @@ export function Board() {
 
     moveLocal(leadId, fromStage, toStage);
 
-    if (stage.prompt_action_datetime || stage.prompt_disqualification) {
+    if (stageNeedsPrompt(stage.stage_type)) {
       setPrompt({ leadId, stage });
       return;
     }
@@ -197,7 +198,7 @@ export function Board() {
   }
 
   if (isError) {
-    return <EmptyState title="Could not load leads." subtitle={apiError(error).message} />;
+    return <EmptyState title="Could not load leads." subtitle={errorMessage(error)} />;
   }
 
   if (!pipelines || pipelines.length === 0) {

@@ -13,7 +13,7 @@ import { formatMoney } from "@/lib/utils";
 import { ContractStatusBadge } from "@/features/admin/contractStatus";
 import { ContractReturnRulesEditor } from "@/features/admin/ContractReturnRulesEditor";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 
 export function ContractPage() {
   const { data: contract, isLoading } = useMyContract();
@@ -48,6 +48,7 @@ export function ContractPage() {
         <div className="flex items-center justify-between">
           <div>
             <div className="text-lg font-semibold text-gray-800">{contract.name}</div>
+            <div className="mt-1 font-mono text-xs text-gray-400">{contract.handler_id}</div>
             <ContractStatusBadge status={contract.status} />
           </div>
           <div className="text-right">
@@ -70,17 +71,17 @@ export function ContractPage() {
           onAdd={(buyerStageId, returnStageId) =>
             add.mutate(
               { contractId: null, buyerStageId, returnStageId },
-              { onError: (e) => toast.error(apiError(e).message) }
+              { onError: (e) => toast.error(errorMessage(e)) }
             )
           }
           onUpdate={(ruleId, buyerStageId, returnStageId) =>
             update.mutate(
               { ruleId, buyerStageId, returnStageId },
-              { onError: (e) => toast.error(apiError(e).message) }
+              { onError: (e) => toast.error(errorMessage(e)) }
             )
           }
           onDelete={(ruleId) =>
-            remove.mutate(ruleId, { onError: (e) => toast.error(apiError(e).message) })
+            remove.mutate(ruleId, { onError: (e) => toast.error(errorMessage(e)) })
           }
           description="When a lead enters the From Stage on your pipeline, it is automatically returned to the publisher (no charge to you on return)."
         />

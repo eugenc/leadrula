@@ -32,6 +32,27 @@ type AuditEntry struct {
 	CreatedAt   time.Time      `json:"created_at"`
 }
 
+type AuditListParams struct {
+	BuyerID     int64
+	Page        int
+	Limit       int
+	From        *time.Time
+	To          *time.Time
+	ActorUserID *int64
+}
+
+type AuditListResult struct {
+	Items []AuditEntry `json:"items"`
+	Total int          `json:"total"`
+	Page  int          `json:"page"`
+	Limit int          `json:"limit"`
+}
+
+type AuditActor struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
 type StatusResponse struct {
 	Status                  string       `json:"status"`
 	Version                 int64        `json:"version,omitempty"`
@@ -50,4 +71,11 @@ type BuyerCollabSummary struct {
 	BuyerID   int64  `json:"buyer_id"`
 	Status    string `json:"status"`
 	Version   int64  `json:"version"`
+}
+
+type BuyerPublisher struct {
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	Website            string `json:"website,omitempty"`
+	CollaborationStatus string `json:"collaboration_status"`
 }

@@ -4,8 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { IconButton } from "@/components/layout/IconButton";
-import { Switch, Spinner } from "@/components/ui/misc";
+import { Spinner } from "@/components/ui/misc";
 import { STAGE_COLORS } from "./stageColors";
+import { STAGE_TYPES } from "./stageTypes";
 import {
   ACTION_DOMAINS,
   CONDITION_DOMAINS,
@@ -27,7 +28,7 @@ import {
 import { useCustomFields, useDisqReasons, useStages, useUsers } from "@/features/leads/hooks";
 import { formatStatus } from "@/features/leads/leadsListColumns";
 import { cn } from "@/lib/utils";
-import { apiError } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 import { toast } from "@/store/toastStore";
 import { Plus, Trash2 } from "lucide-react";
 import type {
@@ -38,6 +39,7 @@ import type {
   RuleConditionOp,
   Stage,
   StageRule,
+  StageType,
 } from "@/types";
 
 type Lookups = {
@@ -189,7 +191,7 @@ export function StageSettingsDrawer({ stage, pipelineId, open, onClose }: Props)
                     onClick={() =>
                       updateStage.mutate(
                         { id: stage.id, body: { color: c.slug } },
-                        { onError: (e) => toast.error(apiError(e).message) }
+                        { onError: (e) => toast.error(errorMessage(e)) }
                       )
                     }
                     className={cn(
@@ -203,27 +205,28 @@ export function StageSettingsDrawer({ stage, pipelineId, open, onClose }: Props)
             </section>
 
             <section>
-              <SectionLabel className="mb-2">Prompts</SectionLabel>
-              <div className="flex flex-col gap-2.5">
-                <label className="flex items-center justify-between gap-4">
-                  <span className="text-sm text-gray-700">Action prompt</span>
-                  <Switch
-                    checked={stage.prompt_action_datetime}
-                    onChange={(v) =>
-                      updateStage.mutate({ id: stage.id, body: { prompt_action_datetime: v } })
-                    }
-                  />
-                </label>
-                <label className="flex items-center justify-between gap-4">
-                  <span className="text-sm text-gray-700">Disq. prompt</span>
-                  <Switch
-                    checked={stage.prompt_disqualification}
-                    onChange={(v) =>
-                      updateStage.mutate({ id: stage.id, body: { prompt_disqualification: v } })
-                    }
-                  />
-                </label>
-              </div>
+              <SectionLabel className="mb-2">Stage type</SectionLabel>
+              <Select
+                value={stage.stage_type}
+                onChange={(e) => {
+                  const stage_type = e.target.value as StageType;
+                  if (stage_type !== stage.stage_type) {
+                    updateStage.mutate(
+                      { id: stage.id, body: { stage_type } },
+                      { onError: (err) => toast.error(errorMessage(err)) }
+                    );
+                  }
+                }}
+              >
+                {STAGE_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </Select>
+              <p className="mt-1.5 text-xs text-gray-500">
+                {STAGE_TYPES.find((t) => t.value === stage.stage_type)?.description}
+              </p>
             </section>
 
             <section>
@@ -262,7 +265,7 @@ export function StageSettingsDrawer({ stage, pipelineId, open, onClose }: Props)
                               setDraft(null);
                               toast.success("Rule created");
                             },
-                            onError: (e) => toast.error(apiError(e).message),
+                            onError: (e) => toast.error(errorMessage(e)),
                           }
                         )
                       }
@@ -322,7 +325,7 @@ function RuleCard({ rule, lk }: { rule: StageRule; lk: Lookups }) {
                 setEditing(false);
                 toast.success("Rule saved");
               },
-              onError: (e) => toast.error(apiError(e).message),
+              onError: (e) => toast.error(errorMessage(e)),
             }
           )
         }
@@ -356,7 +359,7 @@ function RuleCard({ rule, lk }: { rule: StageRule; lk: Lookups }) {
           <IconButton
             variant="danger"
             onClick={() =>
-              deleteRule.mutate(rule.id, { onError: (e) => toast.error(apiError(e).message) })
+              deleteRule.mutate(rule.id, { onError: (e) => toast.error(errorMessage(e)) })
             }
           >
             <Trash2 className="h-3.5 w-3.5" />

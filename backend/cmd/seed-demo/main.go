@@ -10,6 +10,7 @@ import (
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/internal/config"
 	"github.com/echayko/leadrula/backend/internal/database"
+	"github.com/echayko/leadrula/backend/internal/handlerid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -45,11 +46,11 @@ func main() {
 
 	// Publisher pipeline
 	pubPipeline := insertPipeline(ctx, pool, publisherID, "Lead Distribution")
-	pubNew := insertStage(ctx, pool, pubPipeline, "New", 0, true, false)
-	_ = insertStage(ctx, pool, pubPipeline, "Qualifying", 1, true, false)
-	pubReady := insertStage(ctx, pool, pubPipeline, "Ready to Distribute", 2, false, false)
-	_ = insertStage(ctx, pool, pubPipeline, "Distributed", 3, false, false)
-	pubReturned := insertStage(ctx, pool, pubPipeline, "Returned", 4, false, false)
+	pubNew := insertStage(ctx, pool, pubPipeline, "New", 0, "action")
+	_ = insertStage(ctx, pool, pubPipeline, "Qualifying", 1, "action")
+	pubReady := insertStage(ctx, pool, pubPipeline, "Ready to Distribute", 2, "standard")
+	_ = insertStage(ctx, pool, pubPipeline, "Distributed", 3, "standard")
+	pubReturned := insertStage(ctx, pool, pubPipeline, "Returned", 4, "standard")
 
 	seedReasons(ctx, pool, publisherID)
 	insertCustomField(ctx, pool, publisherID, "Utility Provider", "utility_provider", "text")
@@ -92,12 +93,12 @@ func seedBuyer(ctx context.Context, pool *pgxpool.Pool, publisherID, buyerID int
 
 	// pipeline + stages
 	pipe := insertPipeline(ctx, pool, buyerID, "Sales")
-	newLead := insertStage(ctx, pool, pipe, "New Lead", 0, true, false)
-	_ = insertStage(ctx, pool, pipe, "Contacted", 1, true, false)
-	appt := insertStage(ctx, pool, pipe, "Appointment Set", 2, true, false)
-	_ = insertStage(ctx, pool, pipe, "Sold", 3, false, false)
-	missed := insertStage(ctx, pool, pipe, "Missed Appointment", 4, false, false)
-	_ = insertStage(ctx, pool, pipe, "Disqualified", 5, false, true)
+	newLead := insertStage(ctx, pool, pipe, "New Lead", 0, "action")
+	_ = insertStage(ctx, pool, pipe, "Contacted", 1, "action")
+	appt := insertStage(ctx, pool, pipe, "Appointment Set", 2, "action")
+	_ = insertStage(ctx, pool, pipe, "Sold", 3, "won")
+	missed := insertStage(ctx, pool, pipe, "Missed Appointment", 4, "standard")
+	_ = insertStage(ctx, pool, pipe, "Disqualified", 5, "disqualification")
 
 	seedReasons(ctx, pool, buyerID)
 	insertCustomField(ctx, pool, buyerID, "Utility Provider", "utility_provider", "text")
@@ -106,14 +107,30 @@ func seedBuyer(ctx context.Context, pool *pgxpool.Pool, publisherID, buyerID int
 	_, _ = pool.Exec(ctx, `INSERT INTO buyer_balances(buyer_id, balance) VALUES ($1,$2)
 		ON CONFLICT (buyer_id) DO UPDATE SET balance=EXCLUDED.balance`, buyerID, startBalance)
 
+	_, _ = pool.Exec(ctx,
+		`INSERT INTO partnerships(publisher_id, buyer_id, status, requested_by)
+		 VALUES ($1,$2,'active','publisher')
+		 ON CONFLICT (publisher_id, buyer_id) DO UPDATE SET status='active', updated_at=now()`,
+		publisherID, buyerID)
+
 	// contract
 	var contractID int64
-	if err := pool.QueryRow(ctx,
-		`INSERT INTO contracts(publisher_id, buyer_id, name, source_pipeline_id, source_stage_id,
-		    buyer_pipeline_id, return_stage_id, rate_per_lead)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-		publisherID, buyerID, "Contract", pubPipeline, pubReady, pipe, pubReturned, 25.00).Scan(&contractID); err != nil {
-		log.Fatalf("contract: %v", err)
+	for range 10 {
+		hid := handlerid.Generate("C")
+		err := pool.QueryRow(ctx,
+			`INSERT INTO contracts(publisher_id, buyer_id, name, source_pipeline_id, source_stage_id,
+			    buyer_pipeline_id, return_stage_id, rate_per_lead, handler_id)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+			publisherID, buyerID, "Contract", pubPipeline, pubReady, pipe, pubReturned, 25.00, hid).Scan(&contractID)
+		if err == nil {
+			break
+		}
+		if !database.IsUniqueViolation(err) {
+			log.Fatalf("contract: %v", err)
+		}
+	}
+	if contractID == 0 {
+		log.Fatal("contract: failed to assign handler_id")
 	}
 	// return rule: Missed Appointment returns the lead
 	_, _ = pool.Exec(ctx, `INSERT INTO contract_return_rules(contract_id, buyer_stage_id, return_stage_id) VALUES ($1,$2,$3)`, contractID, missed, pubReturned)
@@ -168,11 +185,25 @@ func seedReasons(ctx context.Context, pool *pgxpool.Pool, accountID int64) {
 }
 
 func insertAccount(ctx context.Context, pool *pgxpool.Pool, atype, name string) int64 {
-	var id int64
-	if err := pool.QueryRow(ctx, `INSERT INTO accounts(type, name) VALUES ($1,$2) RETURNING id`, atype, name).Scan(&id); err != nil {
-		log.Fatalf("account %s: %v", name, err)
+	prefix := "B"
+	if atype == "publisher" {
+		prefix = "P"
 	}
-	return id
+	var id int64
+	for range 10 {
+		hid := handlerid.Generate(prefix)
+		err := pool.QueryRow(ctx,
+			`INSERT INTO accounts(type, name, handler_id) VALUES ($1,$2,$3) RETURNING id`,
+			atype, name, hid).Scan(&id)
+		if err == nil {
+			return id
+		}
+		if !database.IsUniqueViolation(err) {
+			log.Fatalf("account %s: %v", name, err)
+		}
+	}
+	log.Fatalf("account %s: failed to assign handler_id", name)
+	return 0
 }
 
 func insertPipeline(ctx context.Context, pool *pgxpool.Pool, accountID int64, name string) int64 {
@@ -183,12 +214,12 @@ func insertPipeline(ctx context.Context, pool *pgxpool.Pool, accountID int64, na
 	return id
 }
 
-func insertStage(ctx context.Context, pool *pgxpool.Pool, pipelineID int64, name string, pos int, promptAction, promptDisq bool) int64 {
+func insertStage(ctx context.Context, pool *pgxpool.Pool, pipelineID int64, name string, pos int, stageType string) int64 {
 	var id int64
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO pipeline_stages(pipeline_id, name, position, prompt_action_datetime, prompt_disqualification)
-		 VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-		pipelineID, name, pos, promptAction, promptDisq).Scan(&id); err != nil {
+		`INSERT INTO pipeline_stages(pipeline_id, name, position, stage_type)
+		 VALUES ($1,$2,$3,$4) RETURNING id`,
+		pipelineID, name, pos, stageType).Scan(&id); err != nil {
 		log.Fatalf("stage %s: %v", name, err)
 	}
 	return id

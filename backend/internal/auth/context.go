@@ -47,3 +47,26 @@ func APIKeyAccountFromContext(ctx context.Context) *APIKeyAccount {
 	a, _ := ctx.Value(apiKeyAccountKey).(*APIKeyAccount)
 	return a
 }
+
+// ImpersonationChange is a before/after field diff recorded for collaboration audit.
+type ImpersonationChange struct {
+	Field string
+	From  string
+	To    string
+}
+
+const impersonationChangesKey ctxKey = 2
+
+// SetImpersonationChanges stores field diffs on the request context for post-handler audit logging.
+func SetImpersonationChanges(ctx context.Context, changes []ImpersonationChange) context.Context {
+	if len(changes) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, impersonationChangesKey, changes)
+}
+
+// ImpersonationChangesFromContext returns field diffs set during request handling.
+func ImpersonationChangesFromContext(ctx context.Context) []ImpersonationChange {
+	changes, _ := ctx.Value(impersonationChangesKey).([]ImpersonationChange)
+	return changes
+}

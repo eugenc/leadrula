@@ -3,6 +3,7 @@ package contracts
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
@@ -64,6 +65,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
 		BuyerID          int64   `json:"buyer_id"`
+		BuyerHandlerID   string  `json:"buyer_handler_id"`
 		Name             string  `json:"name"`
 		SourcePipelineID int64   `json:"source_pipeline_id"`
 		SourceStageID    int64   `json:"source_stage_id"`
@@ -74,8 +76,21 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
+	buyerID := body.BuyerID
+	if buyerID == 0 && strings.TrimSpace(body.BuyerHandlerID) != "" {
+		var err error
+		buyerID, err = h.svc.LookupBuyerIDByHandler(r.Context(), strings.TrimSpace(strings.ToUpper(body.BuyerHandlerID)))
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+	}
+	if buyerID == 0 {
+		httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, "buyer_id or buyer_handler_id is required")
+		return
+	}
 	c, err := h.svc.Create(r.Context(), p.AccountID, CreateParams{
-		BuyerID:          body.BuyerID,
+		BuyerID:          buyerID,
 		Name:             body.Name,
 		SourcePipelineID: body.SourcePipelineID,
 		SourceStageID:    body.SourceStageID,

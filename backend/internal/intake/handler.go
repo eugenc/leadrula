@@ -31,6 +31,12 @@ func (h *Handler) RegisterQueueRoutes(r chi.Router) {
 	r.Get("/intake-queue", h.listQueue)
 	r.With(auth.RequireRole("admin")).Post("/intake-queue/{id}/route", h.route)
 	r.With(auth.RequireRole("admin")).Post("/intake-queue/{id}/reject", h.reject)
+	r.With(auth.RequireRole("admin")).Post("/intake-queue/{id}/map-field", h.mapField)
+}
+
+// RegisterBuyerRoutes mounts buyer read-only contract routing log routes.
+func (h *Handler) RegisterBuyerRoutes(r chi.Router) {
+	r.With(auth.RequireRole("admin")).Get("/routing-log", h.listRoutingLog)
 }
 
 func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
@@ -86,12 +92,35 @@ func (h *Handler) action(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listQueue(w http.ResponseWriter, r *http.Request) {
-	items, err := h.svc.ListQueue(r.Context(), r.URL.Query().Get("status"))
+	p := auth.FromContext(r.Context())
+	q := r.URL.Query()
+	result, err := h.svc.ListQueue(r.Context(), p.AccountID, ListQueueParams{
+		Status: q.Get("status"),
+		Page:   int(parseInt(q.Get("page"))),
+		Limit:  int(parseInt(q.Get("limit"))),
+		Search: q.Get("q"),
+	})
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, items)
+	httpx.JSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) listRoutingLog(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	q := r.URL.Query()
+	result, err := h.svc.ListRoutingLogForBuyer(r.Context(), p.AccountID, ListQueueParams{
+		Status: q.Get("status"),
+		Page:   int(parseInt(q.Get("page"))),
+		Limit:  int(parseInt(q.Get("limit"))),
+		Search: q.Get("q"),
+	})
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) route(w http.ResponseWriter, r *http.Request) {
@@ -120,7 +149,31 @@ func (h *Handler) reject(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func (h *Handler) mapField(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		SourceKey     string  `json:"source_key"`
+		TargetType    string  `json:"target_type"`
+		BuiltinField  *string `json:"builtin_field"`
+		CustomFieldID *int64  `json:"custom_field_id"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	item, err := h.svc.MapField(r.Context(), p.AccountID, idp(r), body.SourceKey, body.TargetType, body.BuiltinField, body.CustomFieldID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, item)
+}
+
 func idp(r *http.Request) int64 {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	return id
+}
+
+func parseInt(s string) int64 {
+	n, _ := strconv.ParseInt(s, 10, 64)
+	return n
 }

@@ -49,6 +49,36 @@ func (s *Service) StatusForBuyer(ctx context.Context, buyerID int64) (*StatusRes
 	return s.status(ctx, pubID, buyerID)
 }
 
+func (s *Service) PublisherForBuyer(ctx context.Context, buyerID int64) (*BuyerPublisher, error) {
+	pubID, err := s.repo.PublisherAccountID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	publicID, name, website, err := s.repo.GetAccountProfile(ctx, pubID)
+	if err != nil {
+		return nil, err
+	}
+	st, err := s.status(ctx, pubID, buyerID)
+	if err != nil {
+		return nil, err
+	}
+	return &BuyerPublisher{
+		ID:                  publicID,
+		Name:                name,
+		Website:             website,
+		CollaborationStatus: st.Status,
+	}, nil
+}
+
+func (s *Service) AuditLogListForBuyer(ctx context.Context, buyerID int64, p AuditListParams) (*AuditListResult, error) {
+	p.BuyerID = buyerID
+	return s.repo.ListAuditForBuyer(ctx, p)
+}
+
+func (s *Service) AuditActorsForBuyer(ctx context.Context, buyerID int64) ([]AuditActor, error) {
+	return s.repo.ListAuditActors(ctx, buyerID)
+}
+
 func (s *Service) StatusForPublisher(ctx context.Context, publisherID, buyerID int64) (*StatusResponse, error) {
 	return s.status(ctx, publisherID, buyerID)
 }
@@ -139,19 +169,26 @@ func (s *Service) RequestFromPublisher(ctx context.Context, p *auth.Principal, b
 }
 
 func (s *Service) InvitePublisherUser(ctx context.Context, p *auth.Principal, email string) (*StatusResponse, error) {
+	pubID, err := s.repo.PublisherAccountID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.InvitePublisherUserForPublisher(ctx, p, pubID, email)
+}
+
+func (s *Service) InvitePublisherUserForPublisher(ctx context.Context, p *auth.Principal, publisherID int64, email string) (*StatusResponse, error) {
 	if !p.IsAdmin() {
 		return nil, httpx.Forbidden("admin required")
+	}
+	if err := s.requireActivePartnership(ctx, publisherID, p.AccountID); err != nil {
+		return nil, err
 	}
 	email = strings.TrimSpace(strings.ToLower(email))
 	if email == "" {
 		return nil, httpx.Validation("email is required")
 	}
 
-	pubID, err := s.repo.PublisherAccountID(ctx)
-	if err != nil {
-		return nil, err
-	}
-	targetUserID, role, active, err := s.repo.FindPublisherUserByEmail(ctx, email)
+	targetUserID, role, active, err := s.repo.FindPublisherUserByEmail(ctx, publisherID, email)
 	if err != nil {
 		return nil, httpx.Validation("email must belong to an active publisher admin")
 	}
@@ -159,7 +196,7 @@ func (s *Service) InvitePublisherUser(ctx context.Context, p *auth.Principal, em
 		return nil, httpx.Validation("email must belong to an active publisher admin")
 	}
 
-	existing, err := s.repo.GetByPair(ctx, pubID, p.AccountID)
+	existing, err := s.repo.GetByPair(ctx, publisherID, p.AccountID)
 	if err == nil {
 		switch existing.Status {
 		case StatusActive:
@@ -173,35 +210,30 @@ func (s *Service) InvitePublisherUser(ctx context.Context, p *auth.Principal, em
 			if err != nil {
 				return nil, err
 			}
-			if err := s.auditAndNotifyInvite(ctx, pubID, p.AccountID, p.UserID, targetUserID, c.ID); err != nil {
+			if err := s.auditAndNotifyInvite(ctx, publisherID, p.AccountID, p.UserID, targetUserID, c.ID); err != nil {
 				return nil, err
 			}
-			return s.status(ctx, pubID, p.AccountID)
+			return s.status(ctx, publisherID, p.AccountID)
 		}
 	} else if err != ErrNotFound {
 		return nil, err
 	}
 
-	c, err := s.repo.CreatePendingPublisher(ctx, pubID, p.AccountID, targetUserID, p.UserID)
+	c, err := s.repo.CreatePendingPublisher(ctx, publisherID, p.AccountID, targetUserID, p.UserID)
 	if err == ErrConflict {
 		return nil, httpx.Conflict("collaboration request already exists")
 	}
 	if err != nil {
 		return nil, err
 	}
-	if err := s.auditAndNotifyInvite(ctx, pubID, p.AccountID, p.UserID, targetUserID, c.ID); err != nil {
+	if err := s.auditAndNotifyInvite(ctx, publisherID, p.AccountID, p.UserID, targetUserID, c.ID); err != nil {
 		return nil, err
 	}
-	return s.status(ctx, pubID, p.AccountID)
+	return s.status(ctx, publisherID, p.AccountID)
 }
 
-func (s *Service) Accept(ctx context.Context, p *auth.Principal, buyerAccountID int64) (*StatusResponse, error) {
-	pubID, err := s.repo.PublisherAccountID(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	c, err := s.repo.GetByPair(ctx, pubID, buyerAccountID)
+func (s *Service) Accept(ctx context.Context, p *auth.Principal, publisherID, buyerAccountID int64) (*StatusResponse, error) {
+	c, err := s.repo.GetByPair(ctx, publisherID, buyerAccountID)
 	if err != nil {
 		return nil, httpx.NotFound("no pending collaboration request")
 	}
@@ -223,22 +255,33 @@ func (s *Service) Accept(ctx context.Context, p *auth.Principal, buyerAccountID 
 	if err != nil {
 		return nil, err
 	}
-	if err := s.repo.InsertAudit(ctx, s.repo.pool, "request_accepted", pubID, buyerAccountID, p.UserID, map[string]any{}); err != nil {
+	if err := s.repo.InsertAudit(ctx, s.repo.pool, "request_accepted", publisherID, buyerAccountID, p.UserID, map[string]any{}); err != nil {
 		return nil, err
 	}
-	if err := s.repo.InsertAudit(ctx, s.repo.pool, "granted", pubID, buyerAccountID, p.UserID, map[string]any{}); err != nil {
+	if err := s.repo.InsertAudit(ctx, s.repo.pool, "granted", publisherID, buyerAccountID, p.UserID, map[string]any{}); err != nil {
 		return nil, err
 	}
 	_ = activated
-	return s.status(ctx, pubID, buyerAccountID)
+	return s.status(ctx, publisherID, buyerAccountID)
 }
 
 func (s *Service) AcceptForBuyer(ctx context.Context, p *auth.Principal) (*StatusResponse, error) {
-	return s.Accept(ctx, p, p.AccountID)
+	pubID, err := s.repo.PublisherAccountID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.Accept(ctx, p, pubID, p.AccountID)
+}
+
+func (s *Service) AcceptForBuyerPublisher(ctx context.Context, p *auth.Principal, publisherID int64) (*StatusResponse, error) {
+	if err := s.requireActivePartnership(ctx, publisherID, p.AccountID); err != nil {
+		return nil, err
+	}
+	return s.Accept(ctx, p, publisherID, p.AccountID)
 }
 
 func (s *Service) AcceptForPublisher(ctx context.Context, p *auth.Principal, buyerAccountID int64) (*StatusResponse, error) {
-	return s.Accept(ctx, p, buyerAccountID)
+	return s.Accept(ctx, p, p.AccountID, buyerAccountID)
 }
 
 func (s *Service) AcceptByBuyerPublicID(ctx context.Context, p *auth.Principal, buyerPublicID string) (*StatusResponse, error) {
@@ -246,16 +289,11 @@ func (s *Service) AcceptByBuyerPublicID(ctx context.Context, p *auth.Principal, 
 	if err != nil || buyerType != "buyer" {
 		return nil, httpx.NotFound("buyer not found")
 	}
-	return s.Accept(ctx, p, buyerID)
+	return s.Accept(ctx, p, p.AccountID, buyerID)
 }
 
-func (s *Service) Reject(ctx context.Context, p *auth.Principal, buyerAccountID int64) (*StatusResponse, error) {
-	pubID, err := s.repo.PublisherAccountID(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	c, err := s.repo.GetByPair(ctx, pubID, buyerAccountID)
+func (s *Service) Reject(ctx context.Context, p *auth.Principal, publisherID, buyerAccountID int64) (*StatusResponse, error) {
+	c, err := s.repo.GetByPair(ctx, publisherID, buyerAccountID)
 	if err != nil {
 		return nil, httpx.NotFound("no pending collaboration request")
 	}
@@ -276,18 +314,29 @@ func (s *Service) Reject(ctx context.Context, p *auth.Principal, buyerAccountID 
 	if err := s.repo.RejectPending(ctx, c.ID); err != nil {
 		return nil, err
 	}
-	if err := s.repo.InsertAudit(ctx, s.repo.pool, "request_rejected", pubID, buyerAccountID, p.UserID, map[string]any{}); err != nil {
+	if err := s.repo.InsertAudit(ctx, s.repo.pool, "request_rejected", publisherID, buyerAccountID, p.UserID, map[string]any{}); err != nil {
 		return nil, err
 	}
-	return s.status(ctx, pubID, buyerAccountID)
+	return s.status(ctx, publisherID, buyerAccountID)
 }
 
 func (s *Service) RejectForBuyer(ctx context.Context, p *auth.Principal) (*StatusResponse, error) {
-	return s.Reject(ctx, p, p.AccountID)
+	pubID, err := s.repo.PublisherAccountID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.Reject(ctx, p, pubID, p.AccountID)
+}
+
+func (s *Service) RejectForBuyerPublisher(ctx context.Context, p *auth.Principal, publisherID int64) (*StatusResponse, error) {
+	if err := s.requireActivePartnership(ctx, publisherID, p.AccountID); err != nil {
+		return nil, err
+	}
+	return s.Reject(ctx, p, publisherID, p.AccountID)
 }
 
 func (s *Service) RejectForPublisher(ctx context.Context, p *auth.Principal, buyerAccountID int64) (*StatusResponse, error) {
-	return s.Reject(ctx, p, buyerAccountID)
+	return s.Reject(ctx, p, p.AccountID, buyerAccountID)
 }
 
 func (s *Service) RejectByBuyerPublicID(ctx context.Context, p *auth.Principal, buyerPublicID string) (*StatusResponse, error) {
@@ -295,18 +344,25 @@ func (s *Service) RejectByBuyerPublicID(ctx context.Context, p *auth.Principal, 
 	if err != nil || buyerType != "buyer" {
 		return nil, httpx.NotFound("buyer not found")
 	}
-	return s.Reject(ctx, p, buyerID)
+	return s.Reject(ctx, p, p.AccountID, buyerID)
 }
 
 func (s *Service) Revoke(ctx context.Context, p *auth.Principal) (*StatusResponse, error) {
-	if !p.IsAdmin() || p.AccountType != "buyer" {
-		return nil, httpx.Forbidden("buyer admin required")
-	}
 	pubID, err := s.repo.PublisherAccountID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	c, err := s.repo.GetByPair(ctx, pubID, p.AccountID)
+	return s.RevokeForBuyerPublisher(ctx, p, pubID)
+}
+
+func (s *Service) RevokeForBuyerPublisher(ctx context.Context, p *auth.Principal, publisherID int64) (*StatusResponse, error) {
+	if !p.IsAdmin() || p.AccountType != "buyer" {
+		return nil, httpx.Forbidden("buyer admin required")
+	}
+	if err := s.requireActivePartnership(ctx, publisherID, p.AccountID); err != nil {
+		return nil, err
+	}
+	c, err := s.repo.GetByPair(ctx, publisherID, p.AccountID)
 	if err != nil {
 		return nil, httpx.NotFound("no active collaboration")
 	}
@@ -316,10 +372,24 @@ func (s *Service) Revoke(ctx context.Context, p *auth.Principal) (*StatusRespons
 	if _, err := s.repo.Revoke(ctx, c.ID, p.UserID); err != nil {
 		return nil, err
 	}
-	if err := s.repo.InsertAudit(ctx, s.repo.pool, "revoked", pubID, p.AccountID, p.UserID, map[string]any{}); err != nil {
+	if err := s.repo.InsertAudit(ctx, s.repo.pool, "revoked", publisherID, p.AccountID, p.UserID, map[string]any{}); err != nil {
 		return nil, err
 	}
-	return s.status(ctx, pubID, p.AccountID)
+	return s.status(ctx, publisherID, p.AccountID)
+}
+
+func (s *Service) requireActivePartnership(ctx context.Context, publisherID, buyerID int64) error {
+	var ok bool
+	err := s.repo.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM partnerships WHERE publisher_id = $1 AND buyer_id = $2 AND status = 'active')`,
+		publisherID, buyerID).Scan(&ok)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return httpx.NotFound("partnership not active")
+	}
+	return nil
 }
 
 func (s *Service) auditAndNotifyRequest(ctx context.Context, pubID, buyerID, actorID int64, collabID int64, direction string) error {
@@ -370,15 +440,21 @@ func (s *Service) adminUserIDs(ctx context.Context, accountID int64) ([]int64, e
 	return ids, rows.Err()
 }
 
-func (s *Service) LogImpersonationAction(ctx context.Context, p *auth.Principal, method, path string) {
+func (s *Service) LogImpersonationAction(ctx context.Context, p *auth.Principal, method, path string, changes []auth.ImpersonationChange) {
 	if p == nil || p.Impersonator == nil {
 		return
 	}
 	pubID := p.Impersonator.AccountID
 	buyerID := p.AccountID
-	_ = s.repo.InsertAudit(ctx, s.repo.pool, "impersonation_action", pubID, buyerID, p.Impersonator.UserID, map[string]any{
-		"method": method, "path": path,
-	})
+	meta := map[string]any{"method": method, "path": path}
+	if len(changes) > 0 {
+		items := make([]map[string]string, len(changes))
+		for i, c := range changes {
+			items[i] = map[string]string{"field": c.Field, "from": c.From, "to": c.To}
+		}
+		meta["changes"] = items
+	}
+	_ = s.repo.InsertAudit(ctx, s.repo.pool, "impersonation_action", pubID, buyerID, p.Impersonator.UserID, meta)
 }
 
 type ImpersonateResult struct {

@@ -5,8 +5,15 @@ import type {
   ApiKey,
   BuyerSummary,
   BuyerDetail,
+  PublisherSummary,
+  PublisherDetail,
   BuyerCollabSummary,
+  BuyerPublisher,
   CollaborationStatus,
+  Partnership,
+  CollaborationAuditEntry,
+  AuditLogListResponse,
+  AuditLogActor,
   CalendarEvent,
   Source,
   Route,
@@ -17,6 +24,7 @@ import type {
   FieldMapEntry,
   SourceSamplePayload,
   QueueItem,
+  QueueListResponse,
   ReturnRule,
   RuleAction,
   RuleCondition,
@@ -341,6 +349,51 @@ export function useDeleteReturnRule(buyer = false) {
 export function useMyContract() {
   return useQuery({ queryKey: ["my-contract"], queryFn: () => get<Contract>(`/buyer/contract`) });
 }
+
+export function useMyPublisher() {
+  return useQuery({
+    queryKey: ["my-publisher"],
+    queryFn: () => get<BuyerPublisher>("/buyer/publisher"),
+  });
+}
+
+export function useBuyerRoutes() {
+  return useQuery({
+    queryKey: ["buyer-routes"],
+    queryFn: () => get<Route[]>("/buyer/routes"),
+  });
+}
+
+export interface BuyerLogsFilters {
+  page?: number;
+  limit?: number;
+  from?: string;
+  to?: string;
+  actor_user_id?: number;
+}
+
+function buyerLogsQueryString(filters: BuyerLogsFilters): string {
+  const qs = new URLSearchParams();
+  Object.entries(filters).forEach(([k, v]) => {
+    if (v !== undefined && v !== "" && v !== 0) qs.set(k, String(v));
+  });
+  return qs.toString();
+}
+
+export function useBuyerLogs(filters: BuyerLogsFilters = { page: 1, limit: 25 }) {
+  const q = buyerLogsQueryString(filters);
+  return useQuery({
+    queryKey: ["buyer-logs", filters],
+    queryFn: () => get<AuditLogListResponse>(`/buyer/logs?${q}`),
+  });
+}
+
+export function useBuyerLogActors() {
+  return useQuery({
+    queryKey: ["buyer-logs", "actors"],
+    queryFn: () => get<AuditLogActor[]>("/buyer/logs/actors"),
+  });
+}
 export function useContractPublisherStages(buyer = false, sourcePipelineId?: number) {
   return useQuery({
     queryKey: ["contract-publisher-stages", buyer, sourcePipelineId],
@@ -358,7 +411,10 @@ export function useSources() {
 }
 export function useCreateSource() {
   const inv = useInvalidate(["sources"]);
-  return useMutation({ mutationFn: (body: Record<string, unknown>) => post(`/publisher/sources`, body), onSuccess: inv });
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) => post<Source>(`/publisher/sources`, body),
+    onSuccess: inv,
+  });
 }
 export function useUpdateSource() {
   const inv = useInvalidate(["sources"]);
@@ -462,10 +518,73 @@ export function useCreateBuyerRouteField(routeId: number) {
 }
 
 // ── Intake queue (publisher) ──────────────────────────────────────
+export interface IntakeLogFilters {
+  status?: string;
+  page?: number;
+  limit?: number;
+  q?: string;
+}
+
+function intakeQueueQueryString(filters: IntakeLogFilters): string {
+  const qs = new URLSearchParams();
+  Object.entries(filters).forEach(([k, v]) => {
+    if (v !== undefined && v !== "" && v !== 0) qs.set(k, String(v));
+  });
+  return qs.toString();
+}
+
+function normalizeQueueResponse(raw: QueueListResponse | QueueItem[] | undefined): QueueListResponse {
+  if (!raw) return { items: [], total: 0, page: 1, limit: 0 };
+  if (Array.isArray(raw)) return { items: raw, total: raw.length, page: 1, limit: raw.length };
+  return { ...raw, items: raw.items ?? [] };
+}
+
 export function useIntakeQueue(status = "pending_review") {
   return useQuery({
     queryKey: ["intake-queue", status],
-    queryFn: () => get<QueueItem[]>(`/publisher/intake-queue?status=${status}`),
+    queryFn: async () =>
+      normalizeQueueResponse(
+        await get<QueueListResponse | QueueItem[]>(`/publisher/intake-queue?status=${status}`)
+      ),
+  });
+}
+export function useIntakeLog(filters: IntakeLogFilters = { status: "all", page: 1, limit: 25 }) {
+  const q = intakeQueueQueryString(filters);
+  return useQuery({
+    queryKey: ["intake-queue", "log", filters],
+    queryFn: async () =>
+      normalizeQueueResponse(await get<QueueListResponse>(`/publisher/intake-queue?${q}`)),
+  });
+}
+export function useBuyerRoutingLog(filters: IntakeLogFilters = { status: "all", page: 1, limit: 25 }) {
+  const q = intakeQueueQueryString(filters);
+  return useQuery({
+    queryKey: ["buyer-routing-log", filters],
+    queryFn: async () =>
+      normalizeQueueResponse(await get<QueueListResponse>(`/buyer/routing-log?${q}`)),
+  });
+}
+export function useRoutingLog(source: "publisher" | "buyer", filters: IntakeLogFilters) {
+  const q = intakeQueueQueryString(filters);
+  return useQuery({
+    queryKey: [source === "buyer" ? "buyer-routing-log" : "intake-queue", "log", filters],
+    queryFn: async () => {
+      const path =
+        source === "buyer" ? `/buyer/routing-log?${q}` : `/publisher/intake-queue?${q}`;
+      return normalizeQueueResponse(await get<QueueListResponse>(path));
+    },
+  });
+}
+export function useMapQueueField() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
+      post<QueueItem>(`/publisher/intake-queue/${id}/map-field`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["intake-queue"] });
+      qc.invalidateQueries({ queryKey: ["source-field-map"] });
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    },
   });
 }
 export function useRouteQueue() {
@@ -486,7 +605,7 @@ export function useBuyers() {
   return useQuery({ queryKey: ["buyers"], queryFn: () => get<BuyerSummary[]>(`/publisher/buyers`) });
 }
 export function useCreateBuyer() {
-  const inv = useInvalidate(["buyers"]);
+  const inv = useInvalidate(["buyers", "partnerships"]);
   return useMutation({
     mutationFn: (body: {
       name: string;
@@ -543,6 +662,48 @@ export function useBuyerBilling(buyerId: number | null) {
     queryFn: () =>
       get<{ balance: number; transactions: Transaction[] }>(`/publisher/buyers/${buyerId}/billing`),
     enabled: !!buyerId,
+  });
+}
+
+// ── Publishers (buyer oversight) ──────────────────────────────────
+export function usePublishers() {
+  return useQuery({ queryKey: ["publishers"], queryFn: () => get<PublisherSummary[]>("/buyer/publishers") });
+}
+export function usePublisher(publisherId: number | null) {
+  return useQuery({
+    queryKey: ["publisher", publisherId],
+    queryFn: () => get<PublisherDetail>(`/buyer/publishers/${publisherId}`),
+    enabled: !!publisherId,
+  });
+}
+
+// ── Partnerships ────────────────────────────────────────────────────
+export function usePartnerships() {
+  return useQuery({
+    queryKey: ["partnerships"],
+    queryFn: () => get<Partnership[]>(`${ns()}/partnerships`),
+  });
+}
+export function useRequestPartnership() {
+  const inv = useInvalidate(["partnerships", "buyers", "publishers"]);
+  return useMutation({
+    mutationFn: (body: { buyer_handler_id?: string; publisher_handler_id?: string }) =>
+      post<Partnership>(`${ns()}/partnerships/request`, body),
+    onSuccess: inv,
+  });
+}
+export function useAcceptPartnership() {
+  const inv = useInvalidate(["partnerships", "buyers", "publishers"]);
+  return useMutation({
+    mutationFn: (id: number) => post<Partnership>(`${ns()}/partnerships/${id}/accept`),
+    onSuccess: inv,
+  });
+}
+export function useRejectPartnership() {
+  const inv = useInvalidate(["partnerships", "publishers"]);
+  return useMutation({
+    mutationFn: (id: number) => post(`${ns()}/partnerships/${id}/reject`),
+    onSuccess: inv,
   });
 }
 
@@ -645,6 +806,50 @@ export function useBuyerCollabStatus() {
   return useQuery({
     queryKey: ["collaboration", "self"],
     queryFn: () => get<CollaborationStatus>("/buyer/collaboration"),
+  });
+}
+
+export function usePublisherCollaboration(publisherId: number | null) {
+  return useQuery({
+    queryKey: ["collaboration", "publisher", publisherId],
+    queryFn: () => get<CollaborationStatus>(`/buyer/collaboration/publishers/${publisherId}`),
+    enabled: !!publisherId,
+  });
+}
+
+export function useInvitePublisherCollaborationForPublisher() {
+  const inv = useInvalidate(["collaboration", "publishers"]);
+  return useMutation({
+    mutationFn: ({ publisherId, email }: { publisherId: number; email: string }) =>
+      post<CollaborationStatus>(`/buyer/collaboration/publishers/${publisherId}/invite`, { email }),
+    onSuccess: inv,
+  });
+}
+
+export function useAcceptCollaborationForPublisher() {
+  const inv = useInvalidate(["collaboration", "publishers"]);
+  return useMutation({
+    mutationFn: (publisherId: number) =>
+      post<CollaborationStatus>(`/buyer/collaboration/publishers/${publisherId}/accept`),
+    onSuccess: inv,
+  });
+}
+
+export function useRejectCollaborationForPublisher() {
+  const inv = useInvalidate(["collaboration", "publishers"]);
+  return useMutation({
+    mutationFn: (publisherId: number) =>
+      post<CollaborationStatus>(`/buyer/collaboration/publishers/${publisherId}/reject`),
+    onSuccess: inv,
+  });
+}
+
+export function useRevokeCollaborationForPublisher() {
+  const inv = useInvalidate(["collaboration", "publishers"]);
+  return useMutation({
+    mutationFn: (publisherId: number) =>
+      del<CollaborationStatus>(`/buyer/collaboration/publishers/${publisherId}`),
+    onSuccess: inv,
   });
 }
 

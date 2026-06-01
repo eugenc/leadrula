@@ -12,6 +12,7 @@ import (
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/internal/config"
 	"github.com/echayko/leadrula/backend/internal/database"
+	"github.com/echayko/leadrula/backend/internal/handlerid"
 )
 
 func main() {
@@ -40,11 +41,12 @@ func main() {
 	var publisherID int64
 	err = pool.QueryRow(ctx, `SELECT id FROM accounts WHERE type='publisher' LIMIT 1`).Scan(&publisherID)
 	if err != nil {
+		hid := handlerid.Generate("P")
 		if err := pool.QueryRow(ctx,
-			`INSERT INTO accounts(type, name) VALUES ('publisher', $1) RETURNING id`, *pubName).Scan(&publisherID); err != nil {
+			`INSERT INTO accounts(type, name, handler_id) VALUES ('publisher', $1, $2) RETURNING id`, *pubName, hid).Scan(&publisherID); err != nil {
 			log.Fatalf("create publisher: %v", err)
 		}
-		log.Printf("created publisher account id=%d", publisherID)
+		log.Printf("created publisher account id=%d handler_id=%s", publisherID, hid)
 	} else {
 		log.Printf("publisher already exists id=%d", publisherID)
 	}

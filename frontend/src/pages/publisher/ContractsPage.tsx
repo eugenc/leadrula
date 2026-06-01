@@ -14,11 +14,11 @@ import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Spinner, EmptyState } from "@/components/ui/misc";
-import { Dialog } from "@/components/ui/dialog";
+import { FormDrawer } from "@/components/ui/dialog";
 import { Plus, Trash2 } from "lucide-react";
 import { formatMoney } from "@/lib/utils";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 import { ContractDetailDrawer } from "@/features/admin/ContractDetailDrawer";
 import { ContractStatusBadge } from "@/features/admin/contractStatus";
 import type { Contract } from "@/types";
@@ -69,7 +69,7 @@ export function ContractsPage() {
                       variant="danger"
                       onClick={(e) => {
                         e.stopPropagation();
-                        remove.mutate(c.id, { onError: (err) => toast.error(apiError(err).message) });
+                        remove.mutate(c.id, { onError: (err) => toast.error(errorMessage(err)) });
                       }}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -82,14 +82,14 @@ export function ContractsPage() {
         </Table>
       )}
 
-      {open && <CreateContractDialog onClose={() => setOpen(false)} />}
+      <CreateContractDrawer open={open} onClose={() => setOpen(false)} />
       <ContractDetailDrawer contract={selected} onClose={() => setSelected(null)} />
       </PageBody>
     </>
   );
 }
 
-function CreateContractDialog({ onClose }: { onClose: () => void }) {
+function CreateContractDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { data: buyers } = useBuyers();
   const { data: pubPipelines } = usePipelines();
   const create = useCreateContract();
@@ -109,8 +109,37 @@ function CreateContractDialog({ onClose }: { onClose: () => void }) {
     setForm((f) => ({ ...f, [k]: v }));
   }
 
+  const canCreate =
+    !!form.buyer_id && !!form.source_stage_id && !!form.buyer_pipeline_id && !!form.return_stage_id;
+
   return (
-    <Dialog open onClose={onClose} title="New Contract">
+    <FormDrawer
+      open={open}
+      onClose={onClose}
+      title="New Contract"
+      width={520}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            disabled={!canCreate}
+            onClick={() =>
+              create.mutate(form, {
+                onSuccess: () => {
+                  toast.success("Contract created");
+                  onClose();
+                },
+                onError: (e) => toast.error(errorMessage(e)),
+              })
+            }
+          >
+            Create
+          </Button>
+        </>
+      }
+    >
       <div className="space-y-3">
         <div>
           <Label>Buyer</Label>
@@ -183,26 +212,7 @@ function CreateContractDialog({ onClose }: { onClose: () => void }) {
             onChange={(e) => set("rate_per_lead", Number(e.target.value))}
           />
         </div>
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            disabled={!form.buyer_id || !form.source_stage_id || !form.buyer_pipeline_id || !form.return_stage_id}
-            onClick={() =>
-              create.mutate(form, {
-                onSuccess: () => {
-                  toast.success("Contract created");
-                  onClose();
-                },
-                onError: (e) => toast.error(apiError(e).message),
-              })
-            }
-          >
-            Create
-          </Button>
-        </div>
       </div>
-    </Dialog>
+    </FormDrawer>
   );
 }

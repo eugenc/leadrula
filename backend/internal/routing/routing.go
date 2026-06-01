@@ -195,6 +195,16 @@ func RouteForSource(ctx context.Context, q database.Querier, sourceID int64) (*R
 		 WHERE r.source_id=$1 AND r.origin='source' AND r.is_active`, sourceID))
 }
 
+// BuyerRouteForSourceAndBuyer finds an active buyer route for a source and contract buyer.
+func BuyerRouteForSourceAndBuyer(ctx context.Context, q database.Querier, publisherID, sourceID, buyerID int64) (*Route, error) {
+	return scanRouteOptional(q.QueryRow(ctx,
+		`SELECT `+routeCols+routeFrom+`
+		 JOIN contracts c ON c.id = r.contract_id
+		 WHERE r.publisher_id=$1 AND r.source_id=$2 AND r.origin='source' AND r.destination='buyer'
+		   AND r.is_active AND c.buyer_id=$3 AND c.deleted_at IS NULL
+		 LIMIT 1`, publisherID, sourceID, buyerID))
+}
+
 // MatchRouteByStage finds an active pipeline-origin route for a publisher trigger stage.
 func MatchRouteByStage(ctx context.Context, q database.Querier, publisherID, stageID int64) (*Route, error) {
 	return scanRouteOptional(q.QueryRow(ctx,
@@ -339,12 +349,27 @@ func (s *Service) LatestSourceSamplePayload(ctx context.Context, publisherID, so
 	return &SourceSamplePayload{Payload: payload, ReceivedAt: &receivedAt}, nil
 }
 
-func (s *Service) AddSourceFieldMap(ctx context.Context, sourceID int64, sourceKey, targetType string, builtinField *string, customFieldID *int64) (*SourceFieldMapEntry, error) {
+func (s *Service) AddSourceFieldMap(ctx context.Context, publisherID, sourceID int64, sourceKey, targetType string, builtinField *string, customFieldID *int64) (*SourceFieldMapEntry, error) {
 	if targetType != "builtin" && targetType != "custom" {
 		return nil, httpx.Validation("target_type must be builtin or custom")
 	}
+	ok, err := s.SourceOwnedBy(ctx, publisherID, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, httpx.NotFound("source not found")
+	}
+	if targetType == "custom" {
+		if customFieldID == nil || *customFieldID == 0 {
+			return nil, httpx.Validation("custom_field_id required for custom target")
+		}
+		if err := s.customFieldOwnedBy(ctx, *customFieldID, publisherID); err != nil {
+			return nil, err
+		}
+	}
 	e := &SourceFieldMapEntry{}
-	err := s.pool.QueryRow(ctx,
+	err = s.pool.QueryRow(ctx,
 		`INSERT INTO routing_source_field_map(source_id, source_key, target_type, builtin_field, custom_field_id)
 		 VALUES ($1,$2,$3,$4,$5)
 		 RETURNING id, source_id, source_key, target_type, builtin_field, custom_field_id, created_at`,
@@ -403,6 +428,26 @@ func (s *Service) ListRoutes(ctx context.Context, publisherID int64) ([]Route, e
 	rows, err := s.pool.Query(ctx,
 		`SELECT `+routeCols+routeFrom+`
 		 WHERE r.publisher_id=$1 ORDER BY r.name`, publisherID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Route
+	for rows.Next() {
+		rt, err := scanRoute(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *rt)
+	}
+	return out, rows.Err()
+}
+
+func (s *Service) ListRoutesForBuyer(ctx context.Context, buyerID int64) ([]Route, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT `+routeCols+routeFrom+`
+		 WHERE r.destination='buyer' AND c.buyer_id=$1 AND c.deleted_at IS NULL
+		 ORDER BY r.name`, buyerID)
 	if err != nil {
 		return nil, err
 	}

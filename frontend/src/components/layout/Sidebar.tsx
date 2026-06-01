@@ -6,7 +6,6 @@ import {
   LayoutDashboard,
   KanbanSquare,
   List,
-  Inbox,
   GitBranch,
   Tags,
   Ban,
@@ -20,6 +19,7 @@ import {
   KeyRound,
   Settings,
   Handshake,
+  Logs,
   type LucideIcon,
 } from "lucide-react";
 
@@ -55,7 +55,7 @@ const publisherNav: NavGroup[] = [
   {
     label: "Buyers",
     items: [
-      { to: "/p/buyers", label: "Buyers List", icon: Building2, adminOnly: true },
+      { to: "/p/buyers", label: "Buyers", icon: Building2, adminOnly: true },
       { to: "/p/contracts", label: "Contracts", icon: FileText, adminOnly: true },
     ],
   },
@@ -64,7 +64,7 @@ const publisherNav: NavGroup[] = [
     items: [
       { to: "/p/sources", label: "Sources", icon: Webhook, adminOnly: true },
       { to: "/p/routing", label: "Routing", icon: Route, adminOnly: true },
-      { to: "/p/intake", label: "Intake Queue", icon: Inbox, adminOnly: true },
+      { to: "/p/log", label: "Log", icon: Logs, adminOnly: true },
     ],
   },
 ];
@@ -97,15 +97,23 @@ const buyerNav: NavGroup[] = [
       { to: "/b/reasons", label: "Disqualification", icon: Ban, adminOnly: true },
     ],
   },
+  {
+    label: "Publishers",
+    items: [
+      { to: "/b/publishers", label: "Publishers", icon: Building2 },
+      { to: "/b/contract", label: "Contracts", icon: FileText },
+      { to: "/b/routes", label: "Routes", icon: Route },
+      { to: "/b/collaboration", label: "Collaboration", icon: Handshake, adminOnly: true },
+      { to: "/b/logs", label: "Logs", icon: Logs, adminOnly: true },
+    ],
+  },
 ];
 
 const buyerSettings: NavGroup = {
   label: "Settings",
   items: [
     { to: "/b/settings", label: "Profile", icon: Settings },
-    { to: "/b/settings/collaboration", label: "Collaboration", icon: Handshake, adminOnly: true },
     { to: "/b/billing", label: "Billing", icon: CreditCard },
-    { to: "/b/contract", label: "Contract", icon: FileText },
     { to: "/b/users", label: "Users", icon: Users, adminOnly: true },
     { to: "/b/api", label: "API Keys", icon: KeyRound, adminOnly: true },
   ],

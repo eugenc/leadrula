@@ -10,14 +10,18 @@ import { useAuthStore } from "@/store/authStore";
 const titles: Record<string, string> = {
   board: "Pipeline",
   leads: "Leads",
-  intake: "Intake Queue",
+  log: "Log",
+  review: "Review",
   pipelines: "Pipelines",
   fields: "Custom Fields",
   reasons: "Disqualification Reasons",
   routing: "Routing",
   sources: "Sources",
   contracts: "Contracts",
-  contract: "Contract",
+  contract: "Contracts",
+  publishers: "Publishers",
+  routes: "Routes",
+  logs: "Logs",
   buyers: "Buyers",
   billing: "Billing",
   users: "Users",
@@ -25,6 +29,7 @@ const titles: Record<string, string> = {
   calendar: "Calendar",
   settings: "Settings",
   collaboration: "Collaboration",
+  activity: "Activity Log",
 };
 
 export function AppShell() {

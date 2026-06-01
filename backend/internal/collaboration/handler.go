@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
@@ -31,12 +32,22 @@ func (h *Handler) RegisterPublisherRoutes(r chi.Router) {
 }
 
 func (h *Handler) RegisterBuyerRoutes(r chi.Router) {
+	r.Get("/publisher", h.buyerPublisher)
+	r.With(auth.RequireRole("admin")).Get("/logs/actors", h.buyerLogActors)
+	r.With(auth.RequireRole("admin")).Get("/logs", h.buyerLogs)
 	r.Route("/collaboration", func(r chi.Router) {
 		r.With(auth.RequireRole("admin")).Get("/", h.buyerStatus)
 		r.With(auth.RequireRole("admin")).Post("/invite", h.buyerInvite)
 		r.With(auth.RequireRole("admin")).Post("/accept", h.buyerAccept)
 		r.With(auth.RequireRole("admin")).Post("/reject", h.buyerReject)
 		r.With(auth.RequireRole("admin")).Delete("/", h.buyerRevoke)
+		r.Route("/publishers/{publisherId}", func(r chi.Router) {
+			r.With(auth.RequireRole("admin")).Get("/", h.buyerPublisherCollabStatus)
+			r.With(auth.RequireRole("admin")).Post("/invite", h.buyerPublisherInvite)
+			r.With(auth.RequireRole("admin")).Post("/accept", h.buyerPublisherAccept)
+			r.With(auth.RequireRole("admin")).Post("/reject", h.buyerPublisherReject)
+			r.With(auth.RequireRole("admin")).Delete("/", h.buyerPublisherRevoke)
+		})
 	})
 }
 
@@ -152,6 +163,68 @@ func (h *Handler) buyerStatus(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, res)
 }
 
+func (h *Handler) buyerPublisher(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	res, err := h.svc.PublisherForBuyer(r.Context(), p.AccountID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, res)
+}
+
+func (h *Handler) buyerLogs(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	q := r.URL.Query()
+
+	page, _ := strconv.Atoi(q.Get("page"))
+	limit, _ := strconv.Atoi(q.Get("limit"))
+
+	params := AuditListParams{Page: page, Limit: limit}
+
+	if fromRaw := q.Get("from"); fromRaw != "" {
+		t, err := time.Parse(time.RFC3339, fromRaw)
+		if err != nil {
+			httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, "invalid from datetime")
+			return
+		}
+		params.From = &t
+	}
+	if toRaw := q.Get("to"); toRaw != "" {
+		t, err := time.Parse(time.RFC3339, toRaw)
+		if err != nil {
+			httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, "invalid to datetime")
+			return
+		}
+		params.To = &t
+	}
+	if actorRaw := q.Get("actor_user_id"); actorRaw != "" {
+		actorID, err := strconv.ParseInt(actorRaw, 10, 64)
+		if err != nil || actorID <= 0 {
+			httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, "invalid actor_user_id")
+			return
+		}
+		params.ActorUserID = &actorID
+	}
+
+	res, err := h.svc.AuditLogListForBuyer(r.Context(), p.AccountID, params)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, res)
+}
+
+func (h *Handler) buyerLogActors(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	items, err := h.svc.AuditActorsForBuyer(r.Context(), p.AccountID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, items)
+}
+
 func (h *Handler) buyerInvite(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
@@ -198,6 +271,87 @@ func (h *Handler) buyerRevoke(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, res)
 }
 
+func (h *Handler) buyerPublisherCollabStatus(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	pubID, err := publisherIDParam(r)
+	if err != nil {
+		httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, err.Error())
+		return
+	}
+	res, err := h.svc.StatusForPublisher(r.Context(), pubID, p.AccountID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, res)
+}
+
+func (h *Handler) buyerPublisherInvite(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	pubID, err := publisherIDParam(r)
+	if err != nil {
+		httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, err.Error())
+		return
+	}
+	var body struct {
+		Email string `json:"email"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	res, err := h.svc.InvitePublisherUserForPublisher(r.Context(), p, pubID, body.Email)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, res)
+}
+
+func (h *Handler) buyerPublisherAccept(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	pubID, err := publisherIDParam(r)
+	if err != nil {
+		httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, err.Error())
+		return
+	}
+	res, err := h.svc.AcceptForBuyerPublisher(r.Context(), p, pubID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, res)
+}
+
+func (h *Handler) buyerPublisherReject(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	pubID, err := publisherIDParam(r)
+	if err != nil {
+		httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, err.Error())
+		return
+	}
+	res, err := h.svc.RejectForBuyerPublisher(r.Context(), p, pubID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, res)
+}
+
+func (h *Handler) buyerPublisherRevoke(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	pubID, err := publisherIDParam(r)
+	if err != nil {
+		httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, err.Error())
+		return
+	}
+	res, err := h.svc.RevokeForBuyerPublisher(r.Context(), p, pubID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, res)
+}
+
 func (h *Handler) RegisterAuthRoutes(r chi.Router) {
 	r.Post("/auth/impersonate", h.impersonate)
 	r.Post("/auth/impersonate/end", h.endImpersonate)
@@ -237,3 +391,12 @@ func buyerIDParam(r *http.Request) (int64, error) {
 }
 
 var errInvalidBuyerID = errors.New("invalid buyer id")
+var errInvalidPublisherID = errors.New("invalid publisher id")
+
+func publisherIDParam(r *http.Request) (int64, error) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "publisherId"), 10, 64)
+	if err != nil || id <= 0 {
+		return 0, errInvalidPublisherID
+	}
+	return id, nil
+}

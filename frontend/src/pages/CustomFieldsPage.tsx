@@ -13,7 +13,7 @@ import { Switch, Spinner } from "@/components/ui/misc";
 import { FormDrawer } from "@/components/ui/dialog";
 import { Plus, Trash2, Upload } from "lucide-react";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 import type { CustomField } from "@/types";
 
 const CUSTOM_FIELD_TYPES = [
@@ -90,7 +90,7 @@ export function CustomFieldsPage() {
             toast.success("Field updated");
             closeDrawer();
           },
-          onError: (e) => toast.error(apiError(e).message),
+          onError: (e) => toast.error(errorMessage(e)),
         }
       );
     } else {
@@ -101,7 +101,7 @@ export function CustomFieldsPage() {
             toast.success("Field created");
             closeDrawer();
           },
-          onError: (e) => toast.error(apiError(e).message),
+          onError: (e) => toast.error(errorMessage(e)),
         }
       );
     }
@@ -160,7 +160,7 @@ export function CustomFieldsPage() {
                     <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
                       <IconButton
                         variant="danger"
-                        onClick={() => remove.mutate(f.id, { onError: (e) => toast.error(apiError(e).message) })}
+                        onClick={() => remove.mutate(f.id, { onError: (e) => toast.error(errorMessage(e)) })}
                       >
                         <Trash2 className="h-4 w-4" />
                       </IconButton>

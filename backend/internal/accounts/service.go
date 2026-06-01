@@ -124,7 +124,7 @@ func (s *Service) Me(ctx context.Context, p *auth.Principal) (map[string]any, er
 			"avatar_url": avatarURLFromPrefs(u.Prefs),
 		},
 		"account": map[string]any{
-			"id": a.PublicID, "type": a.Type, "name": a.Name, "timezone": a.Timezone,
+			"id": a.PublicID, "handler_id": a.HandlerID, "type": a.Type, "name": a.Name, "timezone": a.Timezone,
 		},
 	}
 	if p.Impersonator != nil {

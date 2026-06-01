@@ -21,6 +21,7 @@ import (
 	"github.com/echayko/leadrula/backend/internal/leads"
 	"github.com/echayko/leadrula/backend/internal/notifications"
 	"github.com/echayko/leadrula/backend/internal/oversight"
+	"github.com/echayko/leadrula/backend/internal/partnerships"
 	"github.com/echayko/leadrula/backend/internal/pipelines"
 	"github.com/echayko/leadrula/backend/internal/routing"
 	"github.com/echayko/leadrula/backend/internal/storage"
@@ -63,6 +64,10 @@ func main() {
 	collabSvc := collaboration.NewService(collabRepo, notifSvc, tokens)
 	collabH := collaboration.NewHandler(collabSvc)
 
+	partnersRepo := partnerships.NewRepository(pool)
+	partnersSvc := partnerships.NewService(partnersRepo, accountsRepo, notifSvc)
+	partnersH := partnerships.NewHandler(partnersSvc)
+
 	apikeysSvc := apikeys.NewService(pool)
 	apikeysH := apikeys.NewHandler(apikeysSvc)
 
@@ -91,7 +96,7 @@ func main() {
 	intakeSvc := intake.NewService(pool, leadsRepo, notifSvc, accountsRepo)
 	intakeH := intake.NewHandler(intakeSvc, publisherID)
 
-	oversightH := oversight.NewHandler(accountsRepo, accountsSvc, leadsRepo, pipelinesSvc, billingSvc, calSvc, collabSvc)
+	oversightH := oversight.NewHandler(accountsRepo, accountsSvc, leadsRepo, pipelinesSvc, billingSvc, calSvc, collabSvc, partnersSvc, partnersSvc)
 
 	// ── router ───────────────────────────────────────────────────
 	r := chi.NewRouter()
@@ -129,6 +134,7 @@ func main() {
 		intakeH.RegisterQueueRoutes(p)
 		oversightH.RegisterRoutes(p)
 		collabH.RegisterPublisherRoutes(p)
+		partnersH.RegisterPublisherRoutes(p)
 		accountsH.RegisterUserRoutes(p)
 		apikeysH.RegisterRoutes(p)
 		notifH.RegisterRoutes(p)
@@ -145,6 +151,10 @@ func main() {
 		billingH.RegisterBuyer(b)
 		calH.RegisterRoutes(b)
 		collabH.RegisterBuyerRoutes(b)
+		partnersH.RegisterBuyerRoutes(b)
+		oversightH.RegisterBuyerRoutes(b)
+		intakeH.RegisterBuyerRoutes(b)
+		routingH.RegisterBuyer(b)
 		accountsH.RegisterUserRoutes(b)
 		apikeysH.RegisterRoutes(b)
 		notifH.RegisterRoutes(b)

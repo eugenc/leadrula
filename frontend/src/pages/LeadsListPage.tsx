@@ -35,7 +35,7 @@ import { PageBody } from "@/components/layout/PageBody";
 import { useUIStore } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
   ChevronDown,
@@ -240,7 +240,7 @@ export function LeadsListPage() {
       setAssignOpen(null);
       setBulkOpen(false);
     } catch (err) {
-      toast.error(apiError(err).message);
+      toast.error(errorMessage(err));
     } finally {
       setFetchingIds(false);
     }
@@ -336,7 +336,7 @@ export function LeadsListPage() {
             <Spinner className="h-6 w-6" />
           </div>
         ) : isError ? (
-          <EmptyState title="Could not load leads." subtitle={apiError(error).message} />
+          <EmptyState title="Could not load leads." subtitle={errorMessage(error)} />
         ) : leads.length === 0 ? (
           <EmptyState title="No leads match these filters." />
         ) : (

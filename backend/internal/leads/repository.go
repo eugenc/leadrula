@@ -582,21 +582,20 @@ func (r *Repository) SetDisqReason(ctx context.Context, q database.Querier, lead
 	return err
 }
 
-// StageInfo describes a destination stage's prompts and owning account.
+// StageInfo describes a destination stage and owning account.
 type StageInfo struct {
-	ID                     int64
-	PipelineID             int64
-	AccountID              int64
-	PromptActionDatetime   bool
-	PromptDisqualification bool
+	ID         int64
+	PipelineID int64
+	AccountID  int64
+	StageType  string
 }
 
 func (r *Repository) GetStage(ctx context.Context, q database.Querier, stageID int64) (*StageInfo, error) {
 	si := &StageInfo{}
 	err := q.QueryRow(ctx,
-		`SELECT st.id, st.pipeline_id, p.account_id, st.prompt_action_datetime, st.prompt_disqualification
+		`SELECT st.id, st.pipeline_id, p.account_id, st.stage_type
 		 FROM pipeline_stages st JOIN pipelines p ON p.id = st.pipeline_id
-		 WHERE st.id = $1`, stageID).Scan(&si.ID, &si.PipelineID, &si.AccountID, &si.PromptActionDatetime, &si.PromptDisqualification)
+		 WHERE st.id = $1`, stageID).Scan(&si.ID, &si.PipelineID, &si.AccountID, &si.StageType)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("stage not found")
 	}
@@ -750,4 +749,37 @@ func (r *Repository) ReasonBelongsToAccount(ctx context.Context, q database.Quer
 	var ok bool
 	err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM disqualification_reasons WHERE id=$1 AND account_id=$2)`, reasonID, accountID).Scan(&ok)
 	return ok, err
+}
+
+func (r *Repository) StageName(ctx context.Context, q database.Querier, stageID *int64) string {
+	if stageID == nil {
+		return ""
+	}
+	var name string
+	if err := q.QueryRow(ctx, `SELECT name FROM pipeline_stages WHERE id=$1`, *stageID).Scan(&name); err != nil {
+		return ""
+	}
+	return name
+}
+
+func (r *Repository) CustomFieldNames(ctx context.Context, accountID int64, ids []int64) (map[string]string, error) {
+	out := map[string]string{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := r.pool.Query(ctx,
+		`SELECT id, name FROM custom_fields WHERE account_id=$1 AND id = ANY($2)`, accountID, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, err
+		}
+		out[fmt.Sprintf("%d", id)] = name
+	}
+	return out, rows.Err()
 }

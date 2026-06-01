@@ -8,7 +8,7 @@ import { Card, Badge, Spinner, EmptyState } from "@/components/ui/misc";
 import { Plus, Copy } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 
 export function ApiKeysPage() {
   const { data: keys, isLoading } = useApiKeys();
@@ -53,7 +53,7 @@ export function ApiKeysPage() {
                   setSecret(res.secret);
                   setName("");
                 },
-                onError: (e) => toast.error(apiError(e).message),
+                onError: (e) => toast.error(errorMessage(e)),
               })
             }
           >

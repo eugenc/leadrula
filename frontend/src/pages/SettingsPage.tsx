@@ -1,7 +1,9 @@
 import { Link } from "react-router-dom";
+import { useMe } from "@/features/leads/hooks";
 import { useAuthStore } from "@/store/authStore";
 import { PageBody } from "@/components/layout/PageBody";
 import { Card } from "@/components/ui/misc";
+import { Button } from "@/components/ui/button";
 import { toast } from "@/store/toastStore";
 import { AvatarUpload, uploadError } from "@/features/admin/AvatarUpload";
 import { useUploadMyAvatar } from "@/features/admin/hooks";
@@ -16,10 +18,38 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
+function HandlerIDRow({ handlerId, accountType }: { handlerId: string; accountType: "buyer" | "publisher" }) {
+  const label = accountType === "buyer" ? "Buyer ID" : "Publisher ID";
+  return (
+    <div className="flex items-center justify-between border-b border-gray-100 py-2 last:border-0">
+      <div>
+        <span className="text-sm text-gray-400">{label}</span>
+        <p className="text-xs text-gray-400">Share this so others can link your account</p>
+      </div>
+      <div className="flex items-center gap-2">
+        <code className="text-sm font-semibold text-gray-800">{handlerId}</code>
+        <Button
+          variant="secondary"
+          className="h-7 px-2 text-xs"
+          onClick={() => {
+            void navigator.clipboard.writeText(handlerId).then(() => toast.success(`Copied ${label}`));
+          }}
+        >
+          Copy
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsPage() {
   const user = useAuthStore((s) => s.user);
+  const { data: me } = useMe();
   const upload = useUploadMyAvatar();
-  const isBuyerAdmin = user?.account_type === "buyer" && user.role === "admin";
+  const isAdmin = user?.role === "admin";
+  const isBuyerAdmin = user?.account_type === "buyer" && isAdmin;
+  const handlerId = me?.account.handler_id;
+  const accountType = me?.account.type;
 
   return (
     <>
@@ -45,6 +75,9 @@ export function SettingsPage() {
             label="Account type"
             value={user?.account_type ? formatRole(user.account_type) : "—"}
           />
+          {isAdmin && handlerId && accountType && (
+            <HandlerIDRow handlerId={handlerId} accountType={accountType} />
+          )}
         </Card>
 
         {isBuyerAdmin && (
@@ -54,7 +87,7 @@ export function SettingsPage() {
               Manage publisher access to this buyer account, approve requests, and view audit history.
             </p>
             <Link
-              to="/b/settings/collaboration"
+              to="/b/collaboration"
               className="text-sm font-medium text-jade-600 hover:underline"
             >
               Open collaboration settings →

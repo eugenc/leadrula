@@ -5,12 +5,17 @@ package intake
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sort"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/echayko/leadrula/backend/internal/accounts"
 	"github.com/echayko/leadrula/backend/internal/billing"
 	"github.com/echayko/leadrula/backend/internal/contracts"
+	"github.com/echayko/leadrula/backend/internal/database"
 	"github.com/echayko/leadrula/backend/internal/leads"
 	"github.com/echayko/leadrula/backend/internal/notifications"
 	"github.com/echayko/leadrula/backend/internal/routing"
@@ -210,30 +215,301 @@ type QueueItem struct {
 	Source       *string         `json:"source"`
 	RawPayload   json.RawMessage `json:"raw_payload"`
 	Status       string          `json:"status"`
+	UnmappedKeys []string        `json:"unmapped_keys"`
 	CreatedAt    time.Time       `json:"created_at"`
 }
 
-func (s *Service) ListQueue(ctx context.Context, status string) ([]QueueItem, error) {
+var skipPayloadKeys = map[string]bool{
+	"source":        true,
+	"campaign_name": true,
+	"custom":        true,
+}
+
+func computeUnmappedKeys(raw map[string]any, maps []routing.SourceFieldMapEntry) []string {
+	flat := flattenPayload(raw)
+	mapped := map[string]bool{}
+	for _, m := range maps {
+		mapped[m.SourceKey] = true
+	}
+	var out []string
+	for k := range flat {
+		if skipPayloadKeys[k] || mapped[k] {
+			continue
+		}
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (s *Service) sourceFieldMaps(ctx context.Context, publisherID int64, slug string) ([]routing.SourceFieldMapEntry, error) {
+	if slug == "" {
+		return nil, nil
+	}
+	src, err := routing.MatchSourceBySlug(ctx, s.pool, publisherID, slug)
+	if err != nil || src == nil {
+		return nil, err
+	}
+	return routing.SourceFieldMap(ctx, s.pool, src.ID)
+}
+
+func (s *Service) enrichQueueItem(ctx context.Context, publisherID int64, it *QueueItem) error {
+	var raw map[string]any
+	if len(it.RawPayload) > 0 {
+		if err := json.Unmarshal(it.RawPayload, &raw); err != nil {
+			return err
+		}
+	}
+	slug := ""
+	if it.Source != nil {
+		slug = *it.Source
+	}
+	maps, err := s.sourceFieldMaps(ctx, publisherID, slug)
+	if err != nil {
+		return err
+	}
+	it.UnmappedKeys = computeUnmappedKeys(raw, maps)
+	if it.UnmappedKeys == nil {
+		it.UnmappedKeys = []string{}
+	}
+	return nil
+}
+
+type QueueListResponse struct {
+	Items []QueueItem `json:"items"`
+	Total int64       `json:"total"`
+	Page  int         `json:"page"`
+	Limit int         `json:"limit"`
+}
+
+type ListQueueParams struct {
+	Status string
+	Page   int
+	Limit  int
+	Search string
+}
+
+func (s *Service) ListQueue(ctx context.Context, publisherID int64, p ListQueueParams) (*QueueListResponse, error) {
+	status := p.Status
 	if status == "" {
 		status = "pending_review"
 	}
-	rows, err := s.pool.Query(ctx,
-		`SELECT q.id, q.lead_id, l.first_name, l.last_name, l.phone, q.source, q.raw_payload, q.status, q.created_at
-		 FROM lead_intake_queue q JOIN leads l ON l.id = q.lead_id
-		 WHERE q.status = $1::intake_status ORDER BY q.created_at DESC`, status)
+
+	where := "1=1"
+	args := []any{}
+	argN := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+
+	if status != "all" {
+		where += " AND q.status = " + argN(status) + "::intake_status"
+	}
+	if p.Search != "" {
+		like := "%" + p.Search + "%"
+		n := argN(like)
+		where += fmt.Sprintf(" AND (l.first_name ILIKE %s OR l.last_name ILIKE %s OR l.phone ILIKE %s OR q.source ILIKE %s)", n, n, n, n)
+	}
+
+	from := ` FROM lead_intake_queue q JOIN leads l ON l.id = q.lead_id WHERE ` + where
+
+	var total int64
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*)`+from, args...).Scan(&total); err != nil {
+		return nil, err
+	}
+
+	page := p.Page
+	limit := p.Limit
+	paginate := page > 0 && limit > 0
+	if paginate {
+		if page < 1 {
+			page = 1
+		}
+	} else {
+		page = 1
+		if total > 0 {
+			limit = int(total)
+		}
+	}
+
+	selectQ := `SELECT q.id, q.lead_id, l.first_name, l.last_name, l.phone, q.source, q.raw_payload, q.status, q.created_at` + from + ` ORDER BY q.created_at DESC`
+	if paginate {
+		offset := (page - 1) * limit
+		selectQ += fmt.Sprintf(" LIMIT %s OFFSET %s", argN(limit), argN(offset))
+	}
+
+	rows, err := s.pool.Query(ctx, selectQ, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []QueueItem
+
+	var items []QueueItem
 	for rows.Next() {
 		var it QueueItem
 		if err := rows.Scan(&it.ID, &it.LeadID, &it.FirstName, &it.LastName, &it.Phone, &it.Source, &it.RawPayload, &it.Status, &it.CreatedAt); err != nil {
 			return nil, err
 		}
-		out = append(out, it)
+		if err := s.enrichQueueItem(ctx, publisherID, &it); err != nil {
+			return nil, err
+		}
+		items = append(items, it)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if items == nil {
+		items = []QueueItem{}
+	}
+
+	return &QueueListResponse{
+		Items: items,
+		Total: total,
+		Page:  page,
+		Limit: limit,
+	}, nil
+}
+
+const buyerRoutingFrom = `
+FROM (
+  SELECT DISTINCT ON (t.lead_id) t.lead_id, t.created_at AS routed_at
+  FROM transactions t
+  WHERE t.buyer_id = $1
+    AND t.contract_id IS NOT NULL
+    AND t.type = 'debit'
+    AND t.lead_id IS NOT NULL
+    AND (
+      t.description LIKE 'lead routed:%'
+      OR t.description = 'lead routed from intake queue'
+      OR t.description = 'lead re-distributed'
+    )
+  ORDER BY t.lead_id, t.created_at DESC
+) r
+JOIN leads l ON l.id = r.lead_id
+LEFT JOIN lead_intake_queue q ON q.lead_id = l.id
+WHERE 1=1`
+
+func buyerLogStatus(buyerID int64, leadStatus string, ownerID int64) string {
+	if leadStatus == "returned" || ownerID != buyerID {
+		return "returned"
+	}
+	switch leadStatus {
+	case "review":
+		return "pending_review"
+	case "distributed":
+		return "routed"
+	default:
+		return leadStatus
+	}
+}
+
+func (s *Service) ListRoutingLogForBuyer(ctx context.Context, buyerID int64, p ListQueueParams) (*QueueListResponse, error) {
+	status := p.Status
+	if status == "" {
+		status = "all"
+	}
+
+	args := []any{buyerID}
+	argN := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+
+	where := ""
+	switch status {
+	case "pending_review":
+		where += fmt.Sprintf(" AND l.status = 'review' AND l.owner_account_id = %s", argN(buyerID))
+	case "routed":
+		where += fmt.Sprintf(" AND l.status = 'distributed' AND l.owner_account_id = %s", argN(buyerID))
+	case "rejected":
+		where += " AND 1=0"
+	}
+	if p.Search != "" {
+		like := "%" + p.Search + "%"
+		n := argN(like)
+		where += fmt.Sprintf(" AND (l.first_name ILIKE %s OR l.last_name ILIKE %s OR l.phone ILIKE %s OR COALESCE(q.source, l.source) ILIKE %s)", n, n, n, n)
+	}
+
+	from := buyerRoutingFrom + where
+
+	var total int64
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*)`+from, args...).Scan(&total); err != nil {
+		return nil, err
+	}
+
+	page := p.Page
+	limit := p.Limit
+	paginate := page > 0 && limit > 0
+	if paginate {
+		if page < 1 {
+			page = 1
+		}
+	} else {
+		page = 1
+		if total > 0 {
+			limit = int(total)
+		}
+	}
+
+	selectQ := `SELECT COALESCE(q.id, l.id), l.id, l.first_name, l.last_name, l.phone,
+		COALESCE(q.source, l.source), COALESCE(q.raw_payload, l.raw_payload),
+		l.status, l.owner_account_id, l.publisher_id, r.routed_at` + from + ` ORDER BY r.routed_at DESC`
+	if paginate {
+		offset := (page - 1) * limit
+		selectQ += fmt.Sprintf(" LIMIT %s OFFSET %s", argN(limit), argN(offset))
+	}
+
+	rows, err := s.pool.Query(ctx, selectQ, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []QueueItem
+	for rows.Next() {
+		var it QueueItem
+		var leadStatus string
+		var ownerID, publisherID int64
+		if err := rows.Scan(&it.ID, &it.LeadID, &it.FirstName, &it.LastName, &it.Phone, &it.Source, &it.RawPayload, &leadStatus, &ownerID, &publisherID, &it.CreatedAt); err != nil {
+			return nil, err
+		}
+		it.Status = buyerLogStatus(buyerID, leadStatus, ownerID)
+		if err := s.enrichQueueItem(ctx, publisherID, &it); err != nil {
+			return nil, err
+		}
+		items = append(items, it)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if items == nil {
+		items = []QueueItem{}
+	}
+
+	return &QueueListResponse{
+		Items: items,
+		Total: total,
+		Page:  page,
+		Limit: limit,
+	}, nil
+}
+
+func (s *Service) scanQueueItem(ctx context.Context, q database.Querier, publisherID, queueID int64) (*QueueItem, error) {
+	var it QueueItem
+	err := q.QueryRow(ctx,
+		`SELECT q.id, q.lead_id, l.first_name, l.last_name, l.phone, q.source, q.raw_payload, q.status, q.created_at
+		 FROM lead_intake_queue q JOIN leads l ON l.id = q.lead_id WHERE q.id=$1`, queueID).
+		Scan(&it.ID, &it.LeadID, &it.FirstName, &it.LastName, &it.Phone, &it.Source, &it.RawPayload, &it.Status, &it.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, httpx.NotFound("queue item not found")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := s.enrichQueueItem(ctx, publisherID, &it); err != nil {
+		return nil, err
+	}
+	return &it, nil
 }
 
 // RouteFromQueue manually routes a queued lead to a buyer (DB spec §4.1 manual path).
@@ -251,6 +527,40 @@ func (s *Service) RouteFromQueue(ctx context.Context, queueID, pipelineID, stage
 	}
 	if status != "pending_review" {
 		return httpx.BusinessRule("queue item already handled")
+	}
+
+	var publisherID int64
+	var sourceSlug *string
+	if err := tx.QueryRow(ctx, `SELECT publisher_id, source FROM leads WHERE id=$1`, leadID).Scan(&publisherID, &sourceSlug); err != nil {
+		return err
+	}
+	if sourceSlug != nil && *sourceSlug != "" {
+		src, err := routing.MatchSourceBySlug(ctx, tx, publisherID, *sourceSlug)
+		if err != nil {
+			return err
+		}
+		if src != nil {
+			rt, err := routing.BuyerRouteForSourceAndBuyer(ctx, tx, publisherID, src.ID, buyerID)
+			if err != nil {
+				return err
+			}
+			if rt != nil {
+				lead, err := s.leads.GetByID(ctx, tx, leadID)
+				if err != nil {
+					return err
+				}
+				if err := leads.LoadCustomValues(ctx, tx, lead); err != nil {
+					return err
+				}
+				maps, err := routing.RouteFieldMap(ctx, tx, rt.ID)
+				if err != nil {
+					return err
+				}
+				if err := leads.ApplyRouteFieldMap(ctx, tx, s.leads, lead, maps); err != nil {
+					return err
+				}
+			}
+		}
 	}
 
 	target, err := contracts.FindByBuyer(ctx, tx, buyerID)
@@ -293,6 +603,94 @@ func (s *Service) RouteFromQueue(ctx context.Context, queueID, pipelineID, stage
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// MapField saves a source payload mapping (when source exists) and applies the value to the lead.
+func (s *Service) MapField(ctx context.Context, publisherID, queueID int64, sourceKey, targetType string, builtinField *string, customFieldID *int64) (*QueueItem, error) {
+	if sourceKey == "" {
+		return nil, httpx.Validation("source_key is required")
+	}
+	if targetType != "builtin" && targetType != "custom" {
+		return nil, httpx.Validation("target_type must be builtin or custom")
+	}
+	if targetType == "builtin" && (builtinField == nil || *builtinField == "") {
+		return nil, httpx.Validation("builtin_field is required for builtin target")
+	}
+	if targetType == "custom" && (customFieldID == nil || *customFieldID == 0) {
+		return nil, httpx.Validation("custom_field_id is required for custom target")
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var leadID int64
+	var sourceSlug *string
+	var rawPayload []byte
+	if err := tx.QueryRow(ctx,
+		`SELECT q.lead_id, q.source, q.raw_payload FROM lead_intake_queue q WHERE q.id=$1`, queueID).
+		Scan(&leadID, &sourceSlug, &rawPayload); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, httpx.NotFound("queue item not found")
+		}
+		return nil, err
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(rawPayload, &raw); err != nil {
+		return nil, err
+	}
+	flat := flattenPayload(raw)
+	v, ok := flat[sourceKey]
+	if !ok {
+		return nil, httpx.Validation("source_key not found in payload")
+	}
+
+	slug := ""
+	if sourceSlug != nil {
+		slug = *sourceSlug
+	}
+	if slug != "" {
+		src, err := routing.MatchSourceBySlug(ctx, tx, publisherID, slug)
+		if err != nil {
+			return nil, err
+		}
+		if src != nil {
+			var existing int64
+			err := tx.QueryRow(ctx,
+				`SELECT id FROM routing_source_field_map WHERE source_id=$1 AND source_key=$2`,
+				src.ID, sourceKey).Scan(&existing)
+			if errors.Is(err, pgx.ErrNoRows) {
+				_, err = tx.Exec(ctx,
+					`INSERT INTO routing_source_field_map(source_id, source_key, target_type, builtin_field, custom_field_id)
+					 VALUES ($1,$2,$3,$4,$5)`,
+					src.ID, sourceKey, targetType, builtinField, customFieldID)
+				if err != nil {
+					return nil, err
+				}
+			} else if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if targetType == "builtin" {
+		if err := s.leads.SetBuiltinField(ctx, tx, leadID, *builtinField, toText(v)); err != nil {
+			return nil, err
+		}
+	} else {
+		valJSON, _ := json.Marshal(v)
+		if err := s.leads.UpsertCustomValue(ctx, tx, leadID, *customFieldID, valJSON); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.scanQueueItem(ctx, s.pool, publisherID, queueID)
 }
 
 func (s *Service) Reject(ctx context.Context, queueID, reviewerID int64) error {

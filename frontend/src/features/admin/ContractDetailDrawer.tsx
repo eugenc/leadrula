@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { toast } from "@/store/toastStore";
-import { apiError } from "@/lib/api";
+import { errorMessage } from "@/lib/api";
 import { formatMoney } from "@/lib/utils";
 import {
   useUpdateContract,
@@ -82,7 +82,7 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
           toast.success("Contract saved");
           onClose();
         },
-        onError: (e) => toast.error(apiError(e).message),
+        onError: (e) => toast.error(errorMessage(e)),
       }
     );
   }
@@ -90,19 +90,19 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
   function addReturnRule(buyerStageId: number, returnStageId: number) {
     addRule.mutate(
       { contractId: contract.id, buyerStageId, returnStageId },
-      { onError: (e) => toast.error(apiError(e).message) }
+      { onError: (e) => toast.error(errorMessage(e)) }
     );
   }
 
   function updateReturnRule(ruleId: number, buyerStageId: number, returnStageId: number) {
     updateRule.mutate(
       { ruleId, buyerStageId, returnStageId },
-      { onError: (e) => toast.error(apiError(e).message) }
+      { onError: (e) => toast.error(errorMessage(e)) }
     );
   }
 
   function deleteReturnRule(ruleId: number) {
-    removeRule.mutate(ruleId, { onError: (e) => toast.error(apiError(e).message) });
+    removeRule.mutate(ruleId, { onError: (e) => toast.error(errorMessage(e)) });
   }
 
   return (
@@ -114,6 +114,24 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
       />
 
       <DrawerBody>
+        <div className="mb-4 flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">
+          <span className="text-sm text-gray-400">Contract ID</span>
+          <div className="flex items-center gap-2">
+            <code className="text-sm font-semibold text-gray-800">{contract.handler_id}</code>
+            <Button
+              variant="secondary"
+              className="h-7 px-2 text-xs"
+              onClick={() => {
+                void navigator.clipboard
+                  .writeText(contract.handler_id)
+                  .then(() => toast.success("Copied Contract ID"));
+              }}
+            >
+              Copy
+            </Button>
+          </div>
+        </div>
+
         <div className="flex flex-col gap-2.5">
           <div>
             <Label>Name</Label>
