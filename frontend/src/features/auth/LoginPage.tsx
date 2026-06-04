@@ -9,6 +9,8 @@ import { Input, Label } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/misc";
 import { Logo } from "@/components/layout/Logo";
 import type { Me } from "@/types";
+import { userFromMe } from "@/store/authStore";
+import { homePath } from "@/lib/homePath";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -30,16 +32,8 @@ export function LoginPage() {
       queryClient.clear();
       setTokens(access, refresh);
       const me = await get<Me>("/auth/me");
-      setAuth(access, refresh, {
-        id: me.user.id,
-        email: me.user.email,
-        full_name: me.user.full_name,
-        role: me.user.role,
-        account_type: me.account.type,
-        account_id: me.account.id,
-        avatar_url: me.user.avatar_url,
-      });
-      navigate(me.account.type === "publisher" ? "/p" : "/b");
+      setAuth(access, refresh, userFromMe(me));
+      navigate(homePath(me.account.type));
     } catch {
       setError("Invalid email or password");
       useAuthStore.getState().logout();
@@ -50,7 +44,7 @@ export function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50">
-      <div className="w-full max-w-sm rounded-lg border border-gray-100 bg-white p-8 shadow-sm">
+      <div className="w-full max-w-sm rounded-lg border border-gray-100 bg-surface-card p-8 shadow-sm">
         <div className="mb-6 flex items-center gap-2.5">
           <Logo className="h-10 w-auto" />
         </div>

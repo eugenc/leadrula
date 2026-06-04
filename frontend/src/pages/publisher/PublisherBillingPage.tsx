@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTransactions, useDisputes, useResolveDispute } from "@/features/admin/hooks";
+import { PublisherPayouts } from "@/features/billing/PublisherPayouts";
 import { PageBody } from "@/components/layout/PageBody";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -11,25 +12,27 @@ import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 
 export function PublisherBillingPage() {
-  const [tab, setTab] = useState<"disputes" | "transactions">("disputes");
+  const [tab, setTab] = useState<"disputes" | "transactions" | "payouts">("disputes");
   return (
     <>
       <PageBody>
         <div className="mb-4 flex border-b border-gray-100">
-          {(["disputes", "transactions"] as const).map((t) => (
+          {(["disputes", "transactions", "payouts"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
               className={cn(
                 "-mb-px border-b-2 px-4 py-2 text-base font-semibold capitalize transition-colors",
-                tab === t ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400"
+                tab === t ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400 hover:text-gray-600"
               )}
             >
               {t}
             </button>
           ))}
         </div>
-        {tab === "disputes" ? <Disputes /> : <Transactions />}
+        {tab === "disputes" && <Disputes />}
+        {tab === "transactions" && <Transactions />}
+        {tab === "payouts" && <PublisherPayouts />}
       </PageBody>
     </>
   );
@@ -55,8 +58,8 @@ function Disputes() {
         {(disputes ?? []).map((d) => (
           <TR key={d.id}>
             <TD className="font-medium text-gray-800">{d.buyer_name}</TD>
-            <TD>{d.reason}</TD>
-            <TD>{formatMoney(d.amount)}</TD>
+            <TD className="text-gray-600">{d.reason}</TD>
+            <TD className="font-medium text-danger-fg">{formatMoney(d.amount)}</TD>
             <TD>{format(new Date(d.created_at), "MMM d")}</TD>
             <TD>
               <div className="flex justify-end gap-2">
@@ -114,7 +117,9 @@ function Transactions() {
               <Badge variant={t.amount < 0 ? "overdue" : "distributed"}>{t.type}</Badge>
             </TD>
             <TD>{t.lead_name ?? "—"}</TD>
-            <TD className={t.amount < 0 ? "text-danger" : "text-jade-700"}>{formatMoney(t.amount)}</TD>
+            <TD className={t.amount < 0 ? "font-medium text-danger-fg" : "text-jade-700"}>
+              {formatMoney(t.amount)}
+            </TD>
             <TD>{formatMoney(t.balance_after)}</TD>
             <TD>{format(new Date(t.created_at), "MMM d, h:mma")}</TD>
           </TR>

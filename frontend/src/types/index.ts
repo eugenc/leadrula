@@ -1,4 +1,4 @@
-export type AccountType = "publisher" | "buyer";
+export type AccountType = "publisher" | "buyer" | "platform";
 export type Role = "admin" | "user" | "follower";
 
 export interface CurrentUser {
@@ -12,6 +12,9 @@ export interface CurrentUser {
   impersonating?: boolean;
   buyer_account_name?: string;
   impersonator?: { id: string; full_name?: string; account_id: string };
+  is_switched?: boolean;
+  switched_from?: string;
+  account_name?: string;
 }
 
 export interface Me {
@@ -30,6 +33,42 @@ export interface Me {
     type: AccountType;
     name: string;
     timezone: string;
+  };
+  impersonating?: boolean;
+  buyer_account_name?: string;
+  impersonator?: { id: string; account_id: string };
+  is_switched?: boolean;
+  switched_from?: string;
+  switchable_count?: number;
+}
+
+export type AccountOperationalStatus = "active" | "suspended";
+
+export interface PlatformAccount {
+  id: string;
+  handler_id: string;
+  type: string;
+  name: string;
+  timezone: string;
+  operational_status: AccountOperationalStatus;
+  created_at: string;
+}
+
+export interface SwitchableAccount {
+  id: string;
+  handler_id: string;
+  type: "publisher" | "buyer";
+  name: string;
+}
+
+export interface SwitchLoginResult {
+  access: string;
+  user: {
+    id: string;
+    account_id: string;
+    account_type: "publisher" | "buyer";
+    account_name?: string;
+    switched_from?: string;
   };
 }
 
@@ -173,13 +212,17 @@ export interface Contract {
   handler_id: string;
   buyer_id: number;
   buyer_name?: string;
+  publisher_name?: string;
   name: string;
+  description?: string;
+  lead_type?: string;
   source_pipeline_id: number;
   source_stage_id: number;
   buyer_pipeline_id: number;
   return_stage_id: number;
   rate_per_lead: number;
   status: string;
+  lead_count?: number;
 }
 
 export interface ReturnRule {
@@ -278,7 +321,7 @@ export interface Transaction {
   lead_id: number | null;
   lead_name?: string | null;
   contract_id: number | null;
-  type: "debit" | "credit" | "dispute_credit" | "manual_invoice";
+  type: "debit" | "credit" | "dispute_credit" | "manual_invoice" | "topup";
   amount: number;
   balance_after: number;
   description: string;
@@ -316,6 +359,7 @@ export interface BuyerDetail {
   type: string;
   admin_name: string;
   admin_email: string;
+  admin_status?: string;
 }
 
 export interface PublisherSummary {
@@ -435,5 +479,49 @@ export interface Partnership {
   requested_by: string;
   partner_name: string;
   partner_handler_id: string;
+  created_at: string;
+}
+
+export interface IntegrationProvider {
+  slug: string;
+  name: string;
+  description: string;
+  auth_type: "none" | "api_key" | "oauth2";
+  direction: string;
+  config_schema: Record<string, { type: string; label: string; required?: boolean; enum?: string[] }>;
+}
+
+export interface IntegrationConnection {
+  id: number;
+  public_id: string;
+  provider_slug: string;
+  provider_name: string;
+  name: string;
+  config: Record<string, unknown>;
+  status: string;
+  last_error?: string | null;
+  last_used_at?: string | null;
+  created_at: string;
+}
+
+export interface RouteIntegration {
+  id: number;
+  route_id: number;
+  connection_id: number;
+  connection_name: string;
+  provider_slug: string;
+  delivery_config: Record<string, unknown>;
+  is_active: boolean;
+}
+
+export interface IntegrationDeliveryItem {
+  id: number;
+  lead_id: number;
+  provider: string;
+  status: string;
+  attempts: number;
+  external_id?: string | null;
+  last_error?: string | null;
+  delivered_at?: string | null;
   created_at: string;
 }

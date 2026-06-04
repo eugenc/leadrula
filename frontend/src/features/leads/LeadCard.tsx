@@ -95,7 +95,7 @@ export function LeadCard({
     <div
       onClick={onClick}
       className={cn(
-        "cursor-pointer rounded-lg border border-gray-100 bg-white p-3 shadow-xs transition-[box-shadow,transform] hover:-translate-y-px hover:shadow-md",
+        "cursor-pointer rounded-lg border border-gray-100 bg-surface-card p-3 shadow-xs transition-[box-shadow,transform] hover:-translate-y-px hover:shadow-md",
         dragging && "rotate-[2deg] scale-[1.02] opacity-[0.92] shadow-xl"
       )}
     >
@@ -122,7 +122,7 @@ export function LeadCard({
               {lead.assignee_name && (
                 <span
                   role="tooltip"
-                  className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-gray-800 px-2 py-1 text-xs font-medium text-white opacity-0 shadow-sm transition-opacity duration-150 group-hover/avatar:opacity-100"
+                  className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-[#101828] px-2 py-1 text-xs font-medium text-[#F9FAFB] opacity-0 shadow-sm transition-opacity duration-150 group-hover/avatar:opacity-100"
                 >
                   {lead.assignee_name}
                 </span>

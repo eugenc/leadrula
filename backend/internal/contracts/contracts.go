@@ -20,13 +20,17 @@ type Contract struct {
 	PublisherID      int64     `json:"-"`
 	BuyerID          int64     `json:"buyer_id"`
 	BuyerName        string    `json:"buyer_name,omitempty"`
+	PublisherName    string    `json:"publisher_name,omitempty"`
 	Name             string    `json:"name"`
+	Description      string    `json:"description,omitempty"`
+	LeadType         string    `json:"lead_type,omitempty"`
 	SourcePipelineID int64     `json:"source_pipeline_id"`
 	SourceStageID    int64     `json:"source_stage_id"`
 	BuyerPipelineID  int64     `json:"buyer_pipeline_id"`
 	ReturnStageID    int64     `json:"return_stage_id"`
 	RatePerLead      float64   `json:"rate_per_lead"`
 	Status           string    `json:"status"`
+	LeadCount        int       `json:"lead_count"`
 	CreatedAt        time.Time `json:"created_at"`
 }
 
@@ -65,13 +69,20 @@ func NewService(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
 
 func (s *Service) Pool() *pgxpool.Pool { return s.pool }
 
-const contractCols = `id, public_id, handler_id, publisher_id, buyer_id, name,
+const contractCols = `id, public_id, handler_id, publisher_id, buyer_id, name, description, lead_type,
 	source_pipeline_id, source_stage_id, buyer_pipeline_id, return_stage_id,
 	rate_per_lead::float8, status, created_at`
+
+const contractLeadCountSubquery = `(SELECT COUNT(DISTINCT t.lead_id) FROM transactions t
+ WHERE t.contract_id = c.id AND t.type = 'debit' AND t.lead_id IS NOT NULL
+   AND (t.description LIKE 'lead routed:%'
+        OR t.description = 'lead routed from intake queue'
+        OR t.description = 'lead re-distributed'))`
 
 func scanContract(row pgx.Row) (*Contract, error) {
 	c := &Contract{}
 	err := row.Scan(&c.ID, &c.PublicID, &c.HandlerID, &c.PublisherID, &c.BuyerID, &c.Name,
+		&c.Description, &c.LeadType,
 		&c.SourcePipelineID, &c.SourceStageID, &c.BuyerPipelineID, &c.ReturnStageID,
 		&c.RatePerLead, &c.Status, &c.CreatedAt)
 	if err != nil {
@@ -86,8 +97,9 @@ func scanContract(row pgx.Row) (*Contract, error) {
 func (s *Service) List(ctx context.Context, publisherID int64) ([]Contract, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT c.id, c.public_id, c.handler_id, c.publisher_id, c.buyer_id, c.name,
+		        c.description, c.lead_type,
 		        c.source_pipeline_id, c.source_stage_id, c.buyer_pipeline_id, c.return_stage_id,
-		        c.rate_per_lead::float8, c.status, c.created_at, a.name
+		        c.rate_per_lead::float8, c.status, c.created_at, a.name, `+contractLeadCountSubquery+`
 		 FROM contracts c JOIN accounts a ON a.id = c.buyer_id
 		 WHERE c.publisher_id = $1 AND c.deleted_at IS NULL
 		 ORDER BY c.created_at DESC`, publisherID)
@@ -99,8 +111,9 @@ func (s *Service) List(ctx context.Context, publisherID int64) ([]Contract, erro
 	for rows.Next() {
 		var c Contract
 		if err := rows.Scan(&c.ID, &c.PublicID, &c.HandlerID, &c.PublisherID, &c.BuyerID, &c.Name,
+			&c.Description, &c.LeadType,
 			&c.SourcePipelineID, &c.SourceStageID, &c.BuyerPipelineID, &c.ReturnStageID,
-			&c.RatePerLead, &c.Status, &c.CreatedAt, &c.BuyerName); err != nil {
+			&c.RatePerLead, &c.Status, &c.CreatedAt, &c.BuyerName, &c.LeadCount); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -114,15 +127,44 @@ func (s *Service) Get(ctx context.Context, publisherID, id int64) (*Contract, er
 		id, publisherID))
 }
 
-// GetForBuyer returns the buyer's single contract.
-func (s *Service) GetForBuyer(ctx context.Context, buyerID int64) (*Contract, error) {
+func (s *Service) ListForBuyer(ctx context.Context, buyerID int64) ([]Contract, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT c.id, c.public_id, c.handler_id, c.publisher_id, c.buyer_id, c.name,
+		        c.description, c.lead_type,
+		        c.source_pipeline_id, c.source_stage_id, c.buyer_pipeline_id, c.return_stage_id,
+		        c.rate_per_lead::float8, c.status, c.created_at, a.name, `+contractLeadCountSubquery+`
+		 FROM contracts c JOIN accounts a ON a.id = c.publisher_id
+		 WHERE c.buyer_id = $1 AND c.deleted_at IS NULL
+		 ORDER BY c.created_at DESC`, buyerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Contract
+	for rows.Next() {
+		var c Contract
+		if err := rows.Scan(&c.ID, &c.PublicID, &c.HandlerID, &c.PublisherID, &c.BuyerID, &c.Name,
+			&c.Description, &c.LeadType,
+			&c.SourcePipelineID, &c.SourceStageID, &c.BuyerPipelineID, &c.ReturnStageID,
+			&c.RatePerLead, &c.Status, &c.CreatedAt, &c.PublisherName, &c.LeadCount); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (s *Service) GetForBuyerContract(ctx context.Context, buyerID, contractID int64) (*Contract, error) {
 	return scanContract(s.pool.QueryRow(ctx,
-		`SELECT `+contractCols+` FROM contracts WHERE buyer_id = $1 AND deleted_at IS NULL`, buyerID))
+		`SELECT `+contractCols+` FROM contracts WHERE id = $1 AND buyer_id = $2 AND deleted_at IS NULL`,
+		contractID, buyerID))
 }
 
 type CreateParams struct {
 	BuyerID          int64
 	Name             string
+	Description      string
+	LeadType         string
 	SourcePipelineID int64
 	SourceStageID    int64
 	BuyerPipelineID  int64
@@ -156,11 +198,12 @@ func (s *Service) Create(ctx context.Context, publisherID int64, p CreateParams)
 	for range 10 {
 		hid := handlerid.Generate("C")
 		c, err = scanContract(s.pool.QueryRow(ctx,
-			`INSERT INTO contracts(publisher_id, buyer_id, name, source_pipeline_id, source_stage_id,
-			    buyer_pipeline_id, return_stage_id, rate_per_lead, handler_id)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+			`INSERT INTO contracts(publisher_id, buyer_id, name, description, lead_type,
+			    source_pipeline_id, source_stage_id, buyer_pipeline_id, return_stage_id, rate_per_lead, handler_id)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 			 RETURNING `+contractCols,
-			publisherID, p.BuyerID, p.Name, p.SourcePipelineID, p.SourceStageID,
+			publisherID, p.BuyerID, p.Name, p.Description, p.LeadType,
+			p.SourcePipelineID, p.SourceStageID,
 			p.BuyerPipelineID, p.ReturnStageID, p.RatePerLead, hid))
 		if err == nil {
 			return c, nil
@@ -189,15 +232,25 @@ func (s *Service) LookupBuyerIDByHandler(ctx context.Context, handlerID string) 
 	return id, nil
 }
 
-func (s *Service) Update(ctx context.Context, publisherID, id int64, name *string, rate *float64, status *string) (*Contract, error) {
+type UpdateParams struct {
+	Name        *string
+	RatePerLead *float64
+	Status      *string
+	Description *string
+	LeadType    *string
+}
+
+func (s *Service) Update(ctx context.Context, publisherID, id int64, p UpdateParams) (*Contract, error) {
 	return scanContract(s.pool.QueryRow(ctx,
 		`UPDATE contracts SET
 		   name = COALESCE($3, name),
 		   rate_per_lead = COALESCE($4, rate_per_lead),
-		   status = COALESCE($5, status)
+		   status = COALESCE($5, status),
+		   description = COALESCE($6, description),
+		   lead_type = COALESCE($7, lead_type)
 		 WHERE id = $1 AND publisher_id = $2 AND deleted_at IS NULL
 		 RETURNING `+contractCols,
-		id, publisherID, name, rate, status))
+		id, publisherID, p.Name, p.RatePerLead, p.Status, p.Description, p.LeadType))
 }
 
 func (s *Service) Delete(ctx context.Context, publisherID, id int64) error {
@@ -319,14 +372,19 @@ func (s *Service) DeleteReturnRule(ctx context.Context, ruleID int64) error {
 	return err
 }
 
-func (s *Service) PublisherReturnStages(ctx context.Context, buyerID int64) ([]PublisherStage, error) {
-	c, err := s.GetForBuyer(ctx, buyerID)
+func (s *Service) PublisherReturnStages(ctx context.Context, contractID int64) ([]PublisherStage, error) {
+	var sourcePipelineID int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT source_pipeline_id FROM contracts WHERE id = $1 AND deleted_at IS NULL`, contractID).Scan(&sourcePipelineID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, httpx.NotFound("contract not found")
+	}
 	if err != nil {
 		return nil, err
 	}
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, public_id, pipeline_id, name, position, color, stage_type
-		 FROM pipeline_stages WHERE pipeline_id = $1 ORDER BY position, id`, c.SourcePipelineID)
+		 FROM pipeline_stages WHERE pipeline_id = $1 ORDER BY position, id`, sourcePipelineID)
 	if err != nil {
 		return nil, err
 	}
@@ -353,15 +411,18 @@ func (s *Service) ReturnRuleContractID(ctx context.Context, ruleID int64) (int64
 	return contractID, err
 }
 
-// ContractIDForBuyer returns the buyer's contract id (for return-rule scoping).
-func (s *Service) ContractIDForBuyer(ctx context.Context, buyerID int64) (int64, error) {
-	var id int64
+// ReturnRuleBelongsToBuyer checks whether a return rule belongs to one of the buyer's contracts.
+func (s *Service) ReturnRuleBelongsToBuyer(ctx context.Context, buyerID, ruleID int64) (int64, error) {
+	var contractID int64
 	err := s.pool.QueryRow(ctx,
-		`SELECT id FROM contracts WHERE buyer_id = $1 AND deleted_at IS NULL`, buyerID).Scan(&id)
+		`SELECT rr.contract_id FROM contract_return_rules rr
+		 JOIN contracts c ON c.id = rr.contract_id
+		 WHERE rr.id = $1 AND c.buyer_id = $2 AND c.deleted_at IS NULL`,
+		ruleID, buyerID).Scan(&contractID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, httpx.NotFound("no contract for buyer")
+		return 0, httpx.NotFound("return rule not found")
 	}
-	return id, err
+	return contractID, err
 }
 
 // ── Helpers used inside intake / leads transactions (accept Querier) ──

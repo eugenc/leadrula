@@ -49,6 +49,12 @@ api.interceptors.response.use(
         toast.error("Collaboration access revoked");
         return Promise.reject(err);
       }
+      const sw = useAuthStore.getState().switchSession;
+      if (sw) {
+        useAuthStore.getState().endSwitch();
+        toast.error("Switched session expired");
+        return Promise.reject(err);
+      }
       if (!refreshing) refreshing = tryRefresh();
       const newToken = await refreshing;
       refreshing = null;
@@ -87,6 +93,11 @@ export function apiError(err: unknown): ApiError {
   return new ApiError(0, "error", "unexpected error");
 }
 
+export function isInviteEmailError(err: unknown): boolean {
+  const e = apiError(err);
+  return e.code === "service_unavailable" && e.message.toLowerCase().includes("invite email");
+}
+
 export function errorMessage(err: unknown): string {
   const e = apiError(err);
 
@@ -108,6 +119,8 @@ export function errorMessage(err: unknown): string {
       return "Insufficient balance.";
     case "business_rule":
       return "This action isn't allowed.";
+    case "service_unavailable":
+      return e.message.charAt(0).toUpperCase() + e.message.slice(1);
     case "internal":
     default:
       return "Something went wrong. Please try again.";
@@ -116,7 +129,9 @@ export function errorMessage(err: unknown): string {
 
 export function ns(): string {
   const user = useAuthStore.getState().user;
-  return user?.account_type === "publisher" ? "/publisher" : "/buyer";
+  if (user?.account_type === "publisher") return "/publisher";
+  if (user?.account_type === "platform") return "/platform";
+  return "/buyer";
 }
 
 export async function get<T>(path: string): Promise<T> {

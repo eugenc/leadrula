@@ -9,6 +9,8 @@ import { queryClient } from "@/lib/queryClient";
 import { cn, formatRole } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import type { NotificationItem } from "@/types";
+import { AccountSwitcher } from "./AccountSwitcher";
+import { ThemeToggle } from "./ThemeToggle";
 
 const labels: Record<string, string> = {
   new_lead: "New lead received",
@@ -72,16 +74,18 @@ export function Topbar({ title }: { title: string }) {
   const unread = (notifs ?? []).filter((n) => !n.read_at).length;
 
   return (
-    <header className="sticky top-0 z-30 flex h-13 shrink-0 items-center justify-between border-b border-gray-100 bg-white px-6">
+    <header className="sticky top-0 z-30 flex h-13 shrink-0 items-center justify-between border-b border-gray-100 bg-surface-card px-6">
       <h1 className="text-xl font-semibold text-gray-800">{title}</h1>
       <div className="flex items-center gap-4">
+        <AccountSwitcher />
+        <ThemeToggle />
         <Dropdown
           open={open}
           onClose={() => setOpen(false)}
           trigger={
             <button
               onClick={() => setOpen((o) => !o)}
-              className="relative flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-50 hover:text-gray-800"
+              className="relative flex h-9 w-9 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-800"
             >
               <Bell className="h-5 w-5" />
               {unread > 0 && (

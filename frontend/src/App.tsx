@@ -41,11 +41,19 @@ import { CollaborationActivityTab } from "@/pages/buyer/CollaborationActivityTab
 import { PublishersPage } from "@/pages/buyer/PublishersPage";
 import { RoutesPage } from "@/pages/buyer/RoutesPage";
 import { LogsPage } from "@/pages/buyer/LogsPage";
+import { PlatformShell } from "@/components/layout/PlatformShell";
+import { PlatformHomePage } from "@/pages/platform/PlatformHomePage";
+import { PlatformPublishersPage } from "@/pages/platform/PlatformPublishersPage";
+import { PlatformBuyersPage } from "@/pages/platform/PlatformBuyersPage";
+import { IntegrationsLayout } from "@/pages/IntegrationsLayout";
+import { IntegrationsConnectionsTab } from "@/pages/IntegrationsConnectionsTab";
+import { IntegrationsDeliveriesTab } from "@/pages/IntegrationsDeliveriesTab";
+import { homePath } from "@/lib/homePath";
 
 function RootRedirect() {
   const user = useAuthStore((s) => s.user);
   if (!user) return <Navigate to="/login" replace />;
-  return <Navigate to={user.account_type === "publisher" ? "/p" : "/b"} replace />;
+  return <Navigate to={homePath(user.account_type)} replace />;
 }
 
 export default function App() {
@@ -60,6 +68,17 @@ export default function App() {
           <Route path="/" element={<RootRedirect />} />
 
           <Route element={<RequireAuth />}>
+            {/* Platform operator */}
+            <Route element={<RequireAccountType type="platform" />}>
+              <Route path="/platform" element={<PlatformShell />}>
+                <Route index element={<PlatformHomePage />} />
+                <Route path="publishers" element={<PlatformPublishersPage />} />
+                <Route path="buyers" element={<PlatformBuyersPage />} />
+                <Route path="users" element={<UsersPage />} />
+                <Route path="settings" element={<SettingsPage />} />
+              </Route>
+            </Route>
+
             {/* Publisher */}
             <Route element={<RequireAccountType type="publisher" />}>
               <Route path="/p" element={<AppShell />}>
@@ -85,6 +104,10 @@ export default function App() {
                 <Route path="billing" element={<PublisherBillingPage />} />
                 <Route path="users" element={<UsersPage />} />
                 <Route path="api" element={<ApiKeysPage />} />
+                <Route path="integrations" element={<IntegrationsLayout />}>
+                  <Route index element={<IntegrationsConnectionsTab />} />
+                  <Route path="deliveries" element={<IntegrationsDeliveriesTab />} />
+                </Route>
                 <Route path="settings" element={<SettingsPage />} />
               </Route>
             </Route>
@@ -110,6 +133,10 @@ export default function App() {
                 <Route path="billing" element={<BuyerBillingPage />} />
                 <Route path="users" element={<UsersPage />} />
                 <Route path="api" element={<ApiKeysPage />} />
+                <Route path="integrations" element={<IntegrationsLayout />}>
+                  <Route index element={<IntegrationsConnectionsTab />} />
+                  <Route path="deliveries" element={<IntegrationsDeliveriesTab />} />
+                </Route>
                 <Route path="settings" element={<SettingsPage />} />
                 <Route path="settings/collaboration" element={<Navigate to="/b/collaboration" replace />} />
               </Route>

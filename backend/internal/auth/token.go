@@ -16,6 +16,7 @@ type Claims struct {
 	Impersonating    bool   `json:"imp,omitempty"`
 	ImpersonatorAcct string `json:"imp_acct,omitempty"`
 	CollabVersion    int64  `json:"collab_ver,omitempty"`
+	SwitchedFrom     string `json:"sfr,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -48,9 +49,10 @@ type Identity struct {
 	AccountPublicID string
 	AccountType     string
 	Role            string
-	Impersonating   bool
+	Impersonating    bool
 	ImpersonatorAcct string
-	CollabVersion   int64
+	CollabVersion    int64
+	SwitchedFrom     string
 }
 
 func (tm *TokenManager) IssueAccess(id Identity) (string, error) {
@@ -63,6 +65,7 @@ func (tm *TokenManager) IssueAccess(id Identity) (string, error) {
 		Impersonating:    id.Impersonating,
 		ImpersonatorAcct: id.ImpersonatorAcct,
 		CollabVersion:    id.CollabVersion,
+		SwitchedFrom:     id.SwitchedFrom,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(tm.accessTTL)),

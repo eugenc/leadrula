@@ -7,7 +7,7 @@ import {
 } from "react";
 
 const base =
-  "w-full rounded-md border border-gray-200 bg-white text-md text-gray-800 outline-none transition-[border-color,box-shadow] placeholder:text-gray-300 hover:border-gray-300 focus:border-jade-500 focus:ring-[3px] focus:ring-jade-500/12 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400";
+  "w-full rounded-md border border-gray-200 bg-surface-card text-md text-gray-800 outline-none transition-[border-color,box-shadow] placeholder:text-gray-300 hover:border-gray-300 focus:border-jade-500 focus:ring-[3px] focus:ring-jade-500/12 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400";
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
   ({ className, ...props }, ref) => (

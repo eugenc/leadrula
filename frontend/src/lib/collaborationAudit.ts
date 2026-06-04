@@ -113,6 +113,7 @@ function actionFromPath(method: string, segments: string[]): string | null {
   }
 
   if (joined === "billing/balance/topup") return "Topped up balance";
+  if (joined === "billing/balance/topup-intent") return "Started balance top-up";
   if (joined === "billing/disputes") return method === "POST" ? "Opened dispute" : null;
 
   if (joined === "collaboration/invite") return "Sent invitation";

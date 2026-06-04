@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Sheet, DrawerHeader, DrawerBody, DrawerFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
@@ -49,11 +49,15 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
   const removeRule = useDeleteReturnRule(false);
 
   const [name, setName] = useState(contract.name);
+  const [leadType, setLeadType] = useState(contract.lead_type ?? "");
+  const [description, setDescription] = useState(contract.description ?? "");
   const [rate, setRate] = useState(contract.rate_per_lead);
   const [status, setStatus] = useState(contract.status);
 
   useEffect(() => {
     setName(contract.name);
+    setLeadType(contract.lead_type ?? "");
+    setDescription(contract.description ?? "");
     setRate(contract.rate_per_lead);
     setStatus(contract.status);
   }, [contract]);
@@ -64,13 +68,19 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
   const buyerPipeline = (buyerPipelines ?? []).find((p) => p.id === contract.buyer_pipeline_id);
 
   const unchanged =
-    name.trim() === contract.name && rate === contract.rate_per_lead && status === contract.status;
+    name.trim() === contract.name &&
+    leadType === (contract.lead_type ?? "") &&
+    description === (contract.description ?? "") &&
+    rate === contract.rate_per_lead &&
+    status === contract.status;
   const invalid = !name.trim() || rate < 0;
 
   function save() {
     const body: Record<string, unknown> = {};
     const trimmed = name.trim();
     if (trimmed !== contract.name) body.name = trimmed;
+    if (leadType !== (contract.lead_type ?? "")) body.lead_type = leadType;
+    if (description !== (contract.description ?? "")) body.description = description;
     if (rate !== contract.rate_per_lead) body.rate_per_lead = rate;
     if (status !== contract.status) body.status = status;
     if (Object.keys(body).length === 0) return;
@@ -96,20 +106,23 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
 
   function updateReturnRule(ruleId: number, buyerStageId: number, returnStageId: number) {
     updateRule.mutate(
-      { ruleId, buyerStageId, returnStageId },
+      { contractId: contract.id, ruleId, buyerStageId, returnStageId },
       { onError: (e) => toast.error(errorMessage(e)) }
     );
   }
 
   function deleteReturnRule(ruleId: number) {
-    removeRule.mutate(ruleId, { onError: (e) => toast.error(errorMessage(e)) });
+    removeRule.mutate(
+      { contractId: contract.id, ruleId },
+      { onError: (e) => toast.error(errorMessage(e)) }
+    );
   }
 
   return (
     <div className="flex h-full flex-col">
       <DrawerHeader
         title={contract.name}
-        subtitle={`${contract.buyer_name ?? `Buyer #${contract.buyer_id}`} · ${formatMoney(contract.rate_per_lead)}/lead`}
+        subtitle={`${contract.buyer_name ?? `Buyer #${contract.buyer_id}`} · ${formatMoney(contract.rate_per_lead)}/lead · ${contract.lead_count ?? 0} distributed`}
         onClose={onClose}
       />
 
@@ -136,6 +149,22 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
           <div>
             <Label>Name</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div>
+            <Label>Lead Type</Label>
+            <Input
+              value={leadType}
+              onChange={(e) => setLeadType(e.target.value)}
+              placeholder="e.g. Residential Solar"
+            />
+          </div>
+          <div>
+            <Label>Description</Label>
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Optional notes about this contract"
+            />
           </div>
           <div>
             <Label>Rate per lead (USD)</Label>

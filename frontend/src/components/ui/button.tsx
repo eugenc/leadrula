@@ -11,12 +11,12 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variants: Record<Variant, string> = {
   primary:
-    "bg-jade-500 text-white hover:bg-jade-600 active:bg-jade-700 disabled:bg-jade-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-jade-400 focus-visible:outline-offset-2",
+    "bg-jade-500 text-white hover:bg-jade-600 active:bg-jade-700 disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-jade-400 focus-visible:outline-offset-2",
   secondary:
-    "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-300 active:bg-gray-100",
+    "border border-gray-200 bg-surface-card text-gray-700 hover:bg-gray-100 hover:border-gray-300 active:bg-gray-100",
   ghost: "bg-transparent text-gray-400 hover:bg-gray-100 hover:text-gray-700",
   danger: "bg-danger text-white hover:opacity-90",
-  outline: "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50",
+  outline: "border border-gray-200 bg-surface-card text-gray-700 hover:bg-gray-100",
 };
 
 const sizes: Record<Size, string> = {

@@ -6,15 +6,79 @@ import (
 	"github.com/echayko/leadrula/backend/internal/auth"
 )
 
-// ResolvePrincipal loads the real user and applies impersonation claims when present.
+// ResolvePrincipal loads the real user and applies switch or impersonation claims when present.
 func (s *Service) ResolvePrincipal(ctx context.Context, claims *auth.Claims) (*auth.Principal, error) {
 	real, err := s.loadUserPrincipal(ctx, claims.Subject)
 	if err != nil {
 		return nil, err
 	}
-	if !claims.Impersonating {
-		return real, nil
+
+	if claims.SwitchedFrom != "" {
+		return s.resolveSwitch(ctx, real, claims)
 	}
+	if claims.Impersonating {
+		return s.resolveImpersonation(ctx, real, claims)
+	}
+	return real, nil
+}
+
+func (s *Service) resolveSwitch(ctx context.Context, real *auth.Principal, claims *auth.Claims) (*auth.Principal, error) {
+	var originID int64
+	var originType string
+	err := s.repo.pool.QueryRow(ctx,
+		`SELECT id, type FROM accounts WHERE public_id = $1`, claims.SwitchedFrom).
+		Scan(&originID, &originType)
+	if err != nil {
+		return nil, ErrNotFound
+	}
+
+	targetID, targetType, err := s.repo.GetAccountByPublicID(ctx, claims.AccountID)
+	if err != nil {
+		return nil, ErrNotFound
+	}
+	var targetOpStatus string
+	if err := s.repo.pool.QueryRow(ctx,
+		`SELECT operational_status FROM accounts WHERE id = $1`, targetID).Scan(&targetOpStatus); err != nil {
+		return nil, ErrNotFound
+	}
+	if targetOpStatus == "suspended" {
+		return nil, ErrNotFound
+	}
+
+	switch originType {
+	case "platform":
+		if targetType != "publisher" && targetType != "buyer" {
+			return nil, ErrNotFound
+		}
+	case "publisher":
+		if targetType != "buyer" {
+			return nil, ErrNotFound
+		}
+		var ok bool
+		_ = s.repo.pool.QueryRow(ctx,
+			`SELECT EXISTS(
+				SELECT 1 FROM partnerships
+				WHERE publisher_id = $1 AND buyer_id = $2 AND status = 'active'
+			)`, originID, targetID).Scan(&ok)
+		if !ok {
+			return nil, ErrNotFound
+		}
+	default:
+		return nil, ErrNotFound
+	}
+
+	return &auth.Principal{
+		UserID:          real.UserID,
+		UserPublicID:    real.UserPublicID,
+		AccountID:       targetID,
+		AccountPublicID: claims.AccountID,
+		AccountType:     targetType,
+		Role:            "admin",
+		SwitchedFrom:    claims.SwitchedFrom,
+	}, nil
+}
+
+func (s *Service) resolveImpersonation(ctx context.Context, real *auth.Principal, claims *auth.Claims) (*auth.Principal, error) {
 	if real.AccountType != "publisher" || !real.IsAdmin() {
 		return nil, ErrNotFound
 	}
@@ -22,7 +86,7 @@ func (s *Service) ResolvePrincipal(ctx context.Context, claims *auth.Claims) (*a
 	if err != nil || buyerType != "buyer" {
 		return nil, ErrNotFound
 	}
-	pubID, err := s.repo.PublisherAccountID(ctx)
+	pubID, err := s.repo.PublisherAccountIDForUser(ctx, real.UserID)
 	if err != nil {
 		return nil, err
 	}

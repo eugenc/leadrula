@@ -292,11 +292,13 @@ export function useDeleteContract() {
   return useMutation({ mutationFn: (id: number) => del(`/publisher/contracts/${id}`), onSuccess: inv });
 }
 export function useReturnRules(contractId: number | null, buyer = false) {
-  const path = buyer ? `/buyer/contract/return-rules` : `/publisher/contracts/${contractId}/return-rules`;
+  const path = buyer
+    ? `/buyer/contracts/${contractId}/return-rules`
+    : `/publisher/contracts/${contractId}/return-rules`;
   return useQuery({
     queryKey: ["return-rules", contractId, buyer],
     queryFn: () => get<ReturnRule[]>(path),
-    enabled: buyer || !!contractId,
+    enabled: !!contractId,
   });
 }
 export function useAddReturnRule(buyer = false) {
@@ -307,14 +309,16 @@ export function useAddReturnRule(buyer = false) {
       buyerStageId,
       returnStageId,
     }: {
-      contractId: number | null;
+      contractId: number;
       buyerStageId: number;
       returnStageId: number;
     }) =>
-      post(buyer ? `/buyer/contract/return-rules` : `/publisher/contracts/${contractId}/return-rules`, {
-        buyer_stage_id: buyerStageId,
-        return_stage_id: returnStageId,
-      }),
+      post(
+        buyer
+          ? `/buyer/contracts/${contractId}/return-rules`
+          : `/publisher/contracts/${contractId}/return-rules`,
+        { buyer_stage_id: buyerStageId, return_stage_id: returnStageId }
+      ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["return-rules"] }),
   });
 }
@@ -322,16 +326,20 @@ export function useUpdateReturnRule(buyer = false) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({
+      contractId,
       ruleId,
       buyerStageId,
       returnStageId,
     }: {
+      contractId: number;
       ruleId: number;
       buyerStageId: number;
       returnStageId: number;
     }) =>
       patch(
-        buyer ? `/buyer/contract/return-rules/${ruleId}` : `/publisher/return-rules/${ruleId}`,
+        buyer
+          ? `/buyer/contracts/${contractId}/return-rules/${ruleId}`
+          : `/publisher/return-rules/${ruleId}`,
         { buyer_stage_id: buyerStageId, return_stage_id: returnStageId }
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["return-rules"] }),
@@ -340,14 +348,21 @@ export function useUpdateReturnRule(buyer = false) {
 export function useDeleteReturnRule(buyer = false) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (ruleId: number) =>
-      del(buyer ? `/buyer/contract/return-rules/${ruleId}` : `/publisher/return-rules/${ruleId}`),
+    mutationFn: ({ contractId, ruleId }: { contractId: number; ruleId: number }) =>
+      del(
+        buyer
+          ? `/buyer/contracts/${contractId}/return-rules/${ruleId}`
+          : `/publisher/return-rules/${ruleId}`
+      ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["return-rules"] }),
   });
 }
 
-export function useMyContract() {
-  return useQuery({ queryKey: ["my-contract"], queryFn: () => get<Contract>(`/buyer/contract`) });
+export function useBuyerContracts() {
+  return useQuery({
+    queryKey: ["buyer-contracts"],
+    queryFn: () => get<Contract[]>(`/buyer/contracts`),
+  });
 }
 
 export function useMyPublisher() {
@@ -413,14 +428,14 @@ export function usePublisherLogActors() {
     queryFn: () => get<AuditLogActor[]>("/publisher/collaboration/logs/actors"),
   });
 }
-export function useContractPublisherStages(buyer = false, sourcePipelineId?: number) {
+export function useContractPublisherStages(contractId?: number, buyer = false) {
   return useQuery({
-    queryKey: ["contract-publisher-stages", buyer, sourcePipelineId],
+    queryKey: ["contract-publisher-stages", contractId, buyer],
     queryFn: () =>
       buyer
-        ? get<import("@/types").Stage[]>(`/buyer/contract/publisher-stages`)
-        : get<import("@/types").Stage[]>(`${ns()}/pipelines/${sourcePipelineId}/stages`),
-    enabled: buyer || !!sourcePipelineId,
+        ? get<import("@/types").Stage[]>(`/buyer/contracts/${contractId}/publisher-stages`)
+        : get<import("@/types").Stage[]>(`${ns()}/pipelines/${contractId}/stages`),
+    enabled: buyer ? !!contractId : !!contractId,
   });
 }
 
@@ -654,6 +669,13 @@ export function useUpdateBuyer() {
     onSuccess: inv,
   });
 }
+export function useResendBuyerAdminInvite() {
+  const inv = useInvalidate(["buyer"]);
+  return useMutation({
+    mutationFn: (buyerId: number) => post(`/publisher/buyers/${buyerId}/resend-admin-invite`),
+    onSuccess: inv,
+  });
+}
 export function useBuyerPipelines(buyerId: number | null) {
   return useQuery({
     queryKey: ["buyer-pipelines", buyerId],
@@ -745,9 +767,57 @@ export function useBalance() {
     enabled: isBuyer,
   });
 }
-export function useTopup() {
-  const inv = useInvalidate(["balance", "transactions"]);
-  return useMutation({ mutationFn: (amount: number) => post(`/buyer/billing/balance/topup`, { amount }), onSuccess: inv });
+export type PaymentMethod = {
+  id: string;
+  brand: string;
+  last4: string;
+  exp_month: number;
+  exp_year: number;
+  is_default: boolean;
+};
+
+export function usePaymentMethods() {
+  return useQuery({
+    queryKey: ["payment-methods"],
+    queryFn: () => get<PaymentMethod[]>("/buyer/billing/stripe/payment-methods"),
+  });
+}
+
+export function useCreateSetupIntent() {
+  return useMutation({
+    mutationFn: () => post<{ client_secret: string }>("/buyer/billing/stripe/setup-intent", {}),
+  });
+}
+
+export function useDetachPaymentMethod() {
+  const inv = useInvalidate(["payment-methods"]);
+  return useMutation({
+    mutationFn: (id: string) => del<{ ok: boolean }>(`/buyer/billing/stripe/payment-methods/${id}`),
+    onSuccess: inv,
+  });
+}
+
+export function useCreateTopupIntent() {
+  return useMutation({
+    mutationFn: (amountCents: number) =>
+      post<{ client_secret: string }>("/buyer/billing/balance/topup-intent", { amount_cents: amountCents }),
+  });
+}
+
+export function useStripeConnect() {
+  return useMutation({
+    mutationFn: () =>
+      post<{ onboarding_url: string }>("/publisher/billing/stripe/connect", {
+        return_base_url: window.location.origin,
+      }),
+  });
+}
+
+export function useStripeConnectStatus() {
+  return useQuery({
+    queryKey: ["stripe-connect-status"],
+    queryFn: () => get<{ status: string }>("/publisher/billing/stripe/status"),
+  });
 }
 export function useDisputes(scope: "publisher" | "buyer", status?: string) {
   const q = status ? `?status=${status}` : "";

@@ -30,6 +30,7 @@ import { FormDrawer } from "@/components/ui/dialog";
 import { ArrowRightLeft, Plus, Trash2 } from "lucide-react";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
+import { RouteIntegrationsPanel } from "@/features/integrations/RouteIntegrationsPanel";
 import type { CustomField, Route, RouteFieldMapEntry } from "@/types";
 
 const BUILTINS = ["first_name", "last_name", "phone", "email", "address", "city", "state", "zip"];
@@ -553,6 +554,7 @@ function RouteFieldMapContent({ route, onClose }: { route: Route; onClose: () =>
               <Plus className="h-4 w-4" />
             </Button>
           </div>
+          <RouteIntegrationsPanel routeId={route.id} />
         </div>
       )}
       <CreateCustomFieldDrawer

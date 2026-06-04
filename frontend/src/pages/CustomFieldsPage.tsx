@@ -142,7 +142,7 @@ export function CustomFieldsPage() {
               {(fields ?? []).map((f) => (
                 <TR
                   key={f.id}
-                  className="cursor-pointer hover:bg-gray-50"
+                  className="cursor-pointer hover:bg-gray-100"
                   onClick={() => openEdit(f)}
                 >
                   <TD className="font-medium text-gray-800">{f.name}</TD>

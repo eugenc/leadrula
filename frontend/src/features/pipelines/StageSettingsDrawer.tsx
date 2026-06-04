@@ -195,7 +195,7 @@ export function StageSettingsDrawer({ stage, pipelineId, open, onClose }: Props)
                       )
                     }
                     className={cn(
-                      "h-7 w-7 rounded-full border-2 border-white shadow-sm",
+                      "h-7 w-7 rounded-full border-2 border-surface-card shadow-sm",
                       c.dot,
                       stage.color === c.slug && `ring-2 ring-offset-2 ${c.ring}`
                     )}
@@ -448,7 +448,7 @@ function RuleEditor({
   const canSave = canSaveRule(value);
 
   return (
-    <div className="rounded-lg border border-jade-200 bg-white p-4 shadow-sm">
+    <div className="rounded-lg border border-jade-200 bg-surface-card p-4 shadow-sm">
       <div className="mb-4 flex items-center gap-2">
         <Label className="shrink-0">Match</Label>
         <Select

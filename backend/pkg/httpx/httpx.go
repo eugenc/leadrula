@@ -16,7 +16,8 @@ const (
 	CodeConflict       = "conflict"
 	CodeInsufficient   = "insufficient_balance"
 	CodeBusinessRule   = "business_rule"
-	CodeInternal       = "internal"
+	CodeInternal             = "internal"
+	CodeServiceUnavailable   = "service_unavailable"
 )
 
 type envelope struct {
@@ -60,6 +61,8 @@ func StatusForCode(code string) int {
 		return http.StatusPaymentRequired
 	case CodeBusinessRule:
 		return http.StatusUnprocessableEntity
+	case CodeServiceUnavailable:
+		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError
 	}

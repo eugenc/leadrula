@@ -17,6 +17,7 @@ import {
   Building2,
   Calendar,
   KeyRound,
+  Plug,
   Settings,
   Handshake,
   Logs,
@@ -77,6 +78,7 @@ const publisherSettings: NavGroup = {
     { to: "/p/billing", label: "Billing", icon: CreditCard },
     { to: "/p/users", label: "Users", icon: Users, adminOnly: true },
     { to: "/p/api", label: "API Keys", icon: KeyRound, adminOnly: true },
+    { to: "/p/integrations", label: "Integrations", icon: Plug, adminOnly: true },
   ],
 };
 
@@ -117,15 +119,37 @@ const buyerSettings: NavGroup = {
     { to: "/b/billing", label: "Billing", icon: CreditCard },
     { to: "/b/users", label: "Users", icon: Users, adminOnly: true },
     { to: "/b/api", label: "API Keys", icon: KeyRound, adminOnly: true },
+    { to: "/b/integrations", label: "Integrations", icon: Plug, adminOnly: true },
   ],
 };
+
+const platformNav: NavGroup[] = [
+  { items: [{ to: "/platform", label: "Dashboard", icon: LayoutDashboard }] },
+  {
+    label: "Accounts",
+    items: [
+      { to: "/platform/publishers", label: "Publishers", icon: Building2 },
+      { to: "/platform/buyers", label: "Buyers", icon: Users },
+    ],
+  },
+];
+
+const platformSettings: NavGroup = {
+  label: "Settings",
+  items: [
+    { to: "/platform/settings", label: "Profile", icon: Settings },
+    { to: "/platform/users", label: "Users", icon: Users, adminOnly: true },
+  ],
+};
+
+const dashboardPaths = new Set(["/p", "/b", "/platform"]);
 
 function NavItem({ item }: { item: Item }) {
   const Icon = item.icon;
   return (
     <NavLink
       to={item.to}
-      end={item.to === "/p" || item.to === "/b"}
+      end={dashboardPaths.has(item.to)}
       className={({ isActive }) =>
         cn(
           "mb-0.5 flex h-8 items-center gap-2 rounded-md pl-7 pr-2.5 text-base transition-colors",
@@ -154,7 +178,7 @@ function NavGroupSection({
   if (visible.length === 0) return null;
 
   const childActive = visible.some(
-    (i) => pathname === i.to || (i.to !== "/p" && i.to !== "/b" && pathname.startsWith(i.to))
+    (i) => pathname === i.to || (!dashboardPaths.has(i.to) && pathname.startsWith(i.to))
   );
 
   return (
@@ -182,11 +206,21 @@ export function Sidebar() {
   if (!user) return null;
 
   const isAdmin = user.role === "admin";
-  const groups = user.account_type === "publisher" ? publisherNav : buyerNav;
-  const settings = user.account_type === "publisher" ? publisherSettings : buyerSettings;
+  const groups =
+    user.account_type === "platform"
+      ? platformNav
+      : user.account_type === "publisher"
+        ? publisherNav
+        : buyerNav;
+  const settings =
+    user.account_type === "platform"
+      ? platformSettings
+      : user.account_type === "publisher"
+        ? publisherSettings
+        : buyerSettings;
 
   return (
-    <aside className="flex w-sidebar shrink-0 flex-col border-r border-gray-100 bg-white">
+    <aside className="flex w-sidebar shrink-0 flex-col border-r border-gray-100 bg-surface-card">
       <div className="mb-2 flex items-center gap-2.5 p-3">
         <Logo />
       </div>

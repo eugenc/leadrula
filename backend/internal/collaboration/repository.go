@@ -477,10 +477,43 @@ func (r *Repository) UserName(ctx context.Context, userID int64) (string, error)
 	return name, err
 }
 
-func (r *Repository) PublisherAccountID(ctx context.Context) (int64, error) {
+// PublisherAccountIDForUser returns the publisher account the user belongs to.
+func (r *Repository) PublisherAccountIDForUser(ctx context.Context, userID int64) (int64, error) {
 	var id int64
-	err := r.pool.QueryRow(ctx, `SELECT id FROM accounts WHERE type = 'publisher' LIMIT 1`).Scan(&id)
+	err := r.pool.QueryRow(ctx,
+		`SELECT a.id FROM accounts a
+		 JOIN users u ON u.account_id = a.id
+		 WHERE u.id = $1 AND a.type = 'publisher'`, userID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrNotFound
+	}
 	return id, err
+}
+
+// SoleActivePartnershipPublisher returns the publisher when the buyer has exactly one active partnership.
+func (r *Repository) SoleActivePartnershipPublisher(ctx context.Context, buyerID int64) (int64, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT publisher_id FROM partnerships
+		 WHERE buyer_id = $1 AND status = 'active'`, buyerID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if len(ids) != 1 {
+		return 0, ErrNotFound
+	}
+	return ids[0], nil
 }
 
 func (r *Repository) FindPublisherUserByEmail(ctx context.Context, publisherID int64, email string) (userID int64, role string, active bool, err error) {

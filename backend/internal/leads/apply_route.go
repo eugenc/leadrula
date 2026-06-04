@@ -14,11 +14,17 @@ import (
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 )
 
+// IntegrationEnqueuer enqueues outbound integration deliveries after routing.
+type IntegrationEnqueuer interface {
+	EnqueueDelivery(ctx context.Context, routeID, leadID int64, payloadJSON []byte) error
+}
+
 // RouteApplyDeps holds collaborators for ApplyRoute.
 type RouteApplyDeps struct {
-	Repo     *Repository
-	Accounts *accounts.Repository
-	Notif    *notifications.Service
+	Repo          *Repository
+	Accounts      *accounts.Repository
+	Notif         *notifications.Service
+	Integrations  IntegrationEnqueuer
 }
 
 // ApplyRoute moves a lead according to route destination and delivery.

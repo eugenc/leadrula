@@ -4,7 +4,7 @@ import { Loader2 } from "lucide-react";
 
 export function Card({ className, children }: { className?: string; children: React.ReactNode }) {
   return (
-    <div className={cn("rounded-lg border border-gray-100 bg-white shadow-xs", className)}>
+    <div className={cn("rounded-lg border border-gray-100 bg-surface-card shadow-xs", className)}>
       {children}
     </div>
   );
@@ -29,13 +29,13 @@ export function Badge({
   className?: string;
 }) {
   const styles: Record<BadgeVariant, string> = {
-    default: "bg-neutral-bg text-neutral",
-    review: "bg-info-bg text-info",
-    distributed: "bg-success-bg text-success",
-    returned: "bg-neutral-bg text-neutral",
-    closed: "bg-neutral-bg text-neutral",
-    overdue: "bg-danger-bg text-danger",
-    pending: "bg-warning-bg text-warning",
+    default: "border border-neutral-border bg-neutral-bg text-neutral-fg",
+    review: "border border-info-border bg-info-bg text-info-fg",
+    distributed: "border border-success-border bg-success-bg text-success-fg",
+    returned: "border border-neutral-border bg-neutral-bg text-neutral-fg",
+    closed: "border border-neutral-border bg-neutral-bg text-neutral-fg",
+    overdue: "border border-danger-border bg-danger-bg text-danger-fg",
+    pending: "border border-warning-border bg-warning-bg text-warning-fg",
   };
   return (
     <span
@@ -117,7 +117,7 @@ export function Switch({
     >
       <span
         className={cn(
-          "inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition-transform",
+          "inline-block h-4 w-4 transform rounded-full bg-[#FFFFFF] shadow-xs transition-transform",
           checked ? "translate-x-4" : "translate-x-0.5"
         )}
       />

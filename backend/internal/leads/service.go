@@ -15,14 +15,15 @@ import (
 )
 
 type Service struct {
-	repo       *Repository
-	notif      *notifications.Service
-	accounts   *accounts.Repository
-	pipelines  *pipelines.Service
+	repo         *Repository
+	notif        *notifications.Service
+	accounts     *accounts.Repository
+	pipelines    *pipelines.Service
+	integrations IntegrationEnqueuer
 }
 
-func NewService(repo *Repository, notif *notifications.Service, acc *accounts.Repository, pipes *pipelines.Service) *Service {
-	return &Service{repo: repo, notif: notif, accounts: acc, pipelines: pipes}
+func NewService(repo *Repository, notif *notifications.Service, acc *accounts.Repository, pipes *pipelines.Service, integrations IntegrationEnqueuer) *Service {
+	return &Service{repo: repo, notif: notif, accounts: acc, pipelines: pipes, integrations: integrations}
 }
 
 func (s *Service) Repo() *Repository { return s.repo }
@@ -110,6 +111,7 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		return nil, nil, httpx.BusinessRule("lead has no stage after move")
 	}
 
+	var enqueueRouteID int64
 	// pipeline-origin route: publisher-owned lead reached a trigger stage
 	if lead.ContractID == nil && lead.OwnerAccountID == lead.PublisherID {
 		rt, err := routing.MatchRouteByStage(ctx, tx, lead.PublisherID, *finalStageID)
@@ -117,10 +119,11 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 			return nil, nil, err
 		}
 		if rt != nil {
-			deps := RouteApplyDeps{Repo: s.repo, Accounts: s.accounts, Notif: s.notif}
+			deps := RouteApplyDeps{Repo: s.repo, Accounts: s.accounts, Notif: s.notif, Integrations: s.integrations}
 			if err := ApplyRoute(ctx, tx, deps, rt, lead.PublisherID, leadID); err != nil {
 				return nil, nil, err
 			}
+			enqueueRouteID = rt.ID
 			updated, err = s.repo.GetByID(ctx, tx, leadID)
 			if err != nil {
 				return nil, nil, err
@@ -150,6 +153,9 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, nil, err
+	}
+	if enqueueRouteID != 0 {
+		TryEnqueueIntegrations(ctx, s.repo.Pool(), s.repo, s.integrations, enqueueRouteID, leadID)
 	}
 	_ = s.repo.attachCustomValues(ctx, updated)
 	var auditChanges []auth.ImpersonationChange

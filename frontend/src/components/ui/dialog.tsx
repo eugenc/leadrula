@@ -28,7 +28,7 @@ export function Dialog({
       />
       <div
         className={cn(
-          "relative z-10 flex w-full max-w-[400px] flex-col gap-5 rounded-lg bg-white p-6 shadow-lg",
+          "relative z-10 flex w-full max-w-[400px] flex-col gap-5 rounded-lg bg-surface-card p-6 shadow-lg",
           className
         )}
       >
@@ -85,7 +85,7 @@ export function Sheet({
         onClick={onClose}
       />
       <div
-        className="absolute right-0 top-0 flex h-full animate-slideInRight flex-col overflow-y-auto bg-white shadow-xl"
+        className="absolute right-0 top-0 flex h-full animate-slideInRight flex-col overflow-y-auto bg-surface-card shadow-xl"
         style={{ width }}
       >
         {children}

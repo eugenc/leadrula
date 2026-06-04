@@ -9,6 +9,7 @@ import (
 	"github.com/echayko/leadrula/backend/internal/accounts"
 	"github.com/echayko/leadrula/backend/internal/database"
 	"github.com/echayko/leadrula/backend/internal/notifications"
+	stripeClient "github.com/echayko/leadrula/backend/internal/stripe"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -43,10 +44,11 @@ type Service struct {
 	pool     *pgxpool.Pool
 	notif    *notifications.Service
 	accounts *accounts.Repository
+	stripe   *stripeClient.Client
 }
 
-func NewService(pool *pgxpool.Pool, notif *notifications.Service, acc *accounts.Repository) *Service {
-	return &Service{pool: pool, notif: notif, accounts: acc}
+func NewService(pool *pgxpool.Pool, notif *notifications.Service, acc *accounts.Repository, sc *stripeClient.Client) *Service {
+	return &Service{pool: pool, notif: notif, accounts: acc, stripe: sc}
 }
 
 // EnsureBalance creates a zero balance row if none exists.

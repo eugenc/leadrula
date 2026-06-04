@@ -12,7 +12,7 @@ import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Spinner, EmptyState } from "@/components/ui/misc";
 import { FormDrawer } from "@/components/ui/dialog";
 import { Plus, Trash2 } from "lucide-react";
@@ -49,7 +49,9 @@ export function ContractsPage() {
             <tr>
               <TH>Buyer</TH>
               <TH>Name</TH>
+              <TH>Lead Type</TH>
               <TH>Rate / Lead</TH>
+              <TH>Distributed</TH>
               <TH>Status</TH>
               <TH />
             </tr>
@@ -59,7 +61,9 @@ export function ContractsPage() {
               <TR key={c.id} onClick={() => setSelected(c)}>
                 <TD className="font-semibold">{c.buyer_name}</TD>
                 <TD>{c.name}</TD>
+                <TD>{c.lead_type || "—"}</TD>
                 <TD>{formatMoney(c.rate_per_lead)}</TD>
+                <TD>{c.lead_count ?? 0}</TD>
                 <TD>
                   <ContractStatusBadge status={c.status} />
                 </TD>
@@ -96,6 +100,8 @@ function CreateContractDrawer({ open, onClose }: { open: boolean; onClose: () =>
   const [form, setForm] = useState({
     buyer_id: 0,
     name: "Contract",
+    lead_type: "",
+    description: "",
     source_pipeline_id: 0,
     source_stage_id: 0,
     buyer_pipeline_id: 0,
@@ -155,6 +161,22 @@ function CreateContractDrawer({ open, onClose }: { open: boolean; onClose: () =>
         <div>
           <Label>Name</Label>
           <Input value={form.name} onChange={(e) => set("name", e.target.value)} />
+        </div>
+        <div>
+          <Label>Lead Type</Label>
+          <Input
+            value={form.lead_type}
+            onChange={(e) => set("lead_type", e.target.value)}
+            placeholder="e.g. Residential Solar"
+          />
+        </div>
+        <div>
+          <Label>Description</Label>
+          <Textarea
+            value={form.description}
+            onChange={(e) => set("description", e.target.value)}
+            placeholder="Optional notes about this contract"
+          />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>

@@ -46,6 +46,9 @@ func (s *Service) Login(ctx context.Context, email, password string) (*LoginResu
 	if err != nil || u.PasswordHash == nil || !u.IsActive {
 		return nil, httpx.NewError(httpx.CodeUnauthorized, "invalid credentials")
 	}
+	if u.AccountOpStatus == AccountStatusSuspended {
+		return nil, httpx.NewError(httpx.CodeUnauthorized, "account is suspended")
+	}
 	ok, err := auth.VerifyPassword(password, *u.PasswordHash)
 	if err != nil || !ok {
 		return nil, httpx.NewError(httpx.CodeUnauthorized, "invalid credentials")
@@ -134,6 +137,12 @@ func (s *Service) Me(ctx context.Context, p *auth.Principal) (map[string]any, er
 			"id": p.Impersonator.UserPublicID, "account_id": p.Impersonator.AccountPublicID,
 		}
 	}
+	if p.SwitchedFrom != "" {
+		res["is_switched"] = true
+		res["switched_from"] = p.SwitchedFrom
+	}
+	switchable, _ := s.ListSwitchable(ctx, p)
+	res["switchable_count"] = len(switchable)
 	return res, nil
 }
 
@@ -277,10 +286,20 @@ var allowedTimezones = map[string]struct{}{
 	"UTC":                 {},
 }
 
+func (s *Service) sendInviteEmail(to, fullName, token string) error {
+	if s.mail == nil {
+		return nil
+	}
+	if err := s.mail.SendInvite(to, fullName, token); err != nil {
+		return httpx.ServiceUnavailable("invite email could not be sent")
+	}
+	return nil
+}
+
 func (s *Service) CreateBuyer(ctx context.Context, p CreateBuyerParams) (*BuyerSummary, error) {
 	p.Name = strings.TrimSpace(p.Name)
 	p.Website = strings.TrimSpace(p.Website)
-	p.AdminEmail = strings.TrimSpace(p.AdminEmail)
+	p.AdminEmail = strings.TrimSpace(strings.ToLower(p.AdminEmail))
 	p.AdminFirstName = strings.TrimSpace(p.AdminFirstName)
 	p.AdminLastName = strings.TrimSpace(p.AdminLastName)
 	p.Timezone = strings.TrimSpace(p.Timezone)
@@ -312,9 +331,9 @@ func (s *Service) CreateBuyer(ctx context.Context, p CreateBuyerParams) (*BuyerS
 		}
 		return nil, err
 	}
-	if s.mail != nil {
-		adminName := strings.TrimSpace(p.AdminFirstName + " " + p.AdminLastName)
-		_ = s.mail.SendInvite(res.AdminEmail, adminName, res.InviteToken)
+	adminName := strings.TrimSpace(p.AdminFirstName + " " + p.AdminLastName)
+	if err := s.sendInviteEmail(res.AdminEmail, adminName, res.InviteToken); err != nil {
+		return &res.Buyer, err
 	}
 	return &res.Buyer, nil
 }
@@ -613,10 +632,18 @@ func (s *Service) ResendInvite(ctx context.Context, accountID, inviteID int64) e
 	if _, err := s.repo.UpdateInvite(ctx, accountID, inviteID, nil, nil, nil, &token, &expires); err != nil {
 		return err
 	}
-	if s.mail != nil {
-		_ = s.mail.SendInvite(inv.Email, inv.FullName, token)
+	return s.sendInviteEmail(inv.Email, inv.FullName, token)
+}
+
+func (s *Service) ResendBuyerAdminInvite(ctx context.Context, buyerAccountID int64) error {
+	inv, err := s.repo.FindPendingAdminInvite(ctx, buyerAccountID)
+	if err != nil {
+		if err == ErrNotFound {
+			return httpx.NotFound("no pending admin invite")
+		}
+		return err
 	}
-	return nil
+	return s.ResendInvite(ctx, buyerAccountID, inv.ID)
 }
 
 func randomToken() string {

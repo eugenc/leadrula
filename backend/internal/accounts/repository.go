@@ -3,6 +3,7 @@ package accounts
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -15,7 +16,21 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
-const accountCols = `id, public_id, handler_id, type, name, website, timezone, created_at`
+const accountCols = `id, public_id, handler_id, type, name, website, timezone, operational_status, created_at`
+
+func scanAccount(row pgx.Row) (*Account, error) {
+	a := &Account{}
+	err := row.Scan(
+		&a.ID, &a.PublicID, &a.HandlerID, &a.Type, &a.Name, &a.Website, &a.Timezone,
+		&a.OperationalStatus, &a.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return a, nil
+}
 
 type Repository struct {
 	pool *pgxpool.Pool
@@ -30,49 +45,53 @@ func (r *Repository) Pool() *pgxpool.Pool { return r.pool }
 // LoadPrincipal resolves a user public_id into an auth.Principal.
 func (r *Repository) LoadPrincipal(ctx context.Context, userPublicID string) (*auth.Principal, error) {
 	const q = `
-		SELECT u.id, u.public_id, u.account_id, a.public_id, a.type, u.role, u.is_active
+		SELECT u.id, u.public_id, u.account_id, a.public_id, a.type, u.role, u.is_active,
+		       a.operational_status
 		FROM users u JOIN accounts a ON a.id = u.account_id
 		WHERE u.public_id = $1`
 	p := &auth.Principal{}
 	var active bool
+	var opStatus string
 	err := r.pool.QueryRow(ctx, q, userPublicID).Scan(
 		&p.UserID, &p.UserPublicID, &p.AccountID, &p.AccountPublicID,
-		&p.AccountType, &p.Role, &active)
+		&p.AccountType, &p.Role, &active, &opStatus)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, err
 	}
-	if !active {
+	if !active || opStatus == AccountStatusSuspended {
 		return nil, ErrNotFound
 	}
 	return p, nil
 }
 
 type AuthUser struct {
-	ID           int64
-	PublicID     string
-	AccountID    int64
-	AccountPubID string
-	AccountType  string
-	Email        string
-	PasswordHash *string
-	FullName     string
-	Role         string
-	IsActive     bool
+	ID              int64
+	PublicID        string
+	AccountID       int64
+	AccountPubID    string
+	AccountType     string
+	AccountOpStatus string
+	Email           string
+	PasswordHash    *string
+	FullName        string
+	Role            string
+	IsActive        bool
 }
 
 func (r *Repository) FindUserByEmail(ctx context.Context, email string) (*AuthUser, error) {
 	const q = `
 		SELECT u.id, u.public_id, u.account_id, a.public_id, a.type,
-		       u.email, u.password_hash, u.full_name, u.role, u.is_active
+		       u.email, u.password_hash, u.full_name, u.role, u.is_active,
+		       a.operational_status
 		FROM users u JOIN accounts a ON a.id = u.account_id
 		WHERE u.email = $1`
 	u := &AuthUser{}
 	err := r.pool.QueryRow(ctx, q, email).Scan(
 		&u.ID, &u.PublicID, &u.AccountID, &u.AccountPubID, &u.AccountType,
-		&u.Email, &u.PasswordHash, &u.FullName, &u.Role, &u.IsActive)
+		&u.Email, &u.PasswordHash, &u.FullName, &u.Role, &u.IsActive, &u.AccountOpStatus)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -157,30 +176,12 @@ func (r *Repository) ListPublishers(ctx context.Context, buyerID int64) ([]Publi
 
 func (r *Repository) GetAccount(ctx context.Context, id int64) (*Account, error) {
 	const q = `SELECT ` + accountCols + ` FROM accounts WHERE id = $1`
-	a := &Account{}
-	err := r.pool.QueryRow(ctx, q, id).Scan(
-		&a.ID, &a.PublicID, &a.HandlerID, &a.Type, &a.Name, &a.Website, &a.Timezone, &a.CreatedAt)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		return nil, err
-	}
-	return a, nil
+	return scanAccount(r.pool.QueryRow(ctx, q, id))
 }
 
 func (r *Repository) GetAccountByHandlerID(ctx context.Context, handlerID string) (*Account, error) {
 	const q = `SELECT ` + accountCols + ` FROM accounts WHERE handler_id = $1`
-	a := &Account{}
-	err := r.pool.QueryRow(ctx, q, handlerID).Scan(
-		&a.ID, &a.PublicID, &a.HandlerID, &a.Type, &a.Name, &a.Website, &a.Timezone, &a.CreatedAt)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		return nil, err
-	}
-	return a, nil
+	return scanAccount(r.pool.QueryRow(ctx, q, handlerID))
 }
 
 func (r *Repository) UpdateBuyer(ctx context.Context, id int64, p UpdateBuyerParams) (*Account, error) {
@@ -191,16 +192,7 @@ func (r *Repository) UpdateBuyer(ctx context.Context, id int64, p UpdateBuyerPar
 			timezone = COALESCE($4, timezone)
 		WHERE id = $1 AND type = 'buyer'
 		RETURNING ` + accountCols
-	a := &Account{}
-	err := r.pool.QueryRow(ctx, q, id, p.Name, p.Website, p.Timezone).Scan(
-		&a.ID, &a.PublicID, &a.HandlerID, &a.Type, &a.Name, &a.Website, &a.Timezone, &a.CreatedAt)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		return nil, err
-	}
-	return a, nil
+	return scanAccount(r.pool.QueryRow(ctx, q, id, p.Name, p.Website, p.Timezone))
 }
 
 func (r *Repository) GetUser(ctx context.Context, id int64) (*User, error) {
@@ -368,14 +360,13 @@ func (r *Repository) CreateBuyer(ctx context.Context, p CreateBuyerParams, token
 	}
 	defer tx.Rollback(ctx)
 
-	a := &Account{}
+	var a *Account
 	for range 10 {
 		hid := handlerid.Generate("B")
-		err = tx.QueryRow(ctx,
+		a, err = scanAccount(tx.QueryRow(ctx,
 			`INSERT INTO accounts(type, name, website, timezone, handler_id) VALUES ('buyer', $1, $2, $3, $4)
 			 RETURNING `+accountCols,
-			p.Name, p.Website, p.Timezone, hid).Scan(
-			&a.ID, &a.PublicID, &a.HandlerID, &a.Type, &a.Name, &a.Website, &a.Timezone, &a.CreatedAt)
+			p.Name, p.Website, p.Timezone, hid))
 		if err == nil {
 			break
 		}
@@ -555,6 +546,61 @@ func (r *Repository) PrimaryAdminContact(ctx context.Context, accountID int64) (
 	return &c, nil
 }
 
+// BuyerAdminStatus describes whether the buyer has an active admin, pending invite, or none.
+type BuyerAdminStatus struct {
+	Status   string // active, invite_pending, none
+	InviteID int64
+	Contact  *AdminContact
+}
+
+func (r *Repository) BuyerAdminStatus(ctx context.Context, accountID int64) (*BuyerAdminStatus, error) {
+	const userQ = `
+		SELECT full_name, email FROM users
+		WHERE account_id = $1 AND role = 'admin'
+		ORDER BY created_at
+		LIMIT 1`
+	var c AdminContact
+	err := r.pool.QueryRow(ctx, userQ, accountID).Scan(&c.FullName, &c.Email)
+	if err == nil {
+		return &BuyerAdminStatus{Status: "active", Contact: &c}, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	const invQ = `
+		SELECT id, full_name, email FROM invites
+		WHERE account_id = $1 AND role = 'admin' AND accepted_at IS NULL AND expires_at > now()
+		ORDER BY created_at
+		LIMIT 1`
+	var inviteID int64
+	err = r.pool.QueryRow(ctx, invQ, accountID).Scan(&inviteID, &c.FullName, &c.Email)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return &BuyerAdminStatus{Status: "none"}, nil
+		}
+		return nil, err
+	}
+	return &BuyerAdminStatus{Status: "invite_pending", InviteID: inviteID, Contact: &c}, nil
+}
+
+func (r *Repository) FindPendingAdminInvite(ctx context.Context, accountID int64) (*Invite, error) {
+	const q = `SELECT id, account_id, email, full_name, role, expires_at, created_at
+		FROM invites
+		WHERE account_id = $1 AND role = 'admin' AND accepted_at IS NULL AND expires_at > now()
+		ORDER BY created_at
+		LIMIT 1`
+	inv := &Invite{}
+	err := r.pool.QueryRow(ctx, q, accountID).Scan(
+		&inv.ID, &inv.AccountID, &inv.Email, &inv.FullName, &inv.Role, &inv.ExpiresAt, &inv.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return inv, nil
+}
+
 func (r *Repository) ActiveAdminIDs(ctx context.Context, accountID int64) ([]int64, error) {
 	return r.AdminUserIDs(ctx, r.pool, accountID)
 }
@@ -575,6 +621,150 @@ func (r *Repository) AdminUserIDs(ctx context.Context, q database.Querier, accou
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+func (r *Repository) ListAccounts(ctx context.Context, accountType string) ([]Account, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT `+accountCols+` FROM accounts WHERE type = $1 ORDER BY name`, accountType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Account
+	for rows.Next() {
+		var a Account
+		if err := rows.Scan(&a.ID, &a.PublicID, &a.HandlerID, &a.Type, &a.Name, &a.Website, &a.Timezone, &a.OperationalStatus, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	if out == nil {
+		out = []Account{}
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) ListAccountsPage(ctx context.Context, p ListAccountsParams) (*AccountListResult, error) {
+	page := p.Page
+	if page < 1 {
+		page = 1
+	}
+	limit := p.Limit
+	if limit <= 0 {
+		limit = 25
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	where := "type = $1"
+	args := []any{p.AccountType}
+	search := strings.TrimSpace(p.Search)
+	if search != "" {
+		args = append(args, "%"+search+"%")
+		n := len(args)
+		where += fmt.Sprintf(" AND (name ILIKE $%d OR handler_id ILIKE $%d OR website ILIKE $%d)", n, n, n)
+	}
+
+	var total int
+	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM accounts WHERE `+where, args...).Scan(&total); err != nil {
+		return nil, err
+	}
+
+	offset := (page - 1) * limit
+	qArgs := append([]any{}, args...)
+	qArgs = append(qArgs, limit, offset)
+	limitN := len(args) + 1
+	offsetN := len(args) + 2
+	q := fmt.Sprintf(`SELECT %s FROM accounts WHERE %s ORDER BY name LIMIT $%d OFFSET $%d`, accountCols, where, limitN, offsetN)
+
+	rows, err := r.pool.Query(ctx, q, qArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []Account
+	for rows.Next() {
+		var a Account
+		if err := rows.Scan(&a.ID, &a.PublicID, &a.HandlerID, &a.Type, &a.Name, &a.Website, &a.Timezone, &a.OperationalStatus, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, a)
+	}
+	if items == nil {
+		items = []Account{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return &AccountListResult{Items: items, Total: total, Page: page, Limit: limit}, nil
+}
+
+func (r *Repository) GetAccountByPublicID(ctx context.Context, publicID string) (id int64, accountType, name, operationalStatus string, err error) {
+	err = r.pool.QueryRow(ctx,
+		`SELECT id, type, name, operational_status FROM accounts WHERE public_id = $1`, publicID).
+		Scan(&id, &accountType, &name, &operationalStatus)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, "", "", "", ErrNotFound
+	}
+	return
+}
+
+func (r *Repository) SetOperationalStatus(ctx context.Context, publicID, accountType, status string) (*Account, error) {
+	const q = `UPDATE accounts SET operational_status = $3, updated_at = now()
+		WHERE public_id = $1 AND type = $2
+		RETURNING ` + accountCols
+	return scanAccount(r.pool.QueryRow(ctx, q, publicID, accountType, status))
+}
+
+func (r *Repository) LogAccountSwitch(ctx context.Context, actorUserID, fromAccountID, toAccountID int64) error {
+	_, err := r.pool.Exec(ctx,
+		`INSERT INTO account_switch_log (actor_user_id, from_account_id, to_account_id)
+		 VALUES ($1, $2, $3)`, actorUserID, fromAccountID, toAccountID)
+	return err
+}
+
+func (r *Repository) CreatePublisher(ctx context.Context, p CreatePublisherParams, token string, expires time.Time) (*CreatePublisherResult, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var a *Account
+	for range 10 {
+		hid := handlerid.Generate("PB")
+		a, err = scanAccount(tx.QueryRow(ctx,
+			`INSERT INTO accounts(type, name, timezone, handler_id) VALUES ('publisher', $1, $2, $3)
+			 RETURNING `+accountCols,
+			p.Name, p.Timezone, hid))
+		if err == nil {
+			break
+		}
+		if !database.IsUniqueViolation(err) {
+			return nil, err
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	adminName := strings.TrimSpace(p.AdminFirstName + " " + p.AdminLastName)
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO invites(account_id, email, full_name, role, token, expires_at) VALUES ($1,$2,$3,'admin',$4,$5)`,
+		a.ID, p.AdminEmail, adminName, token, expires); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &CreatePublisherResult{
+		Publisher:   *a,
+		InviteToken: token,
+		AdminEmail:  p.AdminEmail,
+	}, nil
 }
 
 func scanUser(row pgx.Row) (*User, error) {

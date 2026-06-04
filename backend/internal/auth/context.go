@@ -11,6 +11,7 @@ type Principal struct {
 	AccountType     string // publisher | buyer
 	Role            string // admin | user | follower
 	Impersonator    *Principal
+	SwitchedFrom    string // origin account public_id when in a switch session
 }
 
 func (p *Principal) IsAdmin() bool    { return p.Role == "admin" }

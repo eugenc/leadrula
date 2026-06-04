@@ -16,13 +16,13 @@ export function collabLabel(status: string) {
 export function collabBadgeClass(status: string) {
   switch (status) {
     case "active":
-      return "bg-green-100 text-green-800";
+      return "border border-success-border bg-success-bg text-success-fg";
     case "pending_buyer":
     case "pending_publisher":
-      return "bg-amber-100 text-amber-800";
+      return "border border-warning-border bg-warning-bg text-warning-fg";
     case "revoked":
-      return "bg-gray-100 text-gray-600";
+      return "border border-neutral-border bg-neutral-bg text-neutral-fg";
     default:
-      return "bg-gray-100 text-gray-600";
+      return "border border-neutral-border bg-neutral-bg text-neutral-fg";
   }
 }

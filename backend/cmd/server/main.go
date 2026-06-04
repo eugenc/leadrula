@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/echayko/leadrula/backend/db"
@@ -17,6 +21,7 @@ import (
 	"github.com/echayko/leadrula/backend/internal/contracts"
 	"github.com/echayko/leadrula/backend/internal/customfields"
 	"github.com/echayko/leadrula/backend/internal/database"
+	"github.com/echayko/leadrula/backend/internal/integrations"
 	"github.com/echayko/leadrula/backend/internal/intake"
 	"github.com/echayko/leadrula/backend/internal/leads"
 	"github.com/echayko/leadrula/backend/internal/notifications"
@@ -24,6 +29,7 @@ import (
 	"github.com/echayko/leadrula/backend/internal/partnerships"
 	"github.com/echayko/leadrula/backend/internal/pipelines"
 	"github.com/echayko/leadrula/backend/internal/routing"
+	stripeClient "github.com/echayko/leadrula/backend/internal/stripe"
 	"github.com/echayko/leadrula/backend/internal/storage"
 	mw "github.com/echayko/leadrula/backend/pkg/middleware"
 	"github.com/go-chi/chi/v5"
@@ -31,7 +37,8 @@ import (
 
 func main() {
 	cfg := config.Load()
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	pool, err := database.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -43,10 +50,6 @@ func main() {
 		log.Fatalf("migrate: %v", err)
 	}
 	log.Println("migrations applied")
-
-	// find the single publisher (may not exist before bootstrap)
-	var publisherID int64
-	_ = pool.QueryRow(ctx, `SELECT id FROM accounts WHERE type='publisher' LIMIT 1`).Scan(&publisherID)
 
 	// ── wiring ───────────────────────────────────────────────────
 	tokens := auth.NewTokenManager(cfg.JWTAccessSecret, cfg.JWTRefreshSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
@@ -80,11 +83,38 @@ func main() {
 	contractsSvc := contracts.NewService(pool)
 	contractsH := contracts.NewHandler(contractsSvc)
 
-	billingSvc := billing.NewService(pool, notifSvc, accountsRepo)
-	billingH := billing.NewHandler(billingSvc)
+	var sc *stripeClient.Client
+	if cfg.StripeSecretKey != "" {
+		sc = stripeClient.New(cfg.StripeSecretKey, cfg.AppBaseURL, cfg.StripePlatformFee)
+	} else {
+		log.Println("warning: STRIPE_SECRET_KEY not set — Stripe billing endpoints disabled")
+	}
+	billingSvc := billing.NewService(pool, notifSvc, accountsRepo, sc)
+	billingH := billing.NewHandler(billingSvc, cfg.StripeWebhookSecret)
+
+	var integrationsSvc *integrations.Service
+	var integrationsEnq leads.IntegrationEnqueuer
+	if encKey, err := hex.DecodeString(cfg.IntegrationEncKey); err == nil && len(encKey) == 32 {
+		oauthCfg := integrations.OAuthConfig{
+			RedirectBase:       cfg.IntegrationOAuthRedirectBase,
+			PipedriveClientID:  cfg.PipedriveClientID,
+			PipedriveSecret:    cfg.PipedriveClientSecret,
+			HubSpotClientID:    cfg.HubSpotClientID,
+			HubSpotSecret:      cfg.HubSpotClientSecret,
+			ZohoClientID:       cfg.ZohoCRMClientID,
+			ZohoSecret:         cfg.ZohoCRMClientSecret,
+			SalesforceClientID: cfg.SalesforceClientID,
+			SalesforceSecret:   cfg.SalesforceClientSecret,
+		}
+		integrationsSvc = integrations.NewService(pool, encKey, oauthCfg)
+		integrationsEnq = integrationsSvc
+		go integrationsSvc.RunWorker(ctx)
+	} else if cfg.IntegrationEncKey != "" {
+		log.Println("warning: INTEGRATION_ENC_KEY must be 64 hex chars (32 bytes) — integrations disabled")
+	}
 
 	leadsRepo := leads.NewRepository(pool)
-	leadsSvc := leads.NewService(leadsRepo, notifSvc, accountsRepo, pipelinesSvc)
+	leadsSvc := leads.NewService(leadsRepo, notifSvc, accountsRepo, pipelinesSvc, integrationsEnq)
 	leadsH := leads.NewHandler(leadsSvc)
 
 	routingSvc := routing.NewService(pool)
@@ -93,8 +123,8 @@ func main() {
 	calSvc := calendar.NewService(pool)
 	calH := calendar.NewHandler(calSvc)
 
-	intakeSvc := intake.NewService(pool, leadsRepo, notifSvc, accountsRepo)
-	intakeH := intake.NewHandler(intakeSvc, publisherID)
+	intakeSvc := intake.NewService(pool, leadsRepo, notifSvc, accountsRepo, integrationsEnq)
+	intakeH := intake.NewHandler(intakeSvc)
 
 	oversightH := oversight.NewHandler(accountsRepo, accountsSvc, leadsRepo, pipelinesSvc, billingSvc, calSvc, collabSvc, partnersSvc, partnersSvc)
 
@@ -113,13 +143,25 @@ func main() {
 	// public auth
 	accountsH.RegisterAuthRoutes(r)
 
+	if cfg.StripeWebhookSecret != "" {
+		r.Post("/webhooks/stripe", billingH.StripeWebhook)
+	}
+
 	requireAuth := auth.RequireAuth(tokens, collabSvc.ResolvePrincipal)
 
-	// /auth/me (any authenticated account)
+	// /auth/me + switching (any authenticated account)
 	r.Group(func(a chi.Router) {
 		a.Use(requireAuth)
 		accountsH.RegisterMeRoute(a)
+		accountsH.RegisterSwitchRoutes(a)
 		collabH.RegisterAuthRoutes(a)
+	})
+
+	// platform namespace (operator home; use account switch for publisher/buyer routes)
+	r.Route("/platform", func(pl chi.Router) {
+		pl.Use(requireAuth, auth.RequireAccountType("platform"))
+		accountsH.RegisterPlatformRoutes(pl)
+		notifH.RegisterRoutes(pl)
 	})
 
 	// publisher namespace
@@ -138,6 +180,9 @@ func main() {
 		accountsH.RegisterUserRoutes(p)
 		apikeysH.RegisterRoutes(p)
 		notifH.RegisterRoutes(p)
+		if integrationsSvc != nil {
+			integrations.NewHandler(integrationsSvc, "publisher", cfg.AppBaseURL).RegisterRoutes(p)
+		}
 	})
 
 	// buyer namespace
@@ -158,6 +203,9 @@ func main() {
 		accountsH.RegisterUserRoutes(b)
 		apikeysH.RegisterRoutes(b)
 		notifH.RegisterRoutes(b)
+		if integrationsSvc != nil {
+			integrations.NewHandler(integrationsSvc, "buyer", cfg.AppBaseURL).RegisterRoutes(b)
+		}
 	})
 
 	srv := &http.Server{

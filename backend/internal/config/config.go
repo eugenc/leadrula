@@ -3,6 +3,7 @@ package config
 import (
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +31,21 @@ type Config struct {
 	S3AccessKey string
 	S3SecretKey string
 	S3PublicURL string
+
+	StripeSecretKey     string
+	StripeWebhookSecret string
+	StripePlatformFee   float64
+
+	IntegrationEncKey              string
+	IntegrationOAuthRedirectBase   string
+	PipedriveClientID              string
+	PipedriveClientSecret          string
+	HubSpotClientID                string
+	HubSpotClientSecret            string
+	ZohoCRMClientID                string
+	ZohoCRMClientSecret            string
+	SalesforceClientID             string
+	SalesforceClientSecret         string
 }
 
 // Load reads configuration from a .env file (if present) and the environment.
@@ -54,8 +70,35 @@ func Load() *Config {
 		S3AccessKey:    os.Getenv("S3_ACCESS_KEY"),
 		S3SecretKey:    os.Getenv("S3_SECRET_KEY"),
 		S3PublicURL:    os.Getenv("S3_PUBLIC_URL"),
+		StripeSecretKey:     os.Getenv("STRIPE_SECRET_KEY"),
+		StripeWebhookSecret: os.Getenv("STRIPE_WEBHOOK_SECRET"),
+		StripePlatformFee:   getfloat("STRIPE_PLATFORM_FEE", 0.10),
+
+		IntegrationEncKey:            os.Getenv("INTEGRATION_ENC_KEY"),
+		IntegrationOAuthRedirectBase: getenv("INTEGRATION_OAUTH_REDIRECT_BASE", "http://localhost:8080"),
+		PipedriveClientID:            os.Getenv("PIPEDRIVE_CLIENT_ID"),
+		PipedriveClientSecret:        os.Getenv("PIPEDRIVE_CLIENT_SECRET"),
+		HubSpotClientID:              os.Getenv("HUBSPOT_CLIENT_ID"),
+		HubSpotClientSecret:          os.Getenv("HUBSPOT_CLIENT_SECRET"),
+		ZohoCRMClientID:              os.Getenv("ZOHO_CRM_CLIENT_ID"),
+		ZohoCRMClientSecret:          os.Getenv("ZOHO_CRM_CLIENT_SECRET"),
+		SalesforceClientID:           os.Getenv("SALESFORCE_CLIENT_ID"),
+		SalesforceClientSecret:       os.Getenv("SALESFORCE_CLIENT_SECRET"),
 	}
 	return cfg
+}
+
+func getfloat(key string, fallback float64) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		log.Printf("config: invalid float %q for %s, using default", v, key)
+		return fallback
+	}
+	return f
 }
 
 func getenv(key, fallback string) string {

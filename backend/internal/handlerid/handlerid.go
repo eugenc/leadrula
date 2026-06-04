@@ -1,4 +1,4 @@
-// Package handlerid generates short unique handler IDs (B-xxxxx, P-xxxxx, C-xxxxx).
+// Package handlerid generates short unique handler IDs (B-, P-, PB-, PL-, C- prefixes).
 package handlerid
 
 import (

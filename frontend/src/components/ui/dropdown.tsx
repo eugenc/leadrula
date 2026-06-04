@@ -33,7 +33,7 @@ export function Dropdown({
       {open && (
         <div
           className={cn(
-            "absolute top-full z-50 mt-1 min-w-[200px] rounded-lg border border-gray-100 bg-white p-1 shadow-md",
+            "absolute top-full z-50 mt-1 min-w-[200px] rounded-lg border border-gray-100 bg-surface-card p-1 shadow-md",
             align === "right" ? "right-0" : "left-0",
             className
           )}

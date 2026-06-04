@@ -48,7 +48,7 @@ export function PipelinesPage() {
                   key={p.id}
                   className={cn(
                     "flex items-center gap-1 rounded-md px-2 py-1.5 text-sm",
-                    selected === p.id ? "bg-jade-100 text-jade-700" : "hover:bg-gray-50"
+                    selected === p.id ? "bg-jade-100 text-jade-700" : "hover:bg-gray-100"
                   )}
                 >
                   <Input
@@ -141,7 +141,7 @@ function StagesEditor({ pipelineId }: { pipelineId: number }) {
           {sorted.map((s) => (
             <div
               key={s.id}
-              className="grid grid-cols-[auto_1fr_9rem_auto_auto] items-center gap-3 rounded-md hover:bg-gray-50"
+              className="grid grid-cols-[auto_1fr_9rem_auto_auto] items-center gap-3 rounded-md hover:bg-gray-100"
             >
               <span className={cn("ml-1 h-3 w-3 shrink-0 rounded-full", stageColorDot(s.color))} />
               <Input

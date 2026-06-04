@@ -26,21 +26,27 @@
   --gray-600: #344054;
   --gray-700: #1D2939;
   --gray-800: #101828;
+  --gray-900: #0D1117;
 
   /* Semantic */
   --color-success: #1A9268;
+  --color-success-fg: #1A9268;
   --color-success-bg: #F0FAF5;
   --color-success-border: #AEDEC9;
   --color-warning: #B54708;
+  --color-warning-fg: #B54708;
   --color-warning-bg: #FFF6ED;
   --color-warning-border: #FDDCAB;
   --color-danger: #C01048;
+  --color-danger-fg: #C01048;
   --color-danger-bg: #FFF1F3;
   --color-danger-border: #FECDD6;
   --color-info: #175CD3;
+  --color-info-fg: #175CD3;
   --color-info-bg: #EFF8FF;
   --color-info-border: #B2DDFF;
   --color-neutral: #344054;
+  --color-neutral-fg: #344054;
   --color-neutral-bg: #F4F5F7;
   --color-neutral-border: #D0D5DD;
 
@@ -79,6 +85,59 @@
   --duration-slow: 250ms;
 }
 
+.dark {
+  /* Neutrals — inverted for dark canvas */
+  --gray-0: #1D2939;
+  --gray-50: #0D1117;
+  --gray-100: #344054;
+  --gray-200: #475467;
+  --gray-300: #667085;
+  --gray-400: #98A2B3;
+  --gray-500: #98A2B3;
+  --gray-600: #D0D5DD;
+  --gray-700: #EAECF0;
+  --gray-800: #F9FAFB;
+  --gray-900: #FFFFFF;
+
+  /* Jade tints for nav/hover on dark surfaces */
+  --jade-50: #0A3F2C;
+  --jade-100: #157A57;
+  --jade-600: #77C5A8;
+  --jade-700: #D6F2E4;
+
+  /* Semantic — lighter foreground text on dark tint backgrounds */
+  --color-success-fg: #77C5A8;
+  --color-warning-fg: #FEC84B;
+  --color-danger-fg: #FDA29B;
+  --color-info-fg: #84ADFF;
+  --color-neutral-fg: #D0D5DD;
+  --color-success-bg: #0A3F2C;
+  --color-success-border: #157A57;
+  --color-warning-bg: #4A2C00;
+  --color-warning-border: #93370D;
+  --color-danger-bg: #4A0D1F;
+  --color-danger-border: #9E2146;
+  --color-info-bg: #102A56;
+  --color-info-border: #1849A9;
+  --color-neutral-bg: #344054;
+  --color-neutral-border: #475467;
+
+  /* Surfaces */
+  --surface-app: #0D1117;
+  --surface-card: #1D2939;
+  --surface-overlay: rgba(0, 0, 0, 0.6);
+  --surface-hover: #0A3F2C;
+  --surface-active: #0F5E41;
+
+  /* Borders */
+  --border-default: #344054;
+  --border-strong: #475467;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
 html,
 body,
 #root {
@@ -106,6 +165,14 @@ input[type="month"],
 input[type="week"] {
   accent-color: var(--jade-500);
   color-scheme: light;
+}
+
+html.dark input[type="date"],
+html.dark input[type="datetime-local"],
+html.dark input[type="time"],
+html.dark input[type="month"],
+html.dark input[type="week"] {
+  color-scheme: dark;
 }
 
 input[type="date"]::-webkit-calendar-picker-indicator,

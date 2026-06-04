@@ -24,18 +24,19 @@ import (
 )
 
 type Service struct {
-	pool     *pgxpool.Pool
-	leads    *leads.Repository
-	notif    *notifications.Service
-	accounts *accounts.Repository
+	pool         *pgxpool.Pool
+	leads        *leads.Repository
+	notif        *notifications.Service
+	accounts     *accounts.Repository
+	integrations leads.IntegrationEnqueuer
 }
 
-func NewService(pool *pgxpool.Pool, leadRepo *leads.Repository, notif *notifications.Service, acc *accounts.Repository) *Service {
-	return &Service{pool: pool, leads: leadRepo, notif: notif, accounts: acc}
+func NewService(pool *pgxpool.Pool, leadRepo *leads.Repository, notif *notifications.Service, acc *accounts.Repository, integrations leads.IntegrationEnqueuer) *Service {
+	return &Service{pool: pool, leads: leadRepo, notif: notif, accounts: acc, integrations: integrations}
 }
 
 func (s *Service) routeDeps() leads.RouteApplyDeps {
-	return leads.RouteApplyDeps{Repo: s.leads, Accounts: s.accounts, Notif: s.notif}
+	return leads.RouteApplyDeps{Repo: s.leads, Accounts: s.accounts, Notif: s.notif, Integrations: s.integrations}
 }
 
 // IngestResult is returned to the API caller.
@@ -189,6 +190,7 @@ func (s *Service) IngestFromSource(ctx context.Context, publisherID int64, slug 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	leads.TryEnqueueIntegrations(ctx, s.leads.Pool(), s.leads, s.integrations, rt.ID, leadID)
 	return &IngestResult{LeadID: publicID, Status: status}, nil
 }
 

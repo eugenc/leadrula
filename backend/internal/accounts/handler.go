@@ -3,6 +3,7 @@ package accounts
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
@@ -32,6 +33,25 @@ func (h *Handler) RegisterMeRoute(r chi.Router) {
 	r.Get("/auth/me", h.me)
 	r.Patch("/auth/me/prefs", h.patchPrefs)
 	r.Post("/auth/me/avatar", h.uploadMyAvatar)
+}
+
+// RegisterSwitchRoutes mounts account switching endpoints.
+func (h *Handler) RegisterSwitchRoutes(r chi.Router) {
+	r.Get("/auth/switchable", h.listSwitchable)
+	r.Post("/auth/switch", h.switchAccount)
+	r.Post("/auth/switch-back", h.switchBack)
+}
+
+// RegisterPlatformRoutes mounts platform operator endpoints.
+func (h *Handler) RegisterPlatformRoutes(r chi.Router) {
+	r.With(auth.RequireRole("admin")).Post("/publishers", h.createPublisher)
+	r.Get("/publishers", h.listPublishers)
+	r.With(auth.RequireRole("admin")).Patch("/publishers/{accountId}", h.patchPublisherStatus)
+	r.With(auth.RequireRole("admin")).Post("/buyers", h.createPlatformBuyer)
+	r.Get("/buyers", h.listAllBuyers)
+	r.With(auth.RequireRole("admin")).Patch("/buyers/{accountId}", h.patchBuyerStatus)
+	r.Get("/accounts/switch-log", h.switchLog)
+	h.RegisterUserRoutes(r)
 }
 
 // RegisterUserRoutes mounts user/invite management for an account namespace.
@@ -284,6 +304,171 @@ func (h *Handler) deleteInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) listSwitchable(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	items, err := h.svc.ListSwitchable(r.Context(), p)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, items)
+}
+
+func (h *Handler) switchAccount(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		AccountID string `json:"account_id"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	res, err := h.svc.SwitchAccount(r.Context(), p, body.AccountID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, res)
+}
+
+func (h *Handler) switchBack(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	res, err := h.svc.SwitchBack(r.Context(), p)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, res)
+}
+
+func (h *Handler) createPublisher(w http.ResponseWriter, r *http.Request) {
+	var body CreatePublisherParams
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	pub, err := h.svc.CreatePublisher(r.Context(), body)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, pub)
+}
+
+func (h *Handler) listPublishers(w http.ResponseWriter, r *http.Request) {
+	result, err := h.svc.repo.ListAccountsPage(r.Context(), accountListParams(r, "publisher"))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) listAllBuyers(w http.ResponseWriter, r *http.Request) {
+	result, err := h.svc.repo.ListAccountsPage(r.Context(), accountListParams(r, "buyer"))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) patchPublisherStatus(w http.ResponseWriter, r *http.Request) {
+	h.patchAccountStatus(w, r, "publisher")
+}
+
+func (h *Handler) patchBuyerStatus(w http.ResponseWriter, r *http.Request) {
+	h.patchAccountStatus(w, r, "buyer")
+}
+
+func (h *Handler) patchAccountStatus(w http.ResponseWriter, r *http.Request, accountType string) {
+	var body struct {
+		OperationalStatus string `json:"operational_status"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	a, err := h.svc.SetOperationalStatus(r.Context(), chi.URLParam(r, "accountId"), accountType, body.OperationalStatus)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, a)
+}
+
+func accountListParams(r *http.Request, accountType string) ListAccountsParams {
+	q := r.URL.Query()
+	page, _ := strconv.Atoi(q.Get("page"))
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	return ListAccountsParams{
+		AccountType: accountType,
+		Search:      q.Get("q"),
+		Page:        page,
+		Limit:       limit,
+	}
+}
+
+func (h *Handler) createPlatformBuyer(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name            string  `json:"name"`
+		Website         string  `json:"website"`
+		Timezone        string  `json:"timezone"`
+		AdminFirstName  string  `json:"admin_first_name"`
+		AdminLastName   string  `json:"admin_last_name"`
+		AdminEmail      string  `json:"admin_email"`
+		StartingBalance float64 `json:"starting_balance"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	acct, err := h.svc.CreatePlatformBuyer(r.Context(), CreateBuyerParams{
+		Name:            body.Name,
+		Website:         body.Website,
+		Timezone:        body.Timezone,
+		AdminEmail:      body.AdminEmail,
+		AdminFirstName:  body.AdminFirstName,
+		AdminLastName:   body.AdminLastName,
+		StartingBalance: body.StartingBalance,
+	})
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, acct)
+}
+
+func (h *Handler) switchLog(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	rows, err := h.svc.repo.Pool().Query(r.Context(),
+		`SELECT l.id, u.email, fa.name, ta.name, l.switched_at
+		 FROM account_switch_log l
+		 JOIN users u ON u.id = l.actor_user_id
+		 JOIN accounts fa ON fa.id = l.from_account_id
+		 JOIN accounts ta ON ta.id = l.to_account_id
+		 ORDER BY l.switched_at DESC LIMIT 200`)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	defer rows.Close()
+	var out []map[string]any
+	for rows.Next() {
+		var id int64
+		var email, fromName, toName string
+		var switchedAt time.Time
+		if err := rows.Scan(&id, &email, &fromName, &toName, &switchedAt); err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		out = append(out, map[string]any{
+			"id": id, "user": email, "from": fromName, "to": toName, "at": switchedAt,
+		})
+	}
+	if out == nil {
+		out = []map[string]any{}
+	}
+	_ = p
+	httpx.JSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) resendInvite(w http.ResponseWriter, r *http.Request) {

@@ -2,15 +2,21 @@ package accounts
 
 import "time"
 
+const (
+	AccountStatusActive    = "active"
+	AccountStatusSuspended = "suspended"
+)
+
 type Account struct {
-	ID        int64     `json:"-"`
-	PublicID  string    `json:"id"`
-	HandlerID string    `json:"handler_id"`
-	Type      string    `json:"type"`
-	Name      string    `json:"name"`
-	Website   string    `json:"website"`
-	Timezone  string    `json:"timezone"`
-	CreatedAt time.Time `json:"created_at"`
+	ID                  int64     `json:"-"`
+	PublicID              string    `json:"id"`
+	HandlerID             string    `json:"handler_id"`
+	Type                  string    `json:"type"`
+	Name                  string    `json:"name"`
+	Website               string    `json:"website"`
+	Timezone              string    `json:"timezone"`
+	OperationalStatus     string    `json:"operational_status"`
+	CreatedAt             time.Time `json:"created_at"`
 }
 
 type User struct {
@@ -82,4 +88,33 @@ type CreateBuyerResult struct {
 	Buyer       BuyerSummary
 	InviteToken string
 	AdminEmail  string
+}
+
+type CreatePublisherParams struct {
+	Name           string
+	Website        string
+	Timezone       string
+	AdminEmail     string
+	AdminFirstName string
+	AdminLastName  string
+}
+
+type CreatePublisherResult struct {
+	Publisher   Account
+	InviteToken string
+	AdminEmail  string
+}
+
+type ListAccountsParams struct {
+	AccountType string
+	Search      string
+	Page        int
+	Limit       int
+}
+
+type AccountListResult struct {
+	Items []Account `json:"items"`
+	Total int       `json:"total"`
+	Page  int       `json:"page"`
+	Limit int       `json:"limit"`
 }

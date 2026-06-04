@@ -11,12 +11,21 @@ import (
 )
 
 type Handler struct {
-	svc         *Service
-	publisherID int64
+	svc *Service
 }
 
-func NewHandler(svc *Service, publisherID int64) *Handler {
-	return &Handler{svc: svc, publisherID: publisherID}
+func NewHandler(svc *Service) *Handler {
+	return &Handler{svc: svc}
+}
+
+func resolvePublisherID(r *http.Request) (int64, bool) {
+	if a := auth.APIKeyAccountFromContext(r.Context()); a != nil && a.AccountType == "publisher" {
+		return a.AccountID, true
+	}
+	if p := auth.FromContext(r.Context()); p != nil && p.AccountType == "publisher" {
+		return p.AccountID, true
+	}
+	return 0, false
 }
 
 // RegisterPublicRoutes mounts the API-key-authenticated ingest endpoints.
@@ -40,10 +49,10 @@ func (h *Handler) RegisterBuyerRoutes(r chi.Router) {
 }
 
 func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
-	acct := auth.APIKeyAccountFromContext(r.Context())
-	publisherID := h.publisherID
-	if acct != nil && acct.AccountType == "publisher" {
-		publisherID = acct.AccountID
+	publisherID, ok := resolvePublisherID(r)
+	if !ok {
+		httpx.Err(w, http.StatusForbidden, httpx.CodeForbidden, "publisher account required")
+		return
 	}
 	var raw map[string]any
 	if !httpx.DecodeJSON(w, r, &raw) {
@@ -58,10 +67,10 @@ func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ingestSource(w http.ResponseWriter, r *http.Request) {
-	acct := auth.APIKeyAccountFromContext(r.Context())
-	publisherID := h.publisherID
-	if acct != nil && acct.AccountType == "publisher" {
-		publisherID = acct.AccountID
+	publisherID, ok := resolvePublisherID(r)
+	if !ok {
+		httpx.Err(w, http.StatusForbidden, httpx.CodeForbidden, "publisher account required")
+		return
 	}
 	slug := chi.URLParam(r, "slug")
 	var raw map[string]any

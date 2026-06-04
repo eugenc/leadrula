@@ -124,11 +124,16 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
         <div
           className={cn(
             "flex items-center gap-2 rounded-md border px-2.5 py-1.5",
-            overdue ? "border-danger-border bg-danger-bg" : "border-gray-100 bg-gray-50"
+            overdue ? "border-danger-border bg-danger-bg" : "border-gray-100 bg-gray-100"
           )}
         >
           {lead.action_at && <ActionDot actionAt={lead.action_at} variant="dot" />}
-          <span className={cn("shrink-0 text-xs", overdue ? "font-semibold text-danger" : "text-gray-700")}>
+          <span
+            className={cn(
+              "shrink-0 text-xs",
+              overdue ? "font-semibold text-danger-fg" : "text-gray-700"
+            )}
+          >
             Action{overdue && " — overdue"}
           </span>
           <Input
@@ -149,7 +154,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
             onClick={() => setTab(t)}
             className={cn(
               "-mb-px border-b-2 px-2.5 py-1.5 text-sm font-semibold capitalize transition-colors",
-              tab === t ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400"
+              tab === t ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400 hover:text-gray-600"
             )}
           >
             {t}
@@ -404,7 +409,7 @@ function RedistributeBox({ lead }: { lead: Lead }) {
     <div className="rounded-md border border-warning-border bg-warning-bg p-2.5">
       <div className="mb-0.5 flex items-center gap-2">
         <Badge variant="returned">Returned</Badge>
-        <span className="text-xs font-semibold text-gray-800">Re-distribute this lead</span>
+        <span className="text-xs font-semibold text-warning-fg">Re-distribute this lead</span>
       </div>
       <p className="text-xs text-gray-400">
         Send this returned lead to another buyer from the Contracts page.

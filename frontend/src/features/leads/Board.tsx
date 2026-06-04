@@ -208,6 +208,17 @@ export function Board() {
   return (
     <div className="flex h-full flex-col">
       <div className="relative z-10 mb-4 flex flex-wrap items-center gap-2 px-8 pt-5">
+        <FilterSelect
+          value={pipelineId ?? ""}
+          onChange={(e) => setPipelineId(Number(e.target.value))}
+          className="w-56"
+        >
+          {pipelines.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </FilterSelect>
         <LeadViewsMenu
           placement="board"
           filters={conditions}
@@ -236,17 +247,6 @@ export function Board() {
         <Button variant="ghost" size="sm" onClick={() => setFiltersExpanded((e) => !e)}>
           {filtersExpanded ? "Hide filters" : "Edit filters"}
         </Button>
-        <FilterSelect
-          value={pipelineId ?? ""}
-          onChange={(e) => setPipelineId(Number(e.target.value))}
-          className="ml-auto w-56"
-        >
-          {pipelines.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </FilterSelect>
       </div>
 
       {filtersExpanded && (

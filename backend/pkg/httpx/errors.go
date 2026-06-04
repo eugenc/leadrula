@@ -26,6 +26,9 @@ func Forbidden(msg string) *AppError    { return NewError(CodeForbidden, msg) }
 func Conflict(msg string) *AppError     { return NewError(CodeConflict, msg) }
 func BusinessRule(msg string) *AppError { return NewError(CodeBusinessRule, msg) }
 func Insufficient(msg string) *AppError { return NewError(CodeInsufficient, msg) }
+func ServiceUnavailable(msg string) *AppError {
+	return NewError(CodeServiceUnavailable, msg)
+}
 
 // WriteError inspects err: if it is an *AppError it uses its code/status,
 // otherwise it returns a generic 500.

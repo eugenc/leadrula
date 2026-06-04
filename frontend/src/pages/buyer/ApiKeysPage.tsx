@@ -26,7 +26,7 @@ export function ApiKeysPage() {
               Copy your key now — it won't be shown again.
             </div>
             <div className="flex items-center gap-2">
-              <code className="flex-1 break-all rounded-md bg-white px-3 py-2 font-mono text-xs">
+              <code className="flex-1 break-all rounded-md bg-surface-card px-3 py-2 font-mono text-xs">
                 {secret}
               </code>
               <Button

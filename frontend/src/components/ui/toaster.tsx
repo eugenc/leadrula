@@ -13,7 +13,7 @@ export function Toaster() {
             "flex min-w-[240px] items-start gap-2 rounded-md px-4 py-2.5 text-sm font-medium text-white shadow-lg",
             t.variant === "success" && "bg-jade-500",
             t.variant === "error" && "bg-danger",
-            t.variant === "default" && "bg-gray-800"
+            t.variant === "default" && "bg-gray-900"
           )}
         >
           <span className="flex-1">{t.message}</span>

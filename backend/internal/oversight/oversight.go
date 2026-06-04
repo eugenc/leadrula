@@ -3,6 +3,7 @@ package oversight
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -52,6 +53,7 @@ func (h *Handler) RegisterBuyerRoutes(r chi.Router) {
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/buyers", h.listBuyers)
 	r.With(auth.RequireRole("admin")).Post("/buyers", h.createBuyer)
+	r.With(auth.RequireRole("admin")).Post("/buyers/{id}/resend-admin-invite", h.resendBuyerAdminInvite)
 	r.With(auth.RequireRole("admin")).Patch("/buyers/{id}", h.updateBuyer)
 	r.Get("/buyers/{id}", h.getBuyer)
 	r.Get("/buyers/{id}/leads", h.buyerLeads)
@@ -147,9 +149,18 @@ func (h *Handler) createBuyer(w http.ResponseWriter, r *http.Request) {
 		AdminLastName:   body.AdminLastName,
 		StartingBalance: body.StartingBalance,
 	})
+	inviteMailFailed := false
 	if err != nil {
-		httpx.WriteError(w, err)
-		return
+		if buyer == nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		var appErr *httpx.AppError
+		if !errors.As(err, &appErr) || appErr.Code != httpx.CodeServiceUnavailable {
+			httpx.WriteError(w, err)
+			return
+		}
+		inviteMailFailed = true
 	}
 	if body.CollaborateEnabled && h.collab != nil {
 		p := auth.FromContext(r.Context())
@@ -164,6 +175,10 @@ func (h *Handler) createBuyer(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, err)
 			return
 		}
+	}
+	if inviteMailFailed {
+		httpx.WriteError(w, err)
+		return
 	}
 	httpx.JSON(w, http.StatusCreated, buyer)
 }
@@ -205,14 +220,50 @@ func (h *Handler) buyerDetail(ctx context.Context, a *accounts.Account) map[stri
 	out := map[string]any{
 		"id": a.ID, "public_id": a.PublicID, "handler_id": a.HandlerID, "name": a.Name, "type": a.Type,
 		"website": a.Website, "timezone": a.Timezone, "balance": bal,
-		"admin_name": "", "admin_email": "",
+		"admin_name": "", "admin_email": "", "admin_status": "none",
 	}
-	admin, err := h.accounts.PrimaryAdminContact(ctx, a.ID)
-	if err == nil && admin != nil {
-		out["admin_name"] = admin.FullName
-		out["admin_email"] = admin.Email
+	st, err := h.accounts.BuyerAdminStatus(ctx, a.ID)
+	if err == nil && st != nil {
+		out["admin_status"] = st.Status
+		if st.InviteID > 0 {
+			out["admin_invite_id"] = st.InviteID
+		}
+		if st.Contact != nil {
+			out["admin_name"] = st.Contact.FullName
+			out["admin_email"] = st.Contact.Email
+		}
 	}
 	return out
+}
+
+func (h *Handler) resendBuyerAdminInvite(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	buyerID := id(r)
+	a, err := h.accounts.GetAccount(r.Context(), buyerID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if a.Type != "buyer" {
+		httpx.WriteError(w, httpx.NotFound("buyer not found"))
+		return
+	}
+	if h.partnerChk != nil {
+		ok, err := h.partnerChk.HasActive(r.Context(), p.AccountID, buyerID)
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		if !ok {
+			httpx.WriteError(w, httpx.NotFound("buyer not found"))
+			return
+		}
+	}
+	if err := h.accountsSvc.ResendBuyerAdminInvite(r.Context(), buyerID); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) buyerLeads(w http.ResponseWriter, r *http.Request) {

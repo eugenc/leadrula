@@ -18,8 +18,15 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-function HandlerIDRow({ handlerId, accountType }: { handlerId: string; accountType: "buyer" | "publisher" }) {
-  const label = accountType === "buyer" ? "Buyer ID" : "Publisher ID";
+function HandlerIDRow({
+  handlerId,
+  accountType,
+}: {
+  handlerId: string;
+  accountType: "buyer" | "publisher" | "platform";
+}) {
+  const label =
+    accountType === "buyer" ? "Buyer ID" : accountType === "platform" ? "Platform ID" : "Publisher ID";
   return (
     <div className="flex items-center justify-between border-b border-gray-100 py-2 last:border-0">
       <div>
@@ -75,9 +82,9 @@ export function SettingsPage() {
             label="Account type"
             value={user?.account_type ? formatRole(user.account_type) : "—"}
           />
-          {isAdmin && handlerId && accountType && (
+          {isAdmin && handlerId && (accountType === "buyer" || accountType === "publisher" || accountType === "platform") ? (
             <HandlerIDRow handlerId={handlerId} accountType={accountType} />
-          )}
+          ) : null}
         </Card>
 
         {isBuyerAdmin && (

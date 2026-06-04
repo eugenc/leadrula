@@ -16,6 +16,7 @@ import {
   useAcceptCollaborationPublisher,
   useRejectCollaborationPublisher,
   useUpdateBuyer,
+  useResendBuyerAdminInvite,
 } from "@/features/admin/hooks";
 import { useAuthStore } from "@/store/authStore";
 import type { CurrentUser } from "@/types";
@@ -23,15 +24,30 @@ import type { CurrentUser } from "@/types";
 function collabBadge(status: string) {
   switch (status) {
     case "active":
-      return { label: "Collaboration active", className: "bg-green-100 text-green-800" };
+      return {
+        label: "Collaboration active",
+        className: "border border-success-border bg-success-bg text-success-fg",
+      };
     case "pending_buyer":
-      return { label: "Awaiting buyer approval", className: "bg-amber-100 text-amber-800" };
+      return {
+        label: "Awaiting buyer approval",
+        className: "border border-warning-border bg-warning-bg text-warning-fg",
+      };
     case "pending_publisher":
-      return { label: "Awaiting publisher approval", className: "bg-amber-100 text-amber-800" };
+      return {
+        label: "Awaiting publisher approval",
+        className: "border border-warning-border bg-warning-bg text-warning-fg",
+      };
     case "revoked":
-      return { label: "Revoked", className: "bg-gray-100 text-gray-600" };
+      return {
+        label: "Revoked",
+        className: "border border-neutral-border bg-neutral-bg text-neutral-fg",
+      };
     default:
-      return { label: "No collaboration", className: "bg-gray-100 text-gray-600" };
+      return {
+        label: "No collaboration",
+        className: "border border-neutral-border bg-neutral-bg text-neutral-fg",
+      };
   }
 }
 
@@ -63,6 +79,7 @@ function DrawerContent({
   const { data: buyer, isLoading } = useBuyer(buyerId);
   const { data: collab } = useBuyerCollaboration(buyerId);
   const update = useUpdateBuyer();
+  const resendAdminInvite = useResendBuyerAdminInvite();
   const requestCollab = useRequestCollaboration();
   const acceptCollab = useAcceptCollaborationPublisher();
   const rejectCollab = useRejectCollaborationPublisher();
@@ -208,7 +225,14 @@ function DrawerContent({
 
         <div className="flex flex-col gap-2.5">
           <div>
-            <div className="mb-2 text-sm font-semibold text-gray-800">Admin</div>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-sm font-semibold text-gray-800">Admin</span>
+              {buyer.admin_status === "invite_pending" && (
+                <span className="rounded-full border border-warning-border bg-warning-bg px-2 py-0.5 text-xs font-medium text-warning-fg">
+                  Invite pending
+                </span>
+              )}
+            </div>
             <div className="space-y-2.5">
               <div>
                 <Label>Name</Label>
@@ -222,6 +246,21 @@ function DrawerContent({
                   {buyer.admin_email || "—"}
                 </div>
               </div>
+              {buyer.admin_status === "invite_pending" && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={resendAdminInvite.isPending}
+                  onClick={() =>
+                    resendAdminInvite.mutate(buyerId, {
+                      onSuccess: () => toast.success(`Invitation resent to ${buyer.admin_email}`),
+                      onError: (e) => toast.error(errorMessage(e)),
+                    })
+                  }
+                >
+                  Resend invitation
+                </Button>
+              )}
             </div>
           </div>
           <div>

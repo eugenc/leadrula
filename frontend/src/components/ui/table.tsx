@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 
 export function Table({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={cn("overflow-hidden rounded-lg border border-gray-100 bg-white", className)}>
+    <div className={cn("overflow-hidden rounded-lg border border-gray-100 bg-surface-card", className)}>
       <table className="w-full border-collapse">{children}</table>
     </div>
   );
@@ -10,7 +10,7 @@ export function Table({ children, className }: { children: React.ReactNode; clas
 
 export function THead({ children }: { children: React.ReactNode }) {
   return (
-    <thead className="h-10 border-b border-gray-100 bg-gray-50 text-left">
+    <thead className="h-10 border-b border-gray-100 bg-gray-100 text-left">
       {children}
     </thead>
   );
@@ -47,7 +47,7 @@ export function TR({
       onClick={onClick}
       className={cn(
         "h-11 border-b border-gray-100 transition-colors last:border-0",
-        onClick && "cursor-pointer hover:bg-jade-50",
+        onClick && "cursor-pointer hover:bg-gray-100",
         className
       )}
     >

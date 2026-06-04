@@ -41,8 +41,16 @@ func (s *Service) GrantOnCreate(ctx context.Context, publisherID, buyerID, reque
 	return tx.Commit(ctx)
 }
 
+func (s *Service) solePartnershipPublisher(ctx context.Context, buyerID int64) (int64, error) {
+	pubID, err := s.repo.SoleActivePartnershipPublisher(ctx, buyerID)
+	if err == ErrNotFound {
+		return 0, httpx.Validation("use /buyer/collaboration/publishers/{publisherId} when multiple publishers are linked")
+	}
+	return pubID, err
+}
+
 func (s *Service) StatusForBuyer(ctx context.Context, buyerID int64) (*StatusResponse, error) {
-	pubID, err := s.repo.PublisherAccountID(ctx)
+	pubID, err := s.solePartnershipPublisher(ctx, buyerID)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +58,7 @@ func (s *Service) StatusForBuyer(ctx context.Context, buyerID int64) (*StatusRes
 }
 
 func (s *Service) PublisherForBuyer(ctx context.Context, buyerID int64) (*BuyerPublisher, error) {
-	pubID, err := s.repo.PublisherAccountID(ctx)
+	pubID, err := s.solePartnershipPublisher(ctx, buyerID)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +186,7 @@ func (s *Service) RequestFromPublisher(ctx context.Context, p *auth.Principal, b
 }
 
 func (s *Service) InvitePublisherUser(ctx context.Context, p *auth.Principal, email string) (*StatusResponse, error) {
-	pubID, err := s.repo.PublisherAccountID(ctx)
+	pubID, err := s.solePartnershipPublisher(ctx, p.AccountID)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +283,7 @@ func (s *Service) Accept(ctx context.Context, p *auth.Principal, publisherID, bu
 }
 
 func (s *Service) AcceptForBuyer(ctx context.Context, p *auth.Principal) (*StatusResponse, error) {
-	pubID, err := s.repo.PublisherAccountID(ctx)
+	pubID, err := s.solePartnershipPublisher(ctx, p.AccountID)
 	if err != nil {
 		return nil, err
 	}
@@ -330,7 +338,7 @@ func (s *Service) Reject(ctx context.Context, p *auth.Principal, publisherID, bu
 }
 
 func (s *Service) RejectForBuyer(ctx context.Context, p *auth.Principal) (*StatusResponse, error) {
-	pubID, err := s.repo.PublisherAccountID(ctx)
+	pubID, err := s.solePartnershipPublisher(ctx, p.AccountID)
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +365,7 @@ func (s *Service) RejectByBuyerPublicID(ctx context.Context, p *auth.Principal, 
 }
 
 func (s *Service) Revoke(ctx context.Context, p *auth.Principal) (*StatusResponse, error) {
-	pubID, err := s.repo.PublisherAccountID(ctx)
+	pubID, err := s.solePartnershipPublisher(ctx, p.AccountID)
 	if err != nil {
 		return nil, err
 	}

@@ -18,7 +18,8 @@ import { FormDrawer } from "@/components/ui/dialog";
 import { cn, formatMoney } from "@/lib/utils";
 import { TIMEZONES } from "@/lib/timezones";
 import { toast } from "@/store/toastStore";
-import { errorMessage } from "@/lib/api";
+import { errorMessage, isInviteEmailError } from "@/lib/api";
+import { queryClient } from "@/lib/queryClient";
 import { Link2, Plus } from "lucide-react";
 import type { Partnership } from "@/types";
 
@@ -239,7 +240,19 @@ export function BuyersPage() {
                         setOpen(false);
                         setForm(emptyForm);
                       },
-                      onError: (e) => toast.error(errorMessage(e)),
+                      onError: (e) => {
+                        if (isInviteEmailError(e)) {
+                          void queryClient.invalidateQueries({ queryKey: ["buyers"] });
+                          void queryClient.invalidateQueries({ queryKey: ["partnerships"] });
+                          toast.error(
+                            "Buyer created, but invitation email failed — open buyer details to resend"
+                          );
+                          setOpen(false);
+                          setForm(emptyForm);
+                          return;
+                        }
+                        toast.error(errorMessage(e));
+                      },
                     }
                   )
                 }
