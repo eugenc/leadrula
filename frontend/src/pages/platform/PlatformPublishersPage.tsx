@@ -5,10 +5,10 @@ import {
   useCreatePublisher,
   usePlatformPublishers,
   useSwitchAccount,
-  useUpdatePublisherStatus,
 } from "@/features/auth/switchHooks";
-import { PlatformAccountStatusCell } from "@/pages/platform/PlatformAccountStatusCell";
-import type { AccountOperationalStatus } from "@/types";
+import { PlatformAccountStatusBadge } from "@/pages/platform/PlatformAccountStatusBadge";
+import { PlatformPublisherDetailDrawer } from "@/pages/platform/PlatformPublisherDetailDrawer";
+import type { PlatformAccount } from "@/types";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
@@ -37,6 +37,7 @@ export function PlatformPublishersPage() {
   const [limit, setLimit] = useState(25);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  const [selectedPublisher, setSelectedPublisher] = useState<PlatformAccount | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -53,7 +54,6 @@ export function PlatformPublishersPage() {
     limit,
   });
   const switchAccount = useSwitchAccount();
-  const updateStatus = useUpdatePublisherStatus();
   const create = useCreatePublisher();
 
   const rows = data?.items ?? [];
@@ -118,22 +118,14 @@ export function PlatformPublishersPage() {
                 {rows.map((p) => {
                   const suspended = p.operational_status === "suspended";
                   return (
-                    <TR key={p.id}>
+                    <TR
+                      key={p.id}
+                      className="cursor-pointer"
+                      onClick={() => setSelectedPublisher(p)}
+                    >
                       <TD className="font-medium text-gray-800">{p.name}</TD>
                       <TD>
-                        <PlatformAccountStatusCell
-                          value={p.operational_status ?? "active"}
-                          disabled={updateStatus.isPending}
-                          onChange={(status: AccountOperationalStatus) =>
-                            updateStatus.mutate(
-                              { id: p.id, operational_status: status },
-                              {
-                                onSuccess: () => toast.success("Status updated"),
-                                onError: (e) => toast.error(errorMessage(e)),
-                              }
-                            )
-                          }
-                        />
+                        <PlatformAccountStatusBadge value={p.operational_status ?? "active"} />
                       </TD>
                       <TD className="font-mono text-xs text-gray-500">{p.handler_id}</TD>
                       <TD>{p.timezone}</TD>
@@ -147,7 +139,10 @@ export function PlatformPublishersPage() {
                             variant="secondary"
                             disabled={switchAccount.isPending || suspended}
                             title={suspended ? "Account suspended" : undefined}
-                            onClick={() => switchAccount.mutate(p.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              switchAccount.mutate(p.id);
+                            }}
                           >
                             <ArrowRightLeft className="h-3.5 w-3.5" /> Open
                           </Button>
@@ -168,6 +163,11 @@ export function PlatformPublishersPage() {
             />
           </>
         )}
+
+        <PlatformPublisherDetailDrawer
+          publisher={selectedPublisher}
+          onClose={() => setSelectedPublisher(null)}
+        />
 
         <FormDrawer
           open={open}

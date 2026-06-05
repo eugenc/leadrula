@@ -371,6 +371,68 @@ func (s *Service) UpdateBuyer(ctx context.Context, id int64, p UpdateBuyerParams
 	return a, nil
 }
 
+func (s *Service) UpdatePublisher(ctx context.Context, publicID string, p UpdatePublisherParams) (*Account, error) {
+	if p.Name != nil {
+		name := strings.TrimSpace(*p.Name)
+		if name == "" {
+			return nil, httpx.Validation("name is required")
+		}
+		p.Name = &name
+	}
+	if p.Timezone != nil {
+		tz := strings.TrimSpace(*p.Timezone)
+		if tz == "" {
+			tz = "America/Toronto"
+		}
+		if _, ok := allowedTimezones[tz]; !ok {
+			return nil, httpx.Validation("invalid timezone")
+		}
+		p.Timezone = &tz
+	}
+
+	a, err := s.repo.UpdatePublisher(ctx, publicID, p)
+	if err != nil {
+		if err == ErrNotFound {
+			return nil, httpx.NotFound("publisher not found")
+		}
+		return nil, err
+	}
+	return a, nil
+}
+
+func (s *Service) UpdateBuyerByPublicID(ctx context.Context, publicID string, p UpdateBuyerParams) (*Account, error) {
+	if p.Name != nil {
+		name := strings.TrimSpace(*p.Name)
+		if name == "" {
+			return nil, httpx.Validation("name is required")
+		}
+		p.Name = &name
+	}
+	if p.Website != nil {
+		website := strings.TrimSpace(*p.Website)
+		p.Website = &website
+	}
+	if p.Timezone != nil {
+		tz := strings.TrimSpace(*p.Timezone)
+		if tz == "" {
+			tz = "America/Toronto"
+		}
+		if _, ok := allowedTimezones[tz]; !ok {
+			return nil, httpx.Validation("invalid timezone")
+		}
+		p.Timezone = &tz
+	}
+
+	a, err := s.repo.UpdateBuyerByPublicID(ctx, publicID, p)
+	if err != nil {
+		if err == ErrNotFound {
+			return nil, httpx.NotFound("buyer not found")
+		}
+		return nil, err
+	}
+	return a, nil
+}
+
 func (s *Service) AcceptInvite(ctx context.Context, token, fullName, password string) (*LoginResult, error) {
 	inv, err := s.repo.FindInviteByToken(ctx, token)
 	if err != nil {

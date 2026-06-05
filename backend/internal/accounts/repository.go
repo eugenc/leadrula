@@ -48,7 +48,7 @@ func (r *Repository) LoadPrincipal(ctx context.Context, userPublicID string) (*a
 		SELECT u.id, u.public_id, u.account_id, a.public_id, a.type, u.role, u.is_active,
 		       a.operational_status
 		FROM users u JOIN accounts a ON a.id = u.account_id
-		WHERE u.public_id = $1`
+		WHERE u.public_id = $1 AND a.deleted_at IS NULL`
 	p := &auth.Principal{}
 	var active bool
 	var opStatus string
@@ -87,7 +87,7 @@ func (r *Repository) FindUserByEmail(ctx context.Context, email string) (*AuthUs
 		       u.email, u.password_hash, u.full_name, u.role, u.is_active,
 		       a.operational_status
 		FROM users u JOIN accounts a ON a.id = u.account_id
-		WHERE u.email = $1`
+		WHERE u.email = $1 AND a.deleted_at IS NULL`
 	u := &AuthUser{}
 	err := r.pool.QueryRow(ctx, q, email).Scan(
 		&u.ID, &u.PublicID, &u.AccountID, &u.AccountPubID, &u.AccountType,
@@ -190,9 +190,44 @@ func (r *Repository) UpdateBuyer(ctx context.Context, id int64, p UpdateBuyerPar
 			name = COALESCE($2, name),
 			website = COALESCE($3, website),
 			timezone = COALESCE($4, timezone)
-		WHERE id = $1 AND type = 'buyer'
+		WHERE id = $1 AND type = 'buyer' AND deleted_at IS NULL
 		RETURNING ` + accountCols
 	return scanAccount(r.pool.QueryRow(ctx, q, id, p.Name, p.Website, p.Timezone))
+}
+
+func (r *Repository) UpdateBuyerByPublicID(ctx context.Context, publicID string, p UpdateBuyerParams) (*Account, error) {
+	const q = `
+		UPDATE accounts SET
+			name = COALESCE($2, name),
+			website = COALESCE($3, website),
+			timezone = COALESCE($4, timezone)
+		WHERE public_id = $1 AND type = 'buyer' AND deleted_at IS NULL
+		RETURNING ` + accountCols
+	return scanAccount(r.pool.QueryRow(ctx, q, publicID, p.Name, p.Website, p.Timezone))
+}
+
+func (r *Repository) UpdatePublisher(ctx context.Context, publicID string, p UpdatePublisherParams) (*Account, error) {
+	const q = `
+		UPDATE accounts SET
+			name = COALESCE($2, name),
+			timezone = COALESCE($3, timezone)
+		WHERE public_id = $1 AND type = 'publisher' AND deleted_at IS NULL
+		RETURNING ` + accountCols
+	return scanAccount(r.pool.QueryRow(ctx, q, publicID, p.Name, p.Timezone))
+}
+
+func (r *Repository) SoftDeleteAccount(ctx context.Context, publicID, accountType string) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE accounts SET deleted_at = now(), updated_at = now()
+		 WHERE public_id = $1 AND type = $2 AND deleted_at IS NULL`,
+		publicID, accountType)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (r *Repository) GetUser(ctx context.Context, id int64) (*User, error) {
@@ -657,7 +692,7 @@ func (r *Repository) ListAccountsPage(ctx context.Context, p ListAccountsParams)
 		limit = 100
 	}
 
-	where := "type = $1"
+	where := "type = $1 AND deleted_at IS NULL"
 	args := []any{p.AccountType}
 	search := strings.TrimSpace(p.Search)
 	if search != "" {
@@ -703,7 +738,7 @@ func (r *Repository) ListAccountsPage(ctx context.Context, p ListAccountsParams)
 
 func (r *Repository) GetAccountByPublicID(ctx context.Context, publicID string) (id int64, accountType, name, operationalStatus string, err error) {
 	err = r.pool.QueryRow(ctx,
-		`SELECT id, type, name, operational_status FROM accounts WHERE public_id = $1`, publicID).
+		`SELECT id, type, name, operational_status FROM accounts WHERE public_id = $1 AND deleted_at IS NULL`, publicID).
 		Scan(&id, &accountType, &name, &operationalStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, "", "", "", ErrNotFound
@@ -713,7 +748,7 @@ func (r *Repository) GetAccountByPublicID(ctx context.Context, publicID string) 
 
 func (r *Repository) SetOperationalStatus(ctx context.Context, publicID, accountType, status string) (*Account, error) {
 	const q = `UPDATE accounts SET operational_status = $3, updated_at = now()
-		WHERE public_id = $1 AND type = $2
+		WHERE public_id = $1 AND type = $2 AND deleted_at IS NULL
 		RETURNING ` + accountCols
 	return scanAccount(r.pool.QueryRow(ctx, q, publicID, accountType, status))
 }

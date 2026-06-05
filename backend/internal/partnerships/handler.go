@@ -23,6 +23,8 @@ func (h *Handler) RegisterPublisherRoutes(r chi.Router) {
 		r.With(auth.RequireRole("admin")).Post("/request", h.requestPublisher)
 		r.With(auth.RequireRole("admin")).Post("/{id}/accept", h.acceptPublisher)
 		r.With(auth.RequireRole("admin")).Post("/{id}/reject", h.rejectPublisher)
+		r.With(auth.RequireRole("admin")).Get("/publishers", h.listPartnerPublishers)
+		r.With(auth.RequireRole("admin")).Post("/publishers/link", h.linkPublisher)
 	})
 }
 
@@ -129,6 +131,34 @@ func (h *Handler) rejectBuyer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]string{"status": "rejected"})
+}
+
+func (h *Handler) listPartnerPublishers(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	items, err := ListPartnerPublishers(r.Context(), h.svc.repo.Pool(), p.AccountID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if items == nil {
+		items = []PartnerPublisher{}
+	}
+	httpx.JSON(w, http.StatusOK, items)
+}
+
+func (h *Handler) linkPublisher(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		PublisherHandlerID string `json:"publisher_handler_id"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	if err := h.svc.RequestPublisherPartnership(r.Context(), p, body.PublisherHandlerID); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func idParam(r *http.Request) int64 {

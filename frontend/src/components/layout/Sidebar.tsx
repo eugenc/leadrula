@@ -65,6 +65,7 @@ const publisherNav: NavGroup[] = [
     label: "Routing",
     items: [
       { to: "/p/sources", label: "Sources", icon: Webhook, adminOnly: true },
+      { to: "/p/webhooks", label: "Webhooks", icon: Webhook, adminOnly: true },
       { to: "/p/routing", label: "Routing", icon: Route, adminOnly: true },
       { to: "/p/log", label: "Log", icon: Logs, adminOnly: true },
     ],
@@ -119,6 +120,7 @@ const buyerSettings: NavGroup = {
     { to: "/b/billing", label: "Billing", icon: CreditCard },
     { to: "/b/users", label: "Users", icon: Users, adminOnly: true },
     { to: "/b/api", label: "API Keys", icon: KeyRound, adminOnly: true },
+    { to: "/b/webhooks", label: "Webhooks", icon: Webhook, adminOnly: true },
     { to: "/b/integrations", label: "Integrations", icon: Plug, adminOnly: true },
   ],
 };

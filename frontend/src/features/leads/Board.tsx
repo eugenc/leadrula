@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  DragDropContext,
-  Droppable,
-  Draggable,
-  type DropResult,
-} from "@hello-pangea/dnd";
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from "@dnd-kit/core";
 import {
   usePipelines,
   useStages,
@@ -13,6 +17,7 @@ import {
   useCustomFields,
 } from "./hooks";
 import { BoardSortPicker } from "./BoardSortPicker";
+import { BoardColumn } from "./BoardColumn";
 import { stageNeedsPrompt } from "@/features/pipelines/stageTypes";
 import { LeadCard } from "./LeadCard";
 import { LeadsColumnPicker } from "./LeadsColumnPicker";
@@ -22,6 +27,7 @@ import { LeadViewsMenu } from "./LeadViewsMenu";
 import {
   useSavedLeadViews,
   useActiveViewId,
+  useBoardCardFields,
   mergeViews,
   getViewById,
   viewStateEqual,
@@ -34,10 +40,27 @@ import { Spinner, EmptyState } from "@/components/ui/misc";
 import { useUIStore } from "@/store/uiStore";
 import { apiError, errorMessage } from "@/lib/api";
 import { toast } from "@/store/toastStore";
-import { cn } from "@/lib/utils";
-import { stageColorDot, stageColorLine } from "@/features/pipelines/stageColors";
-import { SYSTEM_COLUMNS, boardCardFields, DEFAULT_BOARD_CARD_FIELDS, PIPELINE_COLUMNS } from "./leadsListColumns";
+import {
+  SYSTEM_COLUMNS,
+  boardCardFields,
+  DEFAULT_BOARD_CARD_FIELDS,
+  normalizeBoardCardFields,
+  resolveBoardCardFields,
+  PIPELINE_COLUMNS,
+} from "./leadsListColumns";
 import type { Lead, Stage } from "@/types";
+
+function resolveDropStage(over: DragEndEvent["over"]): number | null {
+  if (!over) return null;
+  const stageId = over.data.current?.stageId;
+  if (stageId != null) return Number(stageId);
+  const n = Number(over.id);
+  return Number.isFinite(n) ? n : null;
+}
+
+function estimateRowHeight(cardFieldCount: number): number {
+  return 88 + Math.max(0, cardFieldCount - 1) * 22;
+}
 
 export function Board() {
   const { data: pipelines, isLoading: plLoading } = usePipelines();
@@ -49,8 +72,10 @@ export function Board() {
   const { data: apiViews, isLoading: viewsLoading } = useSavedLeadViews("board");
   const views = useMemo(() => mergeViews(apiViews, "board"), [apiViews]);
   const { activeId, isLoading: activeLoading } = useActiveViewId("board");
+  const { savedCardFields, saveCardFields, isLoading: cardFieldsLoading } = useBoardCardFields();
   const activeView = getViewById(views, activeId);
   const viewApplied = useRef(false);
+  const cardFieldsHydrated = useRef(false);
 
   const [conditions, setConditions] = useState<FilterCondition[]>([]);
   const [cardFields, setCardFields] = useState<string[]>(DEFAULT_BOARD_CARD_FIELDS);
@@ -59,18 +84,55 @@ export function Board() {
   const [colsOpen, setColsOpen] = useState(false);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
 
-  const applyView = useCallback((view: SavedLeadView) => {
-    setConditions([...view.filters]);
-    setCardFields(boardCardFields(view.columns));
-    setSort(view.sort ?? "created_at");
-    setSortDir(view.sort_dir ?? "desc");
-  }, []);
+  const { data: customFields } = useCustomFields();
+
+  const allColumnIds = useMemo(() => {
+    const custom = (customFields ?? [])
+      .filter((f) => f.is_active)
+      .map((f) => `custom_${f.id}`);
+    return [
+      ...SYSTEM_COLUMNS.map((c) => c.id),
+      ...PIPELINE_COLUMNS.filter((c) => c.id !== "position").map((c) => c.id),
+      ...custom,
+    ];
+  }, [customFields]);
+
+  const updateCardFields = useCallback(
+    (cols: string[]) => {
+      const normalized = normalizeBoardCardFields(cols, allColumnIds);
+      setCardFields(normalized);
+      saveCardFields(normalized);
+    },
+    [allColumnIds, saveCardFields]
+  );
+
+  const applyView = useCallback(
+    (view: SavedLeadView, resetCardFields = false) => {
+      setConditions([...view.filters]);
+      setSort(view.sort ?? "created_at");
+      setSortDir(view.sort_dir ?? "desc");
+      if (resetCardFields) {
+        updateCardFields(boardCardFields(view.columns));
+      }
+    },
+    [updateCardFields]
+  );
 
   useEffect(() => {
     if (viewsLoading || activeLoading || viewApplied.current) return;
     applyView(activeView);
     viewApplied.current = true;
   }, [viewsLoading, activeLoading, activeView, applyView]);
+
+  useEffect(() => {
+    if (cardFieldsLoading || cardFieldsHydrated.current) return;
+    setCardFields(
+      savedCardFields
+        ? normalizeBoardCardFields(savedCardFields, allColumnIds)
+        : resolveBoardCardFields(undefined)
+    );
+    cardFieldsHydrated.current = true;
+  }, [cardFieldsLoading, savedCardFields, allColumnIds]);
 
   const viewChanged = !viewStateEqual(activeView, {
     filters: conditions,
@@ -93,22 +155,11 @@ export function Board() {
 
   const { data: stages } = useStages(pipelineId);
   const { data: leads, isLoading, isError, error } = useLeads(leadFilters);
-  const { data: customFields } = useCustomFields();
   const changeStage = useChangeStage();
   const openDetail = useUIStore((s) => s.openDetail);
 
-  const allColumnIds = useMemo(() => {
-    const custom = (customFields ?? [])
-      .filter((f) => f.is_active)
-      .map((f) => `custom_${f.id}`);
-    return [
-      ...SYSTEM_COLUMNS.map((c) => c.id),
-      ...PIPELINE_COLUMNS.filter((c) => c.id !== "position").map((c) => c.id),
-      ...custom,
-    ];
-  }, [customFields]);
-
   const activeCardFields = cardFields.filter((id) => allColumnIds.includes(id));
+  const rowHeight = estimateRowHeight(activeCardFields.filter((id) => id !== "name").length);
 
   const [board, setBoard] = useState<Record<number, Lead[]>>({});
   useEffect(() => {
@@ -124,10 +175,15 @@ export function Board() {
   const leadItems = leads?.items ?? [];
 
   const [prompt, setPrompt] = useState<{ leadId: number; stage: Stage } | null>(null);
+  const [activeDrag, setActiveDrag] = useState<Lead | null>(null);
 
   const stageList = useMemo(
     () => [...(stages ?? [])].sort((a, b) => a.position - b.position),
     [stages]
+  );
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
 
   function revert() {
@@ -142,14 +198,15 @@ export function Board() {
 
   function moveLocal(leadId: number, fromStage: number, toStage: number) {
     setBoard((prev) => {
-      const next: Record<number, Lead[]> = {};
-      for (const [k, v] of Object.entries(prev)) next[Number(k)] = [...v];
-      const fromArr = next[fromStage] ?? [];
+      const fromArr = prev[fromStage] ?? [];
       const idx = fromArr.findIndex((l) => l.id === leadId);
       if (idx === -1) return prev;
-      const [lead] = fromArr.splice(idx, 1);
-      (next[toStage] ??= []).unshift({ ...lead, stage_id: toStage });
-      return next;
+      const lead = fromArr[idx];
+      return {
+        ...prev,
+        [fromStage]: [...fromArr.slice(0, idx), ...fromArr.slice(idx + 1)],
+        [toStage]: [{ ...lead, stage_id: toStage }, ...(prev[toStage] ?? [])],
+      };
     });
   }
 
@@ -170,13 +227,21 @@ export function Board() {
     );
   }
 
-  function onDragEnd(result: DropResult) {
-    const { source, destination, draggableId } = result;
-    if (!destination) return;
-    const fromStage = Number(source.droppableId);
-    const toStage = Number(destination.droppableId);
-    if (fromStage === toStage) return;
-    const leadId = Number(draggableId);
+  function onDragStart(event: DragStartEvent) {
+    const lead = event.active.data.current?.lead as Lead | undefined;
+    if (lead) setActiveDrag(lead);
+  }
+
+  function onDragEnd(event: DragEndEvent) {
+    setActiveDrag(null);
+    const { active, over } = event;
+    if (!over) return;
+
+    const fromStage = Number(active.data.current?.stageId);
+    const toStage = resolveDropStage(over);
+    if (!fromStage || !toStage || fromStage === toStage) return;
+
+    const leadId = Number(active.id);
     const stage = stageList.find((s) => s.id === toStage);
     if (!stage) return;
 
@@ -189,7 +254,9 @@ export function Board() {
     commit(leadId, stage);
   }
 
-  if (plLoading || isLoading || viewsLoading || activeLoading) {
+  const customFieldsList = customFields ?? [];
+
+  if (plLoading || isLoading || viewsLoading || activeLoading || cardFieldsLoading) {
     return (
       <div className="flex justify-center py-16">
         <Spinner className="h-6 w-6" />
@@ -206,8 +273,8 @@ export function Board() {
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="relative z-10 mb-4 flex flex-wrap items-center gap-2 px-8 pt-5">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="relative z-10 mb-4 flex shrink-0 flex-wrap items-center gap-2 px-8 pt-5">
         <FilterSelect
           value={pipelineId ?? ""}
           onChange={(e) => setPipelineId(Number(e.target.value))}
@@ -226,12 +293,12 @@ export function Board() {
           sort={sort}
           sortDir={sortDir}
           onFiltersChange={setConditions}
-          onViewApply={applyView}
+          onViewApply={(view) => applyView(view, true)}
         />
         <BoardSortPicker
           sort={sort}
           sortDir={sortDir}
-          customFields={customFields ?? []}
+          customFields={customFieldsList}
           onSortChange={setSort}
           onSortDirChange={setSortDir}
         />
@@ -240,8 +307,8 @@ export function Board() {
           onOpenChange={setColsOpen}
           visibleCols={activeCardFields}
           allColumnIds={allColumnIds}
-          customFields={customFields ?? []}
-          onChange={setCardFields}
+          customFields={customFieldsList}
+          onChange={updateCardFields}
           label="Card fields"
         />
         <Button variant="ghost" size="sm" onClick={() => setFiltersExpanded((e) => !e)}>
@@ -250,65 +317,44 @@ export function Board() {
       </div>
 
       {filtersExpanded && (
-        <div className="relative z-10 mx-8 mb-4 rounded-lg border border-gray-100 bg-gray-50/50 p-4">
+        <div className="relative z-10 mx-8 mb-4 shrink-0 rounded-lg border border-gray-100 bg-gray-50/50 p-4">
           <LeadFilterBuilder conditions={conditions} onChange={setConditions} />
         </div>
       )}
 
-      <DragDropContext onDragEnd={onDragEnd}>
-        <div className="relative z-0 flex flex-1 gap-3 overflow-x-auto px-8 pb-8">
-          {stageList.map((stage) => {
-            const items = board[stage.id] ?? [];
-            return (
-              <Droppable droppableId={String(stage.id)} key={stage.id}>
-                {(provided, snapshot) => (
-                  <div
-                    ref={provided.innerRef}
-                    {...provided.droppableProps}
-                    className={cn(
-                      "flex w-[280px] shrink-0 flex-col rounded-lg bg-gray-50",
-                      snapshot.isDraggingOver && "ring-2 ring-jade-400/40"
-                    )}
-                  >
-                    <div className="flex items-center gap-2 border-b border-gray-100 px-3.5 py-2.5">
-                      <span className={cn("h-2 w-2 shrink-0 rounded-full", stageColorDot(stage.color))} />
-                      <span className="flex-1 text-base font-semibold text-gray-700">
-                        {stage.name}
-                      </span>
-                      <span className="text-xs text-gray-400">{items.length}</span>
-                    </div>
-                    <div className="relative flex flex-1 flex-col gap-2 p-2 pl-3">
-                      <span
-                        aria-hidden
-                        className={cn(
-                          "pointer-events-none absolute bottom-0 left-0 top-0 w-px",
-                          stageColorLine(stage.color)
-                        )}
-                      />
-                      {items.map((lead, i) => (
-                        <Draggable draggableId={String(lead.id)} index={i} key={lead.id}>
-                          {(p, snap) => (
-                            <div ref={p.innerRef} {...p.draggableProps} {...p.dragHandleProps}>
-                              <LeadCard
-                                lead={lead}
-                                customFields={customFields ?? []}
-                                cardFields={activeCardFields}
-                                onClick={() => openDetail(lead.id)}
-                                dragging={snap.isDragging}
-                              />
-                            </div>
-                          )}
-                        </Draggable>
-                      ))}
-                      {provided.placeholder}
-                    </div>
-                  </div>
-                )}
-              </Droppable>
-            );
-          })}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+        onDragCancel={() => setActiveDrag(null)}
+      >
+        <div className="relative z-0 flex h-full min-h-0 flex-1 gap-3 overflow-x-auto px-8 pb-8">
+          {stageList.map((stage) => (
+            <BoardColumn
+              key={stage.id}
+              stage={stage}
+              items={board[stage.id] ?? []}
+              customFields={customFieldsList}
+              cardFields={activeCardFields}
+              rowHeight={rowHeight}
+              onCardClick={openDetail}
+              activeDragId={activeDrag ? String(activeDrag.id) : null}
+            />
+          ))}
         </div>
-      </DragDropContext>
+        <DragOverlay dropAnimation={null}>
+          {activeDrag ? (
+            <LeadCard
+              lead={activeDrag}
+              customFields={customFieldsList}
+              cardFields={activeCardFields}
+              onClick={() => {}}
+              dragging
+            />
+          ) : null}
+        </DragOverlay>
+      </DndContext>
 
       <StagePromptModal
         open={!!prompt}

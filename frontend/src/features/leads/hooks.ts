@@ -107,9 +107,15 @@ export function useChangeStage() {
   return useMutation({
     mutationFn: ({ leadId, payload }: { leadId: number; payload: StageChangePayload }) =>
       patch<Lead>(`${ns()}/leads/${leadId}/stage`, payload),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["leads"] });
-      qc.invalidateQueries({ queryKey: ["lead"] });
+    onSuccess: (updated, { leadId }) => {
+      qc.setQueriesData<LeadListResponse>({ queryKey: ["leads"] }, (old) => {
+        if (!old?.items) return old;
+        return {
+          ...old,
+          items: old.items.map((l) => (l.id === leadId ? { ...l, ...updated } : l)),
+        };
+      });
+      qc.setQueryData(["lead", leadId], updated);
     },
   });
 }

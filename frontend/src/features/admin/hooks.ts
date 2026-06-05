@@ -20,6 +20,8 @@ import type {
   RouteFieldMapEntry,
   RouteFieldMapOptions,
   Contract,
+  ContractCompensation,
+  ContractLeadCriteria,
   Dispute,
   FieldMapEntry,
   SourceSamplePayload,
@@ -269,10 +271,11 @@ export function useUploadUserAvatar() {
 
 // ── Contracts (publisher) ─────────────────────────────────────────
 export function useContracts(enabled = true) {
+  const accountId = useAuthStore((s) => s.user?.account_id);
   return useQuery({
-    queryKey: ["contracts"],
+    queryKey: ["contracts", accountId],
     queryFn: () => get<Contract[]>(`/publisher/contracts`),
-    enabled,
+    enabled: enabled && !!accountId,
   });
 }
 export function useCreateContract() {
@@ -290,6 +293,84 @@ export function useUpdateContract() {
 export function useDeleteContract() {
   const inv = useInvalidate(["contracts"]);
   return useMutation({ mutationFn: (id: number) => del(`/publisher/contracts/${id}`), onSuccess: inv });
+}
+
+export function useContractCompensations(contractId: number | null, buyer = false) {
+  const path = buyer
+    ? `/buyer/contracts/${contractId}/compensations`
+    : `/publisher/contracts/${contractId}/compensations`;
+  return useQuery({
+    queryKey: ["contract-compensations", contractId, buyer],
+    queryFn: () => get<ContractCompensation[]>(path),
+    enabled: !!contractId,
+  });
+}
+
+export function useAddContractCompensation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ contractId, body }: { contractId: number; body: Record<string, unknown> }) =>
+      post(`/publisher/contracts/${contractId}/compensations`, body),
+    onSuccess: (_, v) => {
+      qc.invalidateQueries({ queryKey: ["contract-compensations", v.contractId] });
+      qc.invalidateQueries({ queryKey: ["contracts"] });
+    },
+  });
+}
+
+export function useUpdateContractCompensation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      contractId,
+      compId,
+      body,
+    }: {
+      contractId: number;
+      compId: number;
+      body: Record<string, unknown>;
+    }) => patch(`/publisher/contracts/${contractId}/compensations/${compId}`, body),
+    onSuccess: (_, v) => {
+      qc.invalidateQueries({ queryKey: ["contract-compensations", v.contractId] });
+      qc.invalidateQueries({ queryKey: ["contracts"] });
+    },
+  });
+}
+
+export function useDeleteContractCompensation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ contractId, compId }: { contractId: number; compId: number }) =>
+      del(`/publisher/contracts/${contractId}/compensations/${compId}`),
+    onSuccess: (_, v) => {
+      qc.invalidateQueries({ queryKey: ["contract-compensations", v.contractId] });
+      qc.invalidateQueries({ queryKey: ["contracts"] });
+    },
+  });
+}
+
+export function useContractLeadCriteria(contractId: number | null) {
+  return useQuery({
+    queryKey: ["contract-lead-criteria", contractId],
+    queryFn: () => get<ContractLeadCriteria>(`/publisher/contracts/${contractId}/lead-criteria`),
+    enabled: !!contractId,
+  });
+}
+
+export function useSaveContractLeadCriteria() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ contractId, body }: { contractId: number; body: ContractLeadCriteria }) =>
+      patch(`/publisher/contracts/${contractId}/lead-criteria`, body),
+    onSuccess: (_, v) => qc.invalidateQueries({ queryKey: ["contract-lead-criteria", v.contractId] }),
+  });
+}
+
+export function useLinkPublisherPartnership() {
+  return useMutation({
+    mutationFn: (publisher_handler_id: string) =>
+      post(`/publisher/partnerships/publishers/link`, { publisher_handler_id }),
+  });
 }
 export function useReturnRules(contractId: number | null, buyer = false) {
   const path = buyer
@@ -359,9 +440,11 @@ export function useDeleteReturnRule(buyer = false) {
 }
 
 export function useBuyerContracts() {
+  const accountId = useAuthStore((s) => s.user?.account_id);
   return useQuery({
-    queryKey: ["buyer-contracts"],
+    queryKey: ["buyer-contracts", accountId],
     queryFn: () => get<Contract[]>(`/buyer/contracts`),
+    enabled: !!accountId,
   });
 }
 
@@ -709,6 +792,13 @@ export function useBuyerBilling(buyerId: number | null) {
 // ── Publishers (buyer oversight) ──────────────────────────────────
 export function usePublishers() {
   return useQuery({ queryKey: ["publishers"], queryFn: () => get<PublisherSummary[]>("/buyer/publishers") });
+}
+
+export function usePartnerPublishers() {
+  return useQuery({
+    queryKey: ["partner-publishers"],
+    queryFn: () => get<PublisherSummary[]>(`/publisher/partnerships/publishers`),
+  });
 }
 export function usePublisher(publisherId: number | null) {
   return useQuery({

@@ -56,6 +56,7 @@ type CreateLeadInput struct {
 	State          string                     `json:"state"`
 	Zip            string                     `json:"zip"`
 	Source         string                     `json:"source"`
+	ExternalID     string                     `json:"external_id"`
 	CampaignName   string                     `json:"campaign_name"` // deprecated: use source
 	PipelineID     int64                      `json:"pipeline_id"`
 	StageID        int64                      `json:"stage_id"`
@@ -320,6 +321,9 @@ func (s *Service) insertLead(ctx context.Context, p *auth.Principal, in CreateLe
 	if source != "" {
 		builtins["source"] = source
 	}
+	if ext := strings.TrimSpace(in.ExternalID); ext != "" {
+		builtins["external_id"] = ext
+	}
 	for field, val := range builtins {
 		if val == "" {
 			continue
@@ -363,6 +367,17 @@ func (s *Service) insertLead(ctx context.Context, p *auth.Principal, in CreateLe
 
 	if err := tx.Commit(ctx); err != nil {
 		return 0, err
+	}
+	// Fire outbound webhook trigger for lead creation (best-effort, post-commit).
+	if s.webhooks != nil {
+		lead, err := s.repo.GetByID(ctx, s.repo.Pool(), leadID)
+		if err == nil {
+			_ = LoadCustomValues(ctx, s.repo.Pool(), lead)
+			s.fireOutbound(ctx, p.AccountID, "lead.create", lead, PipelineContext{
+				PipelineID: lead.PipelineID,
+				StageID:    lead.StageID,
+			})
+		}
 	}
 	return leadID, nil
 }

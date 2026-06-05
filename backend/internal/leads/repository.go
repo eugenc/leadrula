@@ -27,17 +27,20 @@ func (r *Repository) Pool() *pgxpool.Pool { return r.pool }
 var builtinFields = map[string]bool{
 	"first_name": true, "last_name": true, "phone": true, "email": true,
 	"address": true, "city": true, "state": true, "zip": true, "source": true,
+	"external_id": true,
 }
 
 const leadCols = `id, public_id, owner_account_id, publisher_id, contract_id,
-	first_name, last_name, phone, email, address, city, state, zip, source,
+	first_name, last_name, phone, email, address, city, state, zip, source, external_id,
 	pipeline_id, stage_id, position, assigned_user_id, action_at, status,
 	disqualification_reason_id, created_at, updated_at, tags`
+
+const leadNotDeleted = `deleted_at IS NULL`
 
 func scanLead(row pgx.Row) (*Lead, error) {
 	l := &Lead{}
 	err := row.Scan(&l.ID, &l.PublicID, &l.OwnerAccountID, &l.PublisherID, &l.ContractID,
-		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.Source,
+		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.Source, &l.ExternalID,
 		&l.PipelineID, &l.StageID, &l.Position, &l.AssignedUserID, &l.ActionAt, &l.Status,
 		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt, &l.Tags)
 	if err != nil {
@@ -114,13 +117,13 @@ func (r *Repository) SetStatus(ctx context.Context, q database.Querier, leadID i
 
 // GetByID loads a lead (no visibility check).
 func (r *Repository) GetByID(ctx context.Context, q database.Querier, leadID int64) (*Lead, error) {
-	return scanLead(q.QueryRow(ctx, `SELECT `+leadCols+` FROM leads WHERE id=$1`, leadID))
+	return scanLead(q.QueryRow(ctx, `SELECT `+leadCols+` FROM leads WHERE id=$1 AND `+leadNotDeleted, leadID))
 }
 
 // Get loads a lead enforcing account ownership + role visibility, with custom values.
 func (r *Repository) Get(ctx context.Context, p *auth.Principal, leadID int64) (*Lead, error) {
 	l, err := scanLead(r.pool.QueryRow(ctx,
-		`SELECT `+leadCols+` FROM leads WHERE id=$1 AND owner_account_id=$2`, leadID, p.AccountID))
+		`SELECT `+leadCols+` FROM leads WHERE id=$1 AND owner_account_id=$2 AND `+leadNotDeleted, leadID, p.AccountID))
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +231,7 @@ const listFrom = ` FROM leads l
 	LEFT JOIN pipeline_stages st ON st.id = l.stage_id`
 
 const listSelect = `l.id, l.public_id, l.owner_account_id, l.publisher_id, l.contract_id,
-	l.first_name, l.last_name, l.phone, l.email, l.address, l.city, l.state, l.zip, l.source,
+	l.first_name, l.last_name, l.phone, l.email, l.address, l.city, l.state, l.zip, l.source, l.external_id,
 	l.pipeline_id, l.stage_id, l.position, l.assigned_user_id, l.action_at, l.status,
 	l.disqualification_reason_id, l.created_at, l.updated_at, l.tags,
 	CASE WHEN ba.type = 'buyer' THEN ba.name ELSE NULL END AS buyer_name,
@@ -246,7 +249,7 @@ const listSelect = `l.id, l.public_id, l.owner_account_id, l.publisher_id, l.con
 func scanListLead(row pgx.Row) (*Lead, error) {
 	l := &Lead{}
 	err := row.Scan(&l.ID, &l.PublicID, &l.OwnerAccountID, &l.PublisherID, &l.ContractID,
-		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.Source,
+		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.Source, &l.ExternalID,
 		&l.PipelineID, &l.StageID, &l.Position, &l.AssignedUserID, &l.ActionAt, &l.Status,
 		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt, &l.Tags, &l.BuyerName, &l.AssigneeName, &l.AssigneeAvatarURL,
 		&l.PipelineName, &l.StageName, &l.StageEnteredAt)
@@ -261,7 +264,7 @@ func scanListLead(row pgx.Row) (*Lead, error) {
 
 func (r *Repository) listWhere(p *auth.Principal, f ListFilters) (string, []any) {
 	args := []any{p.AccountID}
-	where := "l.owner_account_id = $1"
+	where := "l.owner_account_id = $1 AND l.deleted_at IS NULL"
 	add := func(cond string, val any) {
 		args = append(args, val)
 		where += fmt.Sprintf(" AND %s $%d", cond, len(args))
@@ -442,7 +445,7 @@ func (r *Repository) List(ctx context.Context, p *auth.Principal, o ListOptions)
 
 // ListByAccount returns all leads for an account (publisher oversight; no role filter).
 func (r *Repository) ListByAccount(ctx context.Context, accountID int64) ([]Lead, error) {
-	rows, err := r.pool.Query(ctx, `SELECT `+leadCols+` FROM leads WHERE owner_account_id=$1 ORDER BY stage_id, position, id`, accountID)
+	rows, err := r.pool.Query(ctx, `SELECT `+leadCols+` FROM leads WHERE owner_account_id=$1 AND `+leadNotDeleted+` ORDER BY stage_id, position, id`, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -553,7 +556,7 @@ func (r *Repository) setTags(ctx context.Context, q database.Querier, accountID,
 func (r *Repository) ListTagSuggestions(ctx context.Context, accountID int64) ([]string, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT DISTINCT t FROM leads, unnest(tags) AS t
-		 WHERE owner_account_id = $1 ORDER BY t`, accountID)
+		 WHERE owner_account_id = $1 AND `+leadNotDeleted+` ORDER BY t`, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -708,6 +711,40 @@ func (r *Repository) AddFollower(ctx context.Context, leadID, userID int64) erro
 func (r *Repository) RemoveFollower(ctx context.Context, leadID, userID int64) error {
 	_, err := r.pool.Exec(ctx, `DELETE FROM lead_followers WHERE lead_id=$1 AND user_id=$2`, leadID, userID)
 	return err
+}
+
+// GetByExternalID finds an active lead by provider external_id.
+func (r *Repository) GetByExternalID(ctx context.Context, q database.Querier, accountID int64, externalID string) (*Lead, error) {
+	return scanLead(q.QueryRow(ctx,
+		`SELECT `+leadCols+` FROM leads WHERE owner_account_id=$1 AND external_id=$2 AND `+leadNotDeleted,
+		accountID, externalID))
+}
+
+// GetByPublicID finds an active lead by public_id UUID string.
+func (r *Repository) GetByPublicID(ctx context.Context, q database.Querier, accountID int64, publicID string) (*Lead, error) {
+	return scanLead(q.QueryRow(ctx,
+		`SELECT `+leadCols+` FROM leads WHERE owner_account_id=$1 AND public_id=$2 AND `+leadNotDeleted,
+		accountID, publicID))
+}
+
+// SetExternalID sets the provider external_id on a lead.
+func (r *Repository) SetExternalID(ctx context.Context, q database.Querier, leadID int64, externalID string) error {
+	_, err := q.Exec(ctx, `UPDATE leads SET external_id=$2 WHERE id=$1`, leadID, externalID)
+	return err
+}
+
+// SoftDelete marks leads as deleted without removing rows.
+func (r *Repository) SoftDelete(ctx context.Context, q database.Querier, accountID int64, leadID int64) error {
+	ct, err := q.Exec(ctx,
+		`UPDATE leads SET deleted_at=now() WHERE owner_account_id=$1 AND id=$2 AND `+leadNotDeleted,
+		accountID, leadID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return httpx.NotFound("lead not found")
+	}
+	return nil
 }
 
 // Delete removes leads owned by the account.

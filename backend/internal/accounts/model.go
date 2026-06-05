@@ -74,6 +74,11 @@ type UpdateBuyerParams struct {
 	Timezone *string
 }
 
+type UpdatePublisherParams struct {
+	Name     *string
+	Timezone *string
+}
+
 type CreateBuyerParams struct {
 	Name            string
 	Website         string

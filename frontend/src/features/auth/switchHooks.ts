@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { get, patch, post } from "@/lib/api";
+import { del, get, patch, post } from "@/lib/api";
 import { homePath } from "@/lib/homePath";
 import { useAuthStore, userFromMe } from "@/store/authStore";
 import type {
@@ -127,11 +127,20 @@ export function useCreatePublisher() {
   });
 }
 
-export function useUpdatePublisherStatus() {
+export function useUpdatePublisher() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, operational_status }: { id: string; operational_status: AccountOperationalStatus }) =>
-      patch<PlatformAccount>(`/platform/publishers/${id}`, { operational_status }),
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: string;
+      body: {
+        name?: string;
+        timezone?: string;
+        operational_status?: AccountOperationalStatus;
+      };
+    }) => patch<PlatformAccount>(`/platform/publishers/${id}`, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["platform", "publishers"] });
       qc.invalidateQueries({ queryKey: ["switchable"] });
@@ -139,11 +148,43 @@ export function useUpdatePublisherStatus() {
   });
 }
 
-export function useUpdateBuyerStatus() {
+export function useUpdatePlatformBuyer() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, operational_status }: { id: string; operational_status: AccountOperationalStatus }) =>
-      patch<PlatformAccount>(`/platform/buyers/${id}`, { operational_status }),
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: string;
+      body: {
+        name?: string;
+        website?: string;
+        timezone?: string;
+        operational_status?: AccountOperationalStatus;
+      };
+    }) => patch<PlatformAccount>(`/platform/buyers/${id}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["platform", "buyers"] });
+      qc.invalidateQueries({ queryKey: ["switchable"] });
+    },
+  });
+}
+
+export function useRemovePlatformPublisher() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => del<{ ok: boolean }>(`/platform/publishers/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["platform", "publishers"] });
+      qc.invalidateQueries({ queryKey: ["switchable"] });
+    },
+  });
+}
+
+export function useRemovePlatformBuyer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => del<{ ok: boolean }>(`/platform/buyers/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["platform", "buyers"] });
       qc.invalidateQueries({ queryKey: ["switchable"] });

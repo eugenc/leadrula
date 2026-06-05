@@ -73,7 +73,33 @@ export const DEFAULT_VISIBLE_COLUMNS = [
   "created_at",
 ];
 
-export const DEFAULT_BOARD_CARD_FIELDS = ["action_at", "phone", "tags"];
+export const DEFAULT_BOARD_CARD_FIELDS = [
+  "name",
+  "assignee",
+  "action_at",
+  "status",
+  "phone",
+  "email",
+  "source",
+];
+
+export const BOARD_CARD_FIELDS_PREF_KEY = "board_card_fields";
+
+export function parseBoardCardFields(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const cols = raw.filter((c): c is string => typeof c === "string" && c.length > 0);
+  return cols.length ? cols : null;
+}
+
+export function resolveBoardCardFields(prefs: Record<string, unknown> | undefined): string[] {
+  const saved = parseBoardCardFields(prefs?.[BOARD_CARD_FIELDS_PREF_KEY]);
+  return saved ?? [...DEFAULT_BOARD_CARD_FIELDS];
+}
+
+export function normalizeBoardCardFields(cols: string[], validIds: string[]): string[] {
+  const filtered = cols.filter((id) => validIds.includes(id));
+  return filtered.length ? filtered : [...DEFAULT_BOARD_CARD_FIELDS];
+}
 
 export function boardCardFields(columns?: string[]): string[] {
   const filtered = (columns ?? []).filter((c) => c !== "name");

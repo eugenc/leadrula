@@ -30,6 +30,7 @@ import (
 	"github.com/echayko/leadrula/backend/internal/pipelines"
 	"github.com/echayko/leadrula/backend/internal/routing"
 	stripeClient "github.com/echayko/leadrula/backend/internal/stripe"
+	"github.com/echayko/leadrula/backend/internal/webhooks"
 	"github.com/echayko/leadrula/backend/internal/storage"
 	mw "github.com/echayko/leadrula/backend/pkg/middleware"
 	"github.com/go-chi/chi/v5"
@@ -94,7 +95,9 @@ func main() {
 
 	var integrationsSvc *integrations.Service
 	var integrationsEnq leads.IntegrationEnqueuer
-	if encKey, err := hex.DecodeString(cfg.IntegrationEncKey); err == nil && len(encKey) == 32 {
+	var encKey []byte
+	if k, err := hex.DecodeString(cfg.IntegrationEncKey); err == nil && len(k) == 32 {
+		encKey = k
 		oauthCfg := integrations.OAuthConfig{
 			RedirectBase:       cfg.IntegrationOAuthRedirectBase,
 			PipedriveClientID:  cfg.PipedriveClientID,
@@ -126,6 +129,10 @@ func main() {
 	intakeSvc := intake.NewService(pool, leadsRepo, notifSvc, accountsRepo, integrationsEnq)
 	intakeH := intake.NewHandler(intakeSvc)
 
+	webhooksSvc := webhooks.NewService(pool, leadsRepo, leadsSvc, encKey, integrationsSvc)
+	webhooksH := webhooks.NewHandler(webhooksSvc)
+	leadsSvc.SetWebhookFirer(webhooksSvc)
+
 	oversightH := oversight.NewHandler(accountsRepo, accountsSvc, leadsRepo, pipelinesSvc, billingSvc, calSvc, collabSvc, partnersSvc, partnersSvc)
 
 	// ── router ───────────────────────────────────────────────────
@@ -139,6 +146,9 @@ func main() {
 		pub.Use(apikeysSvc.RequireAPIKey)
 		intakeH.RegisterPublicRoutes(pub)
 	})
+
+	// inbound webhooks (per-webhook secret auth)
+	webhooksH.RegisterPublicRoutes(r)
 
 	// public auth
 	accountsH.RegisterAuthRoutes(r)
@@ -183,6 +193,7 @@ func main() {
 		if integrationsSvc != nil {
 			integrations.NewHandler(integrationsSvc, "publisher", cfg.AppBaseURL).RegisterRoutes(p)
 		}
+		webhooksH.RegisterRoutes(p)
 	})
 
 	// buyer namespace
@@ -206,6 +217,7 @@ func main() {
 		if integrationsSvc != nil {
 			integrations.NewHandler(integrationsSvc, "buyer", cfg.AppBaseURL).RegisterRoutes(b)
 		}
+		webhooksH.RegisterRoutes(b)
 	})
 
 	srv := &http.Server{
@@ -214,7 +226,17 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	log.Printf("listening on :%s", cfg.Port)
-	if err := srv.ListenAndServe(); err != nil {
-		log.Fatalf("server: %v", err)
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server: %v", err)
+		}
+	}()
+
+	<-ctx.Done()
+	log.Println("shutting down...")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("shutdown: %v", err)
 	}
 }

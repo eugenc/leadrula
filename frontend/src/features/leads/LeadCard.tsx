@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import type { CustomField, Lead } from "@/types";
 import { Avatar, Badge } from "@/components/ui/misc";
 import { ActionIndicator } from "./ActionDot";
@@ -74,7 +74,7 @@ function CardFieldRow({
   );
 }
 
-export function LeadCard({
+export const LeadCard = memo(function LeadCard({
   lead,
   customFields,
   cardFields,
@@ -141,4 +141,4 @@ export function LeadCard({
       )}
     </div>
   );
-}
+});

@@ -37,25 +37,25 @@ func (s *Service) processJobs(ctx context.Context) error {
 			LIMIT 10
 			FOR UPDATE SKIP LOCKED
 		)
-		RETURNING id, connection_id, route_id, lead_id, payload, attempts`)
+		RETURNING id, connection_id, route_id, lead_id, payload, attempts, webhook_trigger_id`)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var jobID, connID, leadID int64
-		var routeID *int64
+		var routeID, triggerID *int64
 		var payload json.RawMessage
 		var attempts int
-		if err := rows.Scan(&jobID, &connID, &routeID, &leadID, &payload, &attempts); err != nil {
+		if err := rows.Scan(&jobID, &connID, &routeID, &leadID, &payload, &attempts, &triggerID); err != nil {
 			continue
 		}
-		go s.executeJob(context.Background(), jobID, connID, leadID, payload, attempts)
+		go s.executeJob(context.Background(), jobID, connID, leadID, payload, attempts, triggerID)
 	}
 	return rows.Err()
 }
 
-func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, payload json.RawMessage, attempts int) {
+func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, payload json.RawMessage, attempts int, triggerID *int64) {
 	start := time.Now()
 
 	var encCredentials []byte
@@ -129,6 +129,10 @@ func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, p
 	s.logAttempt(ctx, jobID, attempts, "success", 200, payload, respRaw, duration, "")
 	s.markSuccess(ctx, jobID, extID)
 	_, _ = s.pool.Exec(ctx, `UPDATE integration_connections SET last_used_at = now(), last_error = NULL WHERE id = $1`, connID)
+	// Apply response field mapping if this was an outbound webhook trigger delivery.
+	if triggerID != nil && leadID != 0 && len(respRaw) > 0 {
+		s.applyResponseMap(ctx, *triggerID, leadID, respRaw)
+	}
 }
 
 func (s *Service) markSuccess(ctx context.Context, jobID int64, externalID string) {

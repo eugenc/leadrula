@@ -19,6 +19,22 @@ type IntegrationEnqueuer interface {
 	EnqueueDelivery(ctx context.Context, routeID, leadID int64, payloadJSON []byte) error
 }
 
+// PipelineContext carries the pipeline/stage snapshot that outbound webhook triggers receive.
+type PipelineContext struct {
+	PipelineID    *int64
+	PipelineName  *string
+	StageID       *int64
+	StageName     *string
+	PrevStageID   *int64
+	PrevStageName *string
+}
+
+// WebhookFirer fires outbound webhook events after lead/pipeline mutations.
+// The event string mirrors the outbound_trigger_event enum values.
+type WebhookFirer interface {
+	FireOutbound(ctx context.Context, accountID int64, event string, lead *Lead, pctx PipelineContext)
+}
+
 // RouteApplyDeps holds collaborators for ApplyRoute.
 type RouteApplyDeps struct {
 	Repo          *Repository
@@ -52,7 +68,7 @@ func applyBuyerRoute(ctx context.Context, q database.Querier, deps RouteApplyDep
 	if route.ContractID == nil {
 		return httpx.BusinessRule("route missing contract")
 	}
-	target, err := contracts.GetTarget(ctx, q, *route.ContractID)
+	target, err := contracts.GetTarget(ctx, q, *route.ContractID, route.CompensationID)
 	if err != nil {
 		return err
 	}
@@ -91,6 +107,9 @@ func applyBuyerRoute(ctx context.Context, q database.Querier, deps RouteApplyDep
 		}
 	}
 	if err := deps.Repo.PlaceInPipeline(ctx, q, leadID, target.BuyerID, target.BuyerPipelineID, destStage, &contractID); err != nil {
+		return err
+	}
+	if err := contracts.CheckCap(ctx, q, target.ID, target.CompensationID); err != nil {
 		return err
 	}
 	if err := billing.Debit(ctx, q, target.BuyerID, target.RatePerLead, leadID, target.ID, "lead routed: "+route.Name); err != nil {

@@ -20,6 +20,7 @@ type Lead struct {
 	State            *string         `json:"state"`
 	Zip              *string         `json:"zip"`
 	Source           *string         `json:"source"`
+	ExternalID       *string         `json:"external_id"`
 	PipelineID       *int64          `json:"pipeline_id"`
 	StageID          *int64          `json:"stage_id"`
 	Position         int             `json:"position"`
@@ -30,6 +31,7 @@ type Lead struct {
 	RawPayload       json.RawMessage `json:"raw_payload,omitempty"`
 	CreatedAt        time.Time       `json:"created_at"`
 	UpdatedAt        time.Time       `json:"updated_at"`
+	DeletedAt        *time.Time      `json:"deleted_at,omitempty"`
 	CustomValues     map[string]json.RawMessage `json:"custom_values"`
 	BuyerName         *string                   `json:"buyer_name,omitempty"`
 	AssigneeName      *string                   `json:"assignee_name,omitempty"`

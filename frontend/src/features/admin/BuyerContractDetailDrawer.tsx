@@ -13,6 +13,10 @@ import {
 } from "@/features/admin/hooks";
 import { useStages } from "@/features/leads/hooks";
 import { ContractStatusBadge } from "@/features/admin/contractStatus";
+import { formatCapPeriod, formatContractCap } from "@/features/admin/contractCap";
+import { formatContractLeadType } from "@/features/admin/contractLeadType";
+import { COMPENSATION_KINDS } from "@/features/admin/contractCompensation";
+import { useContractCompensations } from "@/features/admin/hooks";
 import { ContractReturnRulesEditor } from "@/features/admin/ContractReturnRulesEditor";
 import type { Contract } from "@/types";
 
@@ -37,6 +41,7 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
     true
   );
   const { data: rules, isLoading: rulesLoading } = useReturnRules(contract.id, true);
+  const { data: compensations, isLoading: compsLoading } = useContractCompensations(contract.id, true);
   const addRule = useAddReturnRule(true);
   const updateRule = useUpdateReturnRule(true);
   const removeRule = useDeleteReturnRule(true);
@@ -80,15 +85,49 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
           </div>
         </div>
 
+        <SectionLabel className="mb-2">Contract Details</SectionLabel>
         <div className="mb-4 flex flex-col gap-3 text-sm">
           <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Type</div>
+            <div className="mt-1 text-gray-700">Buy</div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Publisher</div>
+            <div className="mt-1 text-gray-700">{contract.publisher_name ?? "—"}</div>
+          </div>
+          <div>
             <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Lead Type</div>
-            <div className="mt-1 text-gray-700">{contract.lead_type || "—"}</div>
+            <div className="mt-1 text-gray-700">{formatContractLeadType(contract.lead_type) || "—"}</div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Cap limits</div>
+            <div className="mt-1 text-gray-700">{formatContractCap(contract)}</div>
           </div>
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Description</div>
             <div className="mt-1 whitespace-pre-wrap text-gray-700">{contract.description || "—"}</div>
           </div>
+        </div>
+
+        <SectionLabel className="mb-2">Compensation</SectionLabel>
+        <div className="mb-4 flex flex-col gap-2">
+          {compsLoading ? (
+            <p className="text-sm text-gray-400">Loading…</p>
+          ) : (compensations ?? []).length === 0 ? (
+            <p className="text-sm text-gray-400">—</p>
+          ) : (
+            (compensations ?? []).map((c) => (
+              <div key={c.id} className="rounded border border-gray-100 px-3 py-2 text-sm">
+                <div className="font-semibold text-gray-800">
+                  {COMPENSATION_KINDS.find((k) => k.value === c.kind)?.label ?? c.kind}
+                </div>
+                <div className="text-gray-500">
+                  {c.trigger} · {formatCapPeriod(c.cap_period)}
+                  {c.flat_amount != null ? ` · ${formatMoney(c.flat_amount)}/lead` : ""}
+                </div>
+              </div>
+            ))
+          )}
         </div>
 
         <div className="pt-2">

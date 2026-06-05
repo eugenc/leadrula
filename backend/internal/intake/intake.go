@@ -586,6 +586,9 @@ func (s *Service) RouteFromQueue(ctx context.Context, queueID, pipelineID, stage
 	if err := s.leads.PlaceInPipeline(ctx, tx, leadID, buyerID, pipelineID, stageID, &contractID); err != nil {
 		return err
 	}
+	if err := contracts.CheckCap(ctx, tx, target.ID, target.CompensationID); err != nil {
+		return err
+	}
 	if err := billing.Debit(ctx, tx, buyerID, target.RatePerLead, leadID, target.ID, "lead routed from intake queue"); err != nil {
 		return err
 	}

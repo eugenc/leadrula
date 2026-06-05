@@ -311,6 +311,21 @@ func (s *Service) EnqueueDelivery(ctx context.Context, routeID, leadID int64, pa
 	return rows.Err()
 }
 
+// EnqueueWebhookDelivery enqueues a pre-rendered payload for an outbound webhook trigger.
+// Unlike EnqueueDelivery (which uses route integrations), this targets a specific connection
+// directly and sets webhook_trigger_id so delivery logs can distinguish the source.
+func (s *Service) EnqueueWebhookDelivery(ctx context.Context, connectionID, triggerID, leadID int64, payload []byte) error {
+	var nullLeadID *int64
+	if leadID != 0 {
+		nullLeadID = &leadID
+	}
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO integration_delivery_queue (lead_id, connection_id, payload, webhook_trigger_id)
+		 VALUES ($1, $2, $3, $4)`,
+		nullLeadID, connectionID, payload, triggerID)
+	return err
+}
+
 func (s *Service) ListDeliveries(ctx context.Context, accountID int64, status string) ([]DeliveryItem, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT q.id, q.lead_id, p.slug, q.status::text, q.attempts,

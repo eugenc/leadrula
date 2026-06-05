@@ -5,10 +5,10 @@ import {
   useCreatePlatformBuyer,
   usePlatformBuyers,
   useSwitchAccount,
-  useUpdateBuyerStatus,
 } from "@/features/auth/switchHooks";
-import { PlatformAccountStatusCell } from "@/pages/platform/PlatformAccountStatusCell";
-import type { AccountOperationalStatus } from "@/types";
+import { PlatformAccountStatusBadge } from "@/pages/platform/PlatformAccountStatusBadge";
+import { PlatformBuyerDetailDrawer } from "@/pages/platform/PlatformBuyerDetailDrawer";
+import type { PlatformAccount } from "@/types";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
@@ -42,6 +42,7 @@ export function PlatformBuyersPage() {
   const [limit, setLimit] = useState(25);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  const [selectedBuyer, setSelectedBuyer] = useState<PlatformAccount | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -58,7 +59,6 @@ export function PlatformBuyersPage() {
     limit,
   });
   const switchAccount = useSwitchAccount();
-  const updateStatus = useUpdateBuyerStatus();
   const create = useCreatePlatformBuyer();
 
   const rows = data?.items ?? [];
@@ -140,22 +140,14 @@ export function PlatformBuyersPage() {
                 {rows.map((b) => {
                   const suspended = b.operational_status === "suspended";
                   return (
-                    <TR key={b.id}>
+                    <TR
+                      key={b.id}
+                      className="cursor-pointer"
+                      onClick={() => setSelectedBuyer(b)}
+                    >
                       <TD className="font-medium text-gray-800">{b.name}</TD>
                       <TD>
-                        <PlatformAccountStatusCell
-                          value={b.operational_status ?? "active"}
-                          disabled={updateStatus.isPending}
-                          onChange={(status: AccountOperationalStatus) =>
-                            updateStatus.mutate(
-                              { id: b.id, operational_status: status },
-                              {
-                                onSuccess: () => toast.success("Status updated"),
-                                onError: (e) => toast.error(errorMessage(e)),
-                              }
-                            )
-                          }
-                        />
+                        <PlatformAccountStatusBadge value={b.operational_status ?? "active"} />
                       </TD>
                       <TD className="font-mono text-xs text-gray-500">{b.handler_id}</TD>
                       <TD>{b.timezone}</TD>
@@ -169,7 +161,10 @@ export function PlatformBuyersPage() {
                             variant="secondary"
                             disabled={switchAccount.isPending || suspended}
                             title={suspended ? "Account suspended" : undefined}
-                            onClick={() => switchAccount.mutate(b.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              switchAccount.mutate(b.id);
+                            }}
                           >
                             <ArrowRightLeft className="h-3.5 w-3.5" /> Open
                           </Button>
@@ -190,6 +185,8 @@ export function PlatformBuyersPage() {
             />
           </>
         )}
+
+        <PlatformBuyerDetailDrawer buyer={selectedBuyer} onClose={() => setSelectedBuyer(null)} />
 
         <FormDrawer
           open={open}

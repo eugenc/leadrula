@@ -172,7 +172,7 @@ func (s *Service) ListSwitchable(ctx context.Context, actor *auth.Principal) ([]
 		}
 		rows, err = s.repo.pool.Query(ctx,
 			`SELECT public_id, handler_id, type, name FROM accounts
-			 WHERE type IN ('publisher', 'buyer') AND operational_status = 'active'
+			 WHERE type IN ('publisher', 'buyer') AND operational_status = 'active' AND deleted_at IS NULL
 			 ORDER BY type, name`)
 	case "publisher":
 		if origin.Role != "admin" {
@@ -183,7 +183,7 @@ func (s *Service) ListSwitchable(ctx context.Context, actor *auth.Principal) ([]
 			 FROM accounts a
 			 JOIN partnerships p ON p.buyer_id = a.id
 			 WHERE p.publisher_id = $1 AND p.status = 'active'
-			   AND a.operational_status = 'active'
+			   AND a.operational_status = 'active' AND a.deleted_at IS NULL
 			 ORDER BY a.name`, origin.AccountID)
 	default:
 		return []map[string]any{}, nil

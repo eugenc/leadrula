@@ -52,6 +52,7 @@ type Route struct {
 	OriginStageName    *string   `json:"origin_stage_name,omitempty"`
 	Destination        string    `json:"destination"`
 	ContractID         *int64    `json:"contract_id"`
+	CompensationID     *int64    `json:"compensation_id,omitempty"`
 	ContractName       *string   `json:"contract_name,omitempty"`
 	BuyerName          *string   `json:"buyer_name,omitempty"`
 	Delivery           string    `json:"delivery"`
@@ -91,6 +92,7 @@ type CreateRouteParams struct {
 	OriginStageID    *int64 `json:"origin_stage_id"`
 	Destination      string `json:"destination"`
 	ContractID       *int64 `json:"contract_id"`
+	CompensationID   *int64 `json:"compensation_id"`
 	Delivery         string `json:"delivery"`
 	TargetPipelineID *int64 `json:"target_pipeline_id"`
 	TargetStageID    *int64 `json:"target_stage_id"`
@@ -104,6 +106,7 @@ type UpdateRouteParams struct {
 	OriginStageID    *int64  `json:"origin_stage_id"`
 	Destination      *string `json:"destination"`
 	ContractID       *int64  `json:"contract_id"`
+	CompensationID   *int64  `json:"compensation_id"`
 	Delivery         *string `json:"delivery"`
 	TargetPipelineID *int64  `json:"target_pipeline_id"`
 	TargetStageID    *int64  `json:"target_stage_id"`
@@ -128,7 +131,7 @@ const routeFrom = `
  LEFT JOIN pipeline_stages bs ON bs.id = r.target_stage_id AND r.destination = 'buyer'`
 
 const routeCols = `r.id, r.publisher_id, r.name, r.origin, r.source_id, s.name,
-	r.origin_pipeline_id, r.origin_stage_id, r.destination, r.contract_id, c.name,
+	r.origin_pipeline_id, r.origin_stage_id, r.destination, r.contract_id, r.compensation_id, c.name,
 	r.delivery, r.target_pipeline_id, r.target_stage_id, r.is_active, r.created_at,
 	ba.name, op.name, os.name,
 	CASE WHEN r.destination = 'publisher' THEN tp.name ELSE bp.name END,
@@ -137,7 +140,7 @@ const routeCols = `r.id, r.publisher_id, r.name, r.origin, r.source_id, s.name,
 func scanRoute(row pgx.Row) (*Route, error) {
 	rt := &Route{}
 	err := row.Scan(&rt.ID, &rt.PublisherID, &rt.Name, &rt.Origin, &rt.SourceID, &rt.SourceName,
-		&rt.OriginPipelineID, &rt.OriginStageID, &rt.Destination, &rt.ContractID, &rt.ContractName,
+		&rt.OriginPipelineID, &rt.OriginStageID, &rt.Destination, &rt.ContractID, &rt.CompensationID, &rt.ContractName,
 		&rt.Delivery, &rt.TargetPipelineID, &rt.TargetStageID, &rt.IsActive, &rt.CreatedAt,
 		&rt.BuyerName, &rt.OriginPipelineName, &rt.OriginStageName, &rt.TargetPipelineName, &rt.TargetStageName)
 	if err != nil {
@@ -473,10 +476,10 @@ func (s *Service) CreateRoute(ctx context.Context, publisherID int64, p CreateRo
 	var id int64
 	err := s.pool.QueryRow(ctx,
 		`INSERT INTO routes(publisher_id, name, origin, source_id, origin_pipeline_id, origin_stage_id,
-		    destination, contract_id, delivery, target_pipeline_id, target_stage_id)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+		    destination, contract_id, compensation_id, delivery, target_pipeline_id, target_stage_id)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
 		publisherID, p.Name, p.Origin, p.SourceID, p.OriginPipelineID, p.OriginStageID,
-		p.Destination, p.ContractID, p.Delivery, p.TargetPipelineID, p.TargetStageID).Scan(&id)
+		p.Destination, p.ContractID, p.CompensationID, p.Delivery, p.TargetPipelineID, p.TargetStageID).Scan(&id)
 	if err != nil {
 		return nil, err
 	}
@@ -504,6 +507,7 @@ func (s *Service) UpdateRoute(ctx context.Context, publisherID, id int64, p Upda
 		OriginStageID:    cur.OriginStageID,
 		Destination:      cur.Destination,
 		ContractID:       cur.ContractID,
+		CompensationID:   cur.CompensationID,
 		Delivery:         cur.Delivery,
 		TargetPipelineID: cur.TargetPipelineID,
 		TargetStageID:    cur.TargetStageID,
@@ -522,6 +526,9 @@ func (s *Service) UpdateRoute(ctx context.Context, publisherID, id int64, p Upda
 	}
 	if p.ContractID != nil {
 		merged.ContractID = p.ContractID
+	}
+	if p.CompensationID != nil {
+		merged.CompensationID = p.CompensationID
 	}
 	if p.Delivery != nil {
 		merged.Delivery = *p.Delivery
@@ -547,13 +554,14 @@ func (s *Service) UpdateRoute(ctx context.Context, publisherID, id int64, p Upda
 		   origin_stage_id = COALESCE($6, origin_stage_id),
 		   destination = COALESCE($7, destination),
 		   contract_id = COALESCE($8, contract_id),
-		   delivery = COALESCE($9, delivery),
-		   target_pipeline_id = COALESCE($10, target_pipeline_id),
-		   target_stage_id = COALESCE($11, target_stage_id),
-		   is_active = COALESCE($12, is_active)
+		   compensation_id = COALESCE($9, compensation_id),
+		   delivery = COALESCE($10, delivery),
+		   target_pipeline_id = COALESCE($11, target_pipeline_id),
+		   target_stage_id = COALESCE($12, target_stage_id),
+		   is_active = COALESCE($13, is_active)
 		 WHERE id=$1 AND publisher_id=$2`,
 		id, publisherID, name, p.SourceID, p.OriginPipelineID, p.OriginStageID,
-		p.Destination, p.ContractID, p.Delivery, p.TargetPipelineID, p.TargetStageID, p.IsActive)
+		p.Destination, p.ContractID, p.CompensationID, p.Delivery, p.TargetPipelineID, p.TargetStageID, p.IsActive)
 	if err != nil {
 		return nil, err
 	}

@@ -8,15 +8,24 @@ import { errorMessage } from "@/lib/api";
 import { formatMoney } from "@/lib/utils";
 import {
   useUpdateContract,
-  useBuyerPipelines,
   useReturnRules,
   useAddReturnRule,
   useUpdateReturnRule,
   useDeleteReturnRule,
   useBuyerStages,
+  useContractCompensations,
+  useContractLeadCriteria,
+  useSaveContractLeadCriteria,
 } from "@/features/admin/hooks";
-import { usePipelines, useStages } from "@/features/leads/hooks";
+import {
+  ContractLeadCriteriaSection,
+  emptyLeadCriteria,
+} from "@/features/admin/ContractLeadCriteriaSection";
+import { useStages } from "@/features/leads/hooks";
 import { CONTRACT_STATUSES, ContractStatusBadge } from "@/features/admin/contractStatus";
+import { CONTRACT_LEAD_TYPES, isContractLeadType } from "@/features/admin/contractLeadType";
+import { counterpartyLabel, formatBuyerWithType, formatContractType } from "@/features/admin/contractType";
+import { ContractCompensationEditor } from "@/features/admin/ContractCompensationEditor";
 import { ContractReturnRulesEditor } from "@/features/admin/ContractReturnRulesEditor";
 import type { Contract } from "@/types";
 
@@ -28,7 +37,7 @@ export function ContractDetailDrawer({
   onClose: () => void;
 }) {
   return (
-    <Sheet open={!!contract} onClose={onClose} width={520}>
+    <Sheet open={!!contract} onClose={onClose} width={720}>
       {contract && <DrawerContent contract={contract} onClose={onClose} />}
     </Sheet>
   );
@@ -36,9 +45,8 @@ export function ContractDetailDrawer({
 
 function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () => void }) {
   const update = useUpdateContract();
-  const { data: pubPipelines } = usePipelines();
+  const { data: compensations, isLoading: compsLoading } = useContractCompensations(contract.id);
   const { data: sourceStages } = useStages(contract.source_pipeline_id || undefined);
-  const { data: buyerPipelines } = useBuyerPipelines(contract.buyer_id || null);
   const { data: buyerStages, isLoading: stagesLoading } = useBuyerStages(
     contract.buyer_id,
     contract.buyer_pipeline_id
@@ -51,78 +59,55 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
   const [name, setName] = useState(contract.name);
   const [leadType, setLeadType] = useState(contract.lead_type ?? "");
   const [description, setDescription] = useState(contract.description ?? "");
-  const [rate, setRate] = useState(contract.rate_per_lead);
   const [status, setStatus] = useState(contract.status);
+  const { data: leadCriteriaData } = useContractLeadCriteria(contract.id);
+  const saveCriteria = useSaveContractLeadCriteria();
+  const [leadCriteria, setLeadCriteria] = useState(emptyLeadCriteria());
+
+  useEffect(() => {
+    if (leadCriteriaData) setLeadCriteria(leadCriteriaData);
+  }, [leadCriteriaData]);
 
   useEffect(() => {
     setName(contract.name);
     setLeadType(contract.lead_type ?? "");
     setDescription(contract.description ?? "");
-    setRate(contract.rate_per_lead);
     setStatus(contract.status);
   }, [contract]);
-
-  const sourcePipeline = (pubPipelines ?? []).find((p) => p.id === contract.source_pipeline_id);
-  const sourceStage = (sourceStages ?? []).find((s) => s.id === contract.source_stage_id);
-  const returnStage = (sourceStages ?? []).find((s) => s.id === contract.return_stage_id);
-  const buyerPipeline = (buyerPipelines ?? []).find((p) => p.id === contract.buyer_pipeline_id);
 
   const unchanged =
     name.trim() === contract.name &&
     leadType === (contract.lead_type ?? "") &&
     description === (contract.description ?? "") &&
-    rate === contract.rate_per_lead &&
     status === contract.status;
-  const invalid = !name.trim() || rate < 0;
+  const invalid = !name.trim() || !isContractLeadType(leadType);
 
-  function save() {
+  function saveDetails() {
     const body: Record<string, unknown> = {};
     const trimmed = name.trim();
     if (trimmed !== contract.name) body.name = trimmed;
     if (leadType !== (contract.lead_type ?? "")) body.lead_type = leadType;
     if (description !== (contract.description ?? "")) body.description = description;
-    if (rate !== contract.rate_per_lead) body.rate_per_lead = rate;
     if (status !== contract.status) body.status = status;
     if (Object.keys(body).length === 0) return;
 
     update.mutate(
       { id: contract.id, body },
       {
-        onSuccess: () => {
-          toast.success("Contract saved");
-          onClose();
-        },
+        onSuccess: () => toast.success("Contract saved"),
         onError: (e) => toast.error(errorMessage(e)),
       }
     );
   }
 
-  function addReturnRule(buyerStageId: number, returnStageId: number) {
-    addRule.mutate(
-      { contractId: contract.id, buyerStageId, returnStageId },
-      { onError: (e) => toast.error(errorMessage(e)) }
-    );
-  }
-
-  function updateReturnRule(ruleId: number, buyerStageId: number, returnStageId: number) {
-    updateRule.mutate(
-      { contractId: contract.id, ruleId, buyerStageId, returnStageId },
-      { onError: (e) => toast.error(errorMessage(e)) }
-    );
-  }
-
-  function deleteReturnRule(ruleId: number) {
-    removeRule.mutate(
-      { contractId: contract.id, ruleId },
-      { onError: (e) => toast.error(errorMessage(e)) }
-    );
-  }
+  const primaryRate =
+    compensations?.find((c) => c.kind === "flat_rate")?.flat_amount ?? contract.rate_per_lead;
 
   return (
     <div className="flex h-full flex-col">
       <DrawerHeader
         title={contract.name}
-        subtitle={`${contract.buyer_name ?? `Buyer #${contract.buyer_id}`} · ${formatMoney(contract.rate_per_lead)}/lead · ${contract.lead_count ?? 0} distributed`}
+        subtitle={`${formatContractType(contract.contract_type)} · ${formatBuyerWithType(contract.buyer_name, contract.buyer_account_type) || `Buyer #${contract.buyer_id}`} · ${formatMoney(primaryRate)}/lead · ${contract.lead_count ?? 0} distributed`}
         onClose={onClose}
       />
 
@@ -144,31 +129,42 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
             </Button>
           </div>
         </div>
+        {contract.mirror_contract_id != null && (
+          <p className="mb-3 text-xs text-gray-500">
+            Mirrored with publisher contract #{contract.mirror_contract_id}. Edits on shared fields sync on save from the sell side.
+          </p>
+        )}
 
-        <div className="flex flex-col gap-2.5">
+        <SectionLabel className="mb-2">Contract Details</SectionLabel>
+        <div className="mb-6 flex flex-col gap-2.5">
+          <div>
+            <Label>Contract type</Label>
+            <div className="mt-1 text-sm text-gray-700">{formatContractType(contract.contract_type) || "Sell"}</div>
+          </div>
+          <div>
+            <Label>{counterpartyLabel(contract.contract_type)}</Label>
+            <div className="mt-1 text-sm text-gray-700">
+              {formatBuyerWithType(contract.buyer_name, contract.buyer_account_type) || `#${contract.buyer_id}`}
+            </div>
+          </div>
           <div>
             <Label>Name</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div>
-            <Label>Lead Type</Label>
-            <Input
-              value={leadType}
-              onChange={(e) => setLeadType(e.target.value)}
-              placeholder="e.g. Residential Solar"
-            />
+            <Label>Lead type</Label>
+            <Select value={leadType} onChange={(e) => setLeadType(e.target.value)}>
+              <option value="">Select…</option>
+              {CONTRACT_LEAD_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </Select>
           </div>
           <div>
             <Label>Description</Label>
-            <Textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Optional notes about this contract"
-            />
-          </div>
-          <div>
-            <Label>Rate per lead (USD)</Label>
-            <Input type="number" min={0} step={0.01} value={rate} onChange={(e) => setRate(Number(e.target.value))} />
+            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} />
           </div>
           <div>
             <Label>Status</Label>
@@ -183,52 +179,74 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
               <ContractStatusBadge status={status} />
             </div>
           </div>
-
-          <div className="pt-2">
-            <SectionLabel className="mb-2">Routing (read-only)</SectionLabel>
-            <div className="flex flex-col gap-3 text-sm">
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Buyer</div>
-                <div className="mt-1 text-gray-700">{contract.buyer_name ?? `Buyer #${contract.buyer_id}`}</div>
-              </div>
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Source pipeline</div>
-                <div className="mt-1 text-gray-700">{sourcePipeline?.name ?? `#${contract.source_pipeline_id}`}</div>
-              </div>
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Source stage</div>
-                <div className="mt-1 text-gray-700">{sourceStage?.name ?? `#${contract.source_stage_id}`}</div>
-              </div>
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Buyer pipeline</div>
-                <div className="mt-1 text-gray-700">{buyerPipeline?.name ?? `#${contract.buyer_pipeline_id}`}</div>
-              </div>
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Return stage</div>
-                <div className="mt-1 text-gray-700">{returnStage?.name ?? `#${contract.return_stage_id}`}</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-2">
-            <SectionLabel className="mb-2">Return Rules</SectionLabel>
-            <ContractReturnRulesEditor
-              buyerStages={buyerStages ?? []}
-              publisherStages={sourceStages ?? []}
-              rules={rules ?? []}
-              defaultReturnStageId={contract.return_stage_id}
-              loading={stagesLoading || rulesLoading}
-              onAdd={addReturnRule}
-              onUpdate={updateReturnRule}
-              onDelete={deleteReturnRule}
-            />
-          </div>
         </div>
+
+        <SectionLabel className="mb-2">Compensation</SectionLabel>
+        <p className="mb-2 text-xs text-gray-400">Each row has its own cap limits and delivery settings below.</p>
+        <div className="mb-6">
+          {compsLoading ? (
+            <p className="text-sm text-gray-400">Loading…</p>
+          ) : (
+            <ContractCompensationEditor contract={contract} items={compensations ?? []} />
+          )}
+        </div>
+
+        <div className="mb-6">
+          <ContractLeadCriteriaSection
+            buyerId={contract.buyer_id}
+            buyerPipelineId={contract.buyer_pipeline_id}
+            value={leadCriteria}
+            onChange={setLeadCriteria}
+          />
+          <Button
+            className="mt-3"
+            variant="secondary"
+            disabled={saveCriteria.isPending}
+            onClick={() =>
+              saveCriteria.mutate(
+                { contractId: contract.id, body: leadCriteria },
+                {
+                  onSuccess: () => toast.success("Lead criteria saved"),
+                  onError: (e) => toast.error(errorMessage(e)),
+                }
+              )
+            }
+          >
+            Save lead criteria
+          </Button>
+        </div>
+
+        <SectionLabel className="mb-2">Return Rules</SectionLabel>
+        <ContractReturnRulesEditor
+          buyerStages={buyerStages ?? []}
+          publisherStages={sourceStages ?? []}
+          rules={rules ?? []}
+          defaultReturnStageId={contract.return_stage_id}
+          loading={stagesLoading || rulesLoading}
+          onAdd={(buyerStageId, returnStageId) =>
+            addRule.mutate(
+              { contractId: contract.id, buyerStageId, returnStageId },
+              { onError: (e) => toast.error(errorMessage(e)) }
+            )
+          }
+          onUpdate={(ruleId, buyerStageId, returnStageId) =>
+            updateRule.mutate(
+              { contractId: contract.id, ruleId, buyerStageId, returnStageId },
+              { onError: (e) => toast.error(errorMessage(e)) }
+            )
+          }
+          onDelete={(ruleId) =>
+            removeRule.mutate(
+              { contractId: contract.id, ruleId },
+              { onError: (e) => toast.error(errorMessage(e)) }
+            )
+          }
+        />
       </DrawerBody>
 
       <DrawerFooter>
-        <Button disabled={unchanged || invalid || update.isPending} onClick={save}>
-          Save
+        <Button disabled={unchanged || invalid || update.isPending} onClick={saveDetails}>
+          Save details
         </Button>
       </DrawerFooter>
     </div>

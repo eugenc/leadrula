@@ -304,6 +304,11 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		}
 		auth.ApplyImpersonationChanges(r, diffLeadUpdate(before, l, in, fieldNames))
 	}
+	// Fire outbound webhook trigger for lead update.
+	h.svc.fireOutbound(r.Context(), p.AccountID, "lead.update", l, PipelineContext{
+		PipelineID: l.PipelineID,
+		StageID:    l.StageID,
+	})
 	httpx.JSON(w, http.StatusOK, l)
 }
 

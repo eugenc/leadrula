@@ -24,6 +24,7 @@ import { IntakeLogLayout } from "@/pages/publisher/IntakeLogLayout";
 import { IntakeLogTab } from "@/pages/publisher/IntakeLogTab";
 import { IntakeReviewTab } from "@/pages/publisher/IntakeReviewTab";
 import { SourcesPage } from "@/pages/publisher/SourcesPage";
+import { WebhooksPage } from "@/pages/WebhooksPage";
 import { RoutingPage } from "@/pages/publisher/RoutingPage";
 import { ContractsPage } from "@/pages/publisher/ContractsPage";
 import { BuyersPage } from "@/pages/publisher/BuyersPage";
@@ -94,6 +95,7 @@ export default function App() {
                 <Route path="fields" element={<CustomFieldsPage />} />
                 <Route path="reasons" element={<DisqReasonsPage />} />
                 <Route path="sources" element={<SourcesPage />} />
+                <Route path="webhooks" element={<WebhooksPage />} />
                 <Route path="routing" element={<RoutingPage />} />
                 <Route path="contracts" element={<ContractsPage />} />
                 <Route path="buyers" element={<BuyersPage />} />
@@ -104,6 +106,7 @@ export default function App() {
                 <Route path="billing" element={<PublisherBillingPage />} />
                 <Route path="users" element={<UsersPage />} />
                 <Route path="api" element={<ApiKeysPage />} />
+                <Route path="webhooks" element={<WebhooksPage />} />
                 <Route path="integrations" element={<IntegrationsLayout />}>
                   <Route index element={<IntegrationsConnectionsTab />} />
                   <Route path="deliveries" element={<IntegrationsDeliveriesTab />} />
@@ -133,6 +136,7 @@ export default function App() {
                 <Route path="billing" element={<BuyerBillingPage />} />
                 <Route path="users" element={<UsersPage />} />
                 <Route path="api" element={<ApiKeysPage />} />
+                <Route path="webhooks" element={<WebhooksPage />} />
                 <Route path="integrations" element={<IntegrationsLayout />}>
                   <Route index element={<IntegrationsConnectionsTab />} />
                   <Route path="deliveries" element={<IntegrationsDeliveriesTab />} />

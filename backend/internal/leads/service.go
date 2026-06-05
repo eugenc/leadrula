@@ -20,11 +20,15 @@ type Service struct {
 	accounts     *accounts.Repository
 	pipelines    *pipelines.Service
 	integrations IntegrationEnqueuer
+	webhooks     WebhookFirer
 }
 
 func NewService(repo *Repository, notif *notifications.Service, acc *accounts.Repository, pipes *pipelines.Service, integrations IntegrationEnqueuer) *Service {
 	return &Service{repo: repo, notif: notif, accounts: acc, pipelines: pipes, integrations: integrations}
 }
+
+// SetWebhookFirer wires outbound webhook firing after construction (avoids import cycle).
+func (s *Service) SetWebhookFirer(wf WebhookFirer) { s.webhooks = wf }
 
 func (s *Service) Repo() *Repository { return s.repo }
 
@@ -131,6 +135,12 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		}
 	}
 
+	if lead.ContractID != nil && finalStageID != nil {
+		if err := contracts.TryAccrueOnBuyerStage(ctx, tx, *lead.ContractID, leadID, *finalStageID); err != nil {
+			return nil, nil, err
+		}
+	}
+
 	// return rule?
 	if lead.ContractID != nil {
 		ri, err := contracts.FindReturnRule(ctx, tx, *lead.ContractID, *finalStageID)
@@ -164,7 +174,28 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		toName := s.repo.StageName(ctx, s.repo.pool, &newStageID)
 		auditChanges = stageChange(fromName, toName)
 	}
+	// Fire outbound webhook triggers for stage move.
+	s.fireOutbound(ctx, p.AccountID, "pipeline.move_stage", updated, PipelineContext{
+		PipelineID:  updated.PipelineID,
+		StageID:     finalStageID,
+		PrevStageID: fromStage,
+	})
 	return updated, auditChanges, nil
+}
+
+// ChangeStageByWebhook moves a lead without user permission checks (inbound webhook).
+func (s *Service) ChangeStageByWebhook(ctx context.Context, accountID, leadID, newStageID int64, actionAt *time.Time, disqReasonID *int64) (*Lead, error) {
+	p := &auth.Principal{AccountID: accountID, Role: "admin", UserID: 0}
+	lead, _, err := s.ChangeStage(ctx, p, leadID, newStageID, actionAt, disqReasonID)
+	return lead, err
+}
+
+// fireOutbound fires outbound webhooks if a firer is wired. Runs best-effort (no error return).
+func (s *Service) fireOutbound(ctx context.Context, accountID int64, event string, lead *Lead, pctx PipelineContext) {
+	if s.webhooks == nil {
+		return
+	}
+	s.webhooks.FireOutbound(ctx, accountID, event, lead, pctx)
 }
 
 // Redistribute reassigns a publisher-held (returned) lead to another buyer and
@@ -184,7 +215,7 @@ func (s *Service) Redistribute(ctx context.Context, p *auth.Principal, leadID, c
 		return nil, httpx.NotFound("lead not found")
 	}
 
-	target, err := contracts.GetTarget(ctx, tx, contractID)
+	target, err := contracts.GetTargetByContract(ctx, tx, contractID)
 	if err != nil {
 		return nil, err
 	}
@@ -196,6 +227,9 @@ func (s *Service) Redistribute(ctx context.Context, p *auth.Principal, leadID, c
 		return nil, httpx.BusinessRule("target pipeline has no stages")
 	}
 	if err := s.repo.PlaceInPipeline(ctx, tx, leadID, target.BuyerID, target.BuyerPipelineID, firstStage, &target.ID); err != nil {
+		return nil, err
+	}
+	if err := contracts.CheckCap(ctx, tx, target.ID, target.CompensationID); err != nil {
 		return nil, err
 	}
 	if err := s.repo.SetStatus(ctx, tx, leadID, "distributed"); err != nil {
@@ -219,6 +253,11 @@ func (s *Service) Redistribute(ctx context.Context, p *auth.Principal, leadID, c
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	_ = s.repo.attachCustomValues(ctx, updated)
+	s.fireOutbound(ctx, target.BuyerID, "pipeline.place", updated, PipelineContext{
+		PipelineID: updated.PipelineID,
+		StageID:    updated.StageID,
+	})
 	return updated, nil
 }
 

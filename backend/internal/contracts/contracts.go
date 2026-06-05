@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/database"
-	"github.com/echayko/leadrula/backend/internal/handlerid"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -20,6 +19,7 @@ type Contract struct {
 	PublisherID      int64     `json:"-"`
 	BuyerID          int64     `json:"buyer_id"`
 	BuyerName        string    `json:"buyer_name,omitempty"`
+	BuyerAccountType string    `json:"buyer_account_type,omitempty"`
 	PublisherName    string    `json:"publisher_name,omitempty"`
 	Name             string    `json:"name"`
 	Description      string    `json:"description,omitempty"`
@@ -30,6 +30,11 @@ type Contract struct {
 	ReturnStageID    int64     `json:"return_stage_id"`
 	RatePerLead      float64   `json:"rate_per_lead"`
 	Status           string    `json:"status"`
+	CapPeriod        string    `json:"cap_period"`
+	CapTotal         *int      `json:"cap_total,omitempty"`
+	CapMaxDaily      *int      `json:"cap_max_daily,omitempty"`
+	ContractType     string    `json:"contract_type"`
+	MirrorContractID *int64    `json:"mirror_contract_id,omitempty"`
 	LeadCount        int       `json:"lead_count"`
 	CreatedAt        time.Time `json:"created_at"`
 }
@@ -53,14 +58,6 @@ type PublisherStage struct {
 	StageType  string `json:"stage_type"`
 }
 
-// Target is the minimal contract info the intake flow needs.
-type Target struct {
-	ID              int64
-	BuyerID         int64
-	BuyerPipelineID int64
-	RatePerLead     float64
-}
-
 type Service struct {
 	pool *pgxpool.Pool
 }
@@ -69,9 +66,11 @@ func NewService(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
 
 func (s *Service) Pool() *pgxpool.Pool { return s.pool }
 
-const contractCols = `id, public_id, handler_id, publisher_id, buyer_id, name, description, lead_type,
+const contractCols = `id, public_id, handler_id, publisher_id, buyer_id, name,
+	COALESCE(description, '') AS description, COALESCE(lead_type, '') AS lead_type,
 	source_pipeline_id, source_stage_id, buyer_pipeline_id, return_stage_id,
-	rate_per_lead::float8, status, created_at`
+	rate_per_lead::float8, status, cap_period, cap_total, cap_max_daily, created_at,
+	contract_type, mirror_contract_id`
 
 const contractLeadCountSubquery = `(SELECT COUNT(DISTINCT t.lead_id) FROM transactions t
  WHERE t.contract_id = c.id AND t.type = 'debit' AND t.lead_id IS NOT NULL
@@ -84,7 +83,8 @@ func scanContract(row pgx.Row) (*Contract, error) {
 	err := row.Scan(&c.ID, &c.PublicID, &c.HandlerID, &c.PublisherID, &c.BuyerID, &c.Name,
 		&c.Description, &c.LeadType,
 		&c.SourcePipelineID, &c.SourceStageID, &c.BuyerPipelineID, &c.ReturnStageID,
-		&c.RatePerLead, &c.Status, &c.CreatedAt)
+		&c.RatePerLead, &c.Status, &c.CapPeriod, &c.CapTotal, &c.CapMaxDaily, &c.CreatedAt,
+		&c.ContractType, &c.MirrorContractID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, httpx.NotFound("contract not found")
@@ -97,9 +97,10 @@ func scanContract(row pgx.Row) (*Contract, error) {
 func (s *Service) List(ctx context.Context, publisherID int64) ([]Contract, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT c.id, c.public_id, c.handler_id, c.publisher_id, c.buyer_id, c.name,
-		        c.description, c.lead_type,
+		        COALESCE(c.description, ''), COALESCE(c.lead_type, ''),
 		        c.source_pipeline_id, c.source_stage_id, c.buyer_pipeline_id, c.return_stage_id,
-		        c.rate_per_lead::float8, c.status, c.created_at, a.name, `+contractLeadCountSubquery+`
+		        c.rate_per_lead::float8, c.status, c.cap_period, c.cap_total, c.cap_max_daily,
+		        c.created_at, c.contract_type, c.mirror_contract_id, a.name, a.type, `+contractLeadCountSubquery+`
 		 FROM contracts c JOIN accounts a ON a.id = c.buyer_id
 		 WHERE c.publisher_id = $1 AND c.deleted_at IS NULL
 		 ORDER BY c.created_at DESC`, publisherID)
@@ -113,7 +114,8 @@ func (s *Service) List(ctx context.Context, publisherID int64) ([]Contract, erro
 		if err := rows.Scan(&c.ID, &c.PublicID, &c.HandlerID, &c.PublisherID, &c.BuyerID, &c.Name,
 			&c.Description, &c.LeadType,
 			&c.SourcePipelineID, &c.SourceStageID, &c.BuyerPipelineID, &c.ReturnStageID,
-			&c.RatePerLead, &c.Status, &c.CreatedAt, &c.BuyerName, &c.LeadCount); err != nil {
+			&c.RatePerLead, &c.Status, &c.CapPeriod, &c.CapTotal, &c.CapMaxDaily,
+			&c.CreatedAt, &c.ContractType, &c.MirrorContractID, &c.BuyerName, &c.BuyerAccountType, &c.LeadCount); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -130,11 +132,12 @@ func (s *Service) Get(ctx context.Context, publisherID, id int64) (*Contract, er
 func (s *Service) ListForBuyer(ctx context.Context, buyerID int64) ([]Contract, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT c.id, c.public_id, c.handler_id, c.publisher_id, c.buyer_id, c.name,
-		        c.description, c.lead_type,
+		        COALESCE(c.description, ''), COALESCE(c.lead_type, ''),
 		        c.source_pipeline_id, c.source_stage_id, c.buyer_pipeline_id, c.return_stage_id,
-		        c.rate_per_lead::float8, c.status, c.created_at, a.name, `+contractLeadCountSubquery+`
+		        c.rate_per_lead::float8, c.status, c.cap_period, c.cap_total, c.cap_max_daily,
+		        c.created_at, c.contract_type, c.mirror_contract_id, a.name, `+contractLeadCountSubquery+`
 		 FROM contracts c JOIN accounts a ON a.id = c.publisher_id
-		 WHERE c.buyer_id = $1 AND c.deleted_at IS NULL
+		 WHERE c.buyer_id = $1 AND c.deleted_at IS NULL AND c.contract_type = 'sell'
 		 ORDER BY c.created_at DESC`, buyerID)
 	if err != nil {
 		return nil, err
@@ -146,7 +149,8 @@ func (s *Service) ListForBuyer(ctx context.Context, buyerID int64) ([]Contract, 
 		if err := rows.Scan(&c.ID, &c.PublicID, &c.HandlerID, &c.PublisherID, &c.BuyerID, &c.Name,
 			&c.Description, &c.LeadType,
 			&c.SourcePipelineID, &c.SourceStageID, &c.BuyerPipelineID, &c.ReturnStageID,
-			&c.RatePerLead, &c.Status, &c.CreatedAt, &c.PublisherName, &c.LeadCount); err != nil {
+			&c.RatePerLead, &c.Status, &c.CapPeriod, &c.CapTotal, &c.CapMaxDaily,
+			&c.CreatedAt, &c.ContractType, &c.MirrorContractID, &c.PublisherName, &c.LeadCount); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -156,91 +160,90 @@ func (s *Service) ListForBuyer(ctx context.Context, buyerID int64) ([]Contract, 
 
 func (s *Service) GetForBuyerContract(ctx context.Context, buyerID, contractID int64) (*Contract, error) {
 	return scanContract(s.pool.QueryRow(ctx,
-		`SELECT `+contractCols+` FROM contracts WHERE id = $1 AND buyer_id = $2 AND deleted_at IS NULL`,
+		`SELECT `+contractCols+` FROM contracts WHERE id = $1 AND buyer_id = $2 AND deleted_at IS NULL AND contract_type = 'sell'`,
 		contractID, buyerID))
 }
 
 type CreateParams struct {
 	BuyerID          int64
+	ContractType     string
 	Name             string
 	Description      string
 	LeadType         string
+	CapPeriod        string
+	CapTotal         *int
+	CapMaxDaily      *int
 	SourcePipelineID int64
 	SourceStageID    int64
 	BuyerPipelineID  int64
 	ReturnStageID    int64
 	RatePerLead      float64
+	Delivery         string
+	Compensations    []CompensationParams
+	LeadCriteria     *LeadCriteria
 }
 
 func (s *Service) Create(ctx context.Context, publisherID int64, p CreateParams) (*Contract, error) {
-	var exists bool
-	if err := s.pool.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM contracts WHERE publisher_id = $1 AND buyer_id = $2 AND deleted_at IS NULL)`,
-		publisherID, p.BuyerID).Scan(&exists); err != nil {
-		return nil, err
+	if p.ContractType == "" {
+		p.ContractType = "sell"
 	}
-	if exists {
-		return nil, httpx.Conflict("a contract already exists for this buyer")
-	}
-
-	var ok bool
-	if err := s.pool.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM partnerships WHERE publisher_id = $1 AND buyer_id = $2 AND status = 'active')`,
-		publisherID, p.BuyerID).Scan(&ok); err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, httpx.Validation("no active partnership with this buyer")
-	}
-
-	var c *Contract
-	var err error
-	for range 10 {
-		hid := handlerid.Generate("C")
-		c, err = scanContract(s.pool.QueryRow(ctx,
-			`INSERT INTO contracts(publisher_id, buyer_id, name, description, lead_type,
-			    source_pipeline_id, source_stage_id, buyer_pipeline_id, return_stage_id, rate_per_lead, handler_id)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-			 RETURNING `+contractCols,
-			publisherID, p.BuyerID, p.Name, p.Description, p.LeadType,
-			p.SourcePipelineID, p.SourceStageID,
-			p.BuyerPipelineID, p.ReturnStageID, p.RatePerLead, hid))
-		if err == nil {
-			return c, nil
-		}
-		if database.IsUniqueViolation(err) {
-			continue
-		}
-		return nil, err
-	}
-	return nil, err
+	return s.createWithMirror(ctx, publisherID, p)
 }
 
 func (s *Service) LookupBuyerIDByHandler(ctx context.Context, handlerID string) (int64, error) {
+	return s.LookupAccountIDByHandler(ctx, handlerID, "buyer")
+}
+
+func (s *Service) CounterpartyAccountType(ctx context.Context, accountID int64) (string, error) {
+	return counterpartyType(ctx, s.pool, accountID)
+}
+
+func (s *Service) LookupAccountIDByHandler(ctx context.Context, handlerID string, wantType string) (int64, error) {
 	var id int64
 	var typ string
 	err := s.pool.QueryRow(ctx, `SELECT id, type FROM accounts WHERE handler_id = $1`, handlerID).Scan(&id, &typ)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, httpx.NotFound("buyer not found")
+		return 0, httpx.NotFound("account not found")
 	}
 	if err != nil {
 		return 0, err
 	}
-	if typ != "buyer" {
-		return 0, httpx.NotFound("buyer not found")
+	if wantType != "" && typ != wantType {
+		return 0, httpx.NotFound("account not found")
 	}
 	return id, nil
 }
 
 type UpdateParams struct {
-	Name        *string
-	RatePerLead *float64
-	Status      *string
-	Description *string
-	LeadType    *string
+	Name          *string
+	RatePerLead   *float64
+	Status        *string
+	Description   *string
+	LeadType      *string
+	ContractType  *string
+	CapPeriod     *string
+	CapTotal      *int
+	CapMaxDaily   *int
+	PatchCap      bool
 }
 
 func (s *Service) Update(ctx context.Context, publisherID, id int64, p UpdateParams) (*Contract, error) {
+	if p.PatchCap {
+		return scanContract(s.pool.QueryRow(ctx,
+			`UPDATE contracts SET
+			   name = COALESCE($3, name),
+			   rate_per_lead = COALESCE($4, rate_per_lead),
+			   status = COALESCE($5, status),
+			   description = COALESCE($6, description),
+			   lead_type = COALESCE($7, lead_type),
+			   cap_period = COALESCE($8, cap_period),
+			   cap_total = $9,
+			   cap_max_daily = $10
+			 WHERE id = $1 AND publisher_id = $2 AND deleted_at IS NULL
+			 RETURNING `+contractCols,
+			id, publisherID, p.Name, p.RatePerLead, p.Status, p.Description, p.LeadType,
+			p.CapPeriod, p.CapTotal, p.CapMaxDaily))
+	}
 	return scanContract(s.pool.QueryRow(ctx,
 		`UPDATE contracts SET
 		   name = COALESCE($3, name),
@@ -429,50 +432,32 @@ func (s *Service) ReturnRuleBelongsToBuyer(ctx context.Context, buyerID, ruleID 
 
 // FindByBuyerPipeline resolves the contract whose buyer pipeline matches.
 func FindByBuyerPipeline(ctx context.Context, q database.Querier, buyerPipelineID int64) (*Target, error) {
-	t := &Target{}
+	var contractID int64
 	err := q.QueryRow(ctx,
-		`SELECT id, buyer_id, buyer_pipeline_id, rate_per_lead::float8
-		 FROM contracts WHERE buyer_pipeline_id = $1 AND status = 'active' AND deleted_at IS NULL
-		 LIMIT 1`, buyerPipelineID).Scan(&t.ID, &t.BuyerID, &t.BuyerPipelineID, &t.RatePerLead)
+		`SELECT id FROM contracts WHERE buyer_pipeline_id = $1 AND status = 'active' AND deleted_at IS NULL
+		 LIMIT 1`, buyerPipelineID).Scan(&contractID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	return t, nil
+	return GetTargetByContract(ctx, q, contractID)
 }
 
 // FindByBuyer resolves the buyer's active contract target.
 func FindByBuyer(ctx context.Context, q database.Querier, buyerID int64) (*Target, error) {
-	t := &Target{}
+	var contractID int64
 	err := q.QueryRow(ctx,
-		`SELECT id, buyer_id, buyer_pipeline_id, rate_per_lead::float8
-		 FROM contracts WHERE buyer_id = $1 AND status = 'active' AND deleted_at IS NULL
-		 LIMIT 1`, buyerID).Scan(&t.ID, &t.BuyerID, &t.BuyerPipelineID, &t.RatePerLead)
+		`SELECT id FROM contracts WHERE buyer_id = $1 AND status = 'active' AND deleted_at IS NULL
+		 LIMIT 1`, buyerID).Scan(&contractID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	return t, nil
-}
-
-// GetTarget loads a contract target by id.
-func GetTarget(ctx context.Context, q database.Querier, contractID int64) (*Target, error) {
-	t := &Target{}
-	err := q.QueryRow(ctx,
-		`SELECT id, buyer_id, buyer_pipeline_id, rate_per_lead::float8
-		 FROM contracts WHERE id = $1 AND deleted_at IS NULL`, contractID).Scan(
-		&t.ID, &t.BuyerID, &t.BuyerPipelineID, &t.RatePerLead)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, httpx.NotFound("contract not found")
-		}
-		return nil, err
-	}
-	return t, nil
+	return GetTargetByContract(ctx, q, contractID)
 }
 
 // ReturnInfo holds where a returned lead lands back on the publisher side.

@@ -142,6 +142,7 @@ export interface Lead {
   state: string | null;
   zip: string | null;
   source: string | null;
+  external_id: string | null;
   pipeline_id: number | null;
   stage_id: number | null;
   position: number;
@@ -212,9 +213,12 @@ export interface Contract {
   handler_id: string;
   buyer_id: number;
   buyer_name?: string;
+  buyer_account_type?: string;
   publisher_name?: string;
   name: string;
   description?: string;
+  contract_type?: string;
+  mirror_contract_id?: number | null;
   lead_type?: string;
   source_pipeline_id: number;
   source_stage_id: number;
@@ -222,7 +226,57 @@ export interface Contract {
   return_stage_id: number;
   rate_per_lead: number;
   status: string;
+  cap_period?: string;
+  cap_total?: number | null;
+  cap_max_daily?: number | null;
   lead_count?: number;
+}
+
+export interface ContractLeadCriteria {
+  required_fields: {
+    field_type: string;
+    builtin_field?: string;
+    custom_field_id?: number | null;
+  }[];
+  field_map: {
+    src_type: string;
+    src_builtin?: string;
+    src_custom_field_id?: number | null;
+    dst_type: string;
+    dst_builtin?: string;
+    dst_custom_field_id?: number | null;
+  }[];
+  filter_rules: {
+    field_type: string;
+    builtin_field?: string;
+    custom_field_id?: number | null;
+    operator: string;
+    value: string;
+  }[];
+  quality_rules: { buyer_stage_id: number; on_fail: string }[];
+}
+
+export interface ContractCompensation {
+  id: number;
+  contract_id: number;
+  kind: string;
+  flat_amount?: number | null;
+  bid_min?: number | null;
+  bid_max?: number | null;
+  rev_percent?: number | null;
+  profit_percent?: number | null;
+  cap_period: string;
+  cap_total?: number | null;
+  cap_max_daily?: number | null;
+  trigger: string;
+  trigger_stage_id?: number | null;
+  source_pipeline_id?: number | null;
+  source_stage_id?: number | null;
+  counterparty_pipeline_id?: number | null;
+  counterparty_stage_id?: number | null;
+  return_stage_id?: number | null;
+  delivery: string;
+  position: number;
 }
 
 export interface ReturnRule {
@@ -251,6 +305,7 @@ export interface Route {
   origin_stage_name?: string | null;
   destination: "publisher" | "buyer";
   contract_id: number | null;
+  compensation_id?: number | null;
   contract_name?: string | null;
   buyer_name?: string | null;
   delivery: "leads" | "leads_pipeline";
@@ -273,6 +328,90 @@ export interface FieldMapEntry {
 export interface SourceSamplePayload {
   payload: Record<string, unknown> | null;
   received_at?: string;
+}
+
+export interface Webhook {
+  id: number;
+  name: string;
+  slug: string;
+  secret_prefix: string;
+  is_active: boolean;
+  inbound_enabled: boolean;
+  outbound_enabled: boolean;
+  outbound_url?: string | null;
+  created_at: string;
+}
+
+export type OutboundTriggerEvent =
+  | "lead.create"
+  | "lead.update"
+  | "lead.delete"
+  | "pipeline.move_stage"
+  | "pipeline.place"
+  | "pipeline.stage_rule_applied";
+
+export interface ResponseMapEntry {
+  response_key: string;
+  target_type: "builtin" | "custom";
+  builtin_field?: string;
+  custom_field_id?: number;
+}
+
+export interface WebhookOutboundTrigger {
+  id: number;
+  webhook_id: number;
+  trigger_event: OutboundTriggerEvent;
+  condition_logic: "and" | "or";
+  conditions: unknown[];
+  payload_template: string;
+  response_map: ResponseMapEntry[];
+  position: number;
+  is_active: boolean;
+}
+
+export interface WebhookEvent {
+  id: number;
+  webhook_id: number;
+  event_key: string;
+  action: "create" | "update" | "delete" | "move_stage";
+  duplicate_mode?: "update" | "duplicate" | "reject" | null;
+  lookup_by?: "external_id" | "public_id" | null;
+  target_stage_id?: number | null;
+  target_pipeline_id?: number | null;
+  position: number;
+  created_at: string;
+}
+
+export interface WebhookFieldMapEntry {
+  id: number;
+  event_id: number;
+  source_key: string;
+  target_type: "builtin" | "custom";
+  builtin_field: string | null;
+  custom_field_id: number | null;
+}
+
+export interface WebhookSamplePayload {
+  payload: Record<string, unknown> | null;
+  received_at?: string;
+}
+
+export interface WebhookDelivery {
+  id: number;
+  webhook_id: number;
+  event_id?: number | null;
+  lead_id?: number | null;
+  lead_public_id?: string | null;
+  status: "success" | "error" | "skipped";
+  error_message?: string | null;
+  created_at: string;
+}
+
+export interface WebhookDeliveryListResponse {
+  items: WebhookDelivery[];
+  total: number;
+  page: number;
+  limit: number;
 }
 
 export interface RouteFieldMapEntry {

@@ -47,9 +47,11 @@ func (h *Handler) RegisterPlatformRoutes(r chi.Router) {
 	r.With(auth.RequireRole("admin")).Post("/publishers", h.createPublisher)
 	r.Get("/publishers", h.listPublishers)
 	r.With(auth.RequireRole("admin")).Patch("/publishers/{accountId}", h.patchPublisherStatus)
+	r.With(auth.RequireRole("admin")).Delete("/publishers/{accountId}", h.deletePublisher)
 	r.With(auth.RequireRole("admin")).Post("/buyers", h.createPlatformBuyer)
 	r.Get("/buyers", h.listAllBuyers)
 	r.With(auth.RequireRole("admin")).Patch("/buyers/{accountId}", h.patchBuyerStatus)
+	r.With(auth.RequireRole("admin")).Delete("/buyers/{accountId}", h.deleteBuyer)
 	r.Get("/accounts/switch-log", h.switchLog)
 	h.RegisterUserRoutes(r)
 }
@@ -343,11 +345,25 @@ func (h *Handler) switchBack(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) createPublisher(w http.ResponseWriter, r *http.Request) {
-	var body CreatePublisherParams
+	var body struct {
+		Name           string `json:"name"`
+		Website        string `json:"website"`
+		Timezone       string `json:"timezone"`
+		AdminEmail     string `json:"admin_email"`
+		AdminFirstName string `json:"admin_first_name"`
+		AdminLastName  string `json:"admin_last_name"`
+	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	pub, err := h.svc.CreatePublisher(r.Context(), body)
+	pub, err := h.svc.CreatePublisher(r.Context(), CreatePublisherParams{
+		Name:           body.Name,
+		Website:        body.Website,
+		Timezone:       body.Timezone,
+		AdminEmail:     body.AdminEmail,
+		AdminFirstName: body.AdminFirstName,
+		AdminLastName:  body.AdminLastName,
+	})
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -374,11 +390,99 @@ func (h *Handler) listAllBuyers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) patchPublisherStatus(w http.ResponseWriter, r *http.Request) {
-	h.patchAccountStatus(w, r, "publisher")
+	var body struct {
+		Name              *string `json:"name"`
+		Timezone          *string `json:"timezone"`
+		OperationalStatus *string `json:"operational_status"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	if body.Name == nil && body.Timezone == nil && body.OperationalStatus == nil {
+		httpx.WriteError(w, httpx.Validation("no fields to update"))
+		return
+	}
+
+	publicID := chi.URLParam(r, "accountId")
+	var acct *Account
+	var err error
+
+	if body.Name != nil || body.Timezone != nil {
+		acct, err = h.svc.UpdatePublisher(r.Context(), publicID, UpdatePublisherParams{
+			Name:     body.Name,
+			Timezone: body.Timezone,
+		})
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+	}
+	if body.OperationalStatus != nil {
+		acct, err = h.svc.SetOperationalStatus(r.Context(), publicID, "publisher", *body.OperationalStatus)
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+	}
+
+	httpx.JSON(w, http.StatusOK, acct)
+}
+
+func (h *Handler) deletePublisher(w http.ResponseWriter, r *http.Request) {
+	if err := h.svc.SoftDeletePublisher(r.Context(), chi.URLParam(r, "accountId")); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) patchBuyerStatus(w http.ResponseWriter, r *http.Request) {
-	h.patchAccountStatus(w, r, "buyer")
+	var body struct {
+		Name              *string `json:"name"`
+		Timezone          *string `json:"timezone"`
+		Website           *string `json:"website"`
+		OperationalStatus *string `json:"operational_status"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	if body.Name == nil && body.Timezone == nil && body.Website == nil && body.OperationalStatus == nil {
+		httpx.WriteError(w, httpx.Validation("no fields to update"))
+		return
+	}
+
+	publicID := chi.URLParam(r, "accountId")
+	var acct *Account
+	var err error
+
+	if body.Name != nil || body.Timezone != nil || body.Website != nil {
+		acct, err = h.svc.UpdateBuyerByPublicID(r.Context(), publicID, UpdateBuyerParams{
+			Name:     body.Name,
+			Website:  body.Website,
+			Timezone: body.Timezone,
+		})
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+	}
+	if body.OperationalStatus != nil {
+		acct, err = h.svc.SetOperationalStatus(r.Context(), publicID, "buyer", *body.OperationalStatus)
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+	}
+
+	httpx.JSON(w, http.StatusOK, acct)
+}
+
+func (h *Handler) deleteBuyer(w http.ResponseWriter, r *http.Request) {
+	if err := h.svc.SoftDeleteBuyer(r.Context(), chi.URLParam(r, "accountId")); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) patchAccountStatus(w http.ResponseWriter, r *http.Request, accountType string) {

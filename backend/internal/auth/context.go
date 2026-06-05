@@ -49,6 +49,23 @@ func APIKeyAccountFromContext(ctx context.Context) *APIKeyAccount {
 	return a
 }
 
+// WebhookAuth is resolved from a valid per-webhook secret.
+type WebhookAuth struct {
+	WebhookID int64
+	AccountID int64
+}
+
+const webhookAuthKey ctxKey = 3
+
+func WithWebhookAuth(ctx context.Context, a *WebhookAuth) context.Context {
+	return context.WithValue(ctx, webhookAuthKey, a)
+}
+
+func WebhookAuthFromContext(ctx context.Context) *WebhookAuth {
+	a, _ := ctx.Value(webhookAuthKey).(*WebhookAuth)
+	return a
+}
+
 // ImpersonationChange is a before/after field diff recorded for collaboration audit.
 type ImpersonationChange struct {
 	Field string

@@ -2,7 +2,11 @@ import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { get, patch, post, del, ns } from "@/lib/api";
 import type { Me } from "@/types";
-import { DEFAULT_VISIBLE_COLUMNS } from "./leadsListColumns";
+import {
+  DEFAULT_VISIBLE_COLUMNS,
+  BOARD_CARD_FIELDS_PREF_KEY,
+  parseBoardCardFields,
+} from "./leadsListColumns";
 
 export interface FilterCondition {
   field: string;
@@ -229,6 +233,32 @@ export function useActiveViewId(placement: ViewPlacement) {
   });
 
   return { activeId, setActiveId: setActiveId.mutateAsync, isLoading };
+}
+
+export function useBoardCardFields() {
+  const qc = useQueryClient();
+
+  const { data: me, isLoading } = useQuery({
+    queryKey: ["me"],
+    queryFn: () => get<Me>("/auth/me"),
+  });
+
+  const savedCardFields = useMemo(
+    () => parseBoardCardFields(me?.user.prefs?.[BOARD_CARD_FIELDS_PREF_KEY]),
+    [me]
+  );
+
+  const saveCardFields = useMutation({
+    mutationFn: (cols: string[]) =>
+      patch<Record<string, unknown>>("/auth/me/prefs", { [BOARD_CARD_FIELDS_PREF_KEY]: cols }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
+  });
+
+  return {
+    savedCardFields,
+    saveCardFields: saveCardFields.mutate,
+    isLoading,
+  };
 }
 
 export function mergeViews(apiViews: SavedLeadView[] | undefined, placement: ViewPlacement): SavedLeadView[] {
