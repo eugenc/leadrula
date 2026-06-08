@@ -18,19 +18,22 @@ import { useCustomFields } from "@/features/leads/hooks";
 import { CreateCustomFieldDrawer } from "@/features/admin/CreateCustomFieldDrawer";
 import { BuiltinCustomFieldSelect } from "@/features/admin/BuiltinCustomFieldSelect";
 import { slugFieldKey } from "@/features/admin/customFieldConstants";
+import { buildPayloadSuggestions } from "@/features/leads/csvMapping";
+import { payloadValuePreview } from "@/features/intake/payloadKeys";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
 import { Switch, Spinner, EmptyState, Badge } from "@/components/ui/misc";
 import { FormDrawer } from "@/components/ui/dialog";
 import { format } from "date-fns";
 import { ArrowRightLeft, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { IntakeLogSection } from "@/features/intake/IntakeLogTable";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
-import type { Route, RouteFieldMapEntry, Source } from "@/types";
+import type { Route, RouteFieldMapEntry, Source, SourceType } from "@/types";
 
 const BUILTINS = ["first_name", "last_name", "phone", "email", "address", "city", "state", "zip"];
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
@@ -42,8 +45,15 @@ function slugify(name: string) {
     .replace(/^-|-$/g, "");
 }
 
-function mappedSourceKeys(entries: { source_key: string }[]): Set<string> {
-  return new Set(entries.map((e) => e.source_key));
+function sourceFieldKeySets(entries: { source_key: string; target_type: string }[]) {
+  const ignoredKeys = new Set(
+    entries.filter((e) => e.target_type === "ignore").map((e) => e.source_key)
+  );
+  const mappedKeys = new Set(
+    entries.filter((e) => e.target_type !== "ignore").map((e) => e.source_key)
+  );
+  const handledKeys = new Set([...ignoredKeys, ...mappedKeys]);
+  return { ignoredKeys, mappedKeys, handledKeys };
 }
 
 export function SourcesPage() {
@@ -86,7 +96,7 @@ export function SourcesPage() {
               <tr>
                 <TH>Name</TH>
                 <TH>Slug</TH>
-                <TH>Webhook</TH>
+                <TH>Endpoint</TH>
                 <TH>Active</TH>
                 <TH />
               </tr>
@@ -177,12 +187,14 @@ function SourceDrawerContent({
   const create = useCreateSource();
   const update = useUpdateSource();
 
+  const [type, setType] = useState<SourceType>("webhook");
   const [name, setName] = useState(source?.name ?? "");
   const [slug, setSlug] = useState(source?.slug ?? "");
   const [slugTouched, setSlugTouched] = useState(false);
   const [isActive, setIsActive] = useState(source?.is_active ?? true);
 
   useEffect(() => {
+    setType("webhook");
     setName(source?.name ?? "");
     setSlug(source?.slug ?? "");
     setSlugTouched(false);
@@ -203,7 +215,7 @@ function SourceDrawerContent({
       );
     } else {
       create.mutate(
-        { name, slug },
+        { name, slug, type },
         {
           onSuccess: (src) => {
             onCreated?.(src);
@@ -215,7 +227,7 @@ function SourceDrawerContent({
     }
   }
 
-  const valid = !!name && !!slug;
+  const valid = !!name && !!slug && !!type;
   const saving = create.isPending || update.isPending;
 
   return (
@@ -223,7 +235,7 @@ function SourceDrawerContent({
       open
       onClose={onClose}
       title={editing ? source.name : "New Source"}
-      subtitle={editing ? "Edit source" : "Create a webhook source"}
+      subtitle={editing ? "Edit source" : "Create a lead source"}
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
@@ -236,6 +248,21 @@ function SourceDrawerContent({
       }
     >
       <div className="space-y-3">
+        {editing ? (
+          <div>
+            <Label>Type</Label>
+            <p className="text-sm text-gray-700">
+              <Badge>{source.type === "webhook" ? "Webhook" : source.type}</Badge>
+            </p>
+          </div>
+        ) : (
+          <div>
+            <Label>Type</Label>
+            <Select value={type} onChange={(e) => setType(e.target.value as SourceType)}>
+              <option value="webhook">Webhook</option>
+            </Select>
+          </div>
+        )}
         <div>
           <Label>Name</Label>
           <Input
@@ -321,14 +348,37 @@ function SourceFieldMapContent({
   const remove = useDeleteSourceFieldMap();
   const [sourceKey, setSourceKey] = useState("");
   const [target, setTarget] = useState("first_name");
+  const [rowTargets, setRowTargets] = useState<Record<string, string>>({});
   const [createFieldOpen, setCreateFieldOpen] = useState(false);
 
   const createField = useCreateField();
 
   const payload = sample?.payload ?? null;
   const mappableKeys = payload ? mappablePayloadKeys(payload) : [];
-  const mappedKeys = mappedSourceKeys(entries ?? []);
-  const unmappedKeys = mappableKeys.filter((k) => !mappedKeys.has(k));
+  const { ignoredKeys, mappedKeys, handledKeys } = useMemo(
+    () => sourceFieldKeySets(entries ?? []),
+    [entries]
+  );
+  const unmappedKeys = mappableKeys.filter((k) => !handledKeys.has(k));
+
+  const suggestions = useMemo(
+    () => buildPayloadSuggestions(unmappedKeys, customFields ?? []),
+    [unmappedKeys, customFields]
+  );
+
+  useEffect(() => {
+    setRowTargets((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [key, target] of Object.entries(suggestions)) {
+        if (!(key in prev)) {
+          next[key] = target;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [suggestions]);
 
   const buyerRoutes = useMemo(
     () =>
@@ -398,6 +448,26 @@ function SourceFieldMapContent({
     addMapping(sourceKey, target);
   }
 
+  function rowTarget(key: string) {
+    return rowTargets[key] ?? suggestions[key] ?? "first_name";
+  }
+
+  function isSuggested(key: string) {
+    return !!suggestions[key] && rowTarget(key) === suggestions[key];
+  }
+
+  function ignoreMapping(key: string) {
+    add.mutate(
+      { sourceId, body: { source_key: key, target_type: "ignore" } },
+      { onError: (e) => toast.error(errorMessage(e)) }
+    );
+  }
+
+  function prefillMapping(key: string) {
+    setSourceKey(key);
+    setTarget(rowTargets[key] ?? suggestions[key] ?? "first_name");
+  }
+
   function openCreateForKey(key: string) {
     setSourceKey(key);
     setCreateFieldOpen(true);
@@ -449,19 +519,20 @@ function SourceFieldMapContent({
                   <div className="flex flex-wrap gap-1.5">
                     {mappableKeys.map((k) => {
                       const mapped = mappedKeys.has(k);
+                      const ignored = ignoredKeys.has(k);
                       return (
                         <button
                           key={k}
                           type="button"
-                          onClick={() => setSourceKey(k)}
+                          onClick={() => prefillMapping(k)}
                           className={
-                            mapped
+                            mapped || ignored
                               ? "rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 font-mono text-xs text-gray-400"
-                              : "rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-mono text-xs text-amber-900 hover:border-teal-300 hover:bg-teal-50"
+                              : "rounded-full border border-gray-200 bg-white px-2 py-0.5 font-mono text-xs text-gray-800 hover:border-teal-300 hover:bg-teal-50"
                           }
                         >
                           {k}
-                          {mapped ? " ✓" : ""}
+                          {mapped ? " ✓" : ignored ? " —" : ""}
                         </button>
                       );
                     })}
@@ -469,31 +540,47 @@ function SourceFieldMapContent({
                 </div>
               )}
               {unmappedKeys.length > 0 && (
-                <div className="rounded-md border border-amber-100 bg-amber-50/50 p-3 space-y-2">
-                  <Label className="text-amber-900">Unmapped keys</Label>
-                  <p className="text-xs text-amber-800/80">
-                    These payload keys are not mapped yet. Create a custom field or map to a built-in.
-                  </p>
-                  <div className="flex flex-col gap-2">
-                    {unmappedKeys.map((k) => (
-                      <div key={k} className="flex flex-wrap items-center gap-2">
-                        <span className="font-mono text-xs text-gray-800">{k}</span>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => {
-                            setSourceKey(k);
-                            setTarget("first_name");
-                          }}
-                        >
-                          Map…
+                <div className="space-y-3">
+                  <div>
+                    <Label>Unmapped keys</Label>
+                    <p className="text-xs text-gray-500">
+                      These payload keys are not mapped yet. Create a custom field or map to a built-in.
+                    </p>
+                  </div>
+                  {unmappedKeys.map((k) => (
+                    <div key={k} className="rounded-md border border-gray-100 p-3">
+                      <div className="mb-2">
+                        <span className="font-mono text-sm font-medium text-gray-800">{k}</span>
+                        <p className="mt-0.5 truncate text-xs text-gray-400">
+                          {payloadValuePreview(payload, k)}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-end gap-2">
+                        <div className="min-w-[11rem] flex-1">
+                          <BuiltinCustomFieldSelect
+                            value={rowTarget(k)}
+                            onChange={(v) => setRowTargets((t) => ({ ...t, [k]: v }))}
+                            customFields={customFields ?? []}
+                            builtins={BUILTINS}
+                            label="Lead field"
+                            onAddCustomField={() => openCreateForKey(k)}
+                          />
+                          {isSuggested(k) && (
+                            <p className="mt-0.5 text-xs text-gray-400">Suggested</p>
+                          )}
+                        </div>
+                        <Button size="sm" onClick={() => addMapping(k, rowTarget(k))}>
+                          Map
                         </Button>
-                        <Button size="sm" onClick={() => openCreateForKey(k)}>
+                        <Button size="sm" variant="secondary" onClick={() => openCreateForKey(k)}>
                           Create custom field
                         </Button>
+                        <Button size="sm" variant="secondary" onClick={() => ignoreMapping(k)}>
+                          Ignore
+                        </Button>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </>
@@ -510,7 +597,9 @@ function SourceFieldMapContent({
             >
               <span>
                 <span className="font-mono">{e.source_key}</span> →{" "}
-                {e.target_type === "builtin" ? (
+                {e.target_type === "ignore" ? (
+                  <Badge variant="default">Ignored</Badge>
+                ) : e.target_type === "builtin" ? (
                   <Badge variant="review">{e.builtin_field}</Badge>
                 ) : (
                   <Badge variant="distributed">
@@ -518,26 +607,35 @@ function SourceFieldMapContent({
                   </Badge>
                 )}
               </span>
-              <IconButton variant="danger" onClick={() => remove.mutate(e.id)}>
-                <Trash2 className="h-4 w-4" />
-              </IconButton>
+              <div className="flex items-center gap-2">
+                {e.target_type === "ignore" && (
+                  <Button size="sm" variant="secondary" onClick={() => prefillMapping(e.source_key)}>
+                    Map
+                  </Button>
+                )}
+                <IconButton variant="danger" onClick={() => remove.mutate(e.id)}>
+                  <Trash2 className="h-4 w-4" />
+                </IconButton>
+              </div>
             </div>
           ))}
         </div>
 
         <div className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
-          <div>
+          <div className="min-w-0">
             <Label>Payload key</Label>
             <Input value={sourceKey} onChange={(e) => setSourceKey(e.target.value)} placeholder="phone_number" />
           </div>
-          <BuiltinCustomFieldSelect
-            value={target}
-            onChange={setTarget}
-            customFields={customFields ?? []}
-            builtins={BUILTINS}
-            label="Lead field"
-            onAddCustomField={() => setCreateFieldOpen(true)}
-          />
+          <div className="min-w-0">
+            <BuiltinCustomFieldSelect
+              value={target}
+              onChange={setTarget}
+              customFields={customFields ?? []}
+              builtins={BUILTINS}
+              label="Lead field"
+              onAddCustomField={() => setCreateFieldOpen(true)}
+            />
+          </div>
           <Button onClick={submit} disabled={!sourceKey}>
             <Plus className="h-4 w-4" />
           </Button>
@@ -562,6 +660,26 @@ function SourceFieldMapContent({
             ))}
           </div>
         )}
+
+        <div className="space-y-2 border-t border-gray-100 pt-4">
+          <div className="flex items-center justify-between">
+            <Label>Recent intake</Label>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => navigate(`/p/log?source=${encodeURIComponent(slug)}`)}
+            >
+              View all in Log
+            </Button>
+          </div>
+          <IntakeLogSection
+            source="publisher"
+            readOnly={false}
+            emptyTitle="No intake yet for this source."
+            sourceSlug={slug}
+            compact
+          />
+        </div>
       </div>
       <CreateCustomFieldDrawer
         open={createFieldOpen}

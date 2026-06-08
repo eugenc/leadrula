@@ -29,7 +29,7 @@ func (s *Service) applyResponseMap(ctx context.Context, triggerID, leadID int64,
 	var rawMap json.RawMessage
 	var accountID int64
 	if err := s.pool.QueryRow(ctx,
-		`SELECT t.response_map, w.account_id
+		`SELECT w.outbound_response_map, w.account_id
 		 FROM webhook_outbound_triggers t
 		 JOIN webhooks w ON w.id = t.webhook_id
 		 WHERE t.id = $1`, triggerID).Scan(&rawMap, &accountID); err != nil {

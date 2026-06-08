@@ -60,11 +60,12 @@ func (h *Handler) createSource(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name string `json:"name"`
 		Slug string `json:"slug"`
+		Type string `json:"type"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	src, err := h.svc.CreateSource(r.Context(), p.AccountID, body.Name, body.Slug)
+	src, err := h.svc.CreateSource(r.Context(), p.AccountID, body.Name, body.Slug, body.Type)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return

@@ -136,10 +136,16 @@ export function formatTimeInStage(enteredAt: string): string {
   return "Just now";
 }
 
-function renderCustomValue(v: unknown): string {
+function renderCustomValue(v: unknown, field?: CustomField): string {
   if (v == null) return "—";
-  if (typeof v === "string") return v || "—";
+  if (typeof v === "string") {
+    if (!v) return "—";
+    return v;
+  }
   if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (field && (field.type === "date" || field.type === "datetime")) {
+    return String(v);
+  }
   return JSON.stringify(v);
 }
 
@@ -184,7 +190,7 @@ export function cellValue(lead: Lead, colId: string, customFields: CustomField[]
         const fieldId = colId.slice(7);
         const field = customFields.find((f) => String(f.id) === fieldId);
         if (!field) return "—";
-        return renderCustomValue(lead.custom_values?.[fieldId]);
+        return renderCustomValue(lead.custom_values?.[fieldId], field);
       }
       return "—";
   }

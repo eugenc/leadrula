@@ -72,7 +72,7 @@ func (s *Service) CreateRule(ctx context.Context, accountID, stageID int64, logi
 	if err := validateRulePayload(logic, conditions, actions); err != nil {
 		return nil, err
 	}
-	if err := s.validateRuleRefs(ctx, accountID, actions); err != nil {
+	if err := s.validateRuleRefs(ctx, accountID, stageID, actions); err != nil {
 		return nil, err
 	}
 	if logic == "" {
@@ -120,7 +120,7 @@ func (s *Service) UpdateRule(ctx context.Context, accountID, ruleID int64, logic
 		if err := validateRulePayload(useLogic, useConds, useActs); err != nil {
 			return nil, err
 		}
-		if err := s.validateRuleRefs(ctx, accountID, useActs); err != nil {
+		if err := s.validateRuleRefs(ctx, accountID, stageID, useActs); err != nil {
 			return nil, err
 		}
 	}
@@ -427,7 +427,7 @@ func validateRulePayload(logic string, conditions, actions json.RawMessage) erro
 	return nil
 }
 
-func (s *Service) validateRuleRefs(ctx context.Context, accountID int64, actions json.RawMessage) error {
+func (s *Service) validateRuleRefs(ctx context.Context, accountID, stageID int64, actions json.RawMessage) error {
 	acts, err := normalizeActions(actions)
 	if err != nil {
 		return err
@@ -462,9 +462,8 @@ func (s *Service) validateRuleRefs(ctx context.Context, accountID int64, actions
 			}
 		case a.Domain == "lead" && a.Field == "disqualification_reason_id" && !isNullRaw(a.Value):
 			if rid, ok := rawToInt(a.Value); ok {
-				var owned bool
-				if err := s.pool.QueryRow(ctx,
-					`SELECT EXISTS(SELECT 1 FROM disqualification_reasons WHERE id=$1 AND account_id=$2)`, rid, accountID).Scan(&owned); err != nil {
+				owned, err := s.reasonBelongsToRulePipeline(ctx, stageID, rid)
+				if err != nil {
 					return err
 				}
 				if !owned {

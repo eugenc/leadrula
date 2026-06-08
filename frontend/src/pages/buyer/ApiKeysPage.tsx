@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useApiKeys, useCreateApiKey, useRevokeApiKey } from "@/features/admin/hooks";
-import { PageBody } from "@/components/layout/PageBody";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +18,6 @@ export function ApiKeysPage() {
 
   return (
     <>
-      <PageBody>
         {secret && (
           <Card className="mb-4 border-jade-200 bg-jade-50 p-4">
             <div className="mb-1 text-sm font-semibold text-jade-700">
@@ -99,7 +97,6 @@ export function ApiKeysPage() {
             </TBody>
           </Table>
         )}
-      </PageBody>
     </>
   );
 }

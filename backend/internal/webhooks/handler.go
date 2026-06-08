@@ -1,6 +1,7 @@
 package webhooks
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -20,6 +21,7 @@ func (h *Handler) RegisterPublicRoutes(r chi.Router) {
 
 // RegisterRoutes mounts admin CRUD for publisher or buyer namespace.
 func (h *Handler) RegisterRoutes(r chi.Router) {
+	r.Get("/webhook-deliveries", h.listAccountDeliveries)
 	r.Get("/webhooks", h.list)
 	r.Get("/webhooks/{id}/events", h.listEvents)
 	r.Get("/webhooks/{id}/events/{eventId}/field-map", h.listFieldMap)
@@ -133,23 +135,33 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
-		Name            *string `json:"name"`
-		Slug            *string `json:"slug"`
-		IsActive        *bool   `json:"is_active"`
-		InboundEnabled  *bool   `json:"inbound_enabled"`
-		OutboundEnabled *bool   `json:"outbound_enabled"`
-		OutboundURL     *string `json:"outbound_url"`
+		Name                    *string         `json:"name"`
+		Slug                    *string         `json:"slug"`
+		IsActive                *bool           `json:"is_active"`
+		InboundEnabled          *bool           `json:"inbound_enabled"`
+		OutboundEnabled         *bool           `json:"outbound_enabled"`
+		OutboundURL             *string         `json:"outbound_url"`
+		OutboundFormat          *string         `json:"outbound_format"`
+		OutboundMethod          *string         `json:"outbound_method"`
+		OutboundPayloadTemplate *string         `json:"outbound_payload_template"`
+		OutboundFieldMap        json.RawMessage `json:"outbound_field_map"`
+		OutboundResponseMap     json.RawMessage `json:"outbound_response_map"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
 	wb, err := h.svc.Update(r.Context(), p.AccountID, idp(r, "id"), UpdateWebhookInput{
-		Name:            body.Name,
-		Slug:            body.Slug,
-		IsActive:        body.IsActive,
-		InboundEnabled:  body.InboundEnabled,
-		OutboundEnabled: body.OutboundEnabled,
-		OutboundURL:     body.OutboundURL,
+		Name:                    body.Name,
+		Slug:                    body.Slug,
+		IsActive:                body.IsActive,
+		InboundEnabled:          body.InboundEnabled,
+		OutboundEnabled:         body.OutboundEnabled,
+		OutboundURL:             body.OutboundURL,
+		OutboundFormat:          body.OutboundFormat,
+		OutboundMethod:          body.OutboundMethod,
+		OutboundPayloadTemplate: body.OutboundPayloadTemplate,
+		OutboundFieldMap:        body.OutboundFieldMap,
+		OutboundResponseMap:     body.OutboundResponseMap,
 	})
 	if err != nil {
 		httpx.WriteError(w, err)
@@ -332,6 +344,22 @@ func (h *Handler) replayDelivery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusAccepted, res)
+}
+
+func (h *Handler) listAccountDeliveries(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	q := r.URL.Query()
+	result, err := h.svc.ListAccountDeliveries(r.Context(), p.AccountID, ListAccountDeliveriesParams{
+		Status:    q.Get("status"),
+		WebhookID: int64(parseInt(q.Get("webhook_id"))),
+		Page:      int(parseInt(q.Get("page"))),
+		Limit:     int(parseInt(q.Get("limit"))),
+	})
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) listDeliveries(w http.ResponseWriter, r *http.Request) {

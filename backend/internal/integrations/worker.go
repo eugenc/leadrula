@@ -96,23 +96,27 @@ func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, p
 		return
 	}
 
-	var dp providers.DeliveryPayload
-	_ = json.Unmarshal(payload, &dp)
-	var raw map[string]any
-	_ = json.Unmarshal(payload, &raw)
-	if cfg, ok := raw["_config"].(map[string]any); ok {
-		dp.Config = cfg
-	}
-	for k, v := range connConfig {
-		if dp.Config == nil {
-			dp.Config = map[string]any{}
+	var result *providers.DeliveryResult
+	if providerSlug == "webhook" {
+		result, err = providers.DeliverWebhook(ctx, credentials, payload)
+	} else {
+		var dp providers.DeliveryPayload
+		_ = json.Unmarshal(payload, &dp)
+		var raw map[string]any
+		_ = json.Unmarshal(payload, &raw)
+		if cfg, ok := raw["_config"].(map[string]any); ok {
+			dp.Config = cfg
 		}
-		if _, exists := dp.Config[k]; !exists {
-			dp.Config[k] = v
+		for k, v := range connConfig {
+			if dp.Config == nil {
+				dp.Config = map[string]any{}
+			}
+			if _, exists := dp.Config[k]; !exists {
+				dp.Config[k] = v
+			}
 		}
+		result, err = p.Deliver(ctx, credentials, dp)
 	}
-
-	result, err := p.Deliver(ctx, credentials, dp)
 	duration := int(time.Since(start).Milliseconds())
 
 	if err != nil {

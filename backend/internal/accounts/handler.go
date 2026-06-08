@@ -33,6 +33,7 @@ func (h *Handler) RegisterMeRoute(r chi.Router) {
 	r.Get("/auth/me", h.me)
 	r.Patch("/auth/me/prefs", h.patchPrefs)
 	r.Post("/auth/me/avatar", h.uploadMyAvatar)
+	r.With(auth.RequireRole("admin")).Patch("/auth/me/account", h.patchMyAccount)
 }
 
 // RegisterSwitchRoutes mounts account switching endpoints.
@@ -169,6 +170,27 @@ func (h *Handler) patchPrefs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, prefs)
+}
+
+func (h *Handler) patchMyAccount(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		Timezone string `json:"timezone"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	acct, err := h.svc.UpdateMyAccount(r.Context(), p, body.Timezone)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"account": map[string]any{
+			"id": acct.PublicID, "handler_id": acct.HandlerID, "type": acct.Type,
+			"name": acct.Name, "timezone": acct.Timezone,
+		},
+	})
 }
 
 func (h *Handler) uploadMyAvatar(w http.ResponseWriter, r *http.Request) {

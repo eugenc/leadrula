@@ -19,6 +19,7 @@ type Source struct {
 	PublisherID int64     `json:"-"`
 	Name        string    `json:"name"`
 	Slug        string    `json:"slug"`
+	Type        string    `json:"type"`
 	IsActive    bool      `json:"is_active"`
 	CreatedAt   time.Time `json:"created_at"`
 }
@@ -159,9 +160,9 @@ func MatchSourceBySlug(ctx context.Context, q database.Querier, publisherID int6
 	}
 	s := &Source{}
 	err := q.QueryRow(ctx,
-		`SELECT id, publisher_id, name, slug, is_active, created_at
+		`SELECT id, publisher_id, name, slug, type, is_active, created_at
 		 FROM routing_sources WHERE publisher_id=$1 AND slug=$2 AND is_active`,
-		publisherID, slug).Scan(&s.ID, &s.PublisherID, &s.Name, &s.Slug, &s.IsActive, &s.CreatedAt)
+		publisherID, slug).Scan(&s.ID, &s.PublisherID, &s.Name, &s.Slug, &s.Type, &s.IsActive, &s.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -257,7 +258,7 @@ func RouteFieldMap(ctx context.Context, q database.Querier, routeID int64) ([]Ro
 
 func (s *Service) ListSources(ctx context.Context, publisherID int64) ([]Source, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, publisher_id, name, slug, is_active, created_at
+		`SELECT id, publisher_id, name, slug, type, is_active, created_at
 		 FROM routing_sources WHERE publisher_id=$1 ORDER BY name`, publisherID)
 	if err != nil {
 		return nil, err
@@ -266,7 +267,7 @@ func (s *Service) ListSources(ctx context.Context, publisherID int64) ([]Source,
 	var out []Source
 	for rows.Next() {
 		var src Source
-		if err := rows.Scan(&src.ID, &src.PublisherID, &src.Name, &src.Slug, &src.IsActive, &src.CreatedAt); err != nil {
+		if err := rows.Scan(&src.ID, &src.PublisherID, &src.Name, &src.Slug, &src.Type, &src.IsActive, &src.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, src)
@@ -274,12 +275,19 @@ func (s *Service) ListSources(ctx context.Context, publisherID int64) ([]Source,
 	return out, rows.Err()
 }
 
-func (s *Service) CreateSource(ctx context.Context, publisherID int64, name, slug string) (*Source, error) {
+func (s *Service) CreateSource(ctx context.Context, publisherID int64, name, slug, sourceType string) (*Source, error) {
+	if sourceType == "" {
+		return nil, httpx.Validation("type is required")
+	}
+	if sourceType != "webhook" {
+		return nil, httpx.Validation("type must be webhook")
+	}
 	src := &Source{}
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO routing_sources(publisher_id, name, slug) VALUES ($1,$2,$3)
-		 RETURNING id, publisher_id, name, slug, is_active, created_at`,
-		publisherID, name, slug).Scan(&src.ID, &src.PublisherID, &src.Name, &src.Slug, &src.IsActive, &src.CreatedAt)
+		`INSERT INTO routing_sources(publisher_id, name, slug, type) VALUES ($1,$2,$3,$4)
+		 RETURNING id, publisher_id, name, slug, type, is_active, created_at`,
+		publisherID, name, slug, sourceType).Scan(
+		&src.ID, &src.PublisherID, &src.Name, &src.Slug, &src.Type, &src.IsActive, &src.CreatedAt)
 	if err != nil {
 		if database.IsUniqueViolation(err) {
 			return nil, httpx.Conflict("a source with this slug already exists")
@@ -297,9 +305,9 @@ func (s *Service) UpdateSource(ctx context.Context, publisherID, id int64, name,
 		   slug = COALESCE($4, slug),
 		   is_active = COALESCE($5, is_active)
 		 WHERE id=$1 AND publisher_id=$2
-		 RETURNING id, publisher_id, name, slug, is_active, created_at`,
+		 RETURNING id, publisher_id, name, slug, type, is_active, created_at`,
 		id, publisherID, name, slug, isActive).Scan(
-		&src.ID, &src.PublisherID, &src.Name, &src.Slug, &src.IsActive, &src.CreatedAt)
+		&src.ID, &src.PublisherID, &src.Name, &src.Slug, &src.Type, &src.IsActive, &src.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("source not found")
 	}
@@ -353,8 +361,11 @@ func (s *Service) LatestSourceSamplePayload(ctx context.Context, publisherID, so
 }
 
 func (s *Service) AddSourceFieldMap(ctx context.Context, publisherID, sourceID int64, sourceKey, targetType string, builtinField *string, customFieldID *int64) (*SourceFieldMapEntry, error) {
-	if targetType != "builtin" && targetType != "custom" {
-		return nil, httpx.Validation("target_type must be builtin or custom")
+	if targetType != "builtin" && targetType != "custom" && targetType != "ignore" {
+		return nil, httpx.Validation("target_type must be builtin, custom, or ignore")
+	}
+	if sourceKey == "" {
+		return nil, httpx.Validation("source_key is required")
 	}
 	ok, err := s.SourceOwnedBy(ctx, publisherID, sourceID)
 	if err != nil {
@@ -371,6 +382,15 @@ func (s *Service) AddSourceFieldMap(ctx context.Context, publisherID, sourceID i
 			return nil, err
 		}
 	}
+	if targetType == "ignore" {
+		builtinField = nil
+		customFieldID = nil
+	}
+	if _, err := s.pool.Exec(ctx,
+		`DELETE FROM routing_source_field_map WHERE source_id=$1 AND source_key=$2`,
+		sourceID, sourceKey); err != nil {
+		return nil, err
+	}
 	e := &SourceFieldMapEntry{}
 	err = s.pool.QueryRow(ctx,
 		`INSERT INTO routing_source_field_map(source_id, source_key, target_type, builtin_field, custom_field_id)
@@ -380,7 +400,7 @@ func (s *Service) AddSourceFieldMap(ctx context.Context, publisherID, sourceID i
 		&e.ID, &e.SourceID, &e.SourceKey, &e.TargetType, &e.BuiltinField, &e.CustomFieldID, &e.CreatedAt)
 	if err != nil {
 		if database.IsCheckViolation(err) {
-			return nil, httpx.Validation("provide builtin_field for builtin target, or custom_field_id for custom target")
+			return nil, httpx.Validation("provide builtin_field for builtin target, custom_field_id for custom target, or neither for ignore")
 		}
 		return nil, err
 	}
@@ -755,5 +775,5 @@ func (s *Service) CreateBuyerCustomField(ctx context.Context, publisherID, route
 		return nil, err
 	}
 	cf := customfields.NewService(s.pool)
-	return cf.CreateField(ctx, buyerID, name, fieldKey, ftype, options)
+	return cf.CreateField(ctx, buyerID, name, fieldKey, ftype, options, nil)
 }

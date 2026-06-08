@@ -249,10 +249,11 @@ export function useCustomFields() {
   return useQuery({ queryKey: ["custom-fields"], queryFn: () => get<CustomField[]>(`${ns()}/custom-fields`) });
 }
 
-export function useDisqReasons() {
+export function useStageDisqReasons(stageId: number | null) {
   return useQuery({
-    queryKey: ["disq-reasons"],
-    queryFn: () => get<DisqReason[]>(`${ns()}/disqualification-reasons`),
+    queryKey: ["stage-disq-reasons", stageId],
+    queryFn: () => get<DisqReason[]>(`${ns()}/stages/${stageId}/disqualification-reasons`),
+    enabled: !!stageId,
   });
 }
 
@@ -334,6 +335,15 @@ export function usePatchPrefs() {
   return useMutation({
     mutationFn: (patchBody: Record<string, unknown>) =>
       patch<Record<string, unknown>>("/auth/me/prefs", patchBody),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
+  });
+}
+
+export function useUpdateMyAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (timezone: string) =>
+      patch<{ account: Me["account"] }>("/auth/me/account", { timezone }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
   });
 }

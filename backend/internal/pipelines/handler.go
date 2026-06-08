@@ -18,7 +18,9 @@ func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/pipelines", h.list)
 	r.Get("/pipelines/{id}/stages", h.listStages)
+	r.Get("/pipelines/{id}/disqualification-reasons", h.listPipelineReasons)
 	r.Get("/stages/{id}/rules", h.listRules)
+	r.Get("/stages/{id}/disqualification-reasons", h.listStageReasons)
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireRole("admin"))
@@ -29,6 +31,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Post("/pipelines/{id}/stages/reorder", h.reorder)
 		r.Patch("/stages/{id}", h.updateStage)
 		r.Delete("/stages/{id}", h.deleteStage)
+		r.Post("/stages/{id}/disqualification-reasons", h.createStageReason)
+		r.Patch("/disqualification-reasons/{id}", h.updateStageReason)
+		r.Delete("/disqualification-reasons/{id}", h.deleteStageReason)
 		r.Post("/stages/{id}/rules", h.createRule)
 		r.Patch("/stage-rules/{id}", h.updateRule)
 		r.Delete("/stage-rules/{id}", h.deleteRule)
@@ -235,6 +240,69 @@ func (h *Handler) reorderRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.ReorderRules(r.Context(), p.AccountID, idParam(r, "id"), body.OrderedRuleIDs); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) listStageReasons(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	items, err := h.svc.ListStageReasons(r.Context(), p.AccountID, idParam(r, "id"))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, items)
+}
+
+func (h *Handler) listPipelineReasons(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	items, err := h.svc.ListPipelineReasons(r.Context(), p.AccountID, idParam(r, "id"))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, items)
+}
+
+func (h *Handler) createStageReason(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		Label string `json:"label"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	d, err := h.svc.CreateStageReason(r.Context(), p.AccountID, idParam(r, "id"), body.Label)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, d)
+}
+
+func (h *Handler) updateStageReason(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		Label    *string `json:"label"`
+		Position *int    `json:"position"`
+		IsActive *bool   `json:"is_active"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	d, err := h.svc.UpdateStageReason(r.Context(), p.AccountID, idParam(r, "id"), body.Label, body.Position, body.IsActive)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, d)
+}
+
+func (h *Handler) deleteStageReason(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	if err := h.svc.DeleteStageReason(r.Context(), p.AccountID, idParam(r, "id")); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}

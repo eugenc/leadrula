@@ -10,6 +10,9 @@ const ALIASES: Record<string, string> = {
   field_type: "type",
   options: "options",
   choices: "options",
+  format: "format",
+  dateformat: "format",
+  date_format: "format",
   is_active: "is_active",
   isactive: "is_active",
   active: "is_active",
@@ -21,6 +24,7 @@ export const FIELD_MAPPING_TARGETS: { value: string; label: string }[] = [
   { value: "field_key", label: "Field Key" },
   { value: "type", label: "Type" },
   { value: "options", label: "Options" },
+  { value: "format", label: "Format" },
   { value: "is_active", label: "Active" },
 ];
 

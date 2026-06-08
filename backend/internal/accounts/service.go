@@ -146,6 +146,45 @@ func (s *Service) Me(ctx context.Context, p *auth.Principal) (map[string]any, er
 	return res, nil
 }
 
+func (s *Service) UpdateMyAccount(ctx context.Context, p *auth.Principal, timezone string) (*Account, error) {
+	if !p.IsAdmin() {
+		return nil, httpx.Forbidden("admin role required")
+	}
+	if p.AccountType != "buyer" && p.AccountType != "publisher" {
+		return nil, httpx.Validation("account type not supported")
+	}
+	tz := strings.TrimSpace(timezone)
+	if tz == "" {
+		return nil, httpx.Validation("timezone is required")
+	}
+	if _, ok := allowedTimezones[tz]; !ok {
+		return nil, httpx.Validation("invalid timezone")
+	}
+
+	switch p.AccountType {
+	case "buyer":
+		a, err := s.repo.UpdateBuyer(ctx, p.AccountID, UpdateBuyerParams{Timezone: &tz})
+		if err != nil {
+			if err == ErrNotFound {
+				return nil, httpx.NotFound("account not found")
+			}
+			return nil, err
+		}
+		return a, nil
+	case "publisher":
+		a, err := s.repo.UpdatePublisher(ctx, p.AccountPublicID, UpdatePublisherParams{Timezone: &tz})
+		if err != nil {
+			if err == ErrNotFound {
+				return nil, httpx.NotFound("account not found")
+			}
+			return nil, err
+		}
+		return a, nil
+	default:
+		return nil, httpx.Validation("account type not supported")
+	}
+}
+
 // PatchPrefs shallow-merges patch into the user's prefs JSON and returns the merged object.
 func (s *Service) PatchPrefs(ctx context.Context, userID int64, patch map[string]any) (map[string]any, error) {
 	u, err := s.repo.GetUser(ctx, userID)

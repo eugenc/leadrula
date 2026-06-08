@@ -41,6 +41,7 @@ func (h *Handler) RegisterQueueRoutes(r chi.Router) {
 	r.With(auth.RequireRole("admin")).Post("/intake-queue/{id}/route", h.route)
 	r.With(auth.RequireRole("admin")).Post("/intake-queue/{id}/reject", h.reject)
 	r.With(auth.RequireRole("admin")).Post("/intake-queue/{id}/map-field", h.mapField)
+	r.With(auth.RequireRole("admin")).Post("/intake-queue/{id}/rerun", h.rerun)
 }
 
 // RegisterBuyerRoutes mounts buyer read-only contract routing log routes.
@@ -108,6 +109,7 @@ func (h *Handler) listQueue(w http.ResponseWriter, r *http.Request) {
 		Page:   int(parseInt(q.Get("page"))),
 		Limit:  int(parseInt(q.Get("limit"))),
 		Search: q.Get("q"),
+		Source: q.Get("source"),
 	})
 	if err != nil {
 		httpx.WriteError(w, err)
@@ -170,6 +172,16 @@ func (h *Handler) mapField(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	item, err := h.svc.MapField(r.Context(), p.AccountID, idp(r), body.SourceKey, body.TargetType, body.BuiltinField, body.CustomFieldID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, item)
+}
+
+func (h *Handler) rerun(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	item, err := h.svc.ReprocessQueueItem(r.Context(), p.AccountID, idp(r))
 	if err != nil {
 		httpx.WriteError(w, err)
 		return

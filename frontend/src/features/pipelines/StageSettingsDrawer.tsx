@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { IconButton } from "@/components/layout/IconButton";
-import { Spinner } from "@/components/ui/misc";
+import { Spinner, Switch } from "@/components/ui/misc";
 import { STAGE_COLORS } from "./stageColors";
 import { STAGE_TYPES } from "./stageTypes";
 import {
@@ -20,12 +20,17 @@ import {
 } from "./ruleFieldRegistry";
 import {
   useCreateStageRule,
+  useCreateStageReason,
+  useDeleteStageReason,
   useDeleteStageRule,
+  usePipelineDisqReasons,
   useStageRules,
+  useStageDisqReasons,
   useUpdateStage,
+  useUpdateStageReason,
   useUpdateStageRule,
 } from "@/features/admin/hooks";
-import { useCustomFields, useDisqReasons, useStages, useUsers } from "@/features/leads/hooks";
+import { useCustomFields, useStages, useUsers } from "@/features/leads/hooks";
 import { formatStatus } from "@/features/leads/leadsListColumns";
 import { cn } from "@/lib/utils";
 import { errorMessage } from "@/lib/api";
@@ -146,6 +151,15 @@ function emptyRule(): RuleDraft {
   return { condition_logic: "and", conditions: [], actions: [] };
 }
 
+function disqReasonLabel(r: DisqReason): string {
+  return r.stage_name ? `${r.stage_name} — ${r.label}` : r.label;
+}
+
+function findDisqReasonLabel(lk: Lookups, value: unknown): string {
+  const r = lk.reasons.find((x) => x.id === asNum(value));
+  return r ? disqReasonLabel(r) : "—";
+}
+
 type Props = {
   stage: Stage | null;
   pipelineId: number;
@@ -159,9 +173,16 @@ export function StageSettingsDrawer({ stage, pipelineId, open, onClose }: Props)
   const { data: stages } = useStages(pipelineId);
   const { data: customFields } = useCustomFields();
   const { data: users } = useUsers();
-  const { data: reasons } = useDisqReasons();
+  const { data: stageReasons, isLoading: stageReasonsLoading } = useStageDisqReasons(
+    open && stage?.stage_type === "disqualification" ? stage.id : null
+  );
+  const { data: pipelineReasons } = usePipelineDisqReasons(open ? pipelineId : null);
+  const createReason = useCreateStageReason();
+  const updateReason = useUpdateStageReason();
+  const removeReason = useDeleteStageReason();
   const createRule = useCreateStageRule();
   const [draft, setDraft] = useState<RuleDraft | null>(null);
+  const [newReasonLabel, setNewReasonLabel] = useState("");
 
   if (!stage) return null;
 
@@ -169,7 +190,7 @@ export function StageSettingsDrawer({ stage, pipelineId, open, onClose }: Props)
     customFields: customFields ?? [],
     stages: stages ?? [],
     users: (users ?? []).filter((u) => u.status === "active"),
-    reasons: (reasons ?? []).filter((r) => r.is_active),
+    reasons: (pipelineReasons ?? []).filter((r) => r.is_active),
     currentStageId: stage.id,
   };
 
@@ -228,6 +249,75 @@ export function StageSettingsDrawer({ stage, pipelineId, open, onClose }: Props)
                 {STAGE_TYPES.find((t) => t.value === stage.stage_type)?.description}
               </p>
             </section>
+
+            {stage.stage_type === "disqualification" && (
+              <section>
+                <SectionLabel className="mb-2">Disqualification reasons</SectionLabel>
+                <p className="mb-3 text-xs text-gray-400">
+                  Reasons shown when a lead is moved into this stage.
+                </p>
+                {stageReasonsLoading ? (
+                  <Spinner className="h-5 w-5" />
+                ) : (
+                  <div className="space-y-2">
+                    {(stageReasons ?? []).map((r) => (
+                      <div
+                        key={r.id}
+                        className="flex items-center justify-between gap-3 border-b border-gray-100 pb-2 last:border-0"
+                      >
+                        <span className="text-sm font-medium text-gray-800">{r.label}</span>
+                        <div className="flex items-center gap-3">
+                          <Switch
+                            checked={r.is_active}
+                            onChange={(v) =>
+                              updateReason.mutate(
+                                { id: r.id, body: { is_active: v } },
+                                { onError: (e) => toast.error(errorMessage(e)) }
+                              )
+                            }
+                          />
+                          <IconButton
+                            variant="danger"
+                            onClick={() =>
+                              removeReason.mutate(r.id, {
+                                onError: (e) => toast.error(errorMessage(e)),
+                              })
+                            }
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </IconButton>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-3 flex gap-2">
+                  <Input
+                    value={newReasonLabel}
+                    onChange={(e) => setNewReasonLabel(e.target.value)}
+                    placeholder="New reason"
+                    className="h-8 text-sm"
+                  />
+                  <Button
+                    size="sm"
+                    disabled={!newReasonLabel.trim()}
+                    onClick={() => {
+                      const label = newReasonLabel.trim();
+                      if (!label) return;
+                      createReason.mutate(
+                        { stageId: stage.id, label },
+                        {
+                          onSuccess: () => setNewReasonLabel(""),
+                          onError: (e) => toast.error(errorMessage(e)),
+                        }
+                      );
+                    }}
+                  >
+                    <Plus className="h-4 w-4" /> Add
+                  </Button>
+                </div>
+              </section>
+            )}
 
             <section>
               <div className="mb-2 flex items-center justify-between">
@@ -417,7 +507,7 @@ function valueLabel(kind: FieldKind, value: unknown, lk: Lookups): string {
     case "user":
       return lk.users.find((u) => u.id === asNum(value))?.full_name ?? "—";
     case "disq":
-      return lk.reasons.find((r) => r.id === asNum(value))?.label ?? "—";
+      return findDisqReasonLabel(lk, value);
     case "checkbox":
       return value ? "checked" : "unchecked";
     case "tags":
@@ -712,7 +802,7 @@ function ConditionValue({
         >
           {lk.reasons.map((r) => (
             <option key={r.id} value={r.id}>
-              {r.label}
+              {disqReasonLabel(r)}
             </option>
           ))}
         </Select>
@@ -932,7 +1022,7 @@ function ActionValue({
           <option value="">Clear</option>
           {lk.reasons.map((r) => (
             <option key={r.id} value={r.id}>
-              {r.label}
+              {disqReasonLabel(r)}
             </option>
           ))}
         </Select>

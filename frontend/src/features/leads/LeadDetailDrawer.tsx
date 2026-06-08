@@ -26,6 +26,14 @@ import { DeleteLeadConfirmDialog } from "./DeleteLeadConfirmDialog";
 import type { Lead } from "@/types";
 import { formatStatus } from "./leadsListColumns";
 import { LeadTagsEditor } from "./LeadTagsEditor";
+import { effectiveFieldFormat } from "@/features/admin/customFieldConstants";
+import {
+  fromNativeDatetimeLocal,
+  inputModeForFormat,
+  normalizeCustomDateValue,
+  toNativeDateValue,
+  toNativeDatetimeLocalValue,
+} from "./customFieldDate";
 
 const BUILTINS: { key: keyof Lead; label: string }[] = [
   { key: "first_name", label: "First Name" },
@@ -252,6 +260,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
                           leadId={lead.id}
                           fieldId={f.id}
                           type={f.type}
+                          format={f.format}
                           options={f.options}
                           value={lead.custom_values?.[String(f.id)]}
                         />
@@ -290,20 +299,41 @@ function CustomFieldValue({
   leadId,
   fieldId,
   type,
+  format,
   options,
   value,
 }: {
   leadId: number;
   fieldId: number;
   type: string;
+  format?: string | null;
   options: string[];
   value: unknown;
 }) {
   const update = useUpdateLead();
-  const [val, setVal] = useState(value == null ? "" : typeof value === "string" ? value : JSON.stringify(value));
+  const raw = value == null ? "" : typeof value === "string" ? value : JSON.stringify(value);
+  const formatToken = effectiveFieldFormat(type, format);
+  const inputMode = type === "date" || type === "datetime" ? inputModeForFormat(type, formatToken) : "text";
+  const [val, setVal] = useState(() => {
+    if (inputMode === "date") return toNativeDateValue(raw, type, format);
+    if (inputMode === "datetime-local") return toNativeDatetimeLocalValue(raw, type, format);
+    return raw;
+  });
 
   function save(next: unknown) {
     update.mutate({ leadId, body: { custom_values: { [String(fieldId)]: next } } });
+  }
+
+  function saveDateValue(next: string) {
+    if (inputMode === "datetime-local") {
+      save(fromNativeDatetimeLocal(next, type, format));
+      return;
+    }
+    if (type === "date" || type === "datetime") {
+      save(normalizeCustomDateValue(next, type, format));
+      return;
+    }
+    save(next);
   }
 
   if (type === "dropdown") {
@@ -324,10 +354,29 @@ function CustomFieldValue({
       </Select>
     );
   }
+
+  if (type === "date" || type === "datetime") {
+    return (
+      <Input
+        value={val}
+        type={inputMode}
+        placeholder={inputMode === "text" ? formatToken : undefined}
+        onChange={(e) => {
+          const next = e.target.value;
+          setVal(next);
+          if (inputMode !== "text") saveDateValue(next);
+        }}
+        onBlur={() => {
+          if (inputMode === "text") saveDateValue(val);
+        }}
+      />
+    );
+  }
+
   return (
     <Input
       value={val}
-      type={type === "number" ? "number" : type === "date" ? "date" : "text"}
+      type={type === "number" ? "number" : "text"}
       onChange={(e) => setVal(e.target.value)}
       onBlur={() => save(type === "number" ? Number(val) : val)}
     />

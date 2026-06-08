@@ -34,22 +34,20 @@ type PipelineContext = leads.PipelineContext
 
 // OutboundTrigger is one outbound delivery rule attached to a webhook.
 type OutboundTrigger struct {
-	ID              int64           `json:"id"`
-	WebhookID       int64           `json:"webhook_id"`
-	TriggerEvent    string          `json:"trigger_event"`
-	ConditionLogic  string          `json:"condition_logic"`
-	Conditions      json.RawMessage `json:"conditions"`
-	PayloadTemplate string          `json:"payload_template"`
-	ResponseMap     json.RawMessage `json:"response_map"`
-	Position        int             `json:"position"`
-	IsActive        bool            `json:"is_active"`
+	ID             int64           `json:"id"`
+	WebhookID      int64           `json:"webhook_id"`
+	TriggerEvent   string          `json:"trigger_event"`
+	ConditionLogic string          `json:"condition_logic"`
+	Conditions     json.RawMessage `json:"conditions"`
+	Position       int             `json:"position"`
+	IsActive       bool            `json:"is_active"`
 }
 
 // ── outbound trigger CRUD ──────────────────────────────────────────
 
 func (s *Service) ListTriggers(ctx context.Context, webhookID int64) ([]OutboundTrigger, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, webhook_id, trigger_event, condition_logic, conditions, payload_template, response_map, position, is_active
+		`SELECT id, webhook_id, trigger_event, condition_logic, conditions, position, is_active
 		 FROM webhook_outbound_triggers WHERE webhook_id=$1 ORDER BY position, id`, webhookID)
 	if err != nil {
 		return nil, err
@@ -59,7 +57,7 @@ func (s *Service) ListTriggers(ctx context.Context, webhookID int64) ([]Outbound
 	for rows.Next() {
 		var t OutboundTrigger
 		if err := rows.Scan(&t.ID, &t.WebhookID, &t.TriggerEvent, &t.ConditionLogic, &t.Conditions,
-			&t.PayloadTemplate, &t.ResponseMap, &t.Position, &t.IsActive); err != nil {
+			&t.Position, &t.IsActive); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
@@ -68,12 +66,10 @@ func (s *Service) ListTriggers(ctx context.Context, webhookID int64) ([]Outbound
 }
 
 type CreateTriggerInput struct {
-	TriggerEvent    string          `json:"trigger_event"`
-	ConditionLogic  string          `json:"condition_logic"`
-	Conditions      json.RawMessage `json:"conditions"`
-	PayloadTemplate string          `json:"payload_template"`
-	ResponseMap     json.RawMessage `json:"response_map"`
-	Position        int             `json:"position"`
+	TriggerEvent   string          `json:"trigger_event"`
+	ConditionLogic string          `json:"condition_logic"`
+	Conditions     json.RawMessage `json:"conditions"`
+	Position       int             `json:"position"`
 }
 
 func (s *Service) CreateTrigger(ctx context.Context, webhookID int64, in CreateTriggerInput) (*OutboundTrigger, error) {
@@ -83,20 +79,14 @@ func (s *Service) CreateTrigger(ctx context.Context, webhookID int64, in CreateT
 	if in.Conditions == nil {
 		in.Conditions = json.RawMessage("[]")
 	}
-	if in.PayloadTemplate == "" {
-		in.PayloadTemplate = "{}"
-	}
-	if in.ResponseMap == nil {
-		in.ResponseMap = json.RawMessage("[]")
-	}
 	var t OutboundTrigger
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO webhook_outbound_triggers(webhook_id, trigger_event, condition_logic, conditions, payload_template, response_map, position)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7)
-		 RETURNING id, webhook_id, trigger_event, condition_logic, conditions, payload_template, response_map, position, is_active`,
-		webhookID, in.TriggerEvent, in.ConditionLogic, in.Conditions, in.PayloadTemplate, in.ResponseMap, in.Position).Scan(
+		`INSERT INTO webhook_outbound_triggers(webhook_id, trigger_event, condition_logic, conditions, position)
+		 VALUES ($1,$2,$3,$4,$5)
+		 RETURNING id, webhook_id, trigger_event, condition_logic, conditions, position, is_active`,
+		webhookID, in.TriggerEvent, in.ConditionLogic, in.Conditions, in.Position).Scan(
 		&t.ID, &t.WebhookID, &t.TriggerEvent, &t.ConditionLogic, &t.Conditions,
-		&t.PayloadTemplate, &t.ResponseMap, &t.Position, &t.IsActive)
+		&t.Position, &t.IsActive)
 	if err != nil {
 		return nil, err
 	}
@@ -104,31 +94,27 @@ func (s *Service) CreateTrigger(ctx context.Context, webhookID int64, in CreateT
 }
 
 type UpdateTriggerInput struct {
-	TriggerEvent    *string
-	ConditionLogic  *string
-	Conditions      json.RawMessage
-	PayloadTemplate *string
-	ResponseMap     json.RawMessage
-	Position        *int
-	IsActive        *bool
+	TriggerEvent   *string
+	ConditionLogic *string
+	Conditions     json.RawMessage
+	Position       *int
+	IsActive       *bool
 }
 
 func (s *Service) UpdateTrigger(ctx context.Context, id int64, in UpdateTriggerInput) (*OutboundTrigger, error) {
 	var t OutboundTrigger
 	err := s.pool.QueryRow(ctx,
 		`UPDATE webhook_outbound_triggers SET
-		   trigger_event    = COALESCE($2, trigger_event),
-		   condition_logic  = COALESCE($3, condition_logic),
-		   conditions       = COALESCE($4, conditions),
-		   payload_template = COALESCE($5, payload_template),
-		   response_map     = COALESCE($6, response_map),
-		   position         = COALESCE($7, position),
-		   is_active        = COALESCE($8, is_active)
+		   trigger_event   = COALESCE($2, trigger_event),
+		   condition_logic = COALESCE($3, condition_logic),
+		   conditions      = COALESCE($4, conditions),
+		   position        = COALESCE($5, position),
+		   is_active       = COALESCE($6, is_active)
 		 WHERE id=$1
-		 RETURNING id, webhook_id, trigger_event, condition_logic, conditions, payload_template, response_map, position, is_active`,
-		id, in.TriggerEvent, in.ConditionLogic, in.Conditions, in.PayloadTemplate, in.ResponseMap, in.Position, in.IsActive).Scan(
+		 RETURNING id, webhook_id, trigger_event, condition_logic, conditions, position, is_active`,
+		id, in.TriggerEvent, in.ConditionLogic, in.Conditions, in.Position, in.IsActive).Scan(
 		&t.ID, &t.WebhookID, &t.TriggerEvent, &t.ConditionLogic, &t.Conditions,
-		&t.PayloadTemplate, &t.ResponseMap, &t.Position, &t.IsActive)
+		&t.Position, &t.IsActive)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("trigger not found")
@@ -149,28 +135,45 @@ func (s *Service) DeleteTrigger(ctx context.Context, id int64) error {
 // that lets the delivery queue worker post to outbound_url.
 func (s *Service) syncOutboundConnection(ctx context.Context, w *Webhook) error {
 	if !w.OutboundEnabled || w.OutboundURL == nil || *w.OutboundURL == "" {
-		// Disable: nothing to provision; the FK will just be null.
 		return nil
 	}
 	if len(s.encKey) == 0 {
-		return fmt.Errorf("encryption key not configured; cannot provision outbound connection")
+		log.Printf("webhooks: INTEGRATION_ENC_KEY not configured; skipping outbound connection sync for webhook %d", w.ID)
+		return nil
 	}
 
-	// Look up the webhook provider row ID.
 	var providerID int64
 	if err := s.pool.QueryRow(ctx,
 		`SELECT id FROM integration_providers WHERE slug='webhook'`).Scan(&providerID); err != nil {
 		return fmt.Errorf("webhook integration provider not found: %w", err)
 	}
 
-	// Generate a fresh HMAC secret for this outbound connection.
-	rawSecret := make([]byte, 32)
-	if _, err := io.ReadFull(rand.Reader, rawSecret); err != nil {
+	secretHex, err := s.existingOutboundSecret(ctx, w.OutboundConnectionID)
+	if err != nil {
 		return err
 	}
-	secretHex := fmt.Sprintf("%x", rawSecret)
+	if secretHex == "" {
+		rawSecret := make([]byte, 32)
+		if _, err := io.ReadFull(rand.Reader, rawSecret); err != nil {
+			return err
+		}
+		secretHex = fmt.Sprintf("%x", rawSecret)
+	}
 
-	creds := map[string]string{"url": *w.OutboundURL, "secret": secretHex}
+	format := w.OutboundFormat
+	if format == "" {
+		format = "json"
+	}
+	method := w.OutboundMethod
+	if method == "" {
+		method = "POST"
+	}
+	creds := map[string]string{
+		"url":    *w.OutboundURL,
+		"secret": secretHex,
+		"format": format,
+		"method": method,
+	}
 	credsJSON, _ := json.Marshal(creds)
 	encrypted, err := aesEncrypt(s.encKey, credsJSON)
 	if err != nil {
@@ -187,7 +190,6 @@ func (s *Service) syncOutboundConnection(ctx context.Context, w *Webhook) error 
 		       name        = EXCLUDED.name
 		 RETURNING id`,
 		w.AccountID, providerID, name, encrypted).Scan(&connID); err != nil {
-		// Fallback: no unique constraint — just insert.
 		if err2 := s.pool.QueryRow(ctx,
 			`SELECT id FROM integration_connections WHERE account_id=$1 AND name=$2`,
 			w.AccountID, name).Scan(&connID); err2 != nil {
@@ -210,19 +212,50 @@ func (s *Service) syncOutboundConnection(ctx context.Context, w *Webhook) error 
 	return nil
 }
 
+func (s *Service) existingOutboundSecret(ctx context.Context, connID *int64) (string, error) {
+	if connID == nil || len(s.encKey) == 0 {
+		return "", nil
+	}
+	var enc []byte
+	if err := s.pool.QueryRow(ctx,
+		`SELECT credentials FROM integration_connections WHERE id=$1`, *connID).Scan(&enc); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	if len(enc) == 0 {
+		return "", nil
+	}
+	plain, err := aesDecrypt(s.encKey, enc)
+	if err != nil {
+		return "", err
+	}
+	var creds struct {
+		Secret string `json:"secret"`
+	}
+	if json.Unmarshal(plain, &creds) != nil {
+		return "", nil
+	}
+	return creds.Secret, nil
+}
+
 // RotateOutboundSecret regenerates the HMAC signing secret for the outbound connection.
 func (s *Service) RotateOutboundSecret(ctx context.Context, accountID, webhookID int64) (string, error) {
-	var outURL *string
-	var connID *int64
+	var w Webhook
 	if err := s.pool.QueryRow(ctx,
-		`SELECT outbound_url, outbound_connection_id FROM webhooks WHERE id=$1 AND account_id=$2`,
-		webhookID, accountID).Scan(&outURL, &connID); err != nil {
+		`SELECT `+webhookCols+` FROM webhooks WHERE id=$1 AND account_id=$2`,
+		webhookID, accountID).Scan(
+		&w.ID, &w.AccountID, &w.Name, &w.Slug, &w.SecretPrefix, &w.IsActive,
+		&w.InboundEnabled, &w.OutboundEnabled, &w.OutboundURL, &w.OutboundFormat, &w.OutboundMethod,
+		&w.OutboundPayloadTemplate, &w.OutboundFieldMap, &w.OutboundResponseMap,
+		&w.OutboundConnectionID, &w.CreatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", fmt.Errorf("webhook not found")
 		}
 		return "", err
 	}
-	if connID == nil || outURL == nil {
+	if w.OutboundConnectionID == nil || w.OutboundURL == nil {
 		return "", fmt.Errorf("outbound not configured")
 	}
 	rawSecret := make([]byte, 32)
@@ -230,14 +263,27 @@ func (s *Service) RotateOutboundSecret(ctx context.Context, accountID, webhookID
 		return "", err
 	}
 	secretHex := fmt.Sprintf("%x", rawSecret)
-	creds := map[string]string{"url": *outURL, "secret": secretHex}
+	format := w.OutboundFormat
+	if format == "" {
+		format = "json"
+	}
+	method := w.OutboundMethod
+	if method == "" {
+		method = "POST"
+	}
+	creds := map[string]string{
+		"url":    *w.OutboundURL,
+		"secret": secretHex,
+		"format": format,
+		"method": method,
+	}
 	credsJSON, _ := json.Marshal(creds)
 	encrypted, err := aesEncrypt(s.encKey, credsJSON)
 	if err != nil {
 		return "", err
 	}
 	if _, err := s.pool.Exec(ctx,
-		`UPDATE integration_connections SET credentials=$2 WHERE id=$1`, *connID, encrypted); err != nil {
+		`UPDATE integration_connections SET credentials=$2 WHERE id=$1`, *w.OutboundConnectionID, encrypted); err != nil {
 		return "", err
 	}
 	return secretHex, nil
@@ -253,7 +299,8 @@ func (s *Service) FireOutbound(ctx context.Context, accountID int64, event strin
 		return
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT t.id, t.webhook_id, t.condition_logic, t.conditions, t.payload_template,
+		`SELECT t.id, t.webhook_id, t.condition_logic, t.conditions,
+		        w.outbound_format, w.outbound_payload_template, w.outbound_field_map,
 		        w.outbound_connection_id
 		 FROM webhook_outbound_triggers t
 		 JOIN webhooks w ON w.id=t.webhook_id
@@ -272,14 +319,17 @@ func (s *Service) FireOutbound(ctx context.Context, accountID int64, event strin
 		webhookID    int64
 		logic        string
 		conditions   json.RawMessage
+		format       string
 		template     string
+		fieldMap     json.RawMessage
 		connectionID int64
 	}
 
 	var triggers []triggerRow
 	for rows.Next() {
 		var tr triggerRow
-		if err := rows.Scan(&tr.id, &tr.webhookID, &tr.logic, &tr.conditions, &tr.template, &tr.connectionID); err != nil {
+		if err := rows.Scan(&tr.id, &tr.webhookID, &tr.logic, &tr.conditions,
+			&tr.format, &tr.template, &tr.fieldMap, &tr.connectionID); err != nil {
 			log.Printf("webhooks: FireOutbound scan error: %v", err)
 			return
 		}
@@ -313,9 +363,24 @@ func (s *Service) FireOutbound(ctx context.Context, accountID int64, event strin
 			}
 		}
 
-		payload, err := renderTemplate(tr.template, tctx)
+		var payload []byte
+		var err error
+		if tr.format == "url" {
+			entries, err := parseOutboundFieldMap(tr.fieldMap)
+			if err != nil {
+				log.Printf("webhooks: trigger %d field map error: %v", tr.id, err)
+				continue
+			}
+			if len(entries) == 0 {
+				log.Printf("webhooks: trigger %d url format with empty field map", tr.id)
+				continue
+			}
+			payload, err = buildURLPayload(event, lead, pctx, entries)
+		} else {
+			payload, err = renderTemplate(tr.template, tctx)
+		}
 		if err != nil {
-			log.Printf("webhooks: trigger %d template render error: %v", tr.id, err)
+			log.Printf("webhooks: trigger %d payload build error: %v", tr.id, err)
 			continue
 		}
 		if !json.Valid(payload) {
@@ -409,7 +474,127 @@ func renderTemplate(tmpl string, ctx map[string]string) ([]byte, error) {
 	return []byte(result), nil
 }
 
+func parseOutboundFieldMap(raw json.RawMessage) ([]OutboundFieldMapEntry, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var entries []OutboundFieldMapEntry
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func buildURLPayload(event string, l *leads.Lead, pctx PipelineContext, entries []OutboundFieldMapEntry) ([]byte, error) {
+	tctx := buildTemplateContext(event, l, pctx)
+	out := map[string]string{}
+	for _, e := range entries {
+		if e.DestKey == "" {
+			continue
+		}
+		v := resolveOutboundFieldValue(e, tctx, l)
+		if v != "" {
+			out[e.DestKey] = v
+		}
+	}
+	return json.Marshal(out)
+}
+
+func resolveOutboundFieldValue(e OutboundFieldMapEntry, tctx map[string]string, l *leads.Lead) string {
+	switch e.SourceType {
+	case "static":
+		if e.StaticValue != nil {
+			return *e.StaticValue
+		}
+	case "builtin":
+		if e.BuiltinField == nil {
+			return ""
+		}
+		switch *e.BuiltinField {
+		case "first_name":
+			if l != nil {
+				return l.FirstName
+			}
+		case "last_name":
+			if l != nil {
+				return l.LastName
+			}
+		case "phone", "email", "address", "city", "state", "zip", "source", "external_id", "status":
+			if l != nil {
+				return optStrVal(lFieldPtr(l, *e.BuiltinField))
+			}
+		case "public_id":
+			if l != nil {
+				return l.PublicID
+			}
+		}
+	case "custom":
+		if e.CustomFieldID != nil && l != nil {
+			key := fmt.Sprintf("%d", *e.CustomFieldID)
+			if raw, ok := l.CustomValues[key]; ok {
+				var s string
+				if json.Unmarshal(raw, &s) == nil {
+					return s
+				}
+				return string(raw)
+			}
+		}
+	case "meta":
+		if e.MetaField != nil {
+			return tctx[*e.MetaField]
+		}
+	}
+	return ""
+}
+
+func lFieldPtr(l *leads.Lead, field string) *string {
+	switch field {
+	case "phone":
+		return l.Phone
+	case "email":
+		return l.Email
+	case "address":
+		return l.Address
+	case "city":
+		return l.City
+	case "state":
+		return l.State
+	case "zip":
+		return l.Zip
+	case "source":
+		return l.Source
+	case "external_id":
+		return l.ExternalID
+	case "status":
+		return &l.Status
+	}
+	return nil
+}
+
+func optStrVal(p *string) string {
+	if p != nil {
+		return *p
+	}
+	return ""
+}
+
 // ── encryption helpers (local copy avoids importing integrations) ──
+
+func aesDecrypt(key, ciphertext []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	if len(ciphertext) < gcm.NonceSize() {
+		return nil, fmt.Errorf("ciphertext too short")
+	}
+	nonce, ct := ciphertext[:gcm.NonceSize()], ciphertext[gcm.NonceSize():]
+	return gcm.Open(nil, nonce, ct, nil)
+}
 
 func aesEncrypt(key, plaintext []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)

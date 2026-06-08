@@ -34,8 +34,7 @@ export function BuyerBillingPage() {
   const disputedTxnIds = new Set((disputes ?? []).map((d) => d.transaction_id));
 
   return (
-    <>
-      <PageBody>
+    <PageBody>
         <div className="mb-5">
           <StatCard
             label="Current balance"
@@ -94,8 +93,7 @@ export function BuyerBillingPage() {
         {disputing && (
           <DisputeDrawer key={disputing.id} txn={disputing} onClose={() => setDisputing(null)} />
         )}
-      </PageBody>
-    </>
+    </PageBody>
   );
 }
 

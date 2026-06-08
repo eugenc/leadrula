@@ -34,6 +34,7 @@ import type {
   Transaction,
   UserRow,
   CustomField,
+  DisqReason,
 } from "@/types";
 
 function useInvalidate(keys: string[]) {
@@ -170,22 +171,56 @@ export function useImportCustomFields() {
   });
 }
 
-// ── Disqualification reasons ──────────────────────────────────────
-export function useCreateReason() {
-  const inv = useInvalidate(["disq-reasons"]);
-  return useMutation({ mutationFn: (label: string) => post(`${ns()}/disqualification-reasons`, { label }), onSuccess: inv });
+// ── Stage disqualification reasons ────────────────────────────────
+export function useStageDisqReasons(stageId: number | null) {
+  return useQuery({
+    queryKey: ["stage-disq-reasons", stageId],
+    queryFn: () => get<DisqReason[]>(`${ns()}/stages/${stageId}/disqualification-reasons`),
+    enabled: !!stageId,
+  });
 }
-export function useUpdateReason() {
-  const inv = useInvalidate(["disq-reasons"]);
+
+export function usePipelineDisqReasons(pipelineId: number | null) {
+  return useQuery({
+    queryKey: ["pipeline-disq-reasons", pipelineId],
+    queryFn: () => get<DisqReason[]>(`${ns()}/pipelines/${pipelineId}/disqualification-reasons`),
+    enabled: !!pipelineId,
+  });
+}
+
+export function useCreateStageReason() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ stageId, label }: { stageId: number; label: string }) =>
+      post(`${ns()}/stages/${stageId}/disqualification-reasons`, { label }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["stage-disq-reasons"] });
+      qc.invalidateQueries({ queryKey: ["pipeline-disq-reasons"] });
+    },
+  });
+}
+
+export function useUpdateStageReason() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
       patch(`${ns()}/disqualification-reasons/${id}`, body),
-    onSuccess: inv,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["stage-disq-reasons"] });
+      qc.invalidateQueries({ queryKey: ["pipeline-disq-reasons"] });
+    },
   });
 }
-export function useDeleteReason() {
-  const inv = useInvalidate(["disq-reasons"]);
-  return useMutation({ mutationFn: (id: number) => del(`${ns()}/disqualification-reasons/${id}`), onSuccess: inv });
+
+export function useDeleteStageReason() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => del(`${ns()}/disqualification-reasons/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["stage-disq-reasons"] });
+      qc.invalidateQueries({ queryKey: ["pipeline-disq-reasons"] });
+    },
+  });
 }
 
 // ── Users ─────────────────────────────────────────────────────────
@@ -640,6 +675,7 @@ export interface IntakeLogFilters {
   page?: number;
   limit?: number;
   q?: string;
+  source?: string;
 }
 
 function intakeQueueQueryString(filters: IntakeLogFilters): string {
@@ -715,6 +751,16 @@ export function useRouteQueue() {
 export function useRejectQueue() {
   const inv = useInvalidate(["intake-queue"]);
   return useMutation({ mutationFn: (id: number) => post(`/publisher/intake-queue/${id}/reject`), onSuccess: inv });
+}
+export function useRerunIntakeQueue() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => post<QueueItem>(`/publisher/intake-queue/${id}/rerun`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["intake-queue"] });
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    },
+  });
 }
 
 // ── Buyers (publisher oversight) ──────────────────────────────────

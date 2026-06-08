@@ -14,8 +14,7 @@ import { errorMessage } from "@/lib/api";
 export function PublisherBillingPage() {
   const [tab, setTab] = useState<"disputes" | "transactions" | "payouts">("disputes");
   return (
-    <>
-      <PageBody>
+    <PageBody>
         <div className="mb-4 flex border-b border-gray-100">
           {(["disputes", "transactions", "payouts"] as const).map((t) => (
             <button
@@ -33,8 +32,7 @@ export function PublisherBillingPage() {
         {tab === "disputes" && <Disputes />}
         {tab === "transactions" && <Transactions />}
         {tab === "payouts" && <PublisherPayouts />}
-      </PageBody>
-    </>
+    </PageBody>
   );
 }
 

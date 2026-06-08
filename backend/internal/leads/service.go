@@ -69,6 +69,13 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		if disqReasonID == nil {
 			return nil, nil, httpx.BusinessRule("a disqualification reason is required for this stage")
 		}
+		hasActive, err := s.pipelines.HasActiveStageReasons(ctx, newStageID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !hasActive {
+			return nil, nil, httpx.BusinessRule("no disqualification reasons configured for this stage")
+		}
 	}
 
 	if actionAt != nil {
@@ -77,12 +84,12 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		}
 	}
 	if disqReasonID != nil {
-		ok, err := s.repo.ReasonBelongsToAccount(ctx, tx, p.AccountID, *disqReasonID)
+		ok, err := s.pipelines.ReasonBelongsToStage(ctx, newStageID, *disqReasonID)
 		if err != nil {
 			return nil, nil, err
 		}
 		if !ok {
-			return nil, nil, httpx.Validation("invalid disqualification reason")
+			return nil, nil, httpx.Validation("invalid disqualification reason for this stage")
 		}
 		if err := s.repo.SetDisqReason(ctx, tx, leadID, *disqReasonID); err != nil {
 			return nil, nil, err

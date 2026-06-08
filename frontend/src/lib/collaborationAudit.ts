@@ -12,7 +12,6 @@ const AREA_LABELS: Record<string, string> = {
   stages: "Pipelines",
   "stage-rules": "Pipelines",
   "custom-fields": "Custom fields",
-  "disqualification-reasons": "Disqualification",
   billing: "Billing",
   collaboration: "Collaboration",
   contract: "Contracts",
@@ -104,6 +103,9 @@ function actionFromPath(method: string, segments: string[]): string | null {
     if (method === "DELETE") return "Deleted field";
     if (method === "PATCH") return "Updated field";
     return null;
+  }
+  if (joined.match(/^stages\/[^/]+\/disqualification-reasons$/)) {
+    return method === "POST" ? "Created disqualification reason" : null;
   }
   if (joined === "disqualification-reasons") return method === "POST" ? "Created reason" : null;
   if (joined.match(/^disqualification-reasons\/[^/]+$/)) {

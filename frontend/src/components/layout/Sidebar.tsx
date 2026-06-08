@@ -8,7 +8,6 @@ import {
   List,
   GitBranch,
   Tags,
-  Ban,
   Route,
   Webhook,
   FileText,
@@ -16,10 +15,10 @@ import {
   CreditCard,
   Building2,
   Calendar,
-  KeyRound,
   Plug,
   Settings,
   Handshake,
+  Import,
   Logs,
   type LucideIcon,
 } from "lucide-react";
@@ -50,7 +49,6 @@ const publisherNav: NavGroup[] = [
     items: [
       { to: "/p/board", label: "Pipeline", icon: KanbanSquare },
       { to: "/p/pipelines", label: "Pipelines", icon: GitBranch, adminOnly: true },
-      { to: "/p/reasons", label: "Disqualification", icon: Ban, adminOnly: true },
     ],
   },
   {
@@ -64,7 +62,7 @@ const publisherNav: NavGroup[] = [
   {
     label: "Routing",
     items: [
-      { to: "/p/sources", label: "Sources", icon: Webhook, adminOnly: true },
+      { to: "/p/sources", label: "Sources", icon: Import, adminOnly: true },
       { to: "/p/webhooks", label: "Webhooks", icon: Webhook, adminOnly: true },
       { to: "/p/routing", label: "Routing", icon: Route, adminOnly: true },
       { to: "/p/log", label: "Log", icon: Logs, adminOnly: true },
@@ -73,14 +71,14 @@ const publisherNav: NavGroup[] = [
 ];
 
 const publisherSettings: NavGroup = {
-  label: "Settings",
   items: [
-    { to: "/p/settings", label: "Profile", icon: Settings },
+    { to: "/p/settings", label: "Settings", icon: Settings },
     { to: "/p/billing", label: "Billing", icon: CreditCard },
-    { to: "/p/users", label: "Users", icon: Users, adminOnly: true },
-    { to: "/p/api", label: "API Keys", icon: KeyRound, adminOnly: true },
-    { to: "/p/integrations", label: "Integrations", icon: Plug, adminOnly: true },
   ],
+};
+
+const publisherBottomNav: NavGroup = {
+  items: [{ to: "/p/integrations", label: "Integrations", icon: Plug, adminOnly: true }],
 };
 
 const buyerNav: NavGroup[] = [
@@ -98,7 +96,6 @@ const buyerNav: NavGroup[] = [
     items: [
       { to: "/b/board", label: "Pipeline", icon: KanbanSquare },
       { to: "/b/pipelines", label: "Pipelines", icon: GitBranch, adminOnly: true },
-      { to: "/b/reasons", label: "Disqualification", icon: Ban, adminOnly: true },
     ],
   },
   {
@@ -114,12 +111,14 @@ const buyerNav: NavGroup[] = [
 ];
 
 const buyerSettings: NavGroup = {
-  label: "Settings",
   items: [
-    { to: "/b/settings", label: "Profile", icon: Settings },
+    { to: "/b/settings", label: "Settings", icon: Settings },
     { to: "/b/billing", label: "Billing", icon: CreditCard },
-    { to: "/b/users", label: "Users", icon: Users, adminOnly: true },
-    { to: "/b/api", label: "API Keys", icon: KeyRound, adminOnly: true },
+  ],
+};
+
+const buyerBottomNav: NavGroup = {
+  items: [
     { to: "/b/webhooks", label: "Webhooks", icon: Webhook, adminOnly: true },
     { to: "/b/integrations", label: "Integrations", icon: Plug, adminOnly: true },
   ],
@@ -137,11 +136,7 @@ const platformNav: NavGroup[] = [
 ];
 
 const platformSettings: NavGroup = {
-  label: "Settings",
-  items: [
-    { to: "/platform/settings", label: "Profile", icon: Settings },
-    { to: "/platform/users", label: "Users", icon: Users, adminOnly: true },
-  ],
+  items: [{ to: "/platform/settings", label: "Settings", icon: Settings }],
 };
 
 const dashboardPaths = new Set(["/p", "/b", "/platform"]);
@@ -220,6 +215,12 @@ export function Sidebar() {
       : user.account_type === "publisher"
         ? publisherSettings
         : buyerSettings;
+  const bottomNav =
+    user.account_type === "publisher"
+      ? publisherBottomNav
+      : user.account_type === "buyer"
+        ? buyerBottomNav
+        : null;
 
   return (
     <aside className="flex w-sidebar shrink-0 flex-col border-r border-gray-100 bg-surface-card">
@@ -233,6 +234,9 @@ export function Sidebar() {
       </nav>
       <div className="mt-auto border-t border-gray-100 px-2 pb-2 pt-2">
         <NavGroupSection group={settings} isAdmin={isAdmin} pathname={pathname} />
+        {bottomNav && (
+          <NavGroupSection group={bottomNav} isAdmin={isAdmin} pathname={pathname} />
+        )}
       </div>
     </aside>
   );

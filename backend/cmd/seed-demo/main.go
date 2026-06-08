@@ -98,9 +98,9 @@ func seedBuyer(ctx context.Context, pool *pgxpool.Pool, publisherID, buyerID int
 	appt := insertStage(ctx, pool, pipe, "Appointment Set", 2, "action")
 	_ = insertStage(ctx, pool, pipe, "Sold", 3, "won")
 	missed := insertStage(ctx, pool, pipe, "Missed Appointment", 4, "standard")
-	_ = insertStage(ctx, pool, pipe, "Disqualified", 5, "disqualification")
+	disqStage := insertStage(ctx, pool, pipe, "Disqualified", 5, "disqualification")
 
-	seedReasons(ctx, pool, buyerID)
+	seedReasons(ctx, pool, disqStage)
 	insertCustomField(ctx, pool, buyerID, "Utility Provider", "utility_provider", "text")
 
 	// balance
@@ -176,11 +176,11 @@ func seedBuyer(ctx context.Context, pool *pgxpool.Pool, publisherID, buyerID int
 	}
 }
 
-func seedReasons(ctx context.Context, pool *pgxpool.Pool, accountID int64) {
+func seedReasons(ctx context.Context, pool *pgxpool.Pool, stageID int64) {
 	for i, label := range disqReasons {
 		_, _ = pool.Exec(ctx,
-			`INSERT INTO disqualification_reasons(account_id, label, position) VALUES ($1,$2,$3)`,
-			accountID, label, i)
+			`INSERT INTO disqualification_reasons(stage_id, label, position) VALUES ($1,$2,$3)`,
+			stageID, label, i)
 	}
 }
 

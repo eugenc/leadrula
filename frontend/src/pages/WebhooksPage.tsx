@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   useWebhooks,
   useCreateWebhook,
@@ -27,6 +27,7 @@ import { CreateCustomFieldDrawer } from "@/features/admin/CreateCustomFieldDrawe
 import { BuiltinCustomFieldSelect } from "@/features/admin/BuiltinCustomFieldSelect";
 import { useCreateField } from "@/features/admin/hooks";
 import { slugFieldKey } from "@/features/admin/customFieldConstants";
+import { buildPayloadSuggestions } from "@/features/leads/csvMapping";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
@@ -35,11 +36,12 @@ import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Switch, Spinner, EmptyState, Badge } from "@/components/ui/misc";
 import { FormDrawer } from "@/components/ui/dialog";
+import { Dropdown, DropdownItem, DropdownSearch } from "@/components/ui/dropdown";
 import { format } from "date-fns";
 import { ArrowRightLeft, Copy, Eye, EyeOff, KeyRound, Pencil, Plus, Trash2, Zap } from "lucide-react";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
-import type { Webhook, WebhookEvent, WebhookOutboundTrigger, OutboundTriggerEvent, ResponseMapEntry, InboundCondition, WebhookDelivery } from "@/types";
+import type { Webhook, WebhookEvent, WebhookOutboundTrigger, OutboundTriggerEvent, OutboundFormat, OutboundMethod, OutboundFieldMapEntry, ResponseMapEntry, InboundCondition, WebhookDelivery } from "@/types";
 
 type MappingContext = {
   deliveryId?: number;
@@ -132,6 +134,43 @@ const BUILTINS = [
   "first_name", "last_name", "phone", "email", "address", "city", "state", "zip",
   "source", "external_id", "action_at", "disqualification_reason_id",
 ];
+
+const OUTBOUND_BUILTINS = [
+  "first_name", "last_name", "phone", "email", "address", "city", "state", "zip",
+  "source", "external_id", "public_id", "status",
+];
+
+const OUTBOUND_META_FIELDS = [
+  { value: "event", label: "Event name" },
+  { value: "pipeline.stage_name", label: "Stage name" },
+  { value: "pipeline.pipeline_name", label: "Pipeline name" },
+];
+
+const SUNBASE_URL = "https://server4.sunbasedata.com/sunbase/portal/api/lead_post.jsp";
+
+const SUNBASE_FIELD_MAP: OutboundFieldMapEntry[] = [
+  { dest_key: "schema_name", source_type: "static", static_value: "YOUR_SCHEMA" },
+  { dest_key: "last_name", source_type: "builtin", builtin_field: "last_name" },
+  { dest_key: "first_name", source_type: "builtin", builtin_field: "first_name" },
+  { dest_key: "address1", source_type: "builtin", builtin_field: "address" },
+  { dest_key: "city", source_type: "builtin", builtin_field: "city" },
+  { dest_key: "state", source_type: "builtin", builtin_field: "state" },
+  { dest_key: "zip_code", source_type: "builtin", builtin_field: "zip" },
+  { dest_key: "email", source_type: "builtin", builtin_field: "email" },
+  { dest_key: "phone", source_type: "builtin", builtin_field: "phone" },
+  { dest_key: "lead_source", source_type: "builtin", builtin_field: "source" },
+  { dest_key: "lead_other", source_type: "builtin", builtin_field: "external_id" },
+];
+
+function outboundHelperText(format: OutboundFormat, method: OutboundMethod): string {
+  if (format === "json" && method === "POST") return "Send a JSON body on POST";
+  if (format === "json" && method === "GET") return "Template keys become query parameters on the URL";
+  return "Field map keys become query parameters on the URL. GET and POST send the same query string.";
+}
+
+function resolveOutboundFieldMap(map?: OutboundFieldMapEntry[]): OutboundFieldMapEntry[] {
+  return map ?? [];
+}
 
 function slugify(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -358,6 +397,11 @@ function WebhookDrawer({
   const [inboundEnabled, setInboundEnabled] = useState(webhook?.inbound_enabled ?? true);
   const [outboundEnabled, setOutboundEnabled] = useState(webhook?.outbound_enabled ?? false);
   const [outboundURL, setOutboundURL] = useState(webhook?.outbound_url ?? "");
+  const [outboundFormat, setOutboundFormat] = useState<OutboundFormat>(webhook?.outbound_format ?? "json");
+  const [outboundMethod, setOutboundMethod] = useState<OutboundMethod>(webhook?.outbound_method ?? "POST");
+  const [payloadTemplate, setPayloadTemplate] = useState(resolvePayloadTemplate(webhook?.outbound_payload_template));
+  const [fieldMap, setFieldMap] = useState<OutboundFieldMapEntry[]>(resolveOutboundFieldMap(webhook?.outbound_field_map));
+  const [responseMap, setResponseMap] = useState<ResponseMapEntry[]>(webhook?.outbound_response_map ?? []);
   const rotateOutbound = useRotateWebhookOutboundSecret();
 
   useEffect(() => {
@@ -368,19 +412,35 @@ function WebhookDrawer({
     setInboundEnabled(webhook?.inbound_enabled ?? true);
     setOutboundEnabled(webhook?.outbound_enabled ?? false);
     setOutboundURL(webhook?.outbound_url ?? "");
+    setOutboundFormat(webhook?.outbound_format ?? "json");
+    setOutboundMethod(webhook?.outbound_method ?? "POST");
+    setPayloadTemplate(resolvePayloadTemplate(webhook?.outbound_payload_template));
+    setFieldMap(resolveOutboundFieldMap(webhook?.outbound_field_map));
+    setResponseMap(webhook?.outbound_response_map ?? []);
   }, [webhook]);
 
   function submit() {
     if (editing && webhook) {
+      const body: Record<string, unknown> = {
+        name, slug, is_active: isActive,
+        inbound_enabled: inboundEnabled,
+        outbound_enabled: outboundEnabled,
+        outbound_url: outboundURL || null,
+      };
+      if (outboundEnabled) {
+        body.outbound_format = outboundFormat;
+        body.outbound_method = outboundMethod;
+        body.outbound_response_map = responseMap;
+        if (outboundFormat === "json") {
+          body.outbound_payload_template = payloadTemplate;
+        } else {
+          body.outbound_field_map = fieldMap;
+        }
+      }
       update.mutate(
         {
           id: webhook.id,
-          body: {
-            name, slug, is_active: isActive,
-            inbound_enabled: inboundEnabled,
-            outbound_enabled: outboundEnabled,
-            outbound_url: outboundURL || null,
-          },
+          body,
         },
         { onSuccess: () => { toast.success("Webhook updated"); onClose(); }, onError: (e) => toast.error(errorMessage(e)) }
       );
@@ -413,6 +473,7 @@ function WebhookDrawer({
       onClose={onClose}
       title={editing ? webhook!.name : "New Webhook"}
       subtitle={editing ? "Edit webhook" : "Create inbound webhook endpoint"}
+      width={720}
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
@@ -441,19 +502,61 @@ function WebhookDrawer({
           <div className="flex items-center justify-between">
             <div>
               <Label>Outbound</Label>
-              <p className="text-xs text-gray-500">Send HTTP POST on lead/pipeline events</p>
+              <p className="text-xs text-gray-500">{outboundEnabled ? outboundHelperText(outboundFormat, outboundMethod) : "Send HTTP GET or POST on lead/pipeline events"}</p>
             </div>
             <Switch checked={outboundEnabled} onChange={setOutboundEnabled} />
           </div>
           {outboundEnabled && (
-            <div>
-              <Label>Outbound URL</Label>
-              <Input
-                value={outboundURL}
-                onChange={(e) => setOutboundURL(e.target.value)}
-                placeholder="https://example.com/webhook"
-              />
-            </div>
+            <>
+              <div>
+                <Label>Outbound URL</Label>
+                <Input
+                  value={outboundURL}
+                  onChange={(e) => setOutboundURL(e.target.value)}
+                  placeholder="https://example.com/webhook"
+                />
+              </div>
+              <div>
+                <Label>Outbound format</Label>
+                <div className="mt-1 flex gap-4">
+                  <label className="flex items-center gap-1.5 text-sm">
+                    <input type="radio" name="outbound-format" checked={outboundFormat === "json"} onChange={() => setOutboundFormat("json")} />
+                    JSON body
+                  </label>
+                  <label className="flex items-center gap-1.5 text-sm">
+                    <input type="radio" name="outbound-format" checked={outboundFormat === "url"} onChange={() => setOutboundFormat("url")} />
+                    URL parameters
+                  </label>
+                </div>
+              </div>
+              <div>
+                <Label>HTTP method</Label>
+                <div className="mt-1 flex gap-4">
+                  <label className="flex items-center gap-1.5 text-sm">
+                    <input type="radio" name="outbound-method" checked={outboundMethod === "GET"} onChange={() => setOutboundMethod("GET")} />
+                    GET
+                  </label>
+                  <label className="flex items-center gap-1.5 text-sm">
+                    <input type="radio" name="outbound-method" checked={outboundMethod === "POST"} onChange={() => setOutboundMethod("POST")} />
+                    POST
+                  </label>
+                </div>
+              </div>
+              {outboundFormat === "url" && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setOutboundURL(SUNBASE_URL);
+                    setOutboundFormat("url");
+                    setOutboundMethod("POST");
+                    setFieldMap(SUNBASE_FIELD_MAP.map((e) => ({ ...e })));
+                  }}
+                >
+                  Apply SunbaseData preset
+                </Button>
+              )}
+            </>
           )}
         </div>
         {editing && (
@@ -516,7 +619,14 @@ function WebhookDrawer({
               </div>
             )}
             {outboundEnabled && (
-              <div className="space-y-3 border-t border-gray-100 pt-3">
+              <div className="space-y-4 border-t border-gray-100 pt-3">
+                {outboundFormat === "json" ? (
+                  <OutboundPayloadTemplateEditor value={payloadTemplate} onChange={setPayloadTemplate} />
+                ) : (
+                  <OutboundFieldMapping entries={fieldMap} onChange={setFieldMap} />
+                )}
+                <OutboundResponseMapping entries={responseMap} onChange={setResponseMap} />
+                <div className="space-y-3 border-t border-gray-100 pt-3">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Outbound triggers</p>
                   <Button size="sm" onClick={() => setTriggerDrawer(null)}><Plus className="h-3.5 w-3.5" /> Add trigger</Button>
@@ -544,6 +654,7 @@ function WebhookDrawer({
                     </TBody>
                   </Table>
                 )}
+                </div>
               </div>
             )}
           </>
@@ -965,6 +1076,22 @@ function ActionFieldMapping({
   const mapped = mappedKeys(entries ?? []);
   const unmappedKeys = mappableKeys.filter((k) => !mapped.has(k));
 
+  const suggestions = useMemo(
+    () => buildPayloadSuggestions(unmappedKeys, customFields ?? []),
+    [unmappedKeys, customFields]
+  );
+
+  function selectSourceKey(key: string) {
+    setSourceKey(key);
+    if (suggestions[key]) setTarget(suggestions[key]);
+  }
+
+  useEffect(() => {
+    if (sourceKey && suggestions[sourceKey]) {
+      setTarget(suggestions[sourceKey]);
+    }
+  }, [sourceKey, suggestions]);
+
   function addMapping(key: string, targetVal: string) {
     const isCustom = targetVal.startsWith("cf:");
     const body: Record<string, unknown> = isCustom
@@ -987,20 +1114,27 @@ function ActionFieldMapping({
       {unmappedKeys.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {unmappedKeys.map((k) => (
-            <button key={k} type="button" onClick={() => setSourceKey(k)} className="rounded-full border border-jade-200 bg-jade-50 px-2 py-0.5 font-mono text-xs">{k}</button>
+            <button key={k} type="button" onClick={() => selectSourceKey(k)} className="rounded-full border border-jade-200 bg-jade-50 px-2 py-0.5 font-mono text-xs">{k}</button>
           ))}
         </div>
       )}
-      <div className="flex gap-2">
-        <Input value={sourceKey} onChange={(e) => setSourceKey(e.target.value)} placeholder="payload key" className="flex-1" />
-        <BuiltinCustomFieldSelect
-          label="Lead field"
-          builtins={BUILTINS}
-          customFields={customFields ?? []}
-          value={target}
-          onChange={setTarget}
-          onAddCustomField={() => setCreateFieldOpen(true)}
-        />
+      <div className="flex gap-2 items-end">
+        <div className="flex-1">
+          <Input value={sourceKey} onChange={(e) => setSourceKey(e.target.value)} placeholder="payload key" />
+        </div>
+        <div>
+          <BuiltinCustomFieldSelect
+            label="Lead field"
+            builtins={BUILTINS}
+            customFields={customFields ?? []}
+            value={target}
+            onChange={setTarget}
+            onAddCustomField={() => setCreateFieldOpen(true)}
+          />
+          {sourceKey && suggestions[sourceKey] && target === suggestions[sourceKey] && (
+            <p className="mt-0.5 text-xs text-gray-400">Suggested</p>
+          )}
+        </div>
         <Button disabled={!sourceKey} onClick={() => addMapping(sourceKey, target)}>Map</Button>
       </div>
       {(entries ?? []).length > 0 && (
@@ -1066,6 +1200,376 @@ const DEFAULT_TEMPLATE = `{
   "stage": "{{pipeline.stage_name}}"
 }`;
 
+function resolvePayloadTemplate(template?: string): string {
+  if (!template || template === "{}") return DEFAULT_TEMPLATE;
+  return template;
+}
+
+type TemplateVariable = {
+  key: string;
+  label?: string;
+  searchText: string;
+};
+
+function OutboundPayloadTemplateEditor({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const { data: customFields = [] } = useCustomFields();
+  const [templateCursor, setTemplateCursor] = useState<HTMLTextAreaElement | null>(null);
+  const [variablesOpen, setVariablesOpen] = useState(false);
+  const [variableSearch, setVariableSearch] = useState("");
+  const selectionRef = useRef({ start: 0, end: 0 });
+
+  function saveSelection(el: HTMLTextAreaElement) {
+    selectionRef.current = { start: el.selectionStart, end: el.selectionEnd };
+  }
+
+  function insertField(field: string) {
+    if (templateCursor) {
+      const { start, end } = selectionRef.current;
+      const before = value.slice(0, start);
+      const after = value.slice(end);
+      onChange(before + field + after);
+      const cursor = start + field.length;
+      selectionRef.current = { start: cursor, end: cursor };
+      setTimeout(() => {
+        templateCursor.selectionStart = cursor;
+        templateCursor.selectionEnd = cursor;
+        templateCursor.focus();
+      }, 0);
+    } else {
+      onChange(value + field);
+    }
+  }
+
+  function selectVariable(field: string) {
+    insertField(field);
+    setVariablesOpen(false);
+    setVariableSearch("");
+  }
+
+  const staticVariables: TemplateVariable[] = TEMPLATE_FIELDS.map((f) => ({
+    key: f,
+    searchText: f,
+  }));
+
+  const customVariables: TemplateVariable[] = customFields
+    .filter((f) => f.is_active !== false)
+    .map((f) => {
+      const key = `{{lead.custom.${f.id}}}`;
+      return {
+        key,
+        label: f.name,
+        searchText: `${key} ${f.name} ${f.field_key}`,
+      };
+    });
+
+  const q = variableSearch.toLowerCase();
+  const filteredStatic = staticVariables.filter((v) => v.searchText.toLowerCase().includes(q));
+  const filteredCustom = customVariables.filter((v) => v.searchText.toLowerCase().includes(q));
+  const hasResults = filteredStatic.length > 0 || filteredCustom.length > 0;
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <Label>JSON payload template</Label>
+        <div className="flex items-center gap-3">
+          <Dropdown
+            open={variablesOpen}
+            onClose={() => {
+              setVariablesOpen(false);
+              setVariableSearch("");
+            }}
+            align="right"
+            className="max-h-48 min-w-[260px] overflow-y-auto"
+            trigger={
+              <button
+                type="button"
+                onClick={() => setVariablesOpen(!variablesOpen)}
+                className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
+              >
+                <Plus className="h-3 w-3" /> Add Variables
+              </button>
+            }
+          >
+            <DropdownSearch
+              value={variableSearch}
+              onChange={setVariableSearch}
+              placeholder="Search variables…"
+            />
+            {!hasResults ? (
+              <p className="px-2.5 py-2 text-xs text-gray-400">No variables match</p>
+            ) : (
+              <>
+                {filteredStatic.map((v) => (
+                  <DropdownItem key={v.key} onClick={() => selectVariable(v.key)} className="font-mono text-xs">
+                    {v.key}
+                  </DropdownItem>
+                ))}
+                {filteredStatic.length > 0 && filteredCustom.length > 0 && (
+                  <div className="my-1 border-t border-gray-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                    Custom fields
+                  </div>
+                )}
+                {filteredCustom.map((v) => (
+                  <DropdownItem key={v.key} onClick={() => selectVariable(v.key)} className="h-auto py-2">
+                    <div className="text-xs text-gray-700">{v.label}</div>
+                    <div className="font-mono text-xs text-gray-400">{v.key}</div>
+                  </DropdownItem>
+                ))}
+              </>
+            )}
+          </Dropdown>
+          <p className="text-xs text-gray-500">Use {"{{field}}"} placeholders</p>
+        </div>
+      </div>
+      <textarea
+        ref={(el) => setTemplateCursor(el)}
+        rows={12}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onSelect={(e) => saveSelection(e.currentTarget)}
+        onBlur={(e) => saveSelection(e.currentTarget)}
+        onFocus={(e) => saveSelection(e.currentTarget)}
+        className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-jade-500"
+        spellCheck={false}
+      />
+    </div>
+  );
+}
+
+function OutboundFieldMapping({
+  entries,
+  onChange,
+}: {
+  entries: OutboundFieldMapEntry[];
+  onChange: (entries: OutboundFieldMapEntry[]) => void;
+}) {
+  const { data: customFields = [] } = useCustomFields();
+
+  function addRow() {
+    onChange([...entries, { dest_key: "", source_type: "builtin", builtin_field: "last_name" }]);
+  }
+
+  function removeRow(idx: number) {
+    onChange(entries.filter((_, i) => i !== idx));
+  }
+
+  function updateRow(idx: number, patch: Partial<OutboundFieldMapEntry>) {
+    const next = [...entries];
+    next[idx] = { ...next[idx], ...patch };
+    onChange(next);
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <Label>URL parameter mapping</Label>
+        <Button size="sm" variant="secondary" onClick={addRow}><Plus className="h-3.5 w-3.5" /> Add param</Button>
+      </div>
+      <p className="text-xs text-gray-500">Map external query parameter names to lead fields or static values.</p>
+      {entries.length === 0 ? (
+        <p className="text-sm text-gray-500">No parameters mapped yet.</p>
+      ) : (
+        <Table>
+          <THead><tr><TH>Param name</TH><TH>Source</TH><TH>Value</TH><TH /></tr></THead>
+          <TBody>
+            {entries.map((e, idx) => (
+              <TR key={idx}>
+                <TD>
+                  <Input
+                    value={e.dest_key}
+                    onChange={(ev) => updateRow(idx, { dest_key: ev.target.value })}
+                    placeholder="last_name"
+                    className="font-mono text-xs"
+                  />
+                </TD>
+                <TD>
+                  <select
+                    className="rounded border border-gray-200 px-2 py-1 text-xs"
+                    value={e.source_type}
+                    onChange={(ev) => {
+                      const source_type = ev.target.value as OutboundFieldMapEntry["source_type"];
+                      const patch: Partial<OutboundFieldMapEntry> = { source_type };
+                      if (source_type === "builtin") patch.builtin_field = "last_name";
+                      if (source_type === "static") patch.static_value = "";
+                      if (source_type === "meta") patch.meta_field = "event";
+                      updateRow(idx, patch);
+                    }}
+                  >
+                    <option value="builtin">Lead field</option>
+                    <option value="custom">Custom field</option>
+                    <option value="static">Static value</option>
+                    <option value="meta">Event meta</option>
+                  </select>
+                </TD>
+                <TD>
+                  {e.source_type === "builtin" && (
+                    <select
+                      className="w-full rounded border border-gray-200 px-2 py-1 text-xs"
+                      value={e.builtin_field ?? "last_name"}
+                      onChange={(ev) => updateRow(idx, { builtin_field: ev.target.value })}
+                    >
+                      {OUTBOUND_BUILTINS.map((b) => <option key={b} value={b}>{b}</option>)}
+                    </select>
+                  )}
+                  {e.source_type === "custom" && (
+                    <select
+                      className="w-full rounded border border-gray-200 px-2 py-1 text-xs"
+                      value={e.custom_field_id ?? ""}
+                      onChange={(ev) => updateRow(idx, { custom_field_id: Number(ev.target.value) })}
+                    >
+                      <option value="">Select field</option>
+                      {customFields.filter((f) => f.is_active !== false).map((f) => (
+                        <option key={f.id} value={f.id}>{f.name}</option>
+                      ))}
+                    </select>
+                  )}
+                  {e.source_type === "static" && (
+                    <Input
+                      value={e.static_value ?? ""}
+                      onChange={(ev) => updateRow(idx, { static_value: ev.target.value })}
+                      placeholder="YourSchema"
+                      className="text-xs"
+                    />
+                  )}
+                  {e.source_type === "meta" && (
+                    <select
+                      className="w-full rounded border border-gray-200 px-2 py-1 text-xs"
+                      value={e.meta_field ?? "event"}
+                      onChange={(ev) => updateRow(idx, { meta_field: ev.target.value })}
+                    >
+                      {OUTBOUND_META_FIELDS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                    </select>
+                  )}
+                </TD>
+                <TD>
+                  <IconButton variant="danger" aria-label="Remove" onClick={() => removeRow(idx)}>
+                    <Trash2 className="h-4 w-4" />
+                  </IconButton>
+                </TD>
+              </TR>
+            ))}
+          </TBody>
+        </Table>
+      )}
+    </div>
+  );
+}
+
+function OutboundResponseMapping({
+  entries,
+  onChange,
+}: {
+  entries: ResponseMapEntry[];
+  onChange: (entries: ResponseMapEntry[]) => void;
+}) {
+  const { data: customFields = [] } = useCustomFields();
+
+  function addRow() {
+    onChange([...entries, { response_key: "", target_type: "builtin", builtin_field: "external_id" }]);
+  }
+
+  function removeRow(idx: number) {
+    onChange(entries.filter((_, i) => i !== idx));
+  }
+
+  function updateRow(idx: number, field: string, val: string) {
+    const next = [...entries];
+    const entry = { ...next[idx] };
+    if (field === "response_key") {
+      entry.response_key = val;
+    } else if (field === "target") {
+      if (val.startsWith("cf:")) {
+        entry.target_type = "custom";
+        entry.custom_field_id = parseInt(val.slice(3), 10);
+        delete entry.builtin_field;
+      } else {
+        entry.target_type = "builtin";
+        entry.builtin_field = val;
+        delete entry.custom_field_id;
+      }
+    }
+    next[idx] = entry;
+    onChange(next);
+  }
+
+  function targetValue(entry: ResponseMapEntry): string {
+    if (entry.target_type === "custom" && entry.custom_field_id !== undefined) {
+      return `cf:${entry.custom_field_id}`;
+    }
+    return entry.builtin_field ?? "external_id";
+  }
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <Label>Response mapping</Label>
+        <button
+          type="button"
+          onClick={addRow}
+          className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
+        >
+          <Plus className="h-3 w-3" /> Add field
+        </button>
+      </div>
+      {entries.length === 0 ? (
+        <p className="text-xs text-gray-400">
+          Map fields from the external API response back to the lead. Example: extract{" "}
+          <code className="font-mono">data.id</code> and write it to{" "}
+          <code className="font-mono">external_id</code>.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {entries.map((entry, idx) => (
+            <div key={idx} className="flex items-center gap-2">
+              <input
+                type="text"
+                placeholder="data.id"
+                value={entry.response_key}
+                onChange={(e) => updateRow(idx, "response_key", e.target.value)}
+                className="w-32 rounded border border-gray-200 px-2 py-1 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-jade-500"
+              />
+              <span className="text-xs text-gray-400">→</span>
+              <select
+                value={targetValue(entry)}
+                onChange={(e) => updateRow(idx, "target", e.target.value)}
+                className="flex-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-jade-500"
+              >
+                <optgroup label="Built-in">
+                  {["first_name", "last_name", "phone", "email", "address", "city", "state", "zip", "source", "external_id"].map((b) => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </optgroup>
+                {customFields.filter((f) => f.is_active !== false).length > 0 && (
+                  <optgroup label="Custom">
+                    {customFields
+                      .filter((f) => f.is_active !== false)
+                      .map((f) => (
+                        <option key={f.id} value={`cf:${f.id}`}>{f.name}</option>
+                      ))}
+                  </optgroup>
+                )}
+              </select>
+              <button
+                type="button"
+                onClick={() => removeRow(idx)}
+                className="text-gray-400 hover:text-red-500"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OutboundTriggerDrawer({
   webhookId,
   trigger,
@@ -1083,94 +1587,25 @@ function OutboundTriggerDrawer({
   const create = useCreateWebhookOutboundTrigger();
   const update = useUpdateWebhookOutboundTrigger();
 
-  const { data: customFields = [] } = useCustomFields();
   const [triggerEvent, setTriggerEvent] = useState<OutboundTriggerEvent>(
     trigger?.trigger_event ?? "lead.create"
   );
   const [conditionLogic, setConditionLogic] = useState<"and" | "or">(
     trigger?.condition_logic ?? "and"
   );
-  const [payloadTemplate, setPayloadTemplate] = useState(
-    trigger?.payload_template ?? DEFAULT_TEMPLATE
-  );
   const [isActive, setIsActive] = useState(trigger?.is_active ?? true);
-  const [templateCursor, setTemplateCursor] = useState<HTMLTextAreaElement | null>(null);
-  const [responseMap, setResponseMap] = useState<ResponseMapEntry[]>(
-    trigger?.response_map ?? []
-  );
 
   useEffect(() => {
     setTriggerEvent(trigger?.trigger_event ?? "lead.create");
     setConditionLogic(trigger?.condition_logic ?? "and");
-    setPayloadTemplate(trigger?.payload_template ?? DEFAULT_TEMPLATE);
     setIsActive(trigger?.is_active ?? true);
-    setResponseMap(trigger?.response_map ?? []);
   }, [trigger]);
-
-  function addResponseRow() {
-    setResponseMap((prev) => [
-      ...prev,
-      { response_key: "", target_type: "builtin", builtin_field: "external_id" },
-    ]);
-  }
-
-  function removeResponseRow(idx: number) {
-    setResponseMap((prev) => prev.filter((_, i) => i !== idx));
-  }
-
-  function updateResponseRow(idx: number, field: string, val: string) {
-    setResponseMap((prev) => {
-      const next = [...prev];
-      const entry = { ...next[idx] };
-      if (field === "response_key") {
-        entry.response_key = val;
-      } else if (field === "target") {
-        if (val.startsWith("cf:")) {
-          entry.target_type = "custom";
-          entry.custom_field_id = parseInt(val.slice(3), 10);
-          delete entry.builtin_field;
-        } else {
-          entry.target_type = "builtin";
-          entry.builtin_field = val;
-          delete entry.custom_field_id;
-        }
-      }
-      next[idx] = entry;
-      return next;
-    });
-  }
-
-  function targetValue(entry: ResponseMapEntry): string {
-    if (entry.target_type === "custom" && entry.custom_field_id !== undefined) {
-      return `cf:${entry.custom_field_id}`;
-    }
-    return entry.builtin_field ?? "external_id";
-  }
-
-  function insertField(field: string) {
-    if (templateCursor) {
-      const start = templateCursor.selectionStart;
-      const end = templateCursor.selectionEnd;
-      const before = payloadTemplate.slice(0, start);
-      const after = payloadTemplate.slice(end);
-      setPayloadTemplate(before + field + after);
-      setTimeout(() => {
-        templateCursor.selectionStart = start + field.length;
-        templateCursor.selectionEnd = start + field.length;
-        templateCursor.focus();
-      }, 0);
-    } else {
-      setPayloadTemplate((t) => t + field);
-    }
-  }
 
   function save() {
     const body = {
       trigger_event: triggerEvent,
       condition_logic: conditionLogic,
       conditions: [],
-      payload_template: payloadTemplate,
-      response_map: responseMap,
       is_active: isActive,
     };
     if (editing && trigger) {
@@ -1199,8 +1634,7 @@ function OutboundTriggerDrawer({
       open
       onClose={onClose}
       title={editing ? "Edit outbound trigger" : "New outbound trigger"}
-      subtitle="Configure when and how outbound webhook requests are sent"
-      width={600}
+      subtitle="Configure when this webhook fires"
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
@@ -1227,98 +1661,9 @@ function OutboundTriggerDrawer({
           <Switch checked={isActive} onChange={setIsActive} />
         </div>
 
-        <div>
-          <div className="mb-2 flex items-center justify-between">
-            <Label>JSON payload template</Label>
-            <p className="text-xs text-gray-500">Use {"{{field}}"} placeholders</p>
-          </div>
-          <div className="mb-2 flex flex-wrap gap-1">
-            {TEMPLATE_FIELDS.map((f) => (
-              <button
-                key={f}
-                type="button"
-                onClick={() => insertField(f)}
-                className="rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 font-mono text-xs text-indigo-700 hover:bg-indigo-100"
-              >
-                {f}
-              </button>
-            ))}
-          </div>
-          <textarea
-            ref={(el) => setTemplateCursor(el)}
-            rows={12}
-            value={payloadTemplate}
-            onChange={(e) => setPayloadTemplate(e.target.value)}
-            className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-jade-500"
-            spellCheck={false}
-          />
-        </div>
-
         <div className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-xs text-gray-500">
           <p className="font-semibold text-gray-700 mb-1">Conditions</p>
-          <p>Condition builder is available for advanced filtering — all triggers fire unconditionally by default. Edit the JSON payload template above to control what data is sent.</p>
-        </div>
-
-        <div>
-          <div className="mb-2 flex items-center justify-between">
-            <Label>Response mapping</Label>
-            <button
-              type="button"
-              onClick={addResponseRow}
-              className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
-            >
-              <Plus className="h-3 w-3" /> Add field
-            </button>
-          </div>
-          {responseMap.length === 0 ? (
-            <p className="text-xs text-gray-400">
-              Map fields from the external API response back to the lead. Example: extract{" "}
-              <code className="font-mono">data.id</code> and write it to{" "}
-              <code className="font-mono">external_id</code>.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {responseMap.map((entry, idx) => (
-                <div key={idx} className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    placeholder="data.id"
-                    value={entry.response_key}
-                    onChange={(e) => updateResponseRow(idx, "response_key", e.target.value)}
-                    className="w-32 rounded border border-gray-200 px-2 py-1 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-jade-500"
-                  />
-                  <span className="text-xs text-gray-400">→</span>
-                  <select
-                    value={targetValue(entry)}
-                    onChange={(e) => updateResponseRow(idx, "target", e.target.value)}
-                    className="flex-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-jade-500"
-                  >
-                    <optgroup label="Built-in">
-                      {["first_name", "last_name", "phone", "email", "address", "city", "state", "zip", "source", "external_id"].map((b) => (
-                        <option key={b} value={b}>{b}</option>
-                      ))}
-                    </optgroup>
-                    {customFields.filter((f) => f.is_active !== false).length > 0 && (
-                      <optgroup label="Custom">
-                        {customFields
-                          .filter((f) => f.is_active !== false)
-                          .map((f) => (
-                            <option key={f.id} value={`cf:${f.id}`}>{f.name}</option>
-                          ))}
-                      </optgroup>
-                    )}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => removeResponseRow(idx)}
-                    className="text-gray-400 hover:text-red-500"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+          <p>Condition builder is available for advanced filtering — all triggers fire unconditionally by default. Configure the JSON payload template and response mapping in Edit Webhook.</p>
         </div>
       </div>
     </FormDrawer>

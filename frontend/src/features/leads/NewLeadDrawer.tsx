@@ -7,8 +7,16 @@ import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
+import { effectiveFieldFormat } from "@/features/admin/customFieldConstants";
 import { useCreateLead, usePipelines, useStages, useUsers, useCustomFields } from "./hooks";
 import type { CustomField } from "@/types";
+import {
+  fromNativeDatetimeLocal,
+  inputModeForFormat,
+  normalizeCustomDateValue,
+  toNativeDateValue,
+  toNativeDatetimeLocalValue,
+} from "./customFieldDate";
 
 const BUILTINS = [
   { key: "first_name", label: "First Name", required: true },
@@ -273,6 +281,34 @@ function CustomFieldInput({
   value: string;
   onChange: (v: string) => void;
 }) {
+  const formatToken =
+    field.type === "date" || field.type === "datetime"
+      ? effectiveFieldFormat(field.type, field.format)
+      : "";
+  const inputMode =
+    field.type === "date" || field.type === "datetime"
+      ? inputModeForFormat(field.type, formatToken)
+      : "text";
+
+  function handleBlur(next: string) {
+    if (field.type === "date" || field.type === "datetime") {
+      if (inputMode === "datetime-local") {
+        onChange(fromNativeDatetimeLocal(next, field.type, field.format));
+        return;
+      }
+      onChange(normalizeCustomDateValue(next, field.type, field.format));
+      return;
+    }
+    onChange(next);
+  }
+
+  const displayValue =
+    inputMode === "date"
+      ? toNativeDateValue(value, field.type, field.format)
+      : inputMode === "datetime-local"
+        ? toNativeDatetimeLocalValue(value, field.type, field.format)
+        : value;
+
   return (
     <div>
       <Label>{field.name}</Label>
@@ -291,8 +327,31 @@ function CustomFieldInput({
           <option value="true">Yes</option>
           <option value="false">No</option>
         </Select>
+      ) : field.type === "date" || field.type === "datetime" ? (
+        <Input
+          value={displayValue}
+          type={inputMode}
+          placeholder={inputMode === "text" ? formatToken : undefined}
+          onChange={(e) => {
+            const next = e.target.value;
+            if (inputMode === "text") {
+              onChange(next);
+            } else {
+              handleBlur(next);
+            }
+          }}
+          onBlur={(e) => {
+            if (inputMode === "text") handleBlur(e.target.value);
+          }}
+          className="w-full"
+        />
       ) : (
-        <Input value={value} onChange={(e) => onChange(e.target.value)} />
+        <Input
+          value={value}
+          type={field.type === "number" ? "number" : "text"}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full"
+        />
       )}
     </div>
   );

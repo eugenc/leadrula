@@ -1,12 +1,15 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { useMe } from "@/features/leads/hooks";
+import { useMe, useUpdateMyAccount } from "@/features/leads/hooks";
 import { useAuthStore } from "@/store/authStore";
-import { PageBody } from "@/components/layout/PageBody";
 import { Card } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
+import { Label, Select } from "@/components/ui/input";
 import { toast } from "@/store/toastStore";
 import { AvatarUpload, uploadError } from "@/features/admin/AvatarUpload";
 import { useUploadMyAvatar } from "@/features/admin/hooks";
+import { errorMessage } from "@/lib/api";
+import { TIMEZONES } from "@/lib/timezones";
 import { formatRole } from "@/lib/utils";
 
 function Row({ label, value }: { label: string; value: string }) {
@@ -49,18 +52,74 @@ function HandlerIDRow({
   );
 }
 
+function TimezoneRow({
+  timezone,
+  savedTimezone,
+  isAdmin,
+  saving,
+  onChange,
+  onSave,
+}: {
+  timezone: string;
+  savedTimezone: string;
+  isAdmin: boolean;
+  saving: boolean;
+  onChange: (tz: string) => void;
+  onSave: () => void;
+}) {
+  if (isAdmin) {
+    return (
+      <div className="flex items-end justify-between gap-3 border-b border-gray-100 py-2">
+        <div className="min-w-0 flex-1">
+          <Label>Timezone</Label>
+          <Select value={timezone} onChange={(e) => onChange(e.target.value)}>
+            {TIMEZONES.map((tz) => (
+              <option key={tz} value={tz}>
+                {tz}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <Button
+          className="shrink-0"
+          disabled={timezone === savedTimezone || saving}
+          onClick={onSave}
+        >
+          Save
+        </Button>
+      </div>
+    );
+  }
+
+  return <Row label="Timezone" value={timezone || "—"} />;
+}
+
 export function SettingsPage() {
   const user = useAuthStore((s) => s.user);
   const { data: me } = useMe();
   const upload = useUploadMyAvatar();
+  const updateAccount = useUpdateMyAccount();
   const isAdmin = user?.role === "admin";
   const isBuyerAdmin = user?.account_type === "buyer" && isAdmin;
   const handlerId = me?.account.handler_id;
   const accountType = me?.account.type;
+  const showTimezone = accountType === "buyer" || accountType === "publisher";
+  const savedTimezone = me?.account.timezone ?? "America/Toronto";
+  const [timezone, setTimezone] = useState(savedTimezone);
+
+  useEffect(() => {
+    setTimezone(savedTimezone);
+  }, [savedTimezone]);
+
+  const saveTimezone = () => {
+    updateAccount.mutate(timezone, {
+      onSuccess: () => toast.success("Timezone updated"),
+      onError: (err) => toast.error(errorMessage(err)),
+    });
+  };
 
   return (
-    <>
-      <PageBody className="max-w-xl space-y-4">
+    <div className="max-w-xl space-y-4">
         <Card className="p-5">
           <div className="mb-5 border-b border-gray-100 pb-5">
             <AvatarUpload
@@ -82,6 +141,16 @@ export function SettingsPage() {
             label="Account type"
             value={user?.account_type ? formatRole(user.account_type) : "—"}
           />
+          {showTimezone ? (
+            <TimezoneRow
+              timezone={timezone}
+              savedTimezone={savedTimezone}
+              isAdmin={isAdmin}
+              saving={updateAccount.isPending}
+              onChange={setTimezone}
+              onSave={saveTimezone}
+            />
+          ) : null}
           {isAdmin && handlerId && (accountType === "buyer" || accountType === "publisher" || accountType === "platform") ? (
             <HandlerIDRow handlerId={handlerId} accountType={accountType} />
           ) : null}
@@ -101,7 +170,6 @@ export function SettingsPage() {
             </Link>
           </Card>
         )}
-      </PageBody>
-    </>
+    </div>
   );
 }

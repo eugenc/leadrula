@@ -88,6 +88,7 @@ type importFieldRow struct {
 	Name     string
 	FieldKey string
 	Type     string
+	Format   *string
 	Options  json.RawMessage
 	IsActive *bool
 }
@@ -139,7 +140,7 @@ func (s *Service) ImportFields(ctx context.Context, accountID int64, in ImportFi
 			}
 			name := parsed.Name
 			opts := parsed.Options
-			if _, err := s.UpdateField(ctx, accountID, existing.ID, &name, nil, opts, nil, parsed.IsActive); err != nil {
+			if _, err := s.UpdateField(ctx, accountID, existing.ID, &name, nil, opts, parsed.Format, nil, parsed.IsActive); err != nil {
 				result.Skipped++
 				result.Errors = append(result.Errors, ImportRowError{Row: i + 1, Message: err.Error()})
 				continue
@@ -164,7 +165,7 @@ func (s *Service) ImportFields(ctx context.Context, accountID int64, in ImportFi
 			continue
 		}
 
-		f, err := s.CreateField(ctx, accountID, parsed.Name, parsed.FieldKey, parsed.Type, parsed.Options)
+		f, err := s.CreateField(ctx, accountID, parsed.Name, parsed.FieldKey, parsed.Type, parsed.Options, parsed.Format)
 		if err != nil {
 			result.Skipped++
 			result.Errors = append(result.Errors, ImportRowError{Row: i + 1, Message: err.Error()})
@@ -172,7 +173,7 @@ func (s *Service) ImportFields(ctx context.Context, accountID int64, in ImportFi
 		}
 		if parsed.IsActive != nil && !*parsed.IsActive {
 			active := false
-			if _, err := s.UpdateField(ctx, accountID, f.ID, nil, nil, nil, nil, &active); err != nil {
+			if _, err := s.UpdateField(ctx, accountID, f.ID, nil, nil, nil, nil, nil, &active); err != nil {
 				result.Skipped++
 				result.Errors = append(result.Errors, ImportRowError{Row: i + 1, Message: err.Error()})
 				continue
@@ -187,10 +188,9 @@ func (s *Service) ImportFields(ctx context.Context, accountID int64, in ImportFi
 func (s *Service) fieldByKey(ctx context.Context, accountID int64, fieldKey string) (*CustomField, error) {
 	f := &CustomField{}
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, public_id, account_id, name, field_key, type, options, position, is_active, created_at
-		 FROM custom_fields WHERE account_id = $1 AND field_key = $2`,
+		`SELECT `+customFieldCols+` FROM custom_fields WHERE account_id = $1 AND field_key = $2`,
 		accountID, fieldKey).Scan(
-		&f.ID, &f.PublicID, &f.AccountID, &f.Name, &f.FieldKey, &f.Type, &f.Options, &f.Position, &f.IsActive, &f.CreatedAt)
+		&f.ID, &f.PublicID, &f.AccountID, &f.Name, &f.FieldKey, &f.Type, &f.Format, &f.Options, &f.Position, &f.IsActive, &f.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -223,6 +223,11 @@ func mapImportFieldRow(row importRow, mapping []ColumnMapping) (importFieldRow, 
 					return out, err
 				}
 				out.Options = opts
+			}
+		case "format":
+			if val != "" {
+				v := val
+				out.Format = &v
 			}
 		case "is_active":
 			active, err := parseBool(val)

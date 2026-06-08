@@ -73,6 +73,35 @@ func resolveIngestSource(raw map[string]any) string {
 	return ""
 }
 
+func applyPayloadMappings(ctx context.Context, tx database.Querier, repo *leads.Repository, leadID int64, flat map[string]any, maps []routing.SourceFieldMapEntry) error {
+	for _, k := range builtinKeys {
+		if v, ok := flat[k]; ok {
+			if str := toText(v); str != "" {
+				if err := repo.SetBuiltinField(ctx, tx, leadID, k, str); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	for _, m := range maps {
+		v, ok := flat[m.SourceKey]
+		if !ok {
+			continue
+		}
+		if m.TargetType == "builtin" && m.BuiltinField != nil {
+			if err := repo.SetBuiltinField(ctx, tx, leadID, *m.BuiltinField, toText(v)); err != nil {
+				return err
+			}
+		} else if m.TargetType == "custom" && m.CustomFieldID != nil {
+			valJSON, _ := json.Marshal(v)
+			if err := repo.UpsertCustomValue(ctx, tx, leadID, *m.CustomFieldID, valJSON); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // Ingest lands legacy POST /api/v1/leads payloads in the intake queue.
 func (s *Service) Ingest(ctx context.Context, publisherID int64, raw map[string]any) (*IngestResult, error) {
 	source := resolveIngestSource(raw)
@@ -132,34 +161,12 @@ func (s *Service) IngestFromSource(ctx context.Context, publisherID int64, slug 
 	if err != nil {
 		return nil, err
 	}
-	for _, k := range builtinKeys {
-		if v, ok := sources[k]; ok {
-			if str := toText(v); str != "" {
-				if err := s.leads.SetBuiltinField(ctx, tx, leadID, k, str); err != nil {
-					return nil, err
-				}
-			}
-		}
-	}
 	maps, err := routing.SourceFieldMap(ctx, tx, src.ID)
 	if err != nil {
 		return nil, err
 	}
-	for _, m := range maps {
-		v, ok := sources[m.SourceKey]
-		if !ok {
-			continue
-		}
-		if m.TargetType == "builtin" && m.BuiltinField != nil {
-			if err := s.leads.SetBuiltinField(ctx, tx, leadID, *m.BuiltinField, toText(v)); err != nil {
-				return nil, err
-			}
-		} else if m.TargetType == "custom" && m.CustomFieldID != nil {
-			valJSON, _ := json.Marshal(v)
-			if err := s.leads.UpsertCustomValue(ctx, tx, leadID, *m.CustomFieldID, valJSON); err != nil {
-				return nil, err
-			}
-		}
+	if err := applyPayloadMappings(ctx, tx, s.leads, leadID, sources, maps); err != nil {
+		return nil, err
 	}
 
 	rt, err := routing.RouteForSource(ctx, tx, src.ID)
@@ -289,6 +296,7 @@ type ListQueueParams struct {
 	Page   int
 	Limit  int
 	Search string
+	Source string
 }
 
 func (s *Service) ListQueue(ctx context.Context, publisherID int64, p ListQueueParams) (*QueueListResponse, error) {
@@ -306,6 +314,9 @@ func (s *Service) ListQueue(ctx context.Context, publisherID int64, p ListQueueP
 
 	if status != "all" {
 		where += " AND q.status = " + argN(status) + "::intake_status"
+	}
+	if p.Source != "" {
+		where += " AND q.source = " + argN(p.Source)
 	}
 	if p.Search != "" {
 		like := "%" + p.Search + "%"
@@ -615,8 +626,8 @@ func (s *Service) MapField(ctx context.Context, publisherID, queueID int64, sour
 	if sourceKey == "" {
 		return nil, httpx.Validation("source_key is required")
 	}
-	if targetType != "builtin" && targetType != "custom" {
-		return nil, httpx.Validation("target_type must be builtin or custom")
+	if targetType != "builtin" && targetType != "custom" && targetType != "ignore" {
+		return nil, httpx.Validation("target_type must be builtin, custom, or ignore")
 	}
 	if targetType == "builtin" && (builtinField == nil || *builtinField == "") {
 		return nil, httpx.Validation("builtin_field is required for builtin target")
@@ -663,19 +674,25 @@ func (s *Service) MapField(ctx context.Context, publisherID, queueID int64, sour
 			return nil, err
 		}
 		if src != nil {
-			var existing int64
-			err := tx.QueryRow(ctx,
-				`SELECT id FROM routing_source_field_map WHERE source_id=$1 AND source_key=$2`,
-				src.ID, sourceKey).Scan(&existing)
-			if errors.Is(err, pgx.ErrNoRows) {
-				_, err = tx.Exec(ctx,
-					`INSERT INTO routing_source_field_map(source_id, source_key, target_type, builtin_field, custom_field_id)
-					 VALUES ($1,$2,$3,$4,$5)`,
-					src.ID, sourceKey, targetType, builtinField, customFieldID)
-				if err != nil {
-					return nil, err
-				}
-			} else if err != nil {
+			if _, err := tx.Exec(ctx,
+				`DELETE FROM routing_source_field_map WHERE source_id=$1 AND source_key=$2`,
+				src.ID, sourceKey); err != nil {
+				return nil, err
+			}
+			var insertBuiltin *string
+			var insertCustom *int64
+			if targetType == "ignore" {
+				insertBuiltin = nil
+				insertCustom = nil
+			} else {
+				insertBuiltin = builtinField
+				insertCustom = customFieldID
+			}
+			_, err = tx.Exec(ctx,
+				`INSERT INTO routing_source_field_map(source_id, source_key, target_type, builtin_field, custom_field_id)
+				 VALUES ($1,$2,$3,$4,$5)`,
+				src.ID, sourceKey, targetType, insertBuiltin, insertCustom)
+			if err != nil {
 				return nil, err
 			}
 		}
@@ -685,11 +702,71 @@ func (s *Service) MapField(ctx context.Context, publisherID, queueID int64, sour
 		if err := s.leads.SetBuiltinField(ctx, tx, leadID, *builtinField, toText(v)); err != nil {
 			return nil, err
 		}
-	} else {
+	} else if targetType == "custom" {
 		valJSON, _ := json.Marshal(v)
 		if err := s.leads.UpsertCustomValue(ctx, tx, leadID, *customFieldID, valJSON); err != nil {
 			return nil, err
 		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.scanQueueItem(ctx, s.pool, publisherID, queueID)
+}
+
+// ReprocessQueueItem re-applies builtin keys and current source field maps from stored raw_payload.
+func (s *Service) ReprocessQueueItem(ctx context.Context, publisherID, queueID int64) (*QueueItem, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var leadID int64
+	var status string
+	var sourceSlug *string
+	var rawPayload []byte
+	if err := tx.QueryRow(ctx,
+		`SELECT lead_id, status, source, raw_payload FROM lead_intake_queue WHERE id=$1 FOR UPDATE`, queueID).
+		Scan(&leadID, &status, &sourceSlug, &rawPayload); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, httpx.NotFound("queue item not found")
+		}
+		return nil, err
+	}
+	if status != "pending_review" {
+		return nil, httpx.BusinessRule("queue item already handled")
+	}
+	if len(rawPayload) == 0 {
+		return nil, httpx.Validation("raw_payload is empty")
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(rawPayload, &raw); err != nil {
+		return nil, httpx.Validation("invalid raw_payload")
+	}
+	flat := flattenPayload(raw)
+
+	var maps []routing.SourceFieldMapEntry
+	slug := ""
+	if sourceSlug != nil {
+		slug = *sourceSlug
+	}
+	if slug != "" {
+		src, err := routing.MatchSourceBySlug(ctx, tx, publisherID, slug)
+		if err != nil {
+			return nil, err
+		}
+		if src != nil {
+			maps, err = routing.SourceFieldMap(ctx, tx, src.ID)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := applyPayloadMappings(ctx, tx, s.leads, leadID, flat, maps); err != nil {
+		return nil, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {

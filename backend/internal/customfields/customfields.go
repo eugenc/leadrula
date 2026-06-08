@@ -1,5 +1,4 @@
-// Package customfields manages admin-defined custom fields and the
-// disqualification-reason picklist, both scoped per account.
+// Package customfields manages admin-defined custom fields per account.
 package customfields
 
 import (
@@ -21,20 +20,14 @@ type CustomField struct {
 	Name      string          `json:"name"`
 	FieldKey  string          `json:"field_key"`
 	Type      string          `json:"type"`
+	Format    *string         `json:"format"`
 	Options   json.RawMessage `json:"options"`
 	Position  int             `json:"position"`
 	IsActive  bool            `json:"is_active"`
 	CreatedAt time.Time       `json:"created_at"`
 }
 
-type DisqReason struct {
-	ID        int64     `json:"id"`
-	AccountID int64     `json:"-"`
-	Label     string    `json:"label"`
-	Position  int       `json:"position"`
-	IsActive  bool      `json:"is_active"`
-	CreatedAt time.Time `json:"created_at"`
-}
+const customFieldCols = `id, public_id, account_id, name, field_key, type, format, options, position, is_active, created_at`
 
 type Service struct {
 	pool *pgxpool.Pool
@@ -46,8 +39,7 @@ func NewService(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
 
 func (s *Service) ListFields(ctx context.Context, accountID int64) ([]CustomField, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, public_id, account_id, name, field_key, type, options, position, is_active, created_at
-		 FROM custom_fields WHERE account_id = $1 ORDER BY position, id`, accountID)
+		`SELECT `+customFieldCols+` FROM custom_fields WHERE account_id = $1 ORDER BY position, id`, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +47,7 @@ func (s *Service) ListFields(ctx context.Context, accountID int64) ([]CustomFiel
 	var out []CustomField
 	for rows.Next() {
 		var f CustomField
-		if err := rows.Scan(&f.ID, &f.PublicID, &f.AccountID, &f.Name, &f.FieldKey, &f.Type, &f.Options, &f.Position, &f.IsActive, &f.CreatedAt); err != nil {
+		if err := rows.Scan(&f.ID, &f.PublicID, &f.AccountID, &f.Name, &f.FieldKey, &f.Type, &f.Format, &f.Options, &f.Position, &f.IsActive, &f.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, f)
@@ -63,20 +55,24 @@ func (s *Service) ListFields(ctx context.Context, accountID int64) ([]CustomFiel
 	return out, rows.Err()
 }
 
-func (s *Service) CreateField(ctx context.Context, accountID int64, name, fieldKey, ftype string, options json.RawMessage) (*CustomField, error) {
+func (s *Service) CreateField(ctx context.Context, accountID int64, name, fieldKey, ftype string, options json.RawMessage, format *string) (*CustomField, error) {
 	if !validType(ftype) {
 		return nil, httpx.Validation("invalid field type")
 	}
 	if len(options) == 0 {
 		options = json.RawMessage("[]")
 	}
+	resolvedFormat, err := resolveFormat(ftype, format)
+	if err != nil {
+		return nil, err
+	}
 	f := &CustomField{}
-	err := s.pool.QueryRow(ctx,
-		`INSERT INTO custom_fields(account_id, name, field_key, type, options, position)
-		 VALUES ($1,$2,$3,$4,$5, COALESCE((SELECT MAX(position)+1 FROM custom_fields WHERE account_id=$1),0))
-		 RETURNING id, public_id, account_id, name, field_key, type, options, position, is_active, created_at`,
-		accountID, name, fieldKey, ftype, options).Scan(
-		&f.ID, &f.PublicID, &f.AccountID, &f.Name, &f.FieldKey, &f.Type, &f.Options, &f.Position, &f.IsActive, &f.CreatedAt)
+	err = s.pool.QueryRow(ctx,
+		`INSERT INTO custom_fields(account_id, name, field_key, type, format, options, position)
+		 VALUES ($1,$2,$3,$4,$5,$6, COALESCE((SELECT MAX(position)+1 FROM custom_fields WHERE account_id=$1),0))
+		 RETURNING `+customFieldCols,
+		accountID, name, fieldKey, ftype, resolvedFormat, options).Scan(
+		&f.ID, &f.PublicID, &f.AccountID, &f.Name, &f.FieldKey, &f.Type, &f.Format, &f.Options, &f.Position, &f.IsActive, &f.CreatedAt)
 	if err != nil {
 		if database.IsUniqueViolation(err) {
 			return nil, httpx.Conflict("field_key already exists")
@@ -86,15 +82,15 @@ func (s *Service) CreateField(ctx context.Context, accountID int64, name, fieldK
 	return f, nil
 }
 
-func (s *Service) UpdateField(ctx context.Context, accountID, id int64, name, fieldKey *string, options json.RawMessage, position *int, isActive *bool) (*CustomField, error) {
+func (s *Service) UpdateField(ctx context.Context, accountID, id int64, name, fieldKey *string, options json.RawMessage, format *string, position *int, isActive *bool) (*CustomField, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
 
-	var oldKey string
-	err = tx.QueryRow(ctx, `SELECT field_key FROM custom_fields WHERE id = $1 AND account_id = $2`, id, accountID).Scan(&oldKey)
+	var oldKey, ftype string
+	err = tx.QueryRow(ctx, `SELECT field_key, type FROM custom_fields WHERE id = $1 AND account_id = $2`, id, accountID).Scan(&oldKey, &ftype)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("custom field not found")
 	}
@@ -112,18 +108,32 @@ func (s *Service) UpdateField(ctx context.Context, accountID, id int64, name, fi
 	if len(options) > 0 {
 		optArg = []byte(options)
 	}
+	var formatArg interface{}
+	if format != nil {
+		if ftype != "date" && ftype != "datetime" {
+			return nil, httpx.Validation("format only applies to date fields")
+		}
+		if *format == "" {
+			return nil, httpx.Validation("invalid date format")
+		}
+		if !ValidFormat(ftype, *format) {
+			return nil, httpx.Validation("invalid date format")
+		}
+		formatArg = *format
+	}
 	f := &CustomField{}
 	err = tx.QueryRow(ctx,
 		`UPDATE custom_fields SET
 		   name = COALESCE($3, name),
 		   field_key = COALESCE($4, field_key),
 		   options = COALESCE($5, options),
-		   position = COALESCE($6, position),
-		   is_active = COALESCE($7, is_active)
+		   format = COALESCE($6, format),
+		   position = COALESCE($7, position),
+		   is_active = COALESCE($8, is_active)
 		 WHERE id = $1 AND account_id = $2
-		 RETURNING id, public_id, account_id, name, field_key, type, options, position, is_active, created_at`,
-		id, accountID, name, fieldKey, optArg, position, isActive).Scan(
-		&f.ID, &f.PublicID, &f.AccountID, &f.Name, &f.FieldKey, &f.Type, &f.Options, &f.Position, &f.IsActive, &f.CreatedAt)
+		 RETURNING `+customFieldCols,
+		id, accountID, name, fieldKey, optArg, formatArg, position, isActive).Scan(
+		&f.ID, &f.PublicID, &f.AccountID, &f.Name, &f.FieldKey, &f.Type, &f.Format, &f.Options, &f.Position, &f.IsActive, &f.CreatedAt)
 	if err != nil {
 		if database.IsUniqueViolation(err) {
 			return nil, httpx.Conflict("field_key already exists")
@@ -242,73 +252,6 @@ func (s *Service) DeleteField(ctx context.Context, accountID, id int64) error {
 	}
 	if ct.RowsAffected() == 0 {
 		return httpx.NotFound("custom field not found")
-	}
-	return nil
-}
-
-// ── Disqualification reasons ──────────────────────────────────────
-
-func (s *Service) ListReasons(ctx context.Context, accountID int64) ([]DisqReason, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT id, account_id, label, position, is_active, created_at
-		 FROM disqualification_reasons WHERE account_id = $1 ORDER BY position, id`, accountID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []DisqReason
-	for rows.Next() {
-		var d DisqReason
-		if err := rows.Scan(&d.ID, &d.AccountID, &d.Label, &d.Position, &d.IsActive, &d.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, d)
-	}
-	return out, rows.Err()
-}
-
-func (s *Service) CreateReason(ctx context.Context, accountID int64, label string) (*DisqReason, error) {
-	d := &DisqReason{}
-	err := s.pool.QueryRow(ctx,
-		`INSERT INTO disqualification_reasons(account_id, label, position)
-		 VALUES ($1, $2, COALESCE((SELECT MAX(position)+1 FROM disqualification_reasons WHERE account_id=$1),0))
-		 RETURNING id, account_id, label, position, is_active, created_at`,
-		accountID, label).Scan(&d.ID, &d.AccountID, &d.Label, &d.Position, &d.IsActive, &d.CreatedAt)
-	return d, err
-}
-
-func (s *Service) UpdateReason(ctx context.Context, accountID, id int64, label *string, position *int, isActive *bool) (*DisqReason, error) {
-	d := &DisqReason{}
-	err := s.pool.QueryRow(ctx,
-		`UPDATE disqualification_reasons SET
-		   label = COALESCE($3, label),
-		   position = COALESCE($4, position),
-		   is_active = COALESCE($5, is_active)
-		 WHERE id = $1 AND account_id = $2
-		 RETURNING id, account_id, label, position, is_active, created_at`,
-		id, accountID, label, position, isActive).Scan(&d.ID, &d.AccountID, &d.Label, &d.Position, &d.IsActive, &d.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, httpx.NotFound("reason not found")
-	}
-	return d, err
-}
-
-// DeleteReason removes a reason only if it has never been recorded on a lead.
-func (s *Service) DeleteReason(ctx context.Context, accountID, id int64) error {
-	var inUse bool
-	if err := s.pool.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM leads WHERE disqualification_reason_id = $1)`, id).Scan(&inUse); err != nil {
-		return err
-	}
-	if inUse {
-		return httpx.BusinessRule("cannot delete a reason in use; deactivate it instead")
-	}
-	ct, err := s.pool.Exec(ctx, `DELETE FROM disqualification_reasons WHERE id = $1 AND account_id = $2`, id, accountID)
-	if err != nil {
-		return err
-	}
-	if ct.RowsAffected() == 0 {
-		return httpx.NotFound("reason not found")
 	}
 	return nil
 }

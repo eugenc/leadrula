@@ -195,6 +195,7 @@ export interface CustomField {
   name: string;
   field_key: string;
   type: "text" | "number" | "date" | "datetime" | "dropdown" | "checkbox";
+  format?: string | null;
   options: string[];
   position: number;
   is_active: boolean;
@@ -202,6 +203,8 @@ export interface CustomField {
 
 export interface DisqReason {
   id: number;
+  stage_id?: number;
+  stage_name?: string;
   label: string;
   position: number;
   is_active: boolean;
@@ -286,10 +289,13 @@ export interface ReturnRule {
   return_stage_id: number;
 }
 
+export type SourceType = "webhook";
+
 export interface Source {
   id: number;
   name: string;
   slug: string;
+  type: SourceType;
   is_active: boolean;
 }
 
@@ -320,7 +326,7 @@ export interface FieldMapEntry {
   id: number;
   source_id: number;
   source_key: string;
-  target_type: "builtin" | "custom";
+  target_type: "builtin" | "custom" | "ignore";
   builtin_field: string | null;
   custom_field_id: number | null;
 }
@@ -328,6 +334,18 @@ export interface FieldMapEntry {
 export interface SourceSamplePayload {
   payload: Record<string, unknown> | null;
   received_at?: string;
+}
+
+export type OutboundFormat = "json" | "url";
+export type OutboundMethod = "GET" | "POST";
+
+export interface OutboundFieldMapEntry {
+  dest_key: string;
+  source_type: "builtin" | "custom" | "static" | "meta";
+  builtin_field?: string;
+  custom_field_id?: number;
+  static_value?: string;
+  meta_field?: string;
 }
 
 export interface Webhook {
@@ -339,6 +357,11 @@ export interface Webhook {
   inbound_enabled: boolean;
   outbound_enabled: boolean;
   outbound_url?: string | null;
+  outbound_format?: OutboundFormat;
+  outbound_method?: OutboundMethod;
+  outbound_payload_template?: string;
+  outbound_field_map?: OutboundFieldMapEntry[];
+  outbound_response_map?: ResponseMapEntry[];
   created_at: string;
 }
 
@@ -363,8 +386,6 @@ export interface WebhookOutboundTrigger {
   trigger_event: OutboundTriggerEvent;
   condition_logic: "and" | "or";
   conditions: unknown[];
-  payload_template: string;
-  response_map: ResponseMapEntry[];
   position: number;
   is_active: boolean;
 }
@@ -407,6 +428,8 @@ export interface WebhookSamplePayload {
 export interface WebhookDelivery {
   id: number;
   webhook_id: number;
+  webhook_name?: string;
+  webhook_slug?: string;
   event_id?: number | null;
   lead_id?: number | null;
   lead_public_id?: string | null;

@@ -5,9 +5,14 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import type { CustomField } from "@/types";
-import { CUSTOM_FIELD_TYPES, slugFieldKey } from "./customFieldConstants";
+import {
+  CUSTOM_FIELD_TYPES,
+  defaultFormatForType,
+  formatPresetsForType,
+  slugFieldKey,
+} from "./customFieldConstants";
 
-type FieldForm = { name: string; field_key: string; type: string; options: string };
+type FieldForm = { name: string; field_key: string; type: string; format: string; options: string };
 
 function buildBody(form: FieldForm): Record<string, unknown> {
   const body: Record<string, unknown> = {
@@ -17,6 +22,9 @@ function buildBody(form: FieldForm): Record<string, unknown> {
   };
   if (form.type === "dropdown") {
     body.options = form.options.split(",").map((s) => s.trim()).filter(Boolean);
+  }
+  if (form.type === "date" || form.type === "datetime") {
+    body.format = form.format;
   }
   return body;
 }
@@ -38,12 +46,24 @@ export function CreateCustomFieldDrawer({
   onSubmit: (body: Record<string, unknown>) => Promise<CustomField>;
   isPending?: boolean;
 }) {
-  const [form, setForm] = useState<FieldForm>({ name: "", field_key: "", type: "text", options: "" });
+  const [form, setForm] = useState<FieldForm>({
+    name: "",
+    field_key: "",
+    type: "text",
+    format: defaultFormatForType("text"),
+    options: "",
+  });
   const [fieldKeyTouched, setFieldKeyTouched] = useState(false);
 
   useEffect(() => {
     if (!open) return;
-    setForm({ name: defaultName, field_key: defaultFieldKey || slugFieldKey(defaultName), type: "text", options: "" });
+    setForm({
+      name: defaultName,
+      field_key: defaultFieldKey || slugFieldKey(defaultName),
+      type: "text",
+      format: defaultFormatForType("text"),
+      options: "",
+    });
     setFieldKeyTouched(false);
   }, [open, defaultName, defaultFieldKey]);
 
@@ -104,7 +124,17 @@ export function CreateCustomFieldDrawer({
         </div>
         <div>
           <Label>Type</Label>
-          <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+          <Select
+            value={form.type}
+            onChange={(e) => {
+              const type = e.target.value;
+              setForm((f) => ({
+                ...f,
+                type,
+                format: defaultFormatForType(type),
+              }));
+            }}
+          >
             {CUSTOM_FIELD_TYPES.map(({ value, label }) => (
               <option key={value} value={value}>
                 {label}
@@ -112,6 +142,18 @@ export function CreateCustomFieldDrawer({
             ))}
           </Select>
         </div>
+        {(form.type === "date" || form.type === "datetime") && (
+          <div>
+            <Label>Format</Label>
+            <Select value={form.format} onChange={(e) => setForm({ ...form, format: e.target.value })}>
+              {formatPresetsForType(form.type).map(({ value, label }) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
         {form.type === "dropdown" && (
           <div>
             <Label>Options (comma separated)</Label>

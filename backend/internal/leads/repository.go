@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/customfields"
 	"github.com/echayko/leadrula/backend/internal/database"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/jackc/pgx/v5"
@@ -84,7 +85,16 @@ func (r *Repository) SetBuiltinField(ctx context.Context, q database.Querier, le
 }
 
 func (r *Repository) UpsertCustomValue(ctx context.Context, q database.Querier, leadID, customFieldID int64, valueJSON []byte) error {
-	_, err := q.Exec(ctx,
+	var ftype string
+	var format *string
+	err := q.QueryRow(ctx, `SELECT type, format FROM custom_fields WHERE id = $1`, customFieldID).Scan(&ftype, &format)
+	if err == nil && (ftype == "date" || ftype == "datetime") {
+		field := customfields.CustomField{Type: ftype, Format: format}
+		if normalized, normErr := customfields.NormalizeValue(field, valueJSON); normErr == nil {
+			valueJSON = normalized
+		}
+	}
+	_, err = q.Exec(ctx,
 		`INSERT INTO lead_custom_values(lead_id, custom_field_id, value) VALUES ($1,$2,$3)
 		 ON CONFLICT (lead_id, custom_field_id) DO UPDATE SET value = EXCLUDED.value`,
 		leadID, customFieldID, valueJSON)
@@ -793,13 +803,6 @@ func (r *Repository) BulkAddFollowers(ctx context.Context, leadIDs []int64, user
 		}
 	}
 	return nil
-}
-
-// AssignedUserIDForLead returns the assignee (for notifications), if any.
-func (r *Repository) ReasonBelongsToAccount(ctx context.Context, q database.Querier, accountID, reasonID int64) (bool, error) {
-	var ok bool
-	err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM disqualification_reasons WHERE id=$1 AND account_id=$2)`, reasonID, accountID).Scan(&ok)
-	return ok, err
 }
 
 func (r *Repository) StageName(ctx context.Context, q database.Querier, stageID *int64) string {

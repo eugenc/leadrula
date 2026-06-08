@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useUsersList, useInviteUser, useResendInvite } from "@/features/admin/hooks";
 import { UserDetailDrawer } from "@/features/admin/UserDetailDrawer";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -53,7 +52,6 @@ export function UsersPage() {
           </Button>
         }
       />
-      <PageBody>
         {isLoading ? (
           <Spinner className="h-6 w-6" />
         ) : (
@@ -150,7 +148,6 @@ export function UsersPage() {
             </div>
           </div>
         </FormDrawer>
-      </PageBody>
     </>
   );
 }

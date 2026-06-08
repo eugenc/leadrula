@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   useMapQueueField,
   useRouteQueue,
@@ -11,11 +11,13 @@ import { payloadValuePreview } from "@/features/intake/payloadKeys";
 import { BuiltinCustomFieldSelect } from "@/features/admin/BuiltinCustomFieldSelect";
 import { CreateCustomFieldDrawer } from "@/features/admin/CreateCustomFieldDrawer";
 import { slugFieldKey } from "@/features/admin/customFieldConstants";
+import { buildPayloadSuggestions } from "@/features/leads/csvMapping";
 import { Button } from "@/components/ui/button";
 import { Label, Select } from "@/components/ui/input";
 import { Dialog, FormDrawer } from "@/components/ui/dialog";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
+import { RerunIntakeButton } from "@/features/intake/RerunIntakeButton";
 import type { QueueItem } from "@/types";
 
 export { LOG_FILTERS, PAGE_SIZES, statusBadge, type LogFilter } from "@/features/intake/logShared";
@@ -116,8 +118,31 @@ export function QueueItemDrawer({
   const sourceRegistered = !!(item.source && (sources ?? []).some((s) => s.slug === item.source));
   const unmapped = item.unmapped_keys ?? [];
 
+  const suggestions = useMemo(
+    () => buildPayloadSuggestions(unmapped, customFields ?? []),
+    [unmapped, customFields]
+  );
+
+  useEffect(() => {
+    setTargets((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [key, target] of Object.entries(suggestions)) {
+        if (!(key in prev)) {
+          next[key] = target;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [suggestions]);
+
   function targetFor(key: string) {
-    return targets[key] ?? "first_name";
+    return targets[key] ?? suggestions[key] ?? "first_name";
+  }
+
+  function isSuggested(key: string) {
+    return !!suggestions[key] && targetFor(key) === suggestions[key];
   }
 
   function saveMapping(key: string, targetOverride?: string) {
@@ -143,6 +168,24 @@ export function QueueItemDrawer({
     );
   }
 
+  function ignoreField(key: string) {
+    setSavingKey(key);
+    mapField.mutate(
+      { id: item.id, body: { source_key: key, target_type: "ignore" } },
+      {
+        onSuccess: (updated) => {
+          toast.success("Field ignored");
+          onUpdated?.(updated);
+          setSavingKey(null);
+        },
+        onError: (e) => {
+          toast.error(errorMessage(e));
+          setSavingKey(null);
+        },
+      }
+    );
+  }
+
   const pending = item.status === "pending_review";
 
   return (
@@ -156,6 +199,7 @@ export function QueueItemDrawer({
         footer={
           pending ? (
             <>
+              <RerunIntakeButton item={item} onSuccess={onUpdated} />
               <Button variant="secondary" onClick={onReject}>
                 Reject
               </Button>
@@ -200,16 +244,29 @@ export function QueueItemDrawer({
                         label="Lead field"
                         onAddCustomField={() => setCreateFieldKey(key)}
                       />
+                      {isSuggested(key) && (
+                        <p className="mt-0.5 text-xs text-gray-400">Suggested</p>
+                      )}
                     </div>
                     <Button size="sm" disabled={savingKey === key} onClick={() => saveMapping(key)}>
                       Save
                     </Button>
+                    {sourceRegistered && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={savingKey === key}
+                        onClick={() => ignoreField(key)}
+                      >
+                        Ignore
+                      </Button>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-sm text-gray-400">All payload fields are mapped.</p>
+            <p className="text-sm text-gray-400">All payload fields are mapped or ignored.</p>
           )}
         </div>
       </FormDrawer>

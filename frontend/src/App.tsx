@@ -15,9 +15,9 @@ import { BoardPage } from "@/pages/BoardPage";
 import { LeadsListPage } from "@/pages/LeadsListPage";
 import { PipelinesPage } from "@/pages/PipelinesPage";
 import { CustomFieldsPage } from "@/pages/CustomFieldsPage";
-import { DisqReasonsPage } from "@/pages/DisqReasonsPage";
 import { UsersPage } from "@/pages/UsersPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { SettingsLayout } from "@/pages/SettingsLayout";
 import { ApiKeysPage } from "@/pages/buyer/ApiKeysPage";
 
 import { IntakeLogLayout } from "@/pages/publisher/IntakeLogLayout";
@@ -75,8 +75,11 @@ export default function App() {
                 <Route index element={<PlatformHomePage />} />
                 <Route path="publishers" element={<PlatformPublishersPage />} />
                 <Route path="buyers" element={<PlatformBuyersPage />} />
-                <Route path="users" element={<UsersPage />} />
-                <Route path="settings" element={<SettingsPage />} />
+                <Route path="users" element={<Navigate to="/platform/settings/users" replace />} />
+                <Route path="settings" element={<SettingsLayout />}>
+                  <Route index element={<SettingsPage />} />
+                  <Route path="users" element={<UsersPage />} />
+                </Route>
               </Route>
             </Route>
 
@@ -93,7 +96,6 @@ export default function App() {
                 <Route path="intake" element={<Navigate to="/p/log" replace />} />
                 <Route path="pipelines" element={<PipelinesPage />} />
                 <Route path="fields" element={<CustomFieldsPage />} />
-                <Route path="reasons" element={<DisqReasonsPage />} />
                 <Route path="sources" element={<SourcesPage />} />
                 <Route path="webhooks" element={<WebhooksPage />} />
                 <Route path="routing" element={<RoutingPage />} />
@@ -104,14 +106,18 @@ export default function App() {
                   <Route path="activity" element={<PublisherCollaborationActivityTab />} />
                 </Route>
                 <Route path="billing" element={<PublisherBillingPage />} />
-                <Route path="users" element={<UsersPage />} />
-                <Route path="api" element={<ApiKeysPage />} />
-                <Route path="webhooks" element={<WebhooksPage />} />
+                <Route path="users" element={<Navigate to="/p/settings/users" replace />} />
+                <Route path="api" element={<Navigate to="/p/settings/api" replace />} />
                 <Route path="integrations" element={<IntegrationsLayout />}>
                   <Route index element={<IntegrationsConnectionsTab />} />
                   <Route path="deliveries" element={<IntegrationsDeliveriesTab />} />
                 </Route>
-                <Route path="settings" element={<SettingsPage />} />
+                <Route path="settings" element={<SettingsLayout />}>
+                  <Route index element={<SettingsPage />} />
+                  <Route path="billing" element={<Navigate to="/p/billing" replace />} />
+                  <Route path="users" element={<UsersPage />} />
+                  <Route path="api" element={<ApiKeysPage />} />
+                </Route>
               </Route>
             </Route>
 
@@ -124,7 +130,6 @@ export default function App() {
                 <Route path="calendar" element={<CalendarPage />} />
                 <Route path="pipelines" element={<PipelinesPage />} />
                 <Route path="fields" element={<CustomFieldsPage />} />
-                <Route path="reasons" element={<DisqReasonsPage />} />
                 <Route path="publishers" element={<PublishersPage />} />
                 <Route path="contract" element={<ContractPage />} />
                 <Route path="routes" element={<RoutesPage />} />
@@ -134,14 +139,19 @@ export default function App() {
                 </Route>
                 <Route path="logs" element={<LogsPage />} />
                 <Route path="billing" element={<BuyerBillingPage />} />
-                <Route path="users" element={<UsersPage />} />
-                <Route path="api" element={<ApiKeysPage />} />
+                <Route path="users" element={<Navigate to="/b/settings/users" replace />} />
+                <Route path="api" element={<Navigate to="/b/settings/api" replace />} />
                 <Route path="webhooks" element={<WebhooksPage />} />
                 <Route path="integrations" element={<IntegrationsLayout />}>
                   <Route index element={<IntegrationsConnectionsTab />} />
                   <Route path="deliveries" element={<IntegrationsDeliveriesTab />} />
                 </Route>
-                <Route path="settings" element={<SettingsPage />} />
+                <Route path="settings" element={<SettingsLayout />}>
+                  <Route index element={<SettingsPage />} />
+                  <Route path="billing" element={<Navigate to="/b/billing" replace />} />
+                  <Route path="users" element={<UsersPage />} />
+                  <Route path="api" element={<ApiKeysPage />} />
+                </Route>
                 <Route path="settings/collaboration" element={<Navigate to="/b/collaboration" replace />} />
               </Route>
             </Route>

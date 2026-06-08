@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/echayko/leadrula/backend/internal/customfields"
 	"github.com/echayko/leadrula/backend/internal/database"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/jackc/pgx/v5"
@@ -90,8 +91,10 @@ func conditionFieldKind(domain, field string, customByKey map[string]customField
 }
 
 type customFieldDef struct {
-	id   int64
-	kind fieldKind
+	id     int64
+	kind   fieldKind
+	ftype  string
+	format *string
 }
 
 // ruleEvalContext is the lead + pipeline snapshot a rule is evaluated against.
@@ -139,18 +142,19 @@ func buildEvalContext(ctx context.Context, q database.Querier, accountID, leadID
 	ec.builtins["zip"] = zip
 	ec.builtins["source"] = source
 
-	defRows, err := q.Query(ctx, `SELECT id, field_key, type FROM custom_fields WHERE account_id=$1`, accountID)
+	defRows, err := q.Query(ctx, `SELECT id, field_key, type, format FROM custom_fields WHERE account_id=$1`, accountID)
 	if err != nil {
 		return nil, err
 	}
 	for defRows.Next() {
 		var id int64
 		var key, ftype string
-		if err := defRows.Scan(&id, &key, &ftype); err != nil {
+		var format *string
+		if err := defRows.Scan(&id, &key, &ftype, &format); err != nil {
 			defRows.Close()
 			return nil, err
 		}
-		ec.customByKey[key] = customFieldDef{id: id, kind: customFieldKind(ftype)}
+		ec.customByKey[key] = customFieldDef{id: id, kind: customFieldKind(ftype), ftype: ftype, format: format}
 	}
 	defRows.Close()
 	if err := defRows.Err(); err != nil {
@@ -268,18 +272,25 @@ func (e *ruleEvalContext) dateValue(field string) *time.Time {
 	if field == "action_at" {
 		return e.actionAt
 	}
-	raw, ok := e.customRaw(field)
+	key := strings.TrimPrefix(field, "custom:")
+	def, ok := e.customByKey[key]
 	if !ok {
+		return nil
+	}
+	raw, ok := e.customByID[def.id]
+	if !ok || len(raw) == 0 || string(raw) == "null" {
 		return nil
 	}
 	var s string
 	if json.Unmarshal(raw, &s) != nil || s == "" {
 		return nil
 	}
-	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04", "2006-01-02"} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return &t
-		}
+	formatToken := customfields.DefaultFormat(def.ftype)
+	if def.format != nil && *def.format != "" {
+		formatToken = *def.format
+	}
+	if t, ok := customfields.ParseFlexible(def.ftype, formatToken, s); ok {
+		return &t
 	}
 	return nil
 }
@@ -614,7 +625,12 @@ func applyLeadUpdate(ctx context.Context, q database.Querier, accountID, leadID 
 		}
 		var owned bool
 		if err := q.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM disqualification_reasons WHERE id=$1 AND account_id=$2)`, rid, accountID).Scan(&owned); err != nil {
+			`SELECT EXISTS(
+			   SELECT 1 FROM disqualification_reasons dr
+			   JOIN pipeline_stages ps ON ps.id = dr.stage_id
+			   JOIN leads l ON l.pipeline_id = ps.pipeline_id
+			   WHERE dr.id = $1 AND l.id = $2
+			 )`, rid, leadID).Scan(&owned); err != nil {
 			return err
 		}
 		if !owned {

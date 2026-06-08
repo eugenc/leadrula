@@ -126,6 +126,32 @@ export function useWebhookDeliveries(webhookId: number | null) {
   });
 }
 
+export interface AccountWebhookDeliveriesFilters {
+  status?: string;
+  webhookId?: number;
+  page?: number;
+  limit?: number;
+}
+
+function accountWebhookDeliveriesQuery(filters: AccountWebhookDeliveriesFilters) {
+  const params = new URLSearchParams();
+  if (filters.status) params.set("status", filters.status);
+  if (filters.webhookId) params.set("webhook_id", String(filters.webhookId));
+  if (filters.page) params.set("page", String(filters.page));
+  if (filters.limit) params.set("limit", String(filters.limit));
+  const q = params.toString();
+  return q ? `?${q}` : "";
+}
+
+export function useAccountWebhookDeliveries(filters: AccountWebhookDeliveriesFilters = {}) {
+  return useQuery({
+    queryKey: ["account-webhook-deliveries", filters],
+    queryFn: () =>
+      get<WebhookDeliveryListResponse>(`${ns()}/webhook-deliveries${accountWebhookDeliveriesQuery(filters)}`),
+    refetchInterval: 5000,
+  });
+}
+
 export function useWebhookDelivery(webhookId: number | null, deliveryId: number | null) {
   return useQuery({
     queryKey: ["webhook-delivery", webhookId, deliveryId],
@@ -141,6 +167,7 @@ export function useReplayWebhookDelivery() {
       post(`${base()}/${webhookId}/deliveries/${deliveryId}/replay`, {}),
     onSuccess: (_, { webhookId }) => {
       qc.invalidateQueries({ queryKey: ["webhook-deliveries", webhookId] });
+      qc.invalidateQueries({ queryKey: ["account-webhook-deliveries"] });
       qc.invalidateQueries({ queryKey: ["webhook-sample-payload", webhookId] });
       qc.invalidateQueries({ queryKey: ["leads"] });
     },

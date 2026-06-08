@@ -17,17 +17,32 @@ import (
 )
 
 type Webhook struct {
-	ID                   int64     `json:"id"`
-	AccountID            int64     `json:"-"`
-	Name                 string    `json:"name"`
-	Slug                 string    `json:"slug"`
-	SecretPrefix         string    `json:"secret_prefix"`
-	IsActive             bool      `json:"is_active"`
-	InboundEnabled       bool      `json:"inbound_enabled"`
-	OutboundEnabled      bool      `json:"outbound_enabled"`
-	OutboundURL          *string   `json:"outbound_url,omitempty"`
-	OutboundConnectionID *int64    `json:"-"`
-	CreatedAt            time.Time `json:"created_at"`
+	ID                      int64           `json:"id"`
+	AccountID               int64           `json:"-"`
+	Name                    string          `json:"name"`
+	Slug                    string          `json:"slug"`
+	SecretPrefix            string          `json:"secret_prefix"`
+	IsActive                bool            `json:"is_active"`
+	InboundEnabled          bool            `json:"inbound_enabled"`
+	OutboundEnabled         bool            `json:"outbound_enabled"`
+	OutboundURL             *string         `json:"outbound_url,omitempty"`
+	OutboundFormat          string          `json:"outbound_format"`
+	OutboundMethod          string          `json:"outbound_method"`
+	OutboundPayloadTemplate string          `json:"outbound_payload_template"`
+	OutboundFieldMap        json.RawMessage `json:"outbound_field_map"`
+	OutboundResponseMap     json.RawMessage `json:"outbound_response_map"`
+	OutboundConnectionID    *int64          `json:"-"`
+	CreatedAt               time.Time       `json:"created_at"`
+}
+
+// OutboundFieldMapEntry maps an external param name to a lead/event value source.
+type OutboundFieldMapEntry struct {
+	DestKey       string  `json:"dest_key"`
+	SourceType    string  `json:"source_type"`
+	BuiltinField  *string `json:"builtin_field,omitempty"`
+	CustomFieldID *int64  `json:"custom_field_id,omitempty"`
+	StaticValue   *string `json:"static_value,omitempty"`
+	MetaField     *string `json:"meta_field,omitempty"`
 }
 
 type WebhookEvent struct {
@@ -79,6 +94,26 @@ type DeliveryListResult struct {
 	Limit int        `json:"limit"`
 }
 
+type AccountDelivery struct {
+	Delivery
+	WebhookName string `json:"webhook_name"`
+	WebhookSlug string `json:"webhook_slug"`
+}
+
+type AccountDeliveryListResult struct {
+	Items []AccountDelivery `json:"items"`
+	Total int               `json:"total"`
+	Page  int               `json:"page"`
+	Limit int               `json:"limit"`
+}
+
+type ListAccountDeliveriesParams struct {
+	Status    string
+	WebhookID int64
+	Page      int
+	Limit     int
+}
+
 type ActionResult struct {
 	LeadID         string `json:"lead_id,omitempty"`
 	Action         string `json:"action,omitempty"`
@@ -113,12 +148,16 @@ func NewService(pool *pgxpool.Pool, leadRepo *leads.Repository, leadSvc *leads.S
 }
 
 const webhookCols = `id, account_id, name, slug, secret_prefix, is_active,
-    inbound_enabled, outbound_enabled, outbound_url, outbound_connection_id, created_at`
+    inbound_enabled, outbound_enabled, outbound_url, outbound_format, outbound_method,
+    outbound_payload_template, outbound_field_map, outbound_response_map,
+    outbound_connection_id, created_at`
 
 func scanWebhook(row interface{ Scan(...any) error }) (Webhook, error) {
 	var w Webhook
 	return w, row.Scan(&w.ID, &w.AccountID, &w.Name, &w.Slug, &w.SecretPrefix, &w.IsActive,
-		&w.InboundEnabled, &w.OutboundEnabled, &w.OutboundURL, &w.OutboundConnectionID, &w.CreatedAt)
+		&w.InboundEnabled, &w.OutboundEnabled, &w.OutboundURL, &w.OutboundFormat, &w.OutboundMethod,
+		&w.OutboundPayloadTemplate, &w.OutboundFieldMap, &w.OutboundResponseMap,
+		&w.OutboundConnectionID, &w.CreatedAt)
 }
 
 func (s *Service) List(ctx context.Context, accountID int64) ([]Webhook, error) {
@@ -183,28 +222,46 @@ func (s *Service) Create(ctx context.Context, accountID int64, in CreateWebhookI
 }
 
 type UpdateWebhookInput struct {
-	Name            *string
-	Slug            *string
-	IsActive        *bool
-	InboundEnabled  *bool
-	OutboundEnabled *bool
-	OutboundURL     *string
+	Name                    *string
+	Slug                    *string
+	IsActive                *bool
+	InboundEnabled          *bool
+	OutboundEnabled         *bool
+	OutboundURL             *string
+	OutboundFormat          *string
+	OutboundMethod          *string
+	OutboundPayloadTemplate *string
+	OutboundFieldMap        json.RawMessage
+	OutboundResponseMap     json.RawMessage
 }
 
 func (s *Service) Update(ctx context.Context, accountID, id int64, in UpdateWebhookInput) (*Webhook, error) {
+	if in.OutboundFormat != nil && *in.OutboundFormat == "url" && len(in.OutboundFieldMap) > 0 {
+		var entries []OutboundFieldMapEntry
+		if json.Unmarshal(in.OutboundFieldMap, &entries) == nil && len(entries) == 0 {
+			return nil, httpx.Validation("outbound_field_map required for url format")
+		}
+	}
 	w := &Webhook{}
 	row := s.pool.QueryRow(ctx,
 		`UPDATE webhooks SET
-		   name             = COALESCE($3, name),
-		   slug             = COALESCE($4, slug),
-		   is_active        = COALESCE($5, is_active),
-		   inbound_enabled  = COALESCE($6, inbound_enabled),
-		   outbound_enabled = COALESCE($7, outbound_enabled),
-		   outbound_url     = COALESCE($8, outbound_url)
+		   name                      = COALESCE($3, name),
+		   slug                      = COALESCE($4, slug),
+		   is_active                 = COALESCE($5, is_active),
+		   inbound_enabled           = COALESCE($6, inbound_enabled),
+		   outbound_enabled          = COALESCE($7, outbound_enabled),
+		   outbound_url              = COALESCE($8, outbound_url),
+		   outbound_format           = COALESCE($9, outbound_format),
+		   outbound_method           = COALESCE($10, outbound_method),
+		   outbound_payload_template = COALESCE($11, outbound_payload_template),
+		   outbound_field_map        = COALESCE($12, outbound_field_map),
+		   outbound_response_map     = COALESCE($13, outbound_response_map)
 		 WHERE id=$1 AND account_id=$2
 		 RETURNING `+webhookCols,
 		id, accountID, in.Name, in.Slug, in.IsActive,
-		in.InboundEnabled, in.OutboundEnabled, in.OutboundURL)
+		in.InboundEnabled, in.OutboundEnabled, in.OutboundURL,
+		in.OutboundFormat, in.OutboundMethod,
+		in.OutboundPayloadTemplate, nullableJSON(in.OutboundFieldMap), in.OutboundResponseMap)
 	var err error
 	if *w, err = scanWebhook(row); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -215,8 +272,8 @@ func (s *Service) Update(ctx context.Context, accountID, id int64, in UpdateWebh
 		}
 		return nil, err
 	}
-	// Provision or remove the hidden outbound integration connection.
-	if in.OutboundEnabled != nil || in.OutboundURL != nil {
+	// Provision or refresh the hidden outbound integration connection.
+	if in.OutboundEnabled != nil || in.OutboundURL != nil || in.OutboundFormat != nil || in.OutboundMethod != nil {
 		if err := s.syncOutboundConnection(ctx, w); err != nil {
 			return nil, err
 		}
@@ -497,6 +554,66 @@ func (s *Service) ListDeliveries(ctx context.Context, webhookID int64, page, lim
 		items = []Delivery{}
 	}
 	return &DeliveryListResult{Items: items, Total: total, Page: page, Limit: limit}, rows.Err()
+}
+
+func (s *Service) ListAccountDeliveries(ctx context.Context, accountID int64, p ListAccountDeliveriesParams) (*AccountDeliveryListResult, error) {
+	limit := p.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	page := p.Page
+	if page < 1 {
+		page = 1
+	}
+	offset := (page - 1) * limit
+
+	status := p.Status
+	webhookID := p.WebhookID
+
+	var total int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COUNT(*)
+		 FROM webhook_deliveries d
+		 JOIN webhooks w ON w.id = d.webhook_id
+		 WHERE w.account_id = $1
+		   AND ($2 = '' OR d.status = $2::webhook_delivery_status)
+		   AND ($3 = 0 OR d.webhook_id = $3)`,
+		accountID, status, webhookID).Scan(&total); err != nil {
+		return nil, err
+	}
+
+	rows, err := s.pool.Query(ctx,
+		`SELECT d.id, d.webhook_id, w.name, w.slug, d.event_id, d.lead_id, l.public_id::text,
+		        d.status, d.error_message, d.created_at
+		 FROM webhook_deliveries d
+		 JOIN webhooks w ON w.id = d.webhook_id
+		 LEFT JOIN leads l ON l.id = d.lead_id
+		 WHERE w.account_id = $1
+		   AND ($2 = '' OR d.status = $2::webhook_delivery_status)
+		   AND ($3 = 0 OR d.webhook_id = $3)
+		 ORDER BY d.created_at DESC
+		 LIMIT $4 OFFSET $5`,
+		accountID, status, webhookID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []AccountDelivery
+	for rows.Next() {
+		var d AccountDelivery
+		if err := rows.Scan(
+			&d.ID, &d.WebhookID, &d.WebhookName, &d.WebhookSlug,
+			&d.EventID, &d.LeadID, &d.LeadPublicID, &d.Status, &d.ErrorMessage, &d.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, d)
+	}
+	if items == nil {
+		items = []AccountDelivery{}
+	}
+	return &AccountDeliveryListResult{Items: items, Total: total, Page: page, Limit: limit}, rows.Err()
 }
 
 // VerifySecret resolves a webhook by slug + secret.

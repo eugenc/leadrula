@@ -292,7 +292,7 @@ function RouteDrawerContent({
           <div>
             <Label>Origin type</Label>
             <Select value={origin} onChange={(e) => setOrigin(e.target.value as "source" | "pipeline")}>
-              <option value="source">Webhook source</option>
+              <option value="source">Source</option>
               <option value="pipeline">Publisher pipeline stage</option>
             </Select>
           </div>

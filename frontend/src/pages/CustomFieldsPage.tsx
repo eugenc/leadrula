@@ -2,7 +2,13 @@ import { useEffect, useState } from "react";
 import { useCustomFields } from "@/features/leads/hooks";
 import { useCreateField, useUpdateField, useDeleteField } from "@/features/admin/hooks";
 import { ImportCustomFieldsModal } from "@/features/admin/ImportCustomFieldsModal";
-import { slugFieldKey } from "@/features/admin/customFieldConstants";
+import {
+  CUSTOM_FIELD_TYPES,
+  defaultFormatForType,
+  effectiveFieldFormat,
+  formatPresetsForType,
+  slugFieldKey,
+} from "@/features/admin/customFieldConstants";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
@@ -16,24 +22,22 @@ import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import type { CustomField } from "@/types";
 
-const CUSTOM_FIELD_TYPES = [
-  { value: "text", label: "Text" },
-  { value: "number", label: "Number" },
-  { value: "date", label: "Date" },
-  { value: "datetime", label: "Date & time" },
-  { value: "dropdown", label: "Dropdown" },
-  { value: "checkbox", label: "Checkbox" },
-] as const;
+type FieldForm = { name: string; field_key: string; type: string; format: string; options: string };
 
-type FieldForm = { name: string; field_key: string; type: string; options: string };
-
-const emptyForm = (): FieldForm => ({ name: "", field_key: "", type: "text", options: "" });
+const emptyForm = (): FieldForm => ({
+  name: "",
+  field_key: "",
+  type: "text",
+  format: defaultFormatForType("text"),
+  options: "",
+});
 
 function fieldToForm(f: CustomField): FieldForm {
   return {
     name: f.name,
     field_key: f.field_key,
     type: f.type,
+    format: effectiveFieldFormat(f.type, f.format),
     options: f.type === "dropdown" ? (f.options ?? []).join(", ") : "",
   };
 }
@@ -77,6 +81,9 @@ export function CustomFieldsPage() {
     };
     if (form.type === "dropdown") {
       body.options = form.options.split(",").map((s) => s.trim()).filter(Boolean);
+    }
+    if (form.type === "date" || form.type === "datetime") {
+      body.format = form.format;
     }
     return body;
   }
@@ -226,7 +233,17 @@ export function CustomFieldsPage() {
                   {CUSTOM_FIELD_TYPES.find((t) => t.value === editing.type)?.label ?? editing.type}
                 </p>
               ) : (
-                <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+                <Select
+                  value={form.type}
+                  onChange={(e) => {
+                    const type = e.target.value;
+                    setForm((f) => ({
+                      ...f,
+                      type,
+                      format: defaultFormatForType(type),
+                    }));
+                  }}
+                >
                   {CUSTOM_FIELD_TYPES.map(({ value, label }) => (
                     <option key={value} value={value}>
                       {label}
@@ -235,6 +252,21 @@ export function CustomFieldsPage() {
                 </Select>
               )}
             </div>
+            {(editing ? editing.type === "date" || editing.type === "datetime" : form.type === "date" || form.type === "datetime") && (
+              <div>
+                <Label>Format</Label>
+                <Select
+                  value={form.format}
+                  onChange={(e) => setForm({ ...form, format: e.target.value })}
+                >
+                  {formatPresetsForType(editing?.type ?? form.type).map(({ value, label }) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            )}
             {(editing ? editing.type === "dropdown" : form.type === "dropdown") && (
               <div>
                 <Label>Options (comma separated)</Label>

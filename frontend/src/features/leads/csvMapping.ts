@@ -1,4 +1,4 @@
-import { ADD_CUSTOM_FIELD } from "@/features/admin/customFieldConstants";
+import { ADD_CUSTOM_FIELD, slugFieldKey } from "@/features/admin/customFieldConstants";
 
 const ALIASES: Record<string, string> = {
   firstname: "first_name",
@@ -65,6 +65,8 @@ export const MAPPING_TARGETS: { value: string; label: string }[] = [
   { value: "tags", label: "Tags" },
 ];
 
+type MappingField = { id: number; name: string; field_key?: string };
+
 export function normalizeHeader(h: string): string {
   return h.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -81,19 +83,67 @@ function isPhoneLikeHeader(header: string): boolean {
   );
 }
 
-export function guessTarget(header: string, customFields: { id: number; name: string }[]): string {
+function guessCustomFieldId(header: string, customFields: MappingField[]): number | null {
+  const norm = normalizeHeader(header);
+  for (const f of customFields) {
+    if (normalizeHeader(f.name) === norm) return f.id;
+    if (f.field_key && normalizeHeader(f.field_key) === norm) return f.id;
+    if (normalizeHeader(slugFieldKey(f.name)) === norm) return f.id;
+  }
+  return null;
+}
+
+export function guessTarget(header: string, customFields: MappingField[]): string {
   const norm = normalizeHeader(header);
   if (ALIASES[norm]) return ALIASES[norm];
+  const customId = guessCustomFieldId(header, customFields);
+  if (customId) return `custom_${customId}`;
   if (isPhoneLikeHeader(header)) return "phone";
-  for (const f of customFields) {
-    if (normalizeHeader(f.name) === norm) return `custom_${f.id}`;
-  }
   return "skip";
+}
+
+export function guessPayloadTarget(key: string, customFields: MappingField[]): string | null {
+  const norm = normalizeHeader(key);
+  if (ALIASES[norm]) return ALIASES[norm];
+  const customId = guessCustomFieldId(key, customFields);
+  if (customId) return `cf:${customId}`;
+  if (isPhoneLikeHeader(key)) return "phone";
+  return null;
+}
+
+function dedupePhoneSuggestions(keys: string[], out: Record<string, string>): Record<string, string> {
+  const result = { ...out };
+  if (!Object.values(result).includes("phone")) {
+    for (const k of keys) {
+      if (isPhoneLikeHeader(k)) {
+        result[k] = "phone";
+        break;
+      }
+    }
+    return result;
+  }
+  let phoneKept = false;
+  for (const k of keys) {
+    if (result[k] === "phone") {
+      if (phoneKept) delete result[k];
+      else phoneKept = true;
+    }
+  }
+  return result;
+}
+
+export function buildPayloadSuggestions(keys: string[], customFields: MappingField[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of keys) {
+    const guess = guessPayloadTarget(k, customFields);
+    if (guess) out[k] = guess;
+  }
+  return dedupePhoneSuggestions(keys, out);
 }
 
 export function buildInitialMapping(
   headers: string[],
-  customFields: { id: number; name: string }[]
+  customFields: MappingField[]
 ): Record<string, string> {
   const out: Record<string, string> = {};
   for (const h of headers) {

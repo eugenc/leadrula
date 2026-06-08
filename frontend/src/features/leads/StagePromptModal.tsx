@@ -3,7 +3,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import type { Stage } from "@/types";
-import { useDisqReasons } from "./hooks";
+import { useStageDisqReasons } from "./hooks";
 
 export interface PromptResult {
   action_at?: string | null;
@@ -21,7 +21,7 @@ export function StagePromptModal({
   onCancel: () => void;
   onConfirm: (r: PromptResult) => void;
 }) {
-  const { data: reasons } = useDisqReasons();
+  const { data: reasons } = useStageDisqReasons(stage?.id ?? null);
   const [actionAt, setActionAt] = useState("");
   const [reasonId, setReasonId] = useState("");
 
