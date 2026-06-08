@@ -369,16 +369,24 @@ export interface WebhookOutboundTrigger {
   is_active: boolean;
 }
 
+export interface InboundCondition {
+  field: string;
+  op: "eq" | "neq" | "contains" | "empty" | "not_empty";
+  value?: string;
+}
+
 export interface WebhookEvent {
   id: number;
   webhook_id: number;
-  event_key: string;
   action: "create" | "update" | "delete" | "move_stage";
   duplicate_mode?: "update" | "duplicate" | "reject" | null;
-  lookup_by?: "external_id" | "public_id" | null;
+  lookup_by?: "external_id" | "public_id" | "phone" | "email" | null;
+  lookup_source_key?: string | null;
   target_stage_id?: number | null;
   target_pipeline_id?: number | null;
   position: number;
+  condition_logic: "and" | "or";
+  conditions: InboundCondition[];
   created_at: string;
 }
 
@@ -404,6 +412,7 @@ export interface WebhookDelivery {
   lead_public_id?: string | null;
   status: "success" | "error" | "skipped";
   error_message?: string | null;
+  request_payload?: Record<string, unknown> | null;
   created_at: string;
 }
 

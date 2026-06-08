@@ -727,6 +727,20 @@ func (r *Repository) GetByPublicID(ctx context.Context, q database.Querier, acco
 		accountID, publicID))
 }
 
+// GetByPhone finds an active lead by phone.
+func (r *Repository) GetByPhone(ctx context.Context, q database.Querier, accountID int64, phone string) (*Lead, error) {
+	return scanLead(q.QueryRow(ctx,
+		`SELECT `+leadCols+` FROM leads WHERE owner_account_id=$1 AND phone=$2 AND `+leadNotDeleted,
+		accountID, phone))
+}
+
+// GetByEmail finds an active lead by email.
+func (r *Repository) GetByEmail(ctx context.Context, q database.Querier, accountID int64, email string) (*Lead, error) {
+	return scanLead(q.QueryRow(ctx,
+		`SELECT `+leadCols+` FROM leads WHERE owner_account_id=$1 AND email=$2 AND `+leadNotDeleted,
+		accountID, email))
+}
+
 // SetExternalID sets the provider external_id on a lead.
 func (r *Repository) SetExternalID(ctx context.Context, q database.Querier, leadID int64, externalID string) error {
 	_, err := q.Exec(ctx, `UPDATE leads SET external_id=$2 WHERE id=$1`, leadID, externalID)

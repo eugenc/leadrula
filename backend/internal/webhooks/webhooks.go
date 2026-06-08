@@ -31,16 +31,18 @@ type Webhook struct {
 }
 
 type WebhookEvent struct {
-	ID                 int64   `json:"id"`
-	WebhookID          int64   `json:"webhook_id"`
-	EventKey           string  `json:"event_key"`
-	Action             string  `json:"action"`
-	DuplicateMode      *string `json:"duplicate_mode,omitempty"`
-	LookupBy           *string `json:"lookup_by,omitempty"`
-	TargetStageID      *int64  `json:"target_stage_id,omitempty"`
-	TargetPipelineID   *int64  `json:"target_pipeline_id,omitempty"`
-	Position           int     `json:"position"`
-	CreatedAt          time.Time `json:"created_at"`
+	ID                int64           `json:"id"`
+	WebhookID         int64           `json:"webhook_id"`
+	Action            string          `json:"action"`
+	DuplicateMode     *string         `json:"duplicate_mode,omitempty"`
+	LookupBy          *string         `json:"lookup_by,omitempty"`
+	LookupSourceKey   *string         `json:"lookup_source_key,omitempty"`
+	TargetStageID     *int64          `json:"target_stage_id,omitempty"`
+	TargetPipelineID  *int64          `json:"target_pipeline_id,omitempty"`
+	Position          int             `json:"position"`
+	ConditionLogic    string          `json:"condition_logic"`
+	Conditions        json.RawMessage `json:"conditions"`
+	CreatedAt         time.Time       `json:"created_at"`
 }
 
 type FieldMapEntry struct {
@@ -59,14 +61,15 @@ type SamplePayload struct {
 }
 
 type Delivery struct {
-	ID           int64           `json:"id"`
-	WebhookID    int64           `json:"webhook_id"`
-	EventID      *int64          `json:"event_id,omitempty"`
-	LeadID       *int64          `json:"lead_id,omitempty"`
-	LeadPublicID *string         `json:"lead_public_id,omitempty"`
-	Status       string          `json:"status"`
-	ErrorMessage *string         `json:"error_message,omitempty"`
-	CreatedAt    time.Time       `json:"created_at"`
+	ID              int64           `json:"id"`
+	WebhookID       int64           `json:"webhook_id"`
+	EventID         *int64          `json:"event_id,omitempty"`
+	LeadID          *int64          `json:"lead_id,omitempty"`
+	LeadPublicID    *string         `json:"lead_public_id,omitempty"`
+	Status          string          `json:"status"`
+	ErrorMessage    *string         `json:"error_message,omitempty"`
+	RequestPayload  json.RawMessage `json:"request_payload,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
 }
 
 type DeliveryListResult struct {
@@ -76,10 +79,20 @@ type DeliveryListResult struct {
 	Limit int        `json:"limit"`
 }
 
+type ActionResult struct {
+	LeadID         string `json:"lead_id,omitempty"`
+	Action         string `json:"action,omitempty"`
+	Status         string `json:"status,omitempty"`
+	ActionID       int64  `json:"action_id,omitempty"`
+	LeadInternalID int64  `json:"-"`
+}
+
 type IngestResult struct {
-	LeadID string `json:"lead_id"`
-	Action string `json:"action"`
-	Status string `json:"status"`
+	LeadID     string         `json:"lead_id,omitempty"`
+	Action     string         `json:"action,omitempty"`
+	Status     string         `json:"status"`
+	DeliveryID int64          `json:"delivery_id,omitempty"`
+	Results    []ActionResult `json:"results,omitempty"`
 }
 
 // OutboundEnqueuer enqueues a rendered webhook payload onto the integration delivery queue.
@@ -246,91 +259,106 @@ func (s *Service) OwnedBy(ctx context.Context, accountID, id int64) (bool, error
 	return ok, err
 }
 
+const webhookEventCols = `id, webhook_id, action, duplicate_mode, lookup_by, lookup_source_key,
+	target_stage_id, target_pipeline_id, position, condition_logic, conditions, created_at`
+
+func scanWebhookEvent(row interface{ Scan(...any) error }) (*WebhookEvent, error) {
+	e := &WebhookEvent{}
+	err := row.Scan(&e.ID, &e.WebhookID, &e.Action, &e.DuplicateMode, &e.LookupBy, &e.LookupSourceKey,
+		&e.TargetStageID, &e.TargetPipelineID, &e.Position, &e.ConditionLogic, &e.Conditions, &e.CreatedAt)
+	return e, err
+}
+
 func (s *Service) ListEvents(ctx context.Context, webhookID int64) ([]WebhookEvent, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, webhook_id, event_key, action, duplicate_mode, lookup_by,
-		        target_stage_id, target_pipeline_id, position, created_at
-		 FROM webhook_events WHERE webhook_id=$1 ORDER BY position, id`, webhookID)
+		`SELECT `+webhookEventCols+` FROM webhook_events WHERE webhook_id=$1 ORDER BY position, id`, webhookID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []WebhookEvent
 	for rows.Next() {
-		var e WebhookEvent
-		if err := rows.Scan(&e.ID, &e.WebhookID, &e.EventKey, &e.Action, &e.DuplicateMode, &e.LookupBy,
-			&e.TargetStageID, &e.TargetPipelineID, &e.Position, &e.CreatedAt); err != nil {
+		e, err := scanWebhookEvent(rows)
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, e)
+		out = append(out, *e)
 	}
 	return out, rows.Err()
 }
 
 type CreateEventParams struct {
-	EventKey         string  `json:"event_key"`
-	Action           string  `json:"action"`
-	DuplicateMode    *string `json:"duplicate_mode"`
-	LookupBy         *string `json:"lookup_by"`
-	TargetStageID    *int64  `json:"target_stage_id"`
-	TargetPipelineID *int64  `json:"target_pipeline_id"`
+	Action           string          `json:"action"`
+	DuplicateMode    *string         `json:"duplicate_mode"`
+	LookupBy         *string         `json:"lookup_by"`
+	LookupSourceKey  *string         `json:"lookup_source_key"`
+	TargetStageID    *int64          `json:"target_stage_id"`
+	TargetPipelineID *int64          `json:"target_pipeline_id"`
+	ConditionLogic   *string         `json:"condition_logic"`
+	Conditions       json.RawMessage `json:"conditions"`
 }
 
 func (s *Service) CreateEvent(ctx context.Context, webhookID int64, p CreateEventParams) (*WebhookEvent, error) {
 	if err := validateEvent(p); err != nil {
 		return nil, err
 	}
-	e := &WebhookEvent{}
-	err := s.pool.QueryRow(ctx,
-		`INSERT INTO webhook_events(webhook_id, event_key, action, duplicate_mode, lookup_by, target_stage_id, target_pipeline_id, position)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7, COALESCE((SELECT MAX(position)+1 FROM webhook_events WHERE webhook_id=$1), 0))
-		 RETURNING id, webhook_id, event_key, action, duplicate_mode, lookup_by, target_stage_id, target_pipeline_id, position, created_at`,
-		webhookID, p.EventKey, p.Action, p.DuplicateMode, p.LookupBy, p.TargetStageID, p.TargetPipelineID).Scan(
-		&e.ID, &e.WebhookID, &e.EventKey, &e.Action, &e.DuplicateMode, &e.LookupBy,
-		&e.TargetStageID, &e.TargetPipelineID, &e.Position, &e.CreatedAt)
-	if err != nil {
-		if database.IsUniqueViolation(err) {
-			return nil, httpx.Conflict("event key already exists for this webhook")
-		}
-		return nil, err
+	logic := "and"
+	if p.ConditionLogic != nil && *p.ConditionLogic != "" {
+		logic = *p.ConditionLogic
 	}
-	return e, nil
+	conds := p.Conditions
+	if len(conds) == 0 {
+		conds = json.RawMessage("[]")
+	}
+	return scanWebhookEvent(s.pool.QueryRow(ctx,
+		`INSERT INTO webhook_events(webhook_id, action, duplicate_mode, lookup_by, lookup_source_key,
+		 target_stage_id, target_pipeline_id, position, condition_logic, conditions)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7, COALESCE((SELECT MAX(position)+1 FROM webhook_events WHERE webhook_id=$1), 0), $8, $9)
+		 RETURNING `+webhookEventCols,
+		webhookID, p.Action, p.DuplicateMode, p.LookupBy, p.LookupSourceKey,
+		p.TargetStageID, p.TargetPipelineID, logic, conds))
 }
 
 type UpdateEventParams struct {
-	EventKey         *string `json:"event_key"`
-	Action           *string `json:"action"`
-	DuplicateMode    *string `json:"duplicate_mode"`
-	LookupBy         *string `json:"lookup_by"`
-	TargetStageID    *int64  `json:"target_stage_id"`
-	TargetPipelineID *int64  `json:"target_pipeline_id"`
+	Action           *string         `json:"action"`
+	DuplicateMode    *string         `json:"duplicate_mode"`
+	LookupBy         *string         `json:"lookup_by"`
+	LookupSourceKey  *string         `json:"lookup_source_key"`
+	TargetStageID    *int64          `json:"target_stage_id"`
+	TargetPipelineID *int64          `json:"target_pipeline_id"`
+	ConditionLogic   *string         `json:"condition_logic"`
+	Conditions       json.RawMessage `json:"conditions"`
 }
 
 func (s *Service) UpdateEvent(ctx context.Context, webhookID, eventID int64, p UpdateEventParams) (*WebhookEvent, error) {
-	e := &WebhookEvent{}
-	err := s.pool.QueryRow(ctx,
+	e, err := scanWebhookEvent(s.pool.QueryRow(ctx,
 		`UPDATE webhook_events SET
-		   event_key = COALESCE($3, event_key),
-		   action = COALESCE($4, action),
-		   duplicate_mode = COALESCE($5, duplicate_mode),
-		   lookup_by = COALESCE($6, lookup_by),
+		   action = COALESCE($3, action),
+		   duplicate_mode = COALESCE($4, duplicate_mode),
+		   lookup_by = COALESCE($5, lookup_by),
+		   lookup_source_key = COALESCE($6, lookup_source_key),
 		   target_stage_id = COALESCE($7, target_stage_id),
-		   target_pipeline_id = COALESCE($8, target_pipeline_id)
+		   target_pipeline_id = COALESCE($8, target_pipeline_id),
+		   condition_logic = COALESCE($9, condition_logic),
+		   conditions = CASE WHEN $10::jsonb IS NULL THEN conditions ELSE $10::jsonb END
 		 WHERE id=$1 AND webhook_id=$2
-		 RETURNING id, webhook_id, event_key, action, duplicate_mode, lookup_by, target_stage_id, target_pipeline_id, position, created_at`,
-		eventID, webhookID, p.EventKey, p.Action, p.DuplicateMode, p.LookupBy, p.TargetStageID, p.TargetPipelineID).Scan(
-		&e.ID, &e.WebhookID, &e.EventKey, &e.Action, &e.DuplicateMode, &e.LookupBy,
-		&e.TargetStageID, &e.TargetPipelineID, &e.Position, &e.CreatedAt)
+		 RETURNING `+webhookEventCols,
+		eventID, webhookID, p.Action, p.DuplicateMode, p.LookupBy, p.LookupSourceKey,
+		p.TargetStageID, p.TargetPipelineID, p.ConditionLogic, nullableJSON(p.Conditions)))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, httpx.NotFound("event not found")
 		}
-		if database.IsUniqueViolation(err) {
-			return nil, httpx.Conflict("event key already exists for this webhook")
-		}
 		return nil, err
 	}
 	return e, nil
+}
+
+func nullableJSON(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	return raw
 }
 
 func (s *Service) DeleteEvent(ctx context.Context, webhookID, eventID int64) error {
@@ -393,14 +421,45 @@ func (s *Service) LatestSamplePayload(ctx context.Context, webhookID int64) (*Sa
 	var receivedAt time.Time
 	err := s.pool.QueryRow(ctx,
 		`SELECT request_payload, created_at FROM webhook_deliveries
-		 WHERE webhook_id=$1 ORDER BY created_at DESC LIMIT 1`, webhookID).Scan(&payload, &receivedAt)
+		 WHERE webhook_id=$1 AND status='skipped' AND lead_id IS NULL
+		 ORDER BY created_at DESC LIMIT 1`, webhookID).Scan(&payload, &receivedAt)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+		err = s.pool.QueryRow(ctx,
+			`SELECT request_payload, created_at FROM webhook_deliveries
+			 WHERE webhook_id=$1 ORDER BY created_at DESC LIMIT 1`, webhookID).Scan(&payload, &receivedAt)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return &SamplePayload{Payload: json.RawMessage("null")}, nil
+			}
+			return nil, err
+		}
+	}
+	return &SamplePayload{Payload: payload, ReceivedAt: &receivedAt}, nil
+}
+
+func (s *Service) GetDelivery(ctx context.Context, accountID, webhookID, deliveryID int64) (*Delivery, error) {
+	ok, err := s.OwnedBy(ctx, accountID, webhookID)
+	if err != nil || !ok {
+		return nil, httpx.NotFound("webhook not found")
+	}
+	d := &Delivery{}
+	err = s.pool.QueryRow(ctx,
+		`SELECT d.id, d.webhook_id, d.event_id, d.lead_id, l.public_id::text, d.status, d.error_message, d.request_payload, d.created_at
+		 FROM webhook_deliveries d
+		 LEFT JOIN leads l ON l.id = d.lead_id
+		 WHERE d.id=$1 AND d.webhook_id=$2`,
+		deliveryID, webhookID).Scan(
+		&d.ID, &d.WebhookID, &d.EventID, &d.LeadID, &d.LeadPublicID, &d.Status, &d.ErrorMessage, &d.RequestPayload, &d.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return &SamplePayload{Payload: json.RawMessage("null")}, nil
+			return nil, httpx.NotFound("delivery not found")
 		}
 		return nil, err
 	}
-	return &SamplePayload{Payload: payload, ReceivedAt: &receivedAt}, nil
+	return d, nil
 }
 
 func (s *Service) ListDeliveries(ctx context.Context, webhookID int64, page, limit int) (*DeliveryListResult, error) {
@@ -488,9 +547,9 @@ func validateEvent(p CreateEventParams) error {
 			return httpx.Validation("lookup_by required for this action")
 		}
 		switch *p.LookupBy {
-		case "external_id", "public_id":
+		case "external_id", "public_id", "phone", "email":
 		default:
-			return httpx.Validation("lookup_by must be external_id or public_id")
+			return httpx.Validation("lookup_by must be external_id, public_id, phone, or email")
 		}
 	default:
 		return httpx.Validation("action must be create, update, delete, or move_stage")

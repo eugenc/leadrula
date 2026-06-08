@@ -25,6 +25,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/webhooks/{id}/events/{eventId}/field-map", h.listFieldMap)
 	r.Get("/webhooks/{id}/sample-payload", h.samplePayload)
 	r.Get("/webhooks/{id}/deliveries", h.listDeliveries)
+	r.Get("/webhooks/{id}/deliveries/{deliveryId}", h.getDelivery)
 	r.Get("/webhooks/{id}/outbound-triggers", h.listTriggers)
 
 	r.Group(func(r chi.Router) {
@@ -42,6 +43,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Post("/webhooks/{id}/outbound-triggers", h.createTrigger)
 		r.Patch("/webhooks/{id}/outbound-triggers/{triggerId}", h.updateTrigger)
 		r.Delete("/webhooks/{id}/outbound-triggers/{triggerId}", h.deleteTrigger)
+		r.Post("/webhooks/{id}/deliveries/{deliveryId}/replay", h.replayDelivery)
 	})
 }
 
@@ -80,6 +82,10 @@ func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
 	res, err := h.svc.Ingest(r.Context(), &WebhookAuth{WebhookID: wa.WebhookID, AccountID: wa.AccountID}, chi.URLParam(r, "slug"), raw)
 	if err != nil {
 		httpx.WriteError(w, err)
+		return
+	}
+	if res.Status == "captured" {
+		httpx.JSON(w, http.StatusOK, res)
 		return
 	}
 	httpx.JSON(w, http.StatusAccepted, res)
@@ -304,6 +310,28 @@ func (h *Handler) samplePayload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, sample)
+}
+
+func (h *Handler) getDelivery(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	wid := idp(r, "id")
+	d, err := h.svc.GetDelivery(r.Context(), p.AccountID, wid, idp(r, "deliveryId"))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, d)
+}
+
+func (h *Handler) replayDelivery(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	wid := idp(r, "id")
+	res, err := h.svc.ReplayDelivery(r.Context(), p.AccountID, wid, idp(r, "deliveryId"))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusAccepted, res)
 }
 
 func (h *Handler) listDeliveries(w http.ResponseWriter, r *http.Request) {

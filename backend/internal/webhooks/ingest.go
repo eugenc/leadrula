@@ -58,6 +58,68 @@ func toText(v any) string {
 // Ingest handles POST /api/v1/webhooks/{slug}.
 func (s *Service) Ingest(ctx context.Context, wa *WebhookAuth, slug string, raw map[string]any) (*IngestResult, error) {
 	rawJSON, _ := json.Marshal(raw)
+	return s.ingestPayload(ctx, wa, slug, raw, rawJSON, false)
+}
+
+// ReplayDelivery re-processes a stored unprocessed delivery.
+func (s *Service) ReplayDelivery(ctx context.Context, accountID, webhookID, deliveryID int64) (*IngestResult, error) {
+	var status string
+	var leadID *int64
+	var payload json.RawMessage
+	err := s.pool.QueryRow(ctx,
+		`SELECT status, lead_id, request_payload FROM webhook_deliveries
+		 WHERE id=$1 AND webhook_id=$2`, deliveryID, webhookID).Scan(&status, &leadID, &payload)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, httpx.NotFound("delivery not found")
+		}
+		return nil, err
+	}
+	ok, err := s.OwnedBy(ctx, accountID, webhookID)
+	if err != nil || !ok {
+		return nil, httpx.NotFound("webhook not found")
+	}
+	if status != "skipped" || leadID != nil {
+		return nil, httpx.Validation("only unprocessed deliveries can be replayed")
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return nil, httpx.Validation("invalid stored payload")
+	}
+	var slug string
+	if err := s.pool.QueryRow(ctx, `SELECT slug FROM webhooks WHERE id=$1`, webhookID).Scan(&slug); err != nil {
+		return nil, err
+	}
+	res, err := s.ingestPayload(ctx, &WebhookAuth{WebhookID: webhookID, AccountID: accountID}, slug, raw, payload, true)
+	if err != nil {
+		msg := err.Error()
+		if appErr, ok := err.(*httpx.AppError); ok {
+			msg = appErr.Message
+		}
+		_, _ = s.pool.Exec(ctx,
+			`UPDATE webhook_deliveries SET status='error', error_message=$2 WHERE id=$1`,
+			deliveryID, msg)
+		return nil, err
+	}
+	var eventID *int64
+	var newLeadID *int64
+	if len(res.Results) > 0 {
+		if res.Results[0].ActionID != 0 {
+			id := res.Results[0].ActionID
+			eventID = &id
+		}
+		if res.Results[0].LeadInternalID != 0 {
+			id := res.Results[0].LeadInternalID
+			newLeadID = &id
+		}
+	}
+	_, _ = s.pool.Exec(ctx,
+		`UPDATE webhook_deliveries SET status='success', event_id=$2, lead_id=$3, error_message=NULL WHERE id=$1`,
+		deliveryID, eventID, newLeadID)
+	return res, nil
+}
+
+func (s *Service) ingestPayload(ctx context.Context, wa *WebhookAuth, slug string, raw map[string]any, rawJSON []byte, forceProcess bool) (*IngestResult, error) {
 	flat := flattenPayload(raw)
 
 	var webhook Webhook
@@ -74,48 +136,105 @@ func (s *Service) Ingest(ctx context.Context, wa *WebhookAuth, slug string, raw 
 		return nil, err
 	}
 
-	eventKey := toText(flat["event"])
-	if eventKey == "" {
-		s.logDelivery(ctx, webhook.ID, nil, nil, "skipped", rawJSON, "missing event field")
-		return nil, httpx.Validation(`payload field "event" is required`)
-	}
-
-	event, err := s.matchEvent(ctx, webhook.ID, eventKey)
+	actions, err := s.listMatchingActions(ctx, webhook.ID, flat)
 	if err != nil {
-		s.logDelivery(ctx, webhook.ID, nil, nil, "skipped", rawJSON, err.Error())
 		return nil, err
 	}
 
-	result, leadID, execErr := s.executeEvent(ctx, webhook.AccountID, event, flat, rawJSON)
-	if execErr != nil {
-		msg := execErr.Error()
-		if appErr, ok := execErr.(*httpx.AppError); ok {
-			msg = appErr.Message
+	var ready []*WebhookEvent
+	for _, a := range actions {
+		if actionReady(ctx, s, a, flat) {
+			ready = append(ready, a)
 		}
-		s.logDelivery(ctx, webhook.ID, &event.ID, leadID, "error", rawJSON, msg)
-		return nil, execErr
 	}
-	s.logDelivery(ctx, webhook.ID, &event.ID, leadID, "success", rawJSON, "")
-	return result, nil
+
+	if !forceProcess && len(ready) == 0 {
+		deliveryID, _ := s.logDelivery(ctx, webhook.ID, nil, nil, "skipped", rawJSON, "awaiting configuration")
+		return &IngestResult{Status: "captured", DeliveryID: deliveryID}, nil
+	}
+
+	if forceProcess && len(ready) == 0 {
+		return nil, httpx.Validation("no matching configured actions")
+	}
+
+	var results []ActionResult
+	var firstLeadID *int64
+	var firstEventID *int64
+	for _, action := range ready {
+		result, leadID, execErr := s.executeEvent(ctx, webhook.AccountID, action, flat, rawJSON)
+		if execErr != nil {
+			if !forceProcess {
+				msg := execErr.Error()
+				if appErr, ok := execErr.(*httpx.AppError); ok {
+					msg = appErr.Message
+				}
+				s.logDelivery(ctx, webhook.ID, &action.ID, leadID, "error", rawJSON, msg)
+			}
+			return nil, execErr
+		}
+		ar := ActionResult{
+			LeadID:         result.LeadID,
+			Action:         result.Action,
+			Status:         result.Status,
+			ActionID:       action.ID,
+			LeadInternalID: 0,
+		}
+		if leadID != nil {
+			ar.LeadInternalID = *leadID
+			if firstLeadID == nil {
+				firstLeadID = leadID
+				firstEventID = &action.ID
+			}
+		}
+		results = append(results, ar)
+	}
+
+	if !forceProcess {
+		s.logDelivery(ctx, webhook.ID, firstEventID, firstLeadID, "success", rawJSON, "")
+	}
+	return &IngestResult{Status: "processed", Results: results}, nil
 }
 
-func (s *Service) matchEvent(ctx context.Context, webhookID int64, eventKey string) (*WebhookEvent, error) {
-	e := &WebhookEvent{}
-	err := s.pool.QueryRow(ctx,
-		`SELECT id, webhook_id, event_key, action, duplicate_mode, lookup_by,
-		        target_stage_id, target_pipeline_id, position, created_at
-		 FROM webhook_events WHERE webhook_id=$1 AND event_key=$2
-		 ORDER BY position, id LIMIT 1`,
-		webhookID, eventKey).Scan(
-		&e.ID, &e.WebhookID, &e.EventKey, &e.Action, &e.DuplicateMode, &e.LookupBy,
-		&e.TargetStageID, &e.TargetPipelineID, &e.Position, &e.CreatedAt)
+func (s *Service) listMatchingActions(ctx context.Context, webhookID int64, flat map[string]any) ([]*WebhookEvent, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, webhook_id, action, duplicate_mode, lookup_by, lookup_source_key,
+		        target_stage_id, target_pipeline_id, position, condition_logic, conditions, created_at
+		 FROM webhook_events WHERE webhook_id=$1 ORDER BY position, id`, webhookID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, httpx.Validation("no matching event configured")
-		}
 		return nil, err
 	}
-	return e, nil
+	defer rows.Close()
+	var matched []*WebhookEvent
+	for rows.Next() {
+		e, err := scanWebhookEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		conds, err := parsePayloadConditions(e.Conditions)
+		if err != nil {
+			continue
+		}
+		if evalPayloadConditions(conds, e.ConditionLogic, flat) {
+			matched = append(matched, e)
+		}
+	}
+	return matched, rows.Err()
+}
+
+func actionReady(ctx context.Context, s *Service, action *WebhookEvent, flat map[string]any) bool {
+	switch action.Action {
+	case "create", "update":
+		maps, err := s.ListFieldMap(ctx, action.ID)
+		return err == nil && len(maps) > 0
+	case "delete", "move_stage":
+		if action.LookupBy == nil {
+			return false
+		}
+		maps, _ := s.ListFieldMap(ctx, action.ID)
+		return lookupValue(action, flat, maps) != ""
+	default:
+		return false
+	}
 }
 
 func (s *Service) executeEvent(ctx context.Context, accountID int64, event *WebhookEvent, flat map[string]any, rawJSON []byte) (*IngestResult, *int64, error) {
@@ -234,12 +353,10 @@ func (s *Service) execDelete(ctx context.Context, accountID int64, event *Webhoo
 	if err != nil {
 		return nil, nil, err
 	}
-	// Load custom values before soft-delete so the fire call has a complete snapshot.
 	_ = leads.LoadCustomValues(ctx, s.leads.Pool(), lead)
 	if err := s.leads.SoftDelete(ctx, s.leads.Pool(), accountID, lead.ID); err != nil {
 		return nil, &lead.ID, err
 	}
-	// Fire outbound webhook for lead deletion.
 	s.FireOutbound(ctx, accountID, EventLeadDelete, lead, leads.PipelineContext{})
 	return &IngestResult{LeadID: lead.PublicID, Action: "delete", Status: "deleted"}, &lead.ID, nil
 }
@@ -285,7 +402,7 @@ func (s *Service) resolveLead(ctx context.Context, accountID int64, event *Webho
 	if event.LookupBy == nil {
 		return nil, httpx.Validation("lookup_by not configured")
 	}
-	lookupVal := lookupValue(*event.LookupBy, flat, maps)
+	lookupVal := lookupValue(event, flat, maps)
 	if lookupVal == "" {
 		return nil, httpx.Validation("lookup value missing from payload")
 	}
@@ -294,12 +411,25 @@ func (s *Service) resolveLead(ctx context.Context, accountID int64, event *Webho
 		return s.leads.GetByExternalID(ctx, s.leads.Pool(), accountID, lookupVal)
 	case "public_id":
 		return s.leads.GetByPublicID(ctx, s.leads.Pool(), accountID, lookupVal)
+	case "phone":
+		return s.leads.GetByPhone(ctx, s.leads.Pool(), accountID, lookupVal)
+	case "email":
+		return s.leads.GetByEmail(ctx, s.leads.Pool(), accountID, lookupVal)
 	default:
 		return nil, httpx.Validation("invalid lookup_by")
 	}
 }
 
-func lookupValue(lookupBy string, flat map[string]any, maps []FieldMapEntry) string {
+func lookupValue(event *WebhookEvent, flat map[string]any, maps []FieldMapEntry) string {
+	if event.LookupBy == nil {
+		return ""
+	}
+	lookupBy := *event.LookupBy
+	if event.LookupSourceKey != nil && *event.LookupSourceKey != "" {
+		if v, ok := flat[*event.LookupSourceKey]; ok {
+			return toText(v)
+		}
+	}
 	for _, m := range maps {
 		if m.TargetType == "builtin" && m.BuiltinField != nil && *m.BuiltinField == lookupBy {
 			if v, ok := flat[m.SourceKey]; ok {
@@ -367,13 +497,15 @@ func (s *Service) applyMappedFields(ctx context.Context, q database.Querier, acc
 	return nil
 }
 
-func (s *Service) logDelivery(ctx context.Context, webhookID int64, eventID, leadID *int64, status string, payload []byte, errMsg string) {
+func (s *Service) logDelivery(ctx context.Context, webhookID int64, eventID, leadID *int64, status string, payload []byte, errMsg string) (int64, error) {
 	var msg *string
 	if errMsg != "" {
 		msg = &errMsg
 	}
-	_, _ = s.pool.Exec(ctx,
+	var id int64
+	err := s.pool.QueryRow(ctx,
 		`INSERT INTO webhook_deliveries(webhook_id, event_id, lead_id, status, request_payload, error_message)
-		 VALUES ($1,$2,$3,$4,$5,$6)`,
-		webhookID, eventID, leadID, status, payload, msg)
+		 VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+		webhookID, eventID, leadID, status, payload, msg).Scan(&id)
+	return id, err
 }

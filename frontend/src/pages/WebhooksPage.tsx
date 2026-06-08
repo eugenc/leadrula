@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import {
   useWebhooks,
   useCreateWebhook,
@@ -8,12 +8,15 @@ import {
   useRotateWebhookOutboundSecret,
   useWebhookEvents,
   useCreateWebhookEvent,
+  useUpdateWebhookEvent,
   useDeleteWebhookEvent,
   useWebhookFieldMap,
   useWebhookSamplePayload,
   useAddWebhookFieldMap,
   useDeleteWebhookFieldMap,
   useWebhookDeliveries,
+  useWebhookDelivery,
+  useReplayWebhookDelivery,
   useWebhookOutboundTriggers,
   useCreateWebhookOutboundTrigger,
   useUpdateWebhookOutboundTrigger,
@@ -33,10 +36,96 @@ import { Input, Label } from "@/components/ui/input";
 import { Switch, Spinner, EmptyState, Badge } from "@/components/ui/misc";
 import { FormDrawer } from "@/components/ui/dialog";
 import { format } from "date-fns";
-import { ArrowRightLeft, Copy, KeyRound, Plus, RefreshCw, Trash2, Zap } from "lucide-react";
+import { ArrowRightLeft, Copy, Eye, EyeOff, KeyRound, Pencil, Plus, Trash2, Zap } from "lucide-react";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
-import type { Webhook, WebhookEvent, WebhookOutboundTrigger, OutboundTriggerEvent, ResponseMapEntry } from "@/types";
+import type { Webhook, WebhookEvent, WebhookOutboundTrigger, OutboundTriggerEvent, ResponseMapEntry, InboundCondition, WebhookDelivery } from "@/types";
+
+type MappingContext = {
+  deliveryId?: number;
+  payload?: Record<string, unknown>;
+  actionId?: number;
+} | null;
+
+const INBOUND_CONDITION_OPS: { value: InboundCondition["op"]; label: string }[] = [
+  { value: "eq", label: "equals" },
+  { value: "neq", label: "not equals" },
+  { value: "contains", label: "contains" },
+  { value: "empty", label: "is empty" },
+  { value: "not_empty", label: "is not empty" },
+];
+
+const CONDITION_SUMMARY_OPS: Record<InboundCondition["op"], string> = {
+  eq: "EQUAL",
+  neq: "NOT EQUAL",
+  contains: "CONTAINS",
+  empty: "IS EMPTY",
+  not_empty: "IS NOT EMPTY",
+};
+
+function formatCondition(c: InboundCondition): string {
+  const op = CONDITION_SUMMARY_OPS[c.op] ?? c.op.toUpperCase();
+  if (c.op === "empty" || c.op === "not_empty") {
+    return `Payload: "${c.field}" ${op}`;
+  }
+  return `Payload: "${c.field}" ${op} "${c.value ?? ""}"`;
+}
+
+function conditionSummary(conditions: InboundCondition[], logic: string): string {
+  if (!conditions?.length) return "Always";
+  const joiner = logic === "or" ? " OR " : " AND ";
+  return conditions.map(formatCondition).join(joiner);
+}
+
+function InboundConditionRow({
+  condition,
+  mappableKeys,
+  onChange,
+  onRemove,
+}: {
+  condition: InboundCondition;
+  mappableKeys: string[];
+  onChange: (c: InboundCondition) => void;
+  onRemove: () => void;
+}) {
+  const showValue = condition.op !== "empty" && condition.op !== "not_empty";
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-md border border-gray-100 bg-gray-50 p-2">
+      <select
+        className="rounded border border-gray-200 px-2 py-1 text-xs"
+        value={condition.field}
+        onChange={(e) => onChange({ ...condition, field: e.target.value })}
+      >
+        <option value="">Field</option>
+        {mappableKeys.map((k) => <option key={k} value={k}>{k}</option>)}
+        {condition.field && !mappableKeys.includes(condition.field) && (
+          <option value={condition.field}>{condition.field}</option>
+        )}
+      </select>
+      <select
+        className="rounded border border-gray-200 px-2 py-1 text-xs"
+        value={condition.op}
+        onChange={(e) => {
+          const op = e.target.value as InboundCondition["op"];
+          onChange({ ...condition, op, value: op === "empty" || op === "not_empty" ? "" : condition.value });
+        }}
+      >
+        {INBOUND_CONDITION_OPS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+      {showValue && (
+        <Input
+          className="w-32 text-xs"
+          value={condition.value ?? ""}
+          onChange={(e) => onChange({ ...condition, value: e.target.value })}
+          placeholder="value"
+        />
+      )}
+      <IconButton variant="danger" aria-label="Remove condition" onClick={onRemove}>
+        <Trash2 className="h-3.5 w-3.5" />
+      </IconButton>
+    </div>
+  );
+}
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 const BUILTINS = [
@@ -46,6 +135,58 @@ const BUILTINS = [
 
 function slugify(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function InboundEndpointRows({
+  slug,
+  secret,
+  showSecret,
+  onToggleSecret,
+  onCopySecret,
+  onRotate,
+  rotatePending,
+}: {
+  slug: string;
+  secret: string | null;
+  showSecret: boolean;
+  onToggleSecret: () => void;
+  onCopySecret: () => void;
+  onRotate: () => void;
+  rotatePending?: boolean;
+}) {
+  const endpoint = `${API_URL}/api/v1/webhooks/${slug}`;
+  return (
+    <div className="space-y-2 text-sm">
+      <div className="flex items-center gap-1.5 font-mono text-xs text-gray-700">
+        <span className="select-all break-all flex-1">POST {endpoint}</span>
+        <IconButton
+          aria-label="Copy endpoint"
+          onClick={() => { navigator.clipboard.writeText(`POST ${endpoint}`); toast.success("Endpoint copied"); }}
+        >
+          <Copy className="h-3.5 w-3.5" />
+        </IconButton>
+      </div>
+      <div className="flex items-center gap-2 text-xs text-gray-700">
+        <span className="font-medium">Secret:</span>
+        <span className="font-mono select-all">
+          {secret && showSecret ? secret : "••••••••••••••••"}
+        </span>
+        <IconButton
+          aria-label={showSecret ? "Hide secret" : "Show secret"}
+          disabled={!secret}
+          onClick={onToggleSecret}
+        >
+          {showSecret ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+        </IconButton>
+        <IconButton aria-label="Copy secret" disabled={!secret} onClick={onCopySecret}>
+          <Copy className="h-3.5 w-3.5" />
+        </IconButton>
+        <IconButton aria-label="Rotate secret" disabled={rotatePending} onClick={onRotate}>
+          <KeyRound className="h-3.5 w-3.5" />
+        </IconButton>
+      </div>
+    </div>
+  );
 }
 
 function mappedKeys(entries: { source_key: string }[]): Set<string> {
@@ -67,6 +208,8 @@ function mappablePayloadKeys(payload: Record<string, unknown>): string[] {
 export function WebhooksPage() {
   const [drawerWebhook, setDrawerWebhook] = useState<Webhook | null | undefined>(undefined);
   const [detailFor, setDetailFor] = useState<Webhook | null>(null);
+  const [detailSecret, setDetailSecret] = useState<string | null>(null);
+  const [mappingContext, setMappingContext] = useState<MappingContext>(null);
 
   const { data: webhooks, isLoading } = useWebhooks();
   const update = useUpdateWebhook();
@@ -124,6 +267,9 @@ export function WebhooksPage() {
                   </TD>
                   <TD>
                     <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                      <IconButton aria-label="Edit" onClick={() => setDrawerWebhook(w)}>
+                        <Pencil className="h-4 w-4" />
+                      </IconButton>
                       <IconButton aria-label="Configure" onClick={() => setDetailFor(w)}>
                         <ArrowRightLeft className="h-4 w-4" />
                       </IconButton>
@@ -145,15 +291,30 @@ export function WebhooksPage() {
       <WebhookDrawer
         webhook={drawerWebhook ?? null}
         open={drawerOpen}
-        onClose={() => setDrawerWebhook(undefined)}
+        mappingContext={mappingContext}
+        onMappingContextChange={setMappingContext}
+        onClose={() => { setDrawerWebhook(undefined); setMappingContext(null); }}
         onCreated={(wb, secret) => {
           toast.success("Webhook created");
           navigator.clipboard.writeText(secret);
           toast.success("Secret copied to clipboard");
+          setDetailSecret(secret);
           setDetailFor(wb);
         }}
       />
-      <WebhookDetailDrawer webhook={detailFor} open={!!detailFor} onClose={() => setDetailFor(null)} />
+      <WebhookDetailDrawer
+        webhook={detailFor}
+        open={!!detailFor}
+        initialSecret={detailSecret}
+        onClose={() => { setDetailFor(null); setDetailSecret(null); }}
+        onMapFields={(ctx) => {
+          if (!detailFor) return;
+          setMappingContext(ctx);
+          setDrawerWebhook(detailFor);
+          setDetailFor(null);
+          setDetailSecret(null);
+        }}
+      />
     </>
   );
 }
@@ -161,11 +322,15 @@ export function WebhooksPage() {
 function WebhookDrawer({
   webhook,
   open,
+  mappingContext,
+  onMappingContextChange,
   onClose,
   onCreated,
 }: {
   webhook: Webhook | null;
   open: boolean;
+  mappingContext?: MappingContext;
+  onMappingContextChange?: (ctx: MappingContext) => void;
   onClose: () => void;
   onCreated?: (wb: Webhook, secret: string) => void;
 }) {
@@ -173,7 +338,18 @@ function WebhookDrawer({
   const editing = webhook !== null;
   const create = useCreateWebhook();
   const update = useUpdateWebhook();
-  const rotate = useRotateWebhookSecret();
+  const [actionDrawer, setActionDrawer] = useState<WebhookEvent | null | undefined>(undefined);
+  const [triggerDrawer, setTriggerDrawer] = useState<WebhookOutboundTrigger | null | undefined>(undefined);
+  const { data: actions } = useWebhookEvents(editing ? webhook!.id : null);
+  const { data: triggers } = useWebhookOutboundTriggers(editing ? webhook!.id : null);
+  const deleteAction = useDeleteWebhookEvent();
+  const deleteTrigger = useDeleteWebhookOutboundTrigger();
+
+  useEffect(() => {
+    if (!mappingContext?.deliveryId || !mappingContext.actionId) return;
+    const a = actions?.find((x) => x.id === mappingContext.actionId);
+    if (a) setActionDrawer(a);
+  }, [mappingContext, actions]);
 
   const [name, setName] = useState(webhook?.name ?? "");
   const [slug, setSlug] = useState(webhook?.slug ?? "");
@@ -182,7 +358,6 @@ function WebhookDrawer({
   const [inboundEnabled, setInboundEnabled] = useState(webhook?.inbound_enabled ?? true);
   const [outboundEnabled, setOutboundEnabled] = useState(webhook?.outbound_enabled ?? false);
   const [outboundURL, setOutboundURL] = useState(webhook?.outbound_url ?? "");
-  const [newSecret, setNewSecret] = useState<string | null>(null);
   const rotateOutbound = useRotateWebhookOutboundSecret();
 
   useEffect(() => {
@@ -193,7 +368,6 @@ function WebhookDrawer({
     setInboundEnabled(webhook?.inbound_enabled ?? true);
     setOutboundEnabled(webhook?.outbound_enabled ?? false);
     setOutboundURL(webhook?.outbound_url ?? "");
-    setNewSecret(null);
   }, [webhook]);
 
   function submit() {
@@ -230,18 +404,6 @@ function WebhookDrawer({
     }
   }
 
-  function rotateSecret() {
-    if (!webhook) return;
-    rotate.mutate(webhook.id, {
-      onSuccess: (res) => {
-        setNewSecret(res.secret);
-        navigator.clipboard.writeText(res.secret);
-        toast.success("New secret copied to clipboard");
-      },
-      onError: (e) => toast.error(errorMessage(e)),
-    });
-  }
-
   const valid = !!name && !!slug;
   const saving = create.isPending || update.isPending;
 
@@ -267,7 +429,7 @@ function WebhookDrawer({
           <Label>Slug</Label>
           <Input value={slug} onChange={(e) => { setSlugTouched(true); setSlug(e.target.value); }} />
         </div>
-        <div className="rounded-md border border-gray-100 bg-gray-50 p-3 space-y-3">
+        <div className="space-y-3">
           <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Direction</p>
           <div className="flex items-center justify-between">
             <div>
@@ -276,11 +438,6 @@ function WebhookDrawer({
             </div>
             <Switch checked={inboundEnabled} onChange={setInboundEnabled} />
           </div>
-          {inboundEnabled && slug && (
-            <p className="text-xs font-mono text-gray-400">
-              POST {API_URL}/api/v1/webhooks/{slug}
-            </p>
-          )}
           <div className="flex items-center justify-between">
             <div>
               <Label>Outbound</Label>
@@ -305,22 +462,6 @@ function WebhookDrawer({
               <Label>Active</Label>
               <Switch checked={isActive} onChange={setIsActive} />
             </div>
-            {inboundEnabled && (
-              <div className="rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                <p className="font-medium">Inbound secret prefix: {webhook!.secret_prefix}…</p>
-                <Button size="sm" variant="secondary" className="mt-2" onClick={rotateSecret}>
-                  <KeyRound className="h-3.5 w-3.5" /> Rotate inbound secret
-                </Button>
-                {newSecret && (
-                  <div className="mt-2 flex items-center gap-2 font-mono text-xs">
-                    <span className="break-all">{newSecret}</span>
-                    <IconButton aria-label="Copy" onClick={() => { navigator.clipboard.writeText(newSecret!); toast.success("Copied"); }}>
-                      <Copy className="h-3.5 w-3.5" />
-                    </IconButton>
-                  </div>
-                )}
-              </div>
-            )}
             {outboundEnabled && webhook!.outbound_url && (
               <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-800">
                 <p className="font-medium">Outbound HMAC secret</p>
@@ -343,9 +484,97 @@ function WebhookDrawer({
                 </Button>
               </div>
             )}
+            {inboundEnabled && (
+              <div className="space-y-3 border-t border-gray-100 pt-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Inbound actions</p>
+                  <Button size="sm" onClick={() => setActionDrawer(null)}><Plus className="h-3.5 w-3.5" /> Add action</Button>
+                </div>
+                {(actions ?? []).length === 0 ? (
+                  <p className="text-sm text-gray-500">No actions configured.</p>
+                ) : (
+                  <Table>
+                    <THead><tr><TH>Conditions</TH><TH>Action</TH><TH /></tr></THead>
+                    <TBody>
+                      {(actions ?? []).map((a) => (
+                        <TR key={a.id}>
+                          <TD className="text-xs text-gray-600">{conditionSummary(a.conditions ?? [], a.condition_logic)}</TD>
+                          <TD><Badge>{a.action}</Badge></TD>
+                          <TD>
+                            <div className="flex justify-end gap-1">
+                              <IconButton aria-label="Edit action" onClick={() => setActionDrawer(a)}><Pencil className="h-4 w-4" /></IconButton>
+                              <IconButton variant="danger" onClick={() => deleteAction.mutate({ webhookId: webhook!.id, eventId: a.id }, { onError: (e) => toast.error(errorMessage(e)) })}>
+                                <Trash2 className="h-4 w-4" />
+                              </IconButton>
+                            </div>
+                          </TD>
+                        </TR>
+                      ))}
+                    </TBody>
+                  </Table>
+                )}
+              </div>
+            )}
+            {outboundEnabled && (
+              <div className="space-y-3 border-t border-gray-100 pt-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Outbound triggers</p>
+                  <Button size="sm" onClick={() => setTriggerDrawer(null)}><Plus className="h-3.5 w-3.5" /> Add trigger</Button>
+                </div>
+                {(triggers ?? []).length === 0 ? (
+                  <p className="text-sm text-gray-500">No outbound triggers configured.</p>
+                ) : (
+                  <Table>
+                    <THead><tr><TH>Event</TH><TH>Active</TH><TH /></tr></THead>
+                    <TBody>
+                      {(triggers ?? []).map((t) => (
+                        <TR key={t.id}>
+                          <TD><Badge>{t.trigger_event}</Badge></TD>
+                          <TD>{t.is_active ? "✓" : "—"}</TD>
+                          <TD>
+                            <div className="flex justify-end gap-1">
+                              <IconButton aria-label="Edit" onClick={() => setTriggerDrawer(t)}><Zap className="h-4 w-4" /></IconButton>
+                              <IconButton variant="danger" onClick={() => deleteTrigger.mutate({ webhookId: webhook!.id, triggerId: t.id }, { onError: (e) => toast.error(errorMessage(e)) })}>
+                                <Trash2 className="h-4 w-4" />
+                              </IconButton>
+                            </div>
+                          </TD>
+                        </TR>
+                      ))}
+                    </TBody>
+                  </Table>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>
+      {editing && (
+        <>
+          <ActionDrawer
+            webhookId={webhook!.id}
+            action={actionDrawer ?? null}
+            open={actionDrawer !== undefined}
+            mappingContext={mappingContext}
+            onClose={() => setActionDrawer(undefined)}
+            onSaved={(saved) => {
+              toast.success("Action saved");
+              if (mappingContext?.deliveryId) {
+                onMappingContextChange?.({ ...mappingContext, actionId: saved.id });
+                setActionDrawer(saved);
+              } else {
+                setActionDrawer(undefined);
+              }
+            }}
+          />
+          <OutboundTriggerDrawer
+            webhookId={webhook!.id}
+            trigger={triggerDrawer ?? null}
+            open={triggerDrawer !== undefined}
+            onClose={() => setTriggerDrawer(undefined)}
+          />
+        </>
+      )}
     </FormDrawer>
   );
 }
@@ -353,268 +582,296 @@ function WebhookDrawer({
 function WebhookDetailDrawer({
   webhook,
   open,
+  initialSecret,
   onClose,
+  onMapFields,
 }: {
   webhook: Webhook | null;
   open: boolean;
+  initialSecret?: string | null;
   onClose: () => void;
+  onMapFields: (ctx: MappingContext) => void;
 }) {
-  const [tab, setTab] = useState<"events" | "triggers" | "log">("events");
-  const [eventDrawer, setEventDrawer] = useState<WebhookEvent | null | undefined>(undefined);
-  const [mapEvent, setMapEvent] = useState<WebhookEvent | null>(null);
-  const [triggerDrawer, setTriggerDrawer] = useState<WebhookOutboundTrigger | null | undefined>(undefined);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [secret, setSecret] = useState<string | null>(initialSecret ?? null);
+  const [showSecret, setShowSecret] = useState(false);
+  const rotate = useRotateWebhookSecret();
+  const replay = useReplayWebhookDelivery();
 
-  const { data: events } = useWebhookEvents(webhook?.id ?? null);
-  const { data: triggers } = useWebhookOutboundTriggers(webhook?.id ?? null);
-  const { data: deliveries } = useWebhookDeliveries(webhook?.id ?? null);
-  const deleteEvent = useDeleteWebhookEvent();
-  const deleteTrigger = useDeleteWebhookOutboundTrigger();
+  useEffect(() => {
+    setSecret(initialSecret ?? null);
+    setShowSecret(false);
+  }, [webhook, initialSecret]);
+
+  const { data: deliveries, refetch: refetchDeliveries } = useWebhookDeliveries(webhook?.id ?? null);
+  const { data: expandedDelivery } = useWebhookDelivery(webhook?.id ?? null, expandedId);
 
   if (!open || !webhook) return null;
 
-  return (
-    <>
-      <FormDrawer open onClose={onClose} title={webhook.name} subtitle={`Webhook · ${webhook.slug}`} width={720}>
-        <div className="space-y-4">
-          {webhook.inbound_enabled && (
-            <p className="font-mono text-xs text-gray-500">
-              Authorization: Bearer {"{secret}"} · POST {API_URL}/api/v1/webhooks/{webhook.slug}
-            </p>
-          )}
-          {webhook.outbound_enabled && webhook.outbound_url && (
-            <p className="text-xs text-gray-500">
-              <span className="font-semibold text-gray-700">Outbound →</span>{" "}
-              <span className="font-mono">{webhook.outbound_url}</span>
-            </p>
-          )}
-          <div className="flex gap-2 border-b border-gray-100 pb-2">
-            {webhook.inbound_enabled && (
-              <Button size="sm" variant={tab === "events" ? "primary" : "secondary"} onClick={() => setTab("events")}>
-                Inbound events
-              </Button>
-            )}
-            {webhook.outbound_enabled && (
-              <Button size="sm" variant={tab === "triggers" ? "primary" : "secondary"} onClick={() => setTab("triggers")}>
-                Outbound triggers
-              </Button>
-            )}
-            <Button size="sm" variant={tab === "log" ? "primary" : "secondary"} onClick={() => setTab("log")}>Delivery log</Button>
-          </div>
-
-          {tab === "events" && (
-            <div className="space-y-3">
-              <div className="flex justify-end">
-                <Button size="sm" onClick={() => setEventDrawer(null)}><Plus className="h-3.5 w-3.5" /> Add event</Button>
-              </div>
-              {(events ?? []).length === 0 ? (
-                <EmptyState title="No events configured." />
-              ) : (
-                <Table>
-                  <THead>
-                    <tr>
-                      <TH>Event key</TH>
-                      <TH>Action</TH>
-                      <TH>Config</TH>
-                      <TH />
-                    </tr>
-                  </THead>
-                  <TBody>
-                    {(events ?? []).map((e) => (
-                      <TR key={e.id}>
-                        <TD className="font-mono">{e.event_key}</TD>
-                        <TD><Badge>{e.action}</Badge></TD>
-                        <TD className="text-xs text-gray-500">
-                          {e.action === "create" && e.duplicate_mode && `on duplicate: ${e.duplicate_mode}`}
-                          {e.action !== "create" && e.lookup_by && `lookup: ${e.lookup_by}`}
-                          {e.action === "move_stage" && e.target_stage_id && ` → stage ${e.target_stage_id}`}
-                          {e.action === "create" && e.target_pipeline_id && ` → pipeline ${e.target_pipeline_id}`}
-                        </TD>
-                        <TD>
-                          <div className="flex justify-end gap-1">
-                            <IconButton aria-label="Field map" onClick={() => setMapEvent(e)}><ArrowRightLeft className="h-4 w-4" /></IconButton>
-                            <IconButton variant="danger" onClick={() => deleteEvent.mutate({ webhookId: webhook.id, eventId: e.id }, { onError: (err) => toast.error(errorMessage(err)) })}>
-                              <Trash2 className="h-4 w-4" />
-                            </IconButton>
-                          </div>
-                        </TD>
-                      </TR>
-                    ))}
-                  </TBody>
-                </Table>
-              )}
-            </div>
-          )}
-
-          {tab === "triggers" && (
-            <div className="space-y-3">
-              <div className="flex justify-end">
-                <Button size="sm" onClick={() => setTriggerDrawer(null)}>
-                  <Plus className="h-3.5 w-3.5" /> Add trigger
-                </Button>
-              </div>
-              {(triggers ?? []).length === 0 ? (
-                <EmptyState title="No outbound triggers configured." />
-              ) : (
-                <Table>
-                  <THead>
-                    <tr>
-                      <TH>Event</TH>
-                      <TH>Conditions</TH>
-                      <TH>Active</TH>
-                      <TH />
-                    </tr>
-                  </THead>
-                  <TBody>
-                    {(triggers ?? []).map((t) => (
-                      <TR key={t.id} onClick={() => setTriggerDrawer(t)}>
-                        <TD><Badge>{t.trigger_event}</Badge></TD>
-                        <TD className="text-xs text-gray-500">
-                          {Array.isArray(t.conditions) && t.conditions.length > 0
-                            ? `${t.conditions.length} condition${t.conditions.length !== 1 ? "s" : ""} (${t.condition_logic})`
-                            : "Always"}
-                        </TD>
-                        <TD>{t.is_active ? "✓" : "—"}</TD>
-                        <TD>
-                          <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                            <IconButton aria-label="Edit" onClick={() => setTriggerDrawer(t)}>
-                              <Zap className="h-4 w-4" />
-                            </IconButton>
-                            <IconButton
-                              variant="danger"
-                              onClick={() =>
-                                deleteTrigger.mutate(
-                                  { webhookId: webhook.id, triggerId: t.id },
-                                  { onError: (err) => toast.error(errorMessage(err)) }
-                                )
-                              }
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </IconButton>
-                          </div>
-                        </TD>
-                      </TR>
-                    ))}
-                  </TBody>
-                </Table>
-              )}
-            </div>
-          )}
-
-          {tab === "log" && (
-            <div className="space-y-2">
-              {(deliveries?.items ?? []).length === 0 ? (
-                <EmptyState title="No deliveries yet." />
-              ) : (
-                <Table>
-                  <THead>
-                    <tr><TH>Time</TH><TH>Status</TH><TH>Lead</TH><TH>Error</TH></tr>
-                  </THead>
-                  <TBody>
-                    {(deliveries?.items ?? []).map((d) => (
-                      <TR key={d.id}>
-                        <TD className="text-xs">{format(new Date(d.created_at), "MMM d h:mma")}</TD>
-                        <TD><Badge>{d.status}</Badge></TD>
-                        <TD className="font-mono text-xs">{d.lead_public_id ?? "—"}</TD>
-                        <TD className="text-xs text-red-600">{d.error_message ?? ""}</TD>
-                      </TR>
-                    ))}
-                  </TBody>
-                </Table>
-              )}
-            </div>
-          )}
-        </div>
-      </FormDrawer>
-
-      <EventDrawer
-        webhookId={webhook.id}
-        event={eventDrawer ?? null}
-        open={eventDrawer !== undefined}
-        onClose={() => setEventDrawer(undefined)}
-        onCreated={() => { toast.success("Event created"); setEventDrawer(undefined); }}
-      />
-      <EventFieldMapDrawer
-        webhookId={webhook.id}
-        event={mapEvent}
-        slug={webhook.slug}
-        open={!!mapEvent}
-        onClose={() => setMapEvent(null)}
-      />
-      <OutboundTriggerDrawer
-        webhookId={webhook.id}
-        trigger={triggerDrawer ?? null}
-        open={triggerDrawer !== undefined}
-        onClose={() => setTriggerDrawer(undefined)}
-      />
-    </>
-  );
-}
-
-function EventDrawer({
-  webhookId,
-  event,
-  open,
-  onClose,
-  onCreated,
-}: {
-  webhookId: number;
-  event: WebhookEvent | null;
-  open: boolean;
-  onClose: () => void;
-  onCreated?: () => void;
-}) {
-  if (!open) return null;
-  const create = useCreateWebhookEvent();
-  const { data: pipelines } = usePipelines();
-
-  const [eventKey, setEventKey] = useState("");
-  const [action, setAction] = useState<WebhookEvent["action"]>("update");
-  const [duplicateMode, setDuplicateMode] = useState<"update" | "duplicate" | "reject">("reject");
-  const [lookupBy, setLookupBy] = useState<"external_id" | "public_id">("external_id");
-  const [targetPipelineId, setTargetPipelineId] = useState<number | "">("");
-  const [targetStageId, setTargetStageId] = useState<number | "">("");
-
-  const pipelineId = typeof targetPipelineId === "number" ? targetPipelineId : undefined;
-  const { data: stages } = useStages(pipelineId);
-
-  function submit() {
-    const body: Record<string, unknown> = { event_key: eventKey, action };
-    if (action === "create") {
-      body.duplicate_mode = duplicateMode;
-      if (targetPipelineId) body.target_pipeline_id = targetPipelineId;
-    } else {
-      body.lookup_by = lookupBy;
-    }
-    if (action === "move_stage" && targetStageId) body.target_stage_id = targetStageId;
-
-    create.mutate({ webhookId, body }, {
-      onSuccess: () => onCreated?.(),
+  function handleRotate() {
+    rotate.mutate(webhook!.id, {
+      onSuccess: (res) => {
+        setSecret(res.secret);
+        setShowSecret(false);
+        navigator.clipboard.writeText(res.secret);
+        toast.success("New secret copied to clipboard");
+      },
       onError: (e) => toast.error(errorMessage(e)),
     });
   }
 
+  function deliveryStatusLabel(d: WebhookDelivery) {
+    return d.status === "skipped" ? "Captured" : d.status;
+  }
+
+  function canReplay(d: WebhookDelivery) {
+    return d.status === "skipped" && !d.lead_id;
+  }
+
   return (
-    <FormDrawer open onClose={onClose} title="New event" subtitle="Map payload event value to an action" footer={
-      <>
-        <Button variant="secondary" onClick={onClose}>Cancel</Button>
-        <Button disabled={!eventKey || create.isPending} onClick={submit}>Create</Button>
-      </>
-    }>
-      <div className="space-y-3">
-        <div>
-          <Label>Event key (matches payload event field value)</Label>
-          <Input value={eventKey} onChange={(e) => setEventKey(e.target.value)} placeholder="lead.updated" />
+    <FormDrawer open onClose={onClose} title={webhook.name} subtitle={`Webhook · ${webhook.slug}`} width={720}>
+      <div className="space-y-4">
+        {webhook.inbound_enabled && (
+          <InboundEndpointRows
+            slug={webhook.slug}
+            secret={secret}
+            showSecret={showSecret}
+            onToggleSecret={() => setShowSecret((v) => !v)}
+            onCopySecret={() => { navigator.clipboard.writeText(secret!); toast.success("Secret copied"); }}
+            onRotate={handleRotate}
+            rotatePending={rotate.isPending}
+          />
+        )}
+
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Delivery log</p>
+          {(deliveries?.items ?? []).length === 0 ? (
+            <EmptyState title="No deliveries yet." />
+          ) : (
+            <Table>
+              <THead>
+                <tr><TH>Time</TH><TH>Status</TH><TH>Lead</TH><TH /></tr>
+              </THead>
+              <TBody>
+                {(deliveries?.items ?? []).map((d) => (
+                  <Fragment key={d.id}>
+                    <TR>
+                      <TD className="text-xs">{format(new Date(d.created_at), "MMM d h:mma")}</TD>
+                      <TD><Badge>{deliveryStatusLabel(d)}</Badge></TD>
+                      <TD className="font-mono text-xs">{d.lead_public_id ?? "—"}</TD>
+                      <TD>
+                        <div className="flex justify-end gap-1">
+                          <Button size="sm" variant="secondary" onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>
+                            {expandedId === d.id ? "Hide" : "View"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => onMapFields({ deliveryId: d.id })}
+                          >
+                            Actions
+                          </Button>
+                          {canReplay(d) && (
+                            <Button
+                              size="sm"
+                              disabled={replay.isPending}
+                              onClick={() =>
+                                replay.mutate(
+                                  { webhookId: webhook.id, deliveryId: d.id },
+                                  {
+                                    onSuccess: () => { toast.success("Replayed"); refetchDeliveries(); },
+                                    onError: (e) => toast.error(errorMessage(e)),
+                                  }
+                                )
+                              }
+                            >
+                              Run again
+                            </Button>
+                          )}
+                        </div>
+                      </TD>
+                    </TR>
+                    {expandedId === d.id && (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-2">
+                          <pre className="max-h-48 overflow-auto rounded-md border border-gray-100 bg-gray-50 p-3 font-mono text-xs">
+                            {JSON.stringify(expandedDelivery?.request_payload ?? {}, null, 2)}
+                          </pre>
+                          {d.error_message && <p className="mt-1 text-xs text-red-600">{d.error_message}</p>}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+              </TBody>
+            </Table>
+          )}
         </div>
+      </div>
+    </FormDrawer>
+  );
+}
+
+function ActionDrawer({
+  webhookId,
+  action,
+  open,
+  mappingContext,
+  onClose,
+  onSaved,
+}: {
+  webhookId: number;
+  action: WebhookEvent | null;
+  open: boolean;
+  mappingContext?: MappingContext;
+  onClose: () => void;
+  onSaved?: (action: WebhookEvent) => void;
+}) {
+  if (!open) return null;
+  const editing = action !== null;
+  const create = useCreateWebhookEvent();
+  const update = useUpdateWebhookEvent();
+  const { data: pipelines } = usePipelines();
+  const { data: sample } = useWebhookSamplePayload(webhookId, true);
+  const { data: deliveryPayload } = useWebhookDelivery(
+    webhookId,
+    mappingContext?.deliveryId ?? null
+  );
+
+  const [actionType, setActionType] = useState<WebhookEvent["action"]>("create");
+  const [duplicateMode, setDuplicateMode] = useState<"update" | "duplicate" | "reject">("reject");
+  const [lookupBy, setLookupBy] = useState<NonNullable<WebhookEvent["lookup_by"]>>("external_id");
+  const [lookupSourceKey, setLookupSourceKey] = useState("");
+  const [targetPipelineId, setTargetPipelineId] = useState<number | "">("");
+  const [targetStageId, setTargetStageId] = useState<number | "">("");
+  const [conditionLogic, setConditionLogic] = useState<"and" | "or">("and");
+  const [conditions, setConditions] = useState<InboundCondition[]>([]);
+  const [savedActionId, setSavedActionId] = useState<number | null>(action?.id ?? null);
+
+  const pipelineId = typeof targetPipelineId === "number" ? targetPipelineId : undefined;
+  const { data: stages } = useStages(pipelineId);
+
+  useEffect(() => {
+    if (action) {
+      setActionType(action.action);
+      setDuplicateMode(action.duplicate_mode ?? "reject");
+      setLookupBy(action.lookup_by ?? "external_id");
+      setLookupSourceKey(action.lookup_source_key ?? "");
+      setTargetPipelineId(action.target_pipeline_id ?? "");
+      setTargetStageId(action.target_stage_id ?? "");
+      setConditionLogic(action.condition_logic ?? "and");
+      setConditions(action.conditions ?? []);
+      setSavedActionId(action.id);
+    } else {
+      setActionType("create");
+      setDuplicateMode("reject");
+      setLookupBy("external_id");
+      setLookupSourceKey("");
+      setTargetPipelineId("");
+      setTargetStageId("");
+      setConditionLogic("and");
+      setConditions([]);
+      setSavedActionId(null);
+    }
+  }, [action]);
+
+  const payload =
+    mappingContext?.payload ??
+    deliveryPayload?.request_payload ??
+    sample?.payload ??
+    null;
+  const mappableKeys = payload ? mappablePayloadKeys(payload) : [];
+  const fieldMapActionId = savedActionId ?? action?.id ?? null;
+
+  function buildBody(): Record<string, unknown> {
+    const body: Record<string, unknown> = {
+      action: actionType,
+      condition_logic: conditionLogic,
+      conditions,
+    };
+    if (actionType === "create") {
+      body.duplicate_mode = duplicateMode;
+      if (targetPipelineId) body.target_pipeline_id = targetPipelineId;
+    } else {
+      body.lookup_by = lookupBy;
+      if (lookupSourceKey) body.lookup_source_key = lookupSourceKey;
+    }
+    if (actionType === "move_stage" && targetStageId) body.target_stage_id = targetStageId;
+    return body;
+  }
+
+  function save() {
+    const body = buildBody();
+    if (editing && action) {
+      update.mutate({ webhookId, eventId: action.id, body }, {
+        onSuccess: (res: WebhookEvent) => { setSavedActionId(res.id); onSaved?.(res); },
+        onError: (e: unknown) => toast.error(errorMessage(e)),
+      });
+    } else {
+      create.mutate({ webhookId, body }, {
+        onSuccess: (res: WebhookEvent) => { setSavedActionId(res.id); onSaved?.(res); },
+        onError: (e: unknown) => toast.error(errorMessage(e)),
+      });
+    }
+  }
+
+  const saving = create.isPending || update.isPending;
+
+  return (
+    <FormDrawer
+      open
+      onClose={onClose}
+      title={editing ? "Edit action" : "New action"}
+      subtitle="Conditions and field mapping"
+      width={640}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button disabled={saving} onClick={save}>{editing ? "Save" : "Create"}</Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
         <div>
           <Label>Action</Label>
-          <select className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm" value={action} onChange={(e) => setAction(e.target.value as WebhookEvent["action"])}>
+          <select className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm" value={actionType} onChange={(e) => setActionType(e.target.value as WebhookEvent["action"])}>
             <option value="create">Create lead</option>
             <option value="update">Update lead</option>
             <option value="delete">Delete lead (soft)</option>
             <option value="move_stage">Move to stage</option>
           </select>
         </div>
-        {action === "create" && (
+
+        <div className="space-y-2 rounded-md border border-gray-100 p-3">
+          <div className="flex items-center justify-between">
+            <Label>Conditions</Label>
+            <select className="rounded border border-gray-200 px-2 py-1 text-xs" value={conditionLogic} onChange={(e) => setConditionLogic(e.target.value as "and" | "or")}>
+              <option value="and">AND</option>
+              <option value="or">OR</option>
+            </select>
+          </div>
+          <div className="flex flex-col gap-2">
+            {conditions.map((c, i) => (
+              <InboundConditionRow
+                key={i}
+                condition={c}
+                mappableKeys={mappableKeys}
+                onChange={(next) => setConditions((prev) => prev.map((x, j) => (j === i ? next : x)))}
+                onRemove={() => setConditions((prev) => prev.filter((_, j) => j !== i))}
+              />
+            ))}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setConditions((prev) => [...prev, { field: mappableKeys[0] ?? "", op: "eq", value: "" }])}
+            >
+              <Plus className="h-3.5 w-3.5" /> Add condition
+            </Button>
+          </div>
+          <p className="text-xs text-gray-400">No conditions = always matches (catch-all)</p>
+        </div>
+
+        {actionType === "create" && (
           <>
             <div>
               <Label>On duplicate external_id</Label>
@@ -633,16 +890,29 @@ function EventDrawer({
             </div>
           </>
         )}
-        {action !== "create" && (
-          <div>
-            <Label>Lookup lead by</Label>
-            <select className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm" value={lookupBy} onChange={(e) => setLookupBy(e.target.value as typeof lookupBy)}>
-              <option value="external_id">external_id</option>
-              <option value="public_id">public_id</option>
-            </select>
+
+        {actionType !== "create" && (
+          <div className="space-y-2">
+            <div>
+              <Label>Lookup lead by</Label>
+              <select className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm" value={lookupBy} onChange={(e) => setLookupBy(e.target.value as NonNullable<WebhookEvent["lookup_by"]>)}>
+                <option value="phone">phone</option>
+                <option value="email">email</option>
+                <option value="external_id">external_id</option>
+                <option value="public_id">public_id</option>
+              </select>
+            </div>
+            <div>
+              <Label>Lookup value from payload key</Label>
+              <select className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm" value={lookupSourceKey} onChange={(e) => setLookupSourceKey(e.target.value)}>
+                <option value="">Select payload key</option>
+                {mappableKeys.map((k) => <option key={k} value={k}>{k}</option>)}
+              </select>
+            </div>
           </div>
         )}
-        {action === "move_stage" && (
+
+        {actionType === "move_stage" && (
           <>
             <div>
               <Label>Pipeline</Label>
@@ -660,38 +930,37 @@ function EventDrawer({
             </div>
           </>
         )}
+
+        {(actionType === "create" || actionType === "update") && fieldMapActionId && (
+          <ActionFieldMapping webhookId={webhookId} actionId={fieldMapActionId} payload={payload} />
+        )}
+        {(actionType === "create" || actionType === "update") && !fieldMapActionId && (
+          <p className="text-sm text-gray-500">Save the action first, then map fields.</p>
+        )}
       </div>
     </FormDrawer>
   );
 }
 
-function EventFieldMapDrawer({
+function ActionFieldMapping({
   webhookId,
-  event,
-  slug,
-  open,
-  onClose,
+  actionId,
+  payload,
 }: {
   webhookId: number;
-  event: WebhookEvent | null;
-  slug: string;
-  open: boolean;
-  onClose: () => void;
+  actionId: number;
+  payload: Record<string, unknown> | null;
 }) {
-  if (!open || !event) return null;
-
-  const { data: entries } = useWebhookFieldMap(webhookId, event.id);
-  const { data: sample, isLoading: sampleLoading, refetch } = useWebhookSamplePayload(webhookId, true);
+  const { data: entries } = useWebhookFieldMap(webhookId, actionId);
   const { data: customFields } = useCustomFields();
   const add = useAddWebhookFieldMap();
   const remove = useDeleteWebhookFieldMap();
   const createField = useCreateField();
 
   const [sourceKey, setSourceKey] = useState("");
-  const [target, setTarget] = useState("external_id");
+  const [target, setTarget] = useState("first_name");
   const [createFieldOpen, setCreateFieldOpen] = useState(false);
 
-  const payload = sample?.payload ?? null;
   const mappableKeys = payload ? mappablePayloadKeys(payload) : [];
   const mapped = mappedKeys(entries ?? []);
   const unmappedKeys = mappableKeys.filter((k) => !mapped.has(k));
@@ -701,65 +970,53 @@ function EventFieldMapDrawer({
     const body: Record<string, unknown> = isCustom
       ? { source_key: key, target_type: "custom", custom_field_id: Number(targetVal.slice(3)) }
       : { source_key: key, target_type: "builtin", builtin_field: targetVal };
-    add.mutate({ webhookId, eventId: event!.id, body }, {
+    add.mutate({ webhookId, eventId: actionId, body }, {
       onSuccess: () => setSourceKey(""),
       onError: (e) => toast.error(errorMessage(e)),
     });
   }
 
   return (
-    <FormDrawer open onClose={onClose} title="Event field mapping" subtitle={`${event.event_key} · ${slug}`} width={560}>
-      <div className="space-y-4">
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label>Latest payload</Label>
-            <Button size="sm" variant="secondary" onClick={() => refetch()}><RefreshCw className="h-3.5 w-3.5" /> Refresh</Button>
-          </div>
-          {sampleLoading ? <Spinner className="h-5 w-5" /> : !payload ? (
-            <p className="text-sm text-gray-500">No webhook received yet.</p>
-          ) : (
-            <pre className="max-h-48 overflow-auto rounded-md border border-gray-100 bg-gray-50 p-3 font-mono text-xs">{JSON.stringify(payload, null, 2)}</pre>
-          )}
+    <div className="space-y-3 rounded-md border border-gray-100 p-3">
+      <Label>Field mapping</Label>
+      {payload ? (
+        <pre className="max-h-32 overflow-auto rounded-md border border-gray-100 bg-gray-50 p-2 font-mono text-xs">{JSON.stringify(payload, null, 2)}</pre>
+      ) : (
+        <p className="text-sm text-gray-500">No sample payload yet — send a webhook or use Actions from delivery log.</p>
+      )}
+      {unmappedKeys.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {unmappedKeys.map((k) => (
+            <button key={k} type="button" onClick={() => setSourceKey(k)} className="rounded-full border border-jade-200 bg-jade-50 px-2 py-0.5 font-mono text-xs">{k}</button>
+          ))}
         </div>
-
-        {unmappedKeys.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {unmappedKeys.map((k) => (
-              <button key={k} type="button" onClick={() => setSourceKey(k)} className="rounded-full border border-jade-200 bg-jade-50 px-2 py-0.5 font-mono text-xs">{k}</button>
-            ))}
-          </div>
-        )}
-
-        <div className="flex gap-2">
-          <Input value={sourceKey} onChange={(e) => setSourceKey(e.target.value)} placeholder="payload key" className="flex-1" />
-          <BuiltinCustomFieldSelect
-            label="Target field"
-            builtins={BUILTINS}
-            customFields={customFields ?? []}
-            value={target}
-            onChange={setTarget}
-            onAddCustomField={() => setCreateFieldOpen(true)}
-          />
-          <Button disabled={!sourceKey} onClick={() => addMapping(sourceKey, target)}>Map</Button>
-        </div>
-
-        {(entries ?? []).length > 0 && (
-          <Table>
-            <THead><tr><TH>Payload key</TH><TH>Target</TH><TH /></tr></THead>
-            <TBody>
-              {(entries ?? []).map((e) => (
-                <TR key={e.id}>
-                  <TD className="font-mono text-xs">{e.source_key}</TD>
-                  <TD className="text-xs">{e.target_type === "builtin" ? e.builtin_field : `custom #${e.custom_field_id}`}</TD>
-                  <TD>
-                    <IconButton variant="danger" onClick={() => remove.mutate(e.id)}><Trash2 className="h-4 w-4" /></IconButton>
-                  </TD>
-                </TR>
-              ))}
-            </TBody>
-          </Table>
-        )}
+      )}
+      <div className="flex gap-2">
+        <Input value={sourceKey} onChange={(e) => setSourceKey(e.target.value)} placeholder="payload key" className="flex-1" />
+        <BuiltinCustomFieldSelect
+          label="Lead field"
+          builtins={BUILTINS}
+          customFields={customFields ?? []}
+          value={target}
+          onChange={setTarget}
+          onAddCustomField={() => setCreateFieldOpen(true)}
+        />
+        <Button disabled={!sourceKey} onClick={() => addMapping(sourceKey, target)}>Map</Button>
       </div>
+      {(entries ?? []).length > 0 && (
+        <Table>
+          <THead><tr><TH>Payload key</TH><TH>Lead field</TH><TH /></tr></THead>
+          <TBody>
+            {(entries ?? []).map((e) => (
+              <TR key={e.id}>
+                <TD className="font-mono text-xs">{e.source_key}</TD>
+                <TD className="text-xs">{e.target_type === "builtin" ? e.builtin_field : `custom #${e.custom_field_id}`}</TD>
+                <TD><IconButton variant="danger" onClick={() => remove.mutate(e.id)}><Trash2 className="h-4 w-4" /></IconButton></TD>
+              </TR>
+            ))}
+          </TBody>
+        </Table>
+      )}
       <CreateCustomFieldDrawer
         open={createFieldOpen}
         onClose={() => setCreateFieldOpen(false)}
@@ -776,7 +1033,7 @@ function EventFieldMapDrawer({
           })
         }
       />
-    </FormDrawer>
+    </div>
   );
 }
 

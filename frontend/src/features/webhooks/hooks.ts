@@ -122,6 +122,28 @@ export function useWebhookDeliveries(webhookId: number | null) {
     queryKey: ["webhook-deliveries", webhookId],
     queryFn: () => get<WebhookDeliveryListResponse>(`${base()}/${webhookId}/deliveries`),
     enabled: !!webhookId,
+    refetchInterval: 5000,
+  });
+}
+
+export function useWebhookDelivery(webhookId: number | null, deliveryId: number | null) {
+  return useQuery({
+    queryKey: ["webhook-delivery", webhookId, deliveryId],
+    queryFn: () => get<import("@/types").WebhookDelivery>(`${base()}/${webhookId}/deliveries/${deliveryId}`),
+    enabled: !!webhookId && !!deliveryId,
+  });
+}
+
+export function useReplayWebhookDelivery() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ webhookId, deliveryId }: { webhookId: number; deliveryId: number }) =>
+      post(`${base()}/${webhookId}/deliveries/${deliveryId}/replay`, {}),
+    onSuccess: (_, { webhookId }) => {
+      qc.invalidateQueries({ queryKey: ["webhook-deliveries", webhookId] });
+      qc.invalidateQueries({ queryKey: ["webhook-sample-payload", webhookId] });
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    },
   });
 }
 
