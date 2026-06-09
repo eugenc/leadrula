@@ -14,9 +14,9 @@ type Handler struct{ svc *Service }
 
 func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 
-// RegisterPublicRoutes mounts the secret-authenticated ingest endpoint.
+// RegisterPublicRoutes mounts the webhook ingest endpoint.
 func (h *Handler) RegisterPublicRoutes(r chi.Router) {
-	r.With(h.RequireSecret).Post("/api/v1/webhooks/{slug}", h.ingest)
+	r.With(h.AuthenticateWebhook).Post("/api/v1/webhooks/{slug}", h.ingest)
 }
 
 // RegisterRoutes mounts admin CRUD for publisher or buyer namespace.
@@ -49,23 +49,29 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	})
 }
 
-// RequireSecret is middleware that authenticates inbound webhook calls.
-func (h *Handler) RequireSecret(next http.Handler) http.Handler {
+// AuthenticateWebhook resolves the webhook by slug and optionally verifies a Bearer secret.
+func (h *Handler) AuthenticateWebhook(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := auth.Bearer(r)
-		if token == "" {
-			httpx.Err(w, http.StatusUnauthorized, httpx.CodeUnauthorized, "missing webhook secret")
+		slug := chi.URLParam(r, "slug")
+		wh, err := h.svc.ResolveBySlug(r.Context(), slug)
+		if err != nil {
+			httpx.Err(w, http.StatusUnauthorized, httpx.CodeUnauthorized, "invalid webhook")
 			return
 		}
-		slug := chi.URLParam(r, "slug")
-		wa, err := h.svc.VerifySecret(r.Context(), slug, token)
-		if err != nil {
-			httpx.Err(w, http.StatusUnauthorized, httpx.CodeUnauthorized, "invalid webhook secret")
-			return
+		if wh.InboundSecretRequired {
+			token := auth.Bearer(r)
+			if token == "" {
+				httpx.Err(w, http.StatusUnauthorized, httpx.CodeUnauthorized, "missing webhook secret")
+				return
+			}
+			if !verifySecretForWebhook(wh, token) {
+				httpx.Err(w, http.StatusUnauthorized, httpx.CodeUnauthorized, "invalid webhook secret")
+				return
+			}
 		}
 		ctx := auth.WithWebhookAuth(r.Context(), &auth.WebhookAuth{
-			WebhookID: wa.WebhookID,
-			AccountID: wa.AccountID,
+			WebhookID: wh.ID,
+			AccountID: wh.AccountID,
 		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -109,21 +115,25 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
-		Name            string  `json:"name"`
-		Slug            string  `json:"slug"`
-		InboundEnabled  *bool   `json:"inbound_enabled"`
-		OutboundEnabled *bool   `json:"outbound_enabled"`
-		OutboundURL     *string `json:"outbound_url"`
+		Name                  string  `json:"name"`
+		Slug                  string  `json:"slug"`
+		InboundEnabled        *bool   `json:"inbound_enabled"`
+		InboundSecretRequired *bool   `json:"inbound_secret_required"`
+		OutboundEnabled       *bool   `json:"outbound_enabled"`
+		OutboundSignEnabled   *bool   `json:"outbound_sign_enabled"`
+		OutboundURL           *string `json:"outbound_url"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
 	wb, secret, err := h.svc.Create(r.Context(), p.AccountID, CreateWebhookInput{
-		Name:            body.Name,
-		Slug:            body.Slug,
-		InboundEnabled:  body.InboundEnabled,
-		OutboundEnabled: body.OutboundEnabled,
-		OutboundURL:     body.OutboundURL,
+		Name:                  body.Name,
+		Slug:                  body.Slug,
+		InboundEnabled:        body.InboundEnabled,
+		InboundSecretRequired: body.InboundSecretRequired,
+		OutboundEnabled:       body.OutboundEnabled,
+		OutboundSignEnabled:   body.OutboundSignEnabled,
+		OutboundURL:           body.OutboundURL,
 	})
 	if err != nil {
 		httpx.WriteError(w, err)
@@ -139,7 +149,9 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		Slug                    *string         `json:"slug"`
 		IsActive                *bool           `json:"is_active"`
 		InboundEnabled          *bool           `json:"inbound_enabled"`
+		InboundSecretRequired   *bool           `json:"inbound_secret_required"`
 		OutboundEnabled         *bool           `json:"outbound_enabled"`
+		OutboundSignEnabled     *bool           `json:"outbound_sign_enabled"`
 		OutboundURL             *string         `json:"outbound_url"`
 		OutboundFormat          *string         `json:"outbound_format"`
 		OutboundMethod          *string         `json:"outbound_method"`
@@ -155,7 +167,9 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		Slug:                    body.Slug,
 		IsActive:                body.IsActive,
 		InboundEnabled:          body.InboundEnabled,
+		InboundSecretRequired:   body.InboundSecretRequired,
 		OutboundEnabled:         body.OutboundEnabled,
+		OutboundSignEnabled:     body.OutboundSignEnabled,
 		OutboundURL:             body.OutboundURL,
 		OutboundFormat:          body.OutboundFormat,
 		OutboundMethod:          body.OutboundMethod,

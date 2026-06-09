@@ -21,10 +21,12 @@ type Webhook struct {
 	AccountID               int64           `json:"-"`
 	Name                    string          `json:"name"`
 	Slug                    string          `json:"slug"`
-	SecretPrefix            string          `json:"secret_prefix"`
+	SecretPrefix            string          `json:"secret_prefix,omitempty"`
 	IsActive                bool            `json:"is_active"`
 	InboundEnabled          bool            `json:"inbound_enabled"`
+	InboundSecretRequired   bool            `json:"inbound_secret_required"`
 	OutboundEnabled         bool            `json:"outbound_enabled"`
+	OutboundSignEnabled     bool            `json:"outbound_sign_enabled"`
 	OutboundURL             *string         `json:"outbound_url,omitempty"`
 	OutboundFormat          string          `json:"outbound_format"`
 	OutboundMethod          string          `json:"outbound_method"`
@@ -148,14 +150,16 @@ func NewService(pool *pgxpool.Pool, leadRepo *leads.Repository, leadSvc *leads.S
 }
 
 const webhookCols = `id, account_id, name, slug, secret_prefix, is_active,
-    inbound_enabled, outbound_enabled, outbound_url, outbound_format, outbound_method,
+    inbound_enabled, inbound_secret_required, outbound_enabled, outbound_sign_enabled,
+    outbound_url, outbound_format, outbound_method,
     outbound_payload_template, outbound_field_map, outbound_response_map,
     outbound_connection_id, created_at`
 
 func scanWebhook(row interface{ Scan(...any) error }) (Webhook, error) {
 	var w Webhook
 	return w, row.Scan(&w.ID, &w.AccountID, &w.Name, &w.Slug, &w.SecretPrefix, &w.IsActive,
-		&w.InboundEnabled, &w.OutboundEnabled, &w.OutboundURL, &w.OutboundFormat, &w.OutboundMethod,
+		&w.InboundEnabled, &w.InboundSecretRequired, &w.OutboundEnabled, &w.OutboundSignEnabled,
+		&w.OutboundURL, &w.OutboundFormat, &w.OutboundMethod,
 		&w.OutboundPayloadTemplate, &w.OutboundFieldMap, &w.OutboundResponseMap,
 		&w.OutboundConnectionID, &w.CreatedAt)
 }
@@ -179,42 +183,60 @@ func (s *Service) List(ctx context.Context, accountID int64) ([]Webhook, error) 
 }
 
 type CreateWebhookInput struct {
-	Name            string
-	Slug            string
-	InboundEnabled  *bool
-	OutboundEnabled *bool
-	OutboundURL     *string
+	Name                  string
+	Slug                  string
+	InboundEnabled        *bool
+	InboundSecretRequired *bool
+	OutboundEnabled       *bool
+	OutboundSignEnabled   *bool
+	OutboundURL           *string
 }
 
-func (s *Service) Create(ctx context.Context, accountID int64, in CreateWebhookInput) (*Webhook, string, error) {
-	// Default: inbound enabled unless explicitly set to false.
+func (s *Service) Create(ctx context.Context, accountID int64, in CreateWebhookInput) (*Webhook, *string, error) {
 	inbound := true
 	if in.InboundEnabled != nil {
 		inbound = *in.InboundEnabled
+	}
+	inboundSecretRequired := true
+	if in.InboundSecretRequired != nil {
+		inboundSecretRequired = *in.InboundSecretRequired
 	}
 	outbound := false
 	if in.OutboundEnabled != nil {
 		outbound = *in.OutboundEnabled
 	}
-
-	secret, full, hash, prefix, err := generateSecret()
-	if err != nil {
-		return nil, "", err
+	outboundSignEnabled := true
+	if in.OutboundSignEnabled != nil {
+		outboundSignEnabled = *in.OutboundSignEnabled
 	}
+
+	var hash, prefix *string
+	var full *string
+	if inboundSecretRequired {
+		_, generated, h, p, err := generateSecret()
+		if err != nil {
+			return nil, nil, err
+		}
+		hash = &h
+		prefix = &p
+		full = &generated
+	}
+
 	w := &Webhook{}
 	row := s.pool.QueryRow(ctx,
-		`INSERT INTO webhooks(account_id, name, slug, secret_hash, secret_prefix, inbound_enabled, outbound_enabled, outbound_url)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+		`INSERT INTO webhooks(account_id, name, slug, secret_hash, secret_prefix,
+		 inbound_enabled, inbound_secret_required, outbound_enabled, outbound_sign_enabled, outbound_url)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		 RETURNING `+webhookCols,
-		accountID, in.Name, in.Slug, hash, prefix, inbound, outbound, in.OutboundURL)
+		accountID, in.Name, in.Slug, hash, prefix,
+		inbound, inboundSecretRequired, outbound, outboundSignEnabled, in.OutboundURL)
+	var err error
 	if *w, err = scanWebhook(row); err != nil {
 		if database.IsUniqueViolation(err) {
-			return nil, "", httpx.Conflict("a webhook with this slug already exists")
+			return nil, nil, httpx.Conflict("a webhook with this slug already exists")
 		}
-		return nil, "", err
+		return nil, nil, err
 	}
-	_ = secret
-	// Provision outbound connection if outbound is enabled with a URL.
 	if outbound && in.OutboundURL != nil && *in.OutboundURL != "" {
 		_ = s.syncOutboundConnection(ctx, w)
 	}
@@ -226,7 +248,9 @@ type UpdateWebhookInput struct {
 	Slug                    *string
 	IsActive                *bool
 	InboundEnabled          *bool
+	InboundSecretRequired   *bool
 	OutboundEnabled         *bool
+	OutboundSignEnabled     *bool
 	OutboundURL             *string
 	OutboundFormat          *string
 	OutboundMethod          *string
@@ -242,6 +266,10 @@ func (s *Service) Update(ctx context.Context, accountID, id int64, in UpdateWebh
 			return nil, httpx.Validation("outbound_field_map required for url format")
 		}
 	}
+	current, err := s.getWebhook(ctx, accountID, id)
+	if err != nil {
+		return nil, err
+	}
 	w := &Webhook{}
 	row := s.pool.QueryRow(ctx,
 		`UPDATE webhooks SET
@@ -249,20 +277,21 @@ func (s *Service) Update(ctx context.Context, accountID, id int64, in UpdateWebh
 		   slug                      = COALESCE($4, slug),
 		   is_active                 = COALESCE($5, is_active),
 		   inbound_enabled           = COALESCE($6, inbound_enabled),
-		   outbound_enabled          = COALESCE($7, outbound_enabled),
-		   outbound_url              = COALESCE($8, outbound_url),
-		   outbound_format           = COALESCE($9, outbound_format),
-		   outbound_method           = COALESCE($10, outbound_method),
-		   outbound_payload_template = COALESCE($11, outbound_payload_template),
-		   outbound_field_map        = COALESCE($12, outbound_field_map),
-		   outbound_response_map     = COALESCE($13, outbound_response_map)
+		   inbound_secret_required   = COALESCE($7, inbound_secret_required),
+		   outbound_enabled          = COALESCE($8, outbound_enabled),
+		   outbound_sign_enabled     = COALESCE($9, outbound_sign_enabled),
+		   outbound_url              = COALESCE($10, outbound_url),
+		   outbound_format           = COALESCE($11, outbound_format),
+		   outbound_method           = COALESCE($12, outbound_method),
+		   outbound_payload_template = COALESCE($13, outbound_payload_template),
+		   outbound_field_map        = COALESCE($14, outbound_field_map),
+		   outbound_response_map     = COALESCE($15, outbound_response_map)
 		 WHERE id=$1 AND account_id=$2
 		 RETURNING `+webhookCols,
 		id, accountID, in.Name, in.Slug, in.IsActive,
-		in.InboundEnabled, in.OutboundEnabled, in.OutboundURL,
-		in.OutboundFormat, in.OutboundMethod,
+		in.InboundEnabled, in.InboundSecretRequired, in.OutboundEnabled, in.OutboundSignEnabled,
+		in.OutboundURL, in.OutboundFormat, in.OutboundMethod,
 		in.OutboundPayloadTemplate, nullableJSON(in.OutboundFieldMap), in.OutboundResponseMap)
-	var err error
 	if *w, err = scanWebhook(row); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, httpx.NotFound("webhook not found")
@@ -272,13 +301,64 @@ func (s *Service) Update(ctx context.Context, accountID, id int64, in UpdateWebh
 		}
 		return nil, err
 	}
-	// Provision or refresh the hidden outbound integration connection.
-	if in.OutboundEnabled != nil || in.OutboundURL != nil || in.OutboundFormat != nil || in.OutboundMethod != nil {
+	if err := s.applyInboundSecretTransition(ctx, accountID, id, current.InboundSecretRequired, w.InboundSecretRequired); err != nil {
+		return nil, err
+	}
+	if refreshed, err := s.getWebhook(ctx, accountID, id); err == nil {
+		*w = *refreshed
+	}
+	if in.OutboundEnabled != nil || in.OutboundURL != nil || in.OutboundFormat != nil ||
+		in.OutboundMethod != nil || in.OutboundSignEnabled != nil {
 		if err := s.syncOutboundConnection(ctx, w); err != nil {
 			return nil, err
 		}
 	}
 	return w, nil
+}
+
+func (s *Service) getWebhook(ctx context.Context, accountID, id int64) (*Webhook, error) {
+	w, err := scanWebhook(s.pool.QueryRow(ctx,
+		`SELECT `+webhookCols+` FROM webhooks WHERE id=$1 AND account_id=$2`, id, accountID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, httpx.NotFound("webhook not found")
+		}
+		return nil, err
+	}
+	return &w, nil
+}
+
+func (s *Service) applyInboundSecretTransition(ctx context.Context, accountID, id int64, wasRequired, nowRequired bool) error {
+	if wasRequired == nowRequired {
+		return nil
+	}
+	if nowRequired {
+		_, full, hash, prefix, err := generateSecret()
+		if err != nil {
+			return err
+		}
+		ct, err := s.pool.Exec(ctx,
+			`UPDATE webhooks SET secret_hash=$3, secret_prefix=$4 WHERE id=$1 AND account_id=$2`,
+			id, accountID, hash, prefix)
+		if err != nil {
+			return err
+		}
+		if ct.RowsAffected() == 0 {
+			return httpx.NotFound("webhook not found")
+		}
+		_ = full
+		return nil
+	}
+	ct, err := s.pool.Exec(ctx,
+		`UPDATE webhooks SET secret_hash=NULL, secret_prefix=NULL WHERE id=$1 AND account_id=$2`,
+		id, accountID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return httpx.NotFound("webhook not found")
+	}
+	return nil
 }
 
 func (s *Service) Delete(ctx context.Context, accountID, id int64) error {
@@ -293,6 +373,13 @@ func (s *Service) Delete(ctx context.Context, accountID, id int64) error {
 }
 
 func (s *Service) RotateSecret(ctx context.Context, accountID, id int64) (string, error) {
+	w, err := s.getWebhook(ctx, accountID, id)
+	if err != nil {
+		return "", err
+	}
+	if !w.InboundSecretRequired {
+		return "", httpx.Validation("inbound secret is disabled for this webhook")
+	}
 	_, full, hash, prefix, err := generateSecret()
 	if err != nil {
 		return "", err
@@ -616,31 +703,56 @@ func (s *Service) ListAccountDeliveries(ctx context.Context, accountID int64, p 
 	return &AccountDeliveryListResult{Items: items, Total: total, Page: page, Limit: limit}, rows.Err()
 }
 
+type resolvedWebhook struct {
+	ID                    int64
+	AccountID             int64
+	SecretHash            *string
+	SecretPrefix          string
+	InboundSecretRequired bool
+}
+
+// ResolveBySlug loads an active inbound webhook by slug.
+func (s *Service) ResolveBySlug(ctx context.Context, slug string) (*resolvedWebhook, error) {
+	var w resolvedWebhook
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, account_id, secret_hash, COALESCE(secret_prefix, ''), inbound_secret_required
+		 FROM webhooks
+		 WHERE slug=$1 AND is_active AND inbound_enabled`, slug).Scan(
+		&w.ID, &w.AccountID, &w.SecretHash, &w.SecretPrefix, &w.InboundSecretRequired)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.New("webhook not found")
+		}
+		return nil, err
+	}
+	return &w, nil
+}
+
+func verifySecretForWebhook(w *resolvedWebhook, full string) bool {
+	if w.SecretHash == nil || *w.SecretHash == "" {
+		return false
+	}
+	prefix, _, ok := splitSecret(full)
+	if !ok || prefix != w.SecretPrefix {
+		return false
+	}
+	match, _ := auth.VerifyPassword(full, *w.SecretHash)
+	return match
+}
+
 // VerifySecret resolves a webhook by slug + secret.
 func (s *Service) VerifySecret(ctx context.Context, slug, full string) (*WebhookAuth, error) {
-	prefix, _, ok := splitSecret(full)
-	if !ok {
-		return nil, errors.New("malformed secret")
-	}
-	rows, err := s.pool.Query(ctx,
-		`SELECT w.id, w.account_id, w.secret_hash
-		 FROM webhooks w WHERE w.slug=$1 AND w.secret_prefix=$2 AND w.is_active`, slug, prefix)
+	w, err := s.ResolveBySlug(ctx, slug)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var id, accountID int64
-		var hash string
-		if err := rows.Scan(&id, &accountID, &hash); err != nil {
-			return nil, err
-		}
-		match, _ := auth.VerifyPassword(full, hash)
-		if match {
-			return &WebhookAuth{WebhookID: id, AccountID: accountID}, nil
-		}
+	if !w.InboundSecretRequired {
+		return nil, errors.New("secret not required")
 	}
-	return nil, errors.New("invalid secret")
+	if !verifySecretForWebhook(w, full) {
+		return nil, errors.New("invalid secret")
+	}
+	return &WebhookAuth{WebhookID: w.ID, AccountID: w.AccountID}, nil
 }
 
 type WebhookAuth struct {

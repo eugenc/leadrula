@@ -179,6 +179,7 @@ function slugify(name: string) {
 function InboundEndpointRows({
   slug,
   secret,
+  secretRequired,
   showSecret,
   onToggleSecret,
   onCopySecret,
@@ -187,6 +188,7 @@ function InboundEndpointRows({
 }: {
   slug: string;
   secret: string | null;
+  secretRequired: boolean;
   showSecret: boolean;
   onToggleSecret: () => void;
   onCopySecret: () => void;
@@ -205,25 +207,29 @@ function InboundEndpointRows({
           <Copy className="h-3.5 w-3.5" />
         </IconButton>
       </div>
-      <div className="flex items-center gap-2 text-xs text-gray-700">
-        <span className="font-medium">Secret:</span>
-        <span className="font-mono select-all">
-          {secret && showSecret ? secret : "••••••••••••••••"}
-        </span>
-        <IconButton
-          aria-label={showSecret ? "Hide secret" : "Show secret"}
-          disabled={!secret}
-          onClick={onToggleSecret}
-        >
-          {showSecret ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-        </IconButton>
-        <IconButton aria-label="Copy secret" disabled={!secret} onClick={onCopySecret}>
-          <Copy className="h-3.5 w-3.5" />
-        </IconButton>
-        <IconButton aria-label="Rotate secret" disabled={rotatePending} onClick={onRotate}>
-          <KeyRound className="h-3.5 w-3.5" />
-        </IconButton>
-      </div>
+      {!secretRequired ? (
+        <p className="text-xs text-amber-700">No secret required. Anyone with this URL can POST payloads.</p>
+      ) : (
+        <div className="flex items-center gap-2 text-xs text-gray-700">
+          <span className="font-medium">Secret:</span>
+          <span className="font-mono select-all">
+            {secret && showSecret ? secret : "••••••••••••••••"}
+          </span>
+          <IconButton
+            aria-label={showSecret ? "Hide secret" : "Show secret"}
+            disabled={!secret}
+            onClick={onToggleSecret}
+          >
+            {showSecret ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+          </IconButton>
+          <IconButton aria-label="Copy secret" disabled={!secret} onClick={onCopySecret}>
+            <Copy className="h-3.5 w-3.5" />
+          </IconButton>
+          <IconButton aria-label="Rotate secret" disabled={rotatePending} onClick={onRotate}>
+            <KeyRound className="h-3.5 w-3.5" />
+          </IconButton>
+        </div>
+      )}
     </div>
   );
 }
@@ -335,9 +341,13 @@ export function WebhooksPage() {
         onClose={() => { setDrawerWebhook(undefined); setMappingContext(null); }}
         onCreated={(wb, secret) => {
           toast.success("Webhook created");
-          navigator.clipboard.writeText(secret);
-          toast.success("Secret copied to clipboard");
-          setDetailSecret(secret);
+          if (secret) {
+            navigator.clipboard.writeText(secret);
+            toast.success("Secret copied to clipboard");
+            setDetailSecret(secret);
+          } else {
+            setDetailSecret(null);
+          }
           setDetailFor(wb);
         }}
       />
@@ -371,7 +381,7 @@ function WebhookDrawer({
   mappingContext?: MappingContext;
   onMappingContextChange?: (ctx: MappingContext) => void;
   onClose: () => void;
-  onCreated?: (wb: Webhook, secret: string) => void;
+  onCreated?: (wb: Webhook, secret: string | null) => void;
 }) {
   if (!open) return null;
   const editing = webhook !== null;
@@ -395,7 +405,9 @@ function WebhookDrawer({
   const [slugTouched, setSlugTouched] = useState(false);
   const [isActive, setIsActive] = useState(webhook?.is_active ?? true);
   const [inboundEnabled, setInboundEnabled] = useState(webhook?.inbound_enabled ?? true);
+  const [inboundSecretRequired, setInboundSecretRequired] = useState(webhook?.inbound_secret_required ?? true);
   const [outboundEnabled, setOutboundEnabled] = useState(webhook?.outbound_enabled ?? false);
+  const [outboundSignEnabled, setOutboundSignEnabled] = useState(webhook?.outbound_sign_enabled ?? true);
   const [outboundURL, setOutboundURL] = useState(webhook?.outbound_url ?? "");
   const [outboundFormat, setOutboundFormat] = useState<OutboundFormat>(webhook?.outbound_format ?? "json");
   const [outboundMethod, setOutboundMethod] = useState<OutboundMethod>(webhook?.outbound_method ?? "POST");
@@ -410,7 +422,9 @@ function WebhookDrawer({
     setSlugTouched(false);
     setIsActive(webhook?.is_active ?? true);
     setInboundEnabled(webhook?.inbound_enabled ?? true);
+    setInboundSecretRequired(webhook?.inbound_secret_required ?? true);
     setOutboundEnabled(webhook?.outbound_enabled ?? false);
+    setOutboundSignEnabled(webhook?.outbound_sign_enabled ?? true);
     setOutboundURL(webhook?.outbound_url ?? "");
     setOutboundFormat(webhook?.outbound_format ?? "json");
     setOutboundMethod(webhook?.outbound_method ?? "POST");
@@ -424,7 +438,9 @@ function WebhookDrawer({
       const body: Record<string, unknown> = {
         name, slug, is_active: isActive,
         inbound_enabled: inboundEnabled,
+        inbound_secret_required: inboundSecretRequired,
         outbound_enabled: outboundEnabled,
+        outbound_sign_enabled: outboundSignEnabled,
         outbound_url: outboundURL || null,
       };
       if (outboundEnabled) {
@@ -450,7 +466,9 @@ function WebhookDrawer({
           name,
           slug,
           inbound_enabled: inboundEnabled,
+          inbound_secret_required: inboundSecretRequired,
           outbound_enabled: outboundEnabled,
+          outbound_sign_enabled: outboundSignEnabled,
           outbound_url: outboundURL || null,
         },
         {
@@ -499,6 +517,18 @@ function WebhookDrawer({
             </div>
             <Switch checked={inboundEnabled} onChange={setInboundEnabled} />
           </div>
+          {inboundEnabled && (
+            <div className="flex items-center justify-between pl-2 border-l-2 border-gray-100">
+              <div>
+                <Label>Require secret</Label>
+                <p className="text-xs text-gray-500">Bearer token on inbound POST requests</p>
+              </div>
+              <Switch checked={inboundSecretRequired} onChange={setInboundSecretRequired} />
+            </div>
+          )}
+          {inboundEnabled && !inboundSecretRequired && (
+            <p className="text-xs text-amber-700">Anyone with the webhook URL can POST payloads.</p>
+          )}
           <div className="flex items-center justify-between">
             <div>
               <Label>Outbound</Label>
@@ -506,6 +536,18 @@ function WebhookDrawer({
             </div>
             <Switch checked={outboundEnabled} onChange={setOutboundEnabled} />
           </div>
+          {outboundEnabled && (
+            <div className="flex items-center justify-between pl-2 border-l-2 border-gray-100">
+              <div>
+                <Label>Sign requests</Label>
+                <p className="text-xs text-gray-500">X-Leadrula-Signature HMAC header</p>
+              </div>
+              <Switch checked={outboundSignEnabled} onChange={setOutboundSignEnabled} />
+            </div>
+          )}
+          {outboundEnabled && !outboundSignEnabled && (
+            <p className="text-xs text-amber-700">Outbound requests are unsigned. Receivers cannot verify payload integrity.</p>
+          )}
           {outboundEnabled && (
             <>
               <div>
@@ -565,7 +607,7 @@ function WebhookDrawer({
               <Label>Active</Label>
               <Switch checked={isActive} onChange={setIsActive} />
             </div>
-            {outboundEnabled && webhook!.outbound_url && (
+            {outboundEnabled && webhook!.outbound_url && outboundSignEnabled && (
               <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-800">
                 <p className="font-medium">Outbound HMAC secret</p>
                 <p className="text-xs text-blue-600 mt-1">Used to sign outbound requests (X-Leadrula-Signature header)</p>
@@ -746,6 +788,7 @@ function WebhookDetailDrawer({
           <InboundEndpointRows
             slug={webhook.slug}
             secret={secret}
+            secretRequired={webhook.inbound_secret_required}
             showSecret={showSecret}
             onToggleSecret={() => setShowSecret((v) => !v)}
             onCopySecret={() => { navigator.clipboard.writeText(secret!); toast.success("Secret copied"); }}

@@ -16,6 +16,7 @@ import (
 	"github.com/echayko/leadrula/backend/internal/database"
 	"github.com/echayko/leadrula/backend/internal/leads"
 	"github.com/echayko/leadrula/backend/internal/pipelines"
+	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -148,16 +149,13 @@ func (s *Service) syncOutboundConnection(ctx context.Context, w *Webhook) error 
 		return fmt.Errorf("webhook integration provider not found: %w", err)
 	}
 
-	secretHex, err := s.existingOutboundSecret(ctx, w.OutboundConnectionID)
+	existing, err := s.existingOutboundSecret(ctx, w.OutboundConnectionID)
 	if err != nil {
 		return err
 	}
-	if secretHex == "" {
-		rawSecret := make([]byte, 32)
-		if _, err := io.ReadFull(rand.Reader, rawSecret); err != nil {
-			return err
-		}
-		secretHex = fmt.Sprintf("%x", rawSecret)
+	secretHex, err := syncOutboundSecretValue(w.OutboundSignEnabled, existing)
+	if err != nil {
+		return err
 	}
 
 	format := w.OutboundFormat
@@ -212,6 +210,21 @@ func (s *Service) syncOutboundConnection(ctx context.Context, w *Webhook) error 
 	return nil
 }
 
+// syncOutboundSecretValue returns the HMAC secret to store for delivery credentials.
+func syncOutboundSecretValue(signEnabled bool, existing string) (string, error) {
+	if !signEnabled {
+		return "", nil
+	}
+	if existing != "" {
+		return existing, nil
+	}
+	rawSecret := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, rawSecret); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", rawSecret), nil
+}
+
 func (s *Service) existingOutboundSecret(ctx context.Context, connID *int64) (string, error) {
 	if connID == nil || len(s.encKey) == 0 {
 		return "", nil
@@ -242,18 +255,12 @@ func (s *Service) existingOutboundSecret(ctx context.Context, connID *int64) (st
 
 // RotateOutboundSecret regenerates the HMAC signing secret for the outbound connection.
 func (s *Service) RotateOutboundSecret(ctx context.Context, accountID, webhookID int64) (string, error) {
-	var w Webhook
-	if err := s.pool.QueryRow(ctx,
-		`SELECT `+webhookCols+` FROM webhooks WHERE id=$1 AND account_id=$2`,
-		webhookID, accountID).Scan(
-		&w.ID, &w.AccountID, &w.Name, &w.Slug, &w.SecretPrefix, &w.IsActive,
-		&w.InboundEnabled, &w.OutboundEnabled, &w.OutboundURL, &w.OutboundFormat, &w.OutboundMethod,
-		&w.OutboundPayloadTemplate, &w.OutboundFieldMap, &w.OutboundResponseMap,
-		&w.OutboundConnectionID, &w.CreatedAt); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return "", fmt.Errorf("webhook not found")
-		}
+	w, err := s.getWebhook(ctx, accountID, webhookID)
+	if err != nil {
 		return "", err
+	}
+	if !w.OutboundSignEnabled {
+		return "", httpx.Validation("outbound signing is disabled for this webhook")
 	}
 	if w.OutboundConnectionID == nil || w.OutboundURL == nil {
 		return "", fmt.Errorf("outbound not configured")

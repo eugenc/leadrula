@@ -355,7 +355,9 @@ export interface Webhook {
   secret_prefix: string;
   is_active: boolean;
   inbound_enabled: boolean;
+  inbound_secret_required: boolean;
   outbound_enabled: boolean;
+  outbound_sign_enabled: boolean;
   outbound_url?: string | null;
   outbound_format?: OutboundFormat;
   outbound_method?: OutboundMethod;

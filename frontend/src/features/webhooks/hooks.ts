@@ -21,7 +21,7 @@ export function useCreateWebhook() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: Record<string, unknown>) =>
-      post<{ webhook: Webhook; secret: string }>(base(), body),
+      post<{ webhook: Webhook; secret: string | null }>(base(), body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["webhooks"] }),
   });
 }
