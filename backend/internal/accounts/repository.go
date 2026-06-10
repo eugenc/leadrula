@@ -16,13 +16,13 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
-const accountCols = `id, public_id, handler_id, type, name, website, timezone, operational_status, created_at`
+const accountCols = `id, public_id, handler_id, type, name, website, timezone, operational_status, buyer_kind, created_at`
 
 func scanAccount(row pgx.Row) (*Account, error) {
 	a := &Account{}
 	err := row.Scan(
 		&a.ID, &a.PublicID, &a.HandlerID, &a.Type, &a.Name, &a.Website, &a.Timezone,
-		&a.OperationalStatus, &a.CreatedAt)
+		&a.OperationalStatus, &a.BuyerKind, &a.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -79,19 +79,19 @@ type AuthUser struct {
 	FullName        string
 	Role            string
 	IsActive        bool
+	LastLoginAt     *time.Time
 }
 
-func (r *Repository) FindUserByEmail(ctx context.Context, email string) (*AuthUser, error) {
-	const q = `
-		SELECT u.id, u.public_id, u.account_id, a.public_id, a.type,
+const authUserCols = `u.id, u.public_id, u.account_id, a.public_id, a.type,
 		       u.email, u.password_hash, u.full_name, u.role, u.is_active,
-		       a.operational_status
-		FROM users u JOIN accounts a ON a.id = u.account_id
-		WHERE u.email = $1 AND a.deleted_at IS NULL`
+		       a.operational_status, u.last_login_at`
+
+func scanAuthUser(row pgx.Row) (*AuthUser, error) {
 	u := &AuthUser{}
-	err := r.pool.QueryRow(ctx, q, email).Scan(
+	err := row.Scan(
 		&u.ID, &u.PublicID, &u.AccountID, &u.AccountPubID, &u.AccountType,
-		&u.Email, &u.PasswordHash, &u.FullName, &u.Role, &u.IsActive, &u.AccountOpStatus)
+		&u.Email, &u.PasswordHash, &u.FullName, &u.Role, &u.IsActive, &u.AccountOpStatus,
+		&u.LastLoginAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -101,6 +101,81 @@ func (r *Repository) FindUserByEmail(ctx context.Context, email string) (*AuthUs
 	return u, nil
 }
 
+func (r *Repository) FindUserByEmail(ctx context.Context, email string) (*AuthUser, error) {
+	const q = `
+		SELECT ` + authUserCols + `
+		FROM users u JOIN accounts a ON a.id = u.account_id
+		WHERE u.email = $1 AND a.deleted_at IS NULL
+		ORDER BY u.last_login_at DESC NULLS LAST, u.created_at
+		LIMIT 1`
+	return scanAuthUser(r.pool.QueryRow(ctx, q, email))
+}
+
+func (r *Repository) FindUsersByEmail(ctx context.Context, email string) ([]AuthUser, error) {
+	const q = `
+		SELECT ` + authUserCols + `
+		FROM users u JOIN accounts a ON a.id = u.account_id
+		WHERE u.email = $1 AND u.is_active AND a.deleted_at IS NULL
+		ORDER BY u.last_login_at DESC NULLS LAST, u.created_at`
+	rows, err := r.pool.Query(ctx, q, email)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AuthUser
+	for rows.Next() {
+		u, err := scanAuthUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *u)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) FindUserByEmailInAccount(ctx context.Context, accountID int64, email string) (*AuthUser, error) {
+	const q = `
+		SELECT ` + authUserCols + `
+		FROM users u JOIN accounts a ON a.id = u.account_id
+		WHERE u.email = $1 AND u.account_id = $2 AND a.deleted_at IS NULL`
+	return scanAuthUser(r.pool.QueryRow(ctx, q, email, accountID))
+}
+
+func (r *Repository) FindBuyerAdminByEmail(ctx context.Context, email string) (*AuthUser, error) {
+	const q = `
+		SELECT ` + authUserCols + `
+		FROM users u JOIN accounts a ON a.id = u.account_id
+		WHERE u.email = $1 AND a.type = 'buyer' AND u.role = 'admin' AND u.is_active
+		  AND a.deleted_at IS NULL
+		ORDER BY u.created_at
+		LIMIT 1`
+	return scanAuthUser(r.pool.QueryRow(ctx, q, email))
+}
+
+func (r *Repository) PublisherHasBuyerAdminEmail(ctx context.Context, publisherID int64, email string) (bool, error) {
+	const q = `
+		SELECT EXISTS (
+			SELECT 1
+			FROM partnerships p
+			JOIN accounts a ON a.id = p.buyer_id AND a.deleted_at IS NULL
+			WHERE p.publisher_id = $1 AND p.status = 'active'
+			  AND (
+			    EXISTS (
+			      SELECT 1 FROM users u
+			      WHERE u.account_id = a.id AND u.email = $2 AND u.role = 'admin'
+			    )
+			    OR EXISTS (
+			      SELECT 1 FROM invites i
+			      WHERE i.account_id = a.id AND i.email = $2 AND i.role = 'admin'
+			        AND i.accepted_at IS NULL AND i.expires_at > now()
+			    )
+			  )
+		)`
+	var ok bool
+	err := r.pool.QueryRow(ctx, q, publisherID, email).Scan(&ok)
+	return ok, err
+}
+
 func (r *Repository) TouchLogin(ctx context.Context, userID int64) error {
 	_, err := r.pool.Exec(ctx, `UPDATE users SET last_login_at = now() WHERE id = $1`, userID)
 	return err
@@ -108,17 +183,19 @@ func (r *Repository) TouchLogin(ctx context.Context, userID int64) error {
 
 // BuyerSummary is a publisher-oversight row: a buyer with balance + lead count.
 type BuyerSummary struct {
-	ID        int64   `json:"id"`
-	PublicID  string  `json:"public_id"`
-	HandlerID string  `json:"handler_id"`
-	Name      string  `json:"name"`
-	Balance   float64 `json:"balance"`
-	LeadCount int     `json:"lead_count"`
+	ID               int64   `json:"id"`
+	PublicID         string  `json:"public_id"`
+	HandlerID        string  `json:"handler_id"`
+	Name             string  `json:"name"`
+	BuyerKind        string  `json:"buyer_kind"`
+	Balance          float64 `json:"balance"`
+	LeadCount        int     `json:"lead_count"`
+	AdminProvisioned bool    `json:"admin_provisioned,omitempty"`
 }
 
 func (r *Repository) ListBuyers(ctx context.Context, publisherID int64) ([]BuyerSummary, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT a.id, a.public_id, a.handler_id, a.name,
+		`SELECT a.id, a.public_id, a.handler_id, a.name, a.buyer_kind::text,
 		        COALESCE(b.balance,0)::float8,
 		        (SELECT count(*) FROM leads l WHERE l.owner_account_id = a.id)
 		 FROM accounts a
@@ -132,7 +209,7 @@ func (r *Repository) ListBuyers(ctx context.Context, publisherID int64) ([]Buyer
 	var out []BuyerSummary
 	for rows.Next() {
 		var s BuyerSummary
-		if err := rows.Scan(&s.ID, &s.PublicID, &s.HandlerID, &s.Name, &s.Balance, &s.LeadCount); err != nil {
+		if err := rows.Scan(&s.ID, &s.PublicID, &s.HandlerID, &s.Name, &s.BuyerKind, &s.Balance, &s.LeadCount); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -189,10 +266,11 @@ func (r *Repository) UpdateBuyer(ctx context.Context, id int64, p UpdateBuyerPar
 		UPDATE accounts SET
 			name = COALESCE($2, name),
 			website = COALESCE($3, website),
-			timezone = COALESCE($4, timezone)
+			timezone = COALESCE($4, timezone),
+			buyer_kind = COALESCE($5::buyer_kind, buyer_kind)
 		WHERE id = $1 AND type = 'buyer' AND deleted_at IS NULL
 		RETURNING ` + accountCols
-	return scanAccount(r.pool.QueryRow(ctx, q, id, p.Name, p.Website, p.Timezone))
+	return scanAccount(r.pool.QueryRow(ctx, q, id, p.Name, p.Website, p.Timezone, p.BuyerKind))
 }
 
 func (r *Repository) UpdateBuyerByPublicID(ctx context.Context, publicID string, p UpdateBuyerParams) (*Account, error) {
@@ -200,10 +278,24 @@ func (r *Repository) UpdateBuyerByPublicID(ctx context.Context, publicID string,
 		UPDATE accounts SET
 			name = COALESCE($2, name),
 			website = COALESCE($3, website),
-			timezone = COALESCE($4, timezone)
+			timezone = COALESCE($4, timezone),
+			buyer_kind = COALESCE($5::buyer_kind, buyer_kind)
 		WHERE public_id = $1 AND type = 'buyer' AND deleted_at IS NULL
 		RETURNING ` + accountCols
-	return scanAccount(r.pool.QueryRow(ctx, q, publicID, p.Name, p.Website, p.Timezone))
+	return scanAccount(r.pool.QueryRow(ctx, q, publicID, p.Name, p.Website, p.Timezone, p.BuyerKind))
+}
+
+func (r *Repository) SetBuyerKind(ctx context.Context, buyerID int64, kind string) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE accounts SET buyer_kind = $2::buyer_kind WHERE id = $1 AND type = 'buyer' AND deleted_at IS NULL`,
+		buyerID, kind)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (r *Repository) UpdatePublisher(ctx context.Context, publicID string, p UpdatePublisherParams) (*Account, error) {
@@ -387,7 +479,7 @@ func (r *Repository) DeleteInvite(ctx context.Context, accountID, inviteID int64
 	return nil
 }
 
-// CreateBuyer inserts a buyer account, admin invite, balance row, and optional credit txn.
+// CreateBuyer inserts a buyer account, admin invite, and zero balance row.
 func (r *Repository) CreateBuyer(ctx context.Context, p CreateBuyerParams, token string, expires time.Time) (*CreateBuyerResult, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -399,7 +491,8 @@ func (r *Repository) CreateBuyer(ctx context.Context, p CreateBuyerParams, token
 	for range 10 {
 		hid := handlerid.Generate("B")
 		a, err = scanAccount(tx.QueryRow(ctx,
-			`INSERT INTO accounts(type, name, website, timezone, handler_id) VALUES ('buyer', $1, $2, $3, $4)
+			`INSERT INTO accounts(type, name, website, timezone, handler_id, buyer_kind)
+			 VALUES ('buyer', $1, $2, $3, $4, 'direct')
 			 RETURNING `+accountCols,
 			p.Name, p.Website, p.Timezone, hid))
 		if err == nil {
@@ -421,18 +514,9 @@ func (r *Repository) CreateBuyer(ctx context.Context, p CreateBuyerParams, token
 	}
 
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO buyer_balances(buyer_id, balance) VALUES ($1, $2)`,
-		a.ID, p.StartingBalance); err != nil {
+		`INSERT INTO buyer_balances(buyer_id, balance) VALUES ($1, 0)`,
+		a.ID); err != nil {
 		return nil, err
-	}
-
-	if p.StartingBalance > 0 {
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO transactions(buyer_id, type, amount, balance_after, description)
-			 VALUES ($1, 'credit', $2, $2, 'initial balance')`,
-			a.ID, p.StartingBalance); err != nil {
-			return nil, err
-		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -445,11 +529,76 @@ func (r *Repository) CreateBuyer(ctx context.Context, p CreateBuyerParams, token
 			PublicID:  a.PublicID,
 			HandlerID: a.HandlerID,
 			Name:      a.Name,
-			Balance:   p.StartingBalance,
+			BuyerKind: a.BuyerKind,
+			Balance:   0,
 			LeadCount: 0,
 		},
 		InviteToken: token,
 		AdminEmail:  p.AdminEmail,
+	}, nil
+}
+
+// CreateBuyerWithExistingAdmin inserts a buyer account and provisions an admin user copied from an existing buyer admin.
+func (r *Repository) CreateBuyerWithExistingAdmin(ctx context.Context, p CreateBuyerParams, existing *AuthUser) (*CreateBuyerResult, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var a *Account
+	for range 10 {
+		hid := handlerid.Generate("B")
+		a, err = scanAccount(tx.QueryRow(ctx,
+			`INSERT INTO accounts(type, name, website, timezone, handler_id, buyer_kind)
+			 VALUES ('buyer', $1, $2, $3, $4, 'direct')
+			 RETURNING `+accountCols,
+			p.Name, p.Website, p.Timezone, hid))
+		if err == nil {
+			break
+		}
+		if !database.IsUniqueViolation(err) {
+			return nil, err
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	adminName := strings.TrimSpace(p.AdminFirstName + " " + p.AdminLastName)
+	if adminName == "" {
+		adminName = existing.FullName
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO users(account_id, email, password_hash, full_name, role)
+		 VALUES ($1, $2, $3, $4, 'admin')`,
+		a.ID, p.AdminEmail, existing.PasswordHash, adminName); err != nil {
+		return nil, err
+	}
+
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO buyer_balances(buyer_id, balance) VALUES ($1, 0)`,
+		a.ID); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	return &CreateBuyerResult{
+		Buyer: BuyerSummary{
+			ID:               a.ID,
+			PublicID:         a.PublicID,
+			HandlerID:        a.HandlerID,
+			Name:             a.Name,
+			BuyerKind:        a.BuyerKind,
+			Balance:          0,
+			LeadCount:        0,
+			AdminProvisioned: true,
+		},
+		AdminEmail:       p.AdminEmail,
+		AdminProvisioned: true,
 	}, nil
 }
 
@@ -536,7 +685,11 @@ func (r *Repository) ConsumeReset(ctx context.Context, resetID, userID int64, pa
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `UPDATE users SET password_hash = $2 WHERE id = $1`, userID, passwordHash); err != nil {
+	var email string
+	if err := tx.QueryRow(ctx, `SELECT email FROM users WHERE id = $1`, userID).Scan(&email); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE users SET password_hash = $2 WHERE email = $1`, email, passwordHash); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE password_resets SET used_at = now() WHERE id = $1`, resetID); err != nil {
@@ -667,11 +820,11 @@ func (r *Repository) ListAccounts(ctx context.Context, accountType string) ([]Ac
 	defer rows.Close()
 	var out []Account
 	for rows.Next() {
-		var a Account
-		if err := rows.Scan(&a.ID, &a.PublicID, &a.HandlerID, &a.Type, &a.Name, &a.Website, &a.Timezone, &a.OperationalStatus, &a.CreatedAt); err != nil {
+		a, err := scanAccount(rows)
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, a)
+		out = append(out, *a)
 	}
 	if out == nil {
 		out = []Account{}
@@ -721,11 +874,11 @@ func (r *Repository) ListAccountsPage(ctx context.Context, p ListAccountsParams)
 
 	var items []Account
 	for rows.Next() {
-		var a Account
-		if err := rows.Scan(&a.ID, &a.PublicID, &a.HandlerID, &a.Type, &a.Name, &a.Website, &a.Timezone, &a.OperationalStatus, &a.CreatedAt); err != nil {
+		a, err := scanAccount(rows)
+		if err != nil {
 			return nil, err
 		}
-		items = append(items, a)
+		items = append(items, *a)
 	}
 	if items == nil {
 		items = []Account{}
@@ -813,4 +966,27 @@ func scanUser(row pgx.Row) (*User, error) {
 		return nil, err
 	}
 	return u, nil
+}
+
+func (r *Repository) GetNotificationPrefs(ctx context.Context, q database.Querier, accountID int64) ([]byte, error) {
+	var raw []byte
+	err := q.QueryRow(ctx, `SELECT notification_prefs FROM accounts WHERE id = $1`, accountID).Scan(&raw)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return raw, nil
+}
+
+func (r *Repository) UpdateNotificationPrefs(ctx context.Context, accountID int64, raw []byte) error {
+	_, err := r.pool.Exec(ctx, `UPDATE accounts SET notification_prefs = $2 WHERE id = $1`, accountID, raw)
+	return err
+}
+
+func (r *Repository) AccountType(ctx context.Context, q database.Querier, accountID int64) (string, error) {
+	var t string
+	err := q.QueryRow(ctx, `SELECT type FROM accounts WHERE id = $1`, accountID).Scan(&t)
+	return t, err
 }

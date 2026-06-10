@@ -12,7 +12,21 @@ const FILTER_OPS = [
   { value: "neq", label: "not equals" },
   { value: "contains", label: "contains" },
   { value: "not_empty", label: "not empty" },
+  { value: "gt", label: "More than" },
+  { value: "lt", label: "Less than" },
 ];
+
+function fieldsSectionLabels(contractType: string) {
+  const sell = contractType === "sell";
+  return {
+    section: sell ? "Available fields" : "Required fields",
+    addButton: sell ? "Add available field" : "Add required field",
+    removeAria: sell ? "Remove available field" : "Remove required field",
+    intro: sell
+      ? "Available fields, mapping, and intake filters for leads on this contract."
+      : "Required fields, mapping, and intake filters for leads on this contract.",
+  };
+}
 
 function parseFieldKey(key: string): { field_type: string; builtin_field?: string; custom_field_id?: number } {
   if (key.startsWith("cf:")) {
@@ -33,24 +47,25 @@ export function emptyLeadCriteria(): ContractLeadCriteria {
 export function ContractLeadCriteriaSection({
   value,
   onChange,
+  contractType = "sell",
 }: {
   buyerId?: number;
   buyerPipelineId?: number;
   value: ContractLeadCriteria;
   onChange: (v: ContractLeadCriteria) => void;
+  contractType?: string;
 }) {
   const { data: customFields } = useCustomFields();
   const fields = customFields ?? [];
+  const labels = fieldsSectionLabels(contractType);
 
   return (
     <div className="flex flex-col gap-4">
       <SectionLabel>Lead data & criteria</SectionLabel>
-      <p className="text-xs text-gray-400">
-        Required fields, mapping, and intake filters for leads on this contract.
-      </p>
+      <p className="text-xs text-gray-400">{labels.intro}</p>
 
       <div>
-        <div className="mb-2 text-sm font-semibold text-gray-700">Required fields</div>
+        <div className="mb-2 text-sm font-semibold text-gray-700">{labels.section}</div>
         {(value.required_fields ?? []).map((r, i) => (
           <div key={i} className="mb-2 flex gap-2">
             <div className="flex-1">
@@ -70,7 +85,7 @@ export function ContractLeadCriteriaSection({
             <IconButton
               variant="danger"
               className="mt-6 shrink-0"
-              aria-label="Remove required field"
+              aria-label={labels.removeAria}
               onClick={() =>
                 onChange({
                   ...value,
@@ -92,7 +107,7 @@ export function ContractLeadCriteriaSection({
             })
           }
         >
-          Add required field
+          {labels.addButton}
         </Button>
       </div>
 

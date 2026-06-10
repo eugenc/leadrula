@@ -15,7 +15,7 @@ import { useStages } from "@/features/leads/hooks";
 import { ContractStatusBadge } from "@/features/admin/contractStatus";
 import { formatCapPeriod, formatContractCap } from "@/features/admin/contractCap";
 import { formatContractLeadType } from "@/features/admin/contractLeadType";
-import { COMPENSATION_KINDS } from "@/features/admin/contractCompensation";
+import { COMPENSATION_KINDS, formatCompTrigger } from "@/features/admin/contractCompensation";
 import { useContractCompensations } from "@/features/admin/hooks";
 import { ContractReturnRulesEditor } from "@/features/admin/ContractReturnRulesEditor";
 import type { Contract } from "@/types";
@@ -35,7 +35,7 @@ export function BuyerContractDetailDrawer({
 }
 
 function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () => void }) {
-  const { data: buyerStages, isLoading: buyerStagesLoading } = useStages(contract.buyer_pipeline_id);
+  const { data: buyerStages, isLoading: buyerStagesLoading } = useStages(contract.buyer_pipeline_id ?? undefined);
   const { data: publisherStages, isLoading: pubStagesLoading } = useContractPublisherStages(
     contract.id,
     true
@@ -122,7 +122,7 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
                   {COMPENSATION_KINDS.find((k) => k.value === c.kind)?.label ?? c.kind}
                 </div>
                 <div className="text-gray-500">
-                  {c.trigger} · {formatCapPeriod(c.cap_period)}
+                  {formatCompTrigger(c.trigger)} · {formatCapPeriod(c.cap_period)}
                   {c.flat_amount != null ? ` · ${formatMoney(c.flat_amount)}/lead` : ""}
                 </div>
               </div>
@@ -136,7 +136,7 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
             buyerStages={buyerStages ?? []}
             publisherStages={publisherStages ?? []}
             rules={rules ?? []}
-            defaultReturnStageId={contract.return_stage_id}
+            defaultReturnStageId={contract.return_stage_id ?? 0}
             loading={loading}
             description="When a lead enters the From Stage on your pipeline, it is automatically returned to the publisher (no charge to you on return)."
             onAdd={(buyerStageId, returnStageId) =>

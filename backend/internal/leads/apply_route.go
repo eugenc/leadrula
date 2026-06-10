@@ -17,6 +17,8 @@ import (
 // IntegrationEnqueuer enqueues outbound integration deliveries after routing.
 type IntegrationEnqueuer interface {
 	EnqueueDelivery(ctx context.Context, routeID, leadID int64, payloadJSON []byte) error
+	EnqueueConnectionDelivery(ctx context.Context, connectionID, leadID int64, payloadJSON []byte) error
+	EnqueueParticipationWebhook(ctx context.Context, webhookID, leadID int64, payloadJSON []byte) error
 }
 
 // PipelineContext carries the pipeline/stage snapshot that outbound webhook triggers receive.
@@ -44,85 +46,148 @@ type RouteApplyDeps struct {
 }
 
 // ApplyRoute moves a lead according to route destination and delivery.
-func ApplyRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, publisherID, leadID int64) error {
+func ApplyRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, publisherID, leadID int64) ([]notifications.EmailJob, error) {
 	if route.Destination == "publisher" {
 		return applyPublisherRoute(ctx, q, deps.Repo, route, publisherID, leadID)
 	}
 	return applyBuyerRoute(ctx, q, deps, route, leadID)
 }
 
-func applyPublisherRoute(ctx context.Context, q database.Querier, repo *Repository, route *routing.Route, publisherID, leadID int64) error {
+func applyPublisherRoute(ctx context.Context, q database.Querier, repo *Repository, route *routing.Route, publisherID, leadID int64) ([]notifications.EmailJob, error) {
 	if route.Delivery == "leads" {
-		return repo.SetStatus(ctx, q, leadID, "review")
+		return nil, repo.SetStatus(ctx, q, leadID, "review")
 	}
 	if route.TargetPipelineID == nil || route.TargetStageID == nil {
-		return httpx.BusinessRule("route missing publisher pipeline target")
+		return nil, httpx.BusinessRule("route missing publisher pipeline target")
 	}
 	if err := repo.PlaceInPipeline(ctx, q, leadID, publisherID, *route.TargetPipelineID, *route.TargetStageID, nil); err != nil {
-		return err
+		return nil, err
 	}
-	return repo.SetStatus(ctx, q, leadID, "distributed")
+	return nil, repo.SetStatus(ctx, q, leadID, "review")
 }
 
-func applyBuyerRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, leadID int64) error {
+func applyBuyerRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, leadID int64) ([]notifications.EmailJob, error) {
 	if route.ContractID == nil {
-		return httpx.BusinessRule("route missing contract")
+		return nil, httpx.BusinessRule("route missing contract")
 	}
-	target, err := contracts.GetTarget(ctx, q, *route.ContractID, route.CompensationID)
-	if err != nil {
-		return err
+	if err := contracts.RequireActiveContract(ctx, q, *route.ContractID); err != nil {
+		return nil, err
 	}
-
 	lead, err := deps.Repo.GetByID(ctx, q, leadID)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	leadCost := float64(0)
+	if cb := costBasisFromLead(lead); cb != nil {
+		leadCost = *cb
+	}
+	target, err := contracts.GetTargetForRoute(ctx, q, *route.ContractID, route.CompensationID, leadCost)
+	if err != nil {
+		return nil, err
+	}
+	if err := CheckDuplicate(ctx, q, target.BuyerID, lead.Phone, lead.Email, leadID); err != nil {
+		return nil, err
 	}
 	if err := LoadCustomValues(ctx, q, lead); err != nil {
-		return err
+		return nil, err
 	}
 	maps, err := routing.RouteFieldMap(ctx, q, route.ID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := ApplyRouteFieldMap(ctx, q, deps.Repo, lead, maps); err != nil {
-		return err
+		return nil, err
+	}
+
+	buyer, err := deps.Accounts.GetAccount(ctx, target.BuyerID)
+	if err != nil {
+		return nil, err
 	}
 
 	contractID := target.ID
-	if route.Delivery == "leads" {
+	delivery := route.Delivery
+	if target.Delivery != "" {
+		delivery = target.Delivery
+	}
+	if delivery == "leads" || delivery == "webhook" {
 		if err := deps.Repo.TransferOwner(ctx, q, leadID, target.BuyerID, &contractID); err != nil {
-			return err
+			return nil, err
 		}
-		return deps.Repo.SetStatus(ctx, q, leadID, "review")
+		if delivery == "leads" || delivery == "webhook" {
+			if err := deps.Repo.SetStatus(ctx, q, leadID, "review"); err != nil {
+				return nil, err
+			}
+			return nil, enqueueParticipationIntegration(ctx, deps, target, lead)
+		}
 	}
 
 	var destStage int64
-	if route.TargetStageID != nil && *route.TargetStageID != 0 {
+	if target.BuyerStageID != 0 {
+		destStage = target.BuyerStageID
+	} else if route.TargetStageID != nil && *route.TargetStageID != 0 {
 		destStage = *route.TargetStageID
 	} else {
 		if err := q.QueryRow(ctx,
 			`SELECT id FROM pipeline_stages WHERE pipeline_id=$1 ORDER BY position, id LIMIT 1`,
 			target.BuyerPipelineID).Scan(&destStage); err != nil {
-			return httpx.BusinessRule("target pipeline has no stages")
+			return nil, httpx.BusinessRule("target pipeline has no stages")
 		}
 	}
 	if err := deps.Repo.PlaceInPipeline(ctx, q, leadID, target.BuyerID, target.BuyerPipelineID, destStage, &contractID); err != nil {
-		return err
+		return nil, err
 	}
 	if err := contracts.CheckCap(ctx, q, target.ID, target.CompensationID); err != nil {
-		return err
+		return nil, err
 	}
+	costBasis := costBasisFromLead(lead)
 	if err := billing.Debit(ctx, q, target.BuyerID, target.RatePerLead, leadID, target.ID, "lead routed: "+route.Name); err != nil {
-		return err
+		return nil, err
+	}
+	if err := contracts.RecordEarningDistribute(ctx, q, target.CompensationID, leadID, target.RatePerLead, costBasis); err != nil {
+		return nil, err
+	}
+	if err := deps.Repo.SetCostAfterBuyerDistribution(ctx, q, leadID, buyer.Type, target.RatePerLead); err != nil {
+		return nil, err
 	}
 	if err := deps.Repo.SetStatus(ctx, q, leadID, "distributed"); err != nil {
-		return err
+		return nil, err
 	}
-	adminIDs, err := deps.Accounts.AdminUserIDs(ctx, q, target.BuyerID)
+	updated, err := deps.Repo.GetByID(ctx, q, leadID)
+	if err != nil {
+		return nil, err
+	}
+	emails, err := deps.Notif.Deliver(ctx, q, notifications.DeliverParams{
+		AccountID: target.BuyerID,
+		UserIDs:   notifications.AssigneeIDs(updated.AssignedUserID),
+		EventType: "new_lead",
+		Payload:   map[string]any{"lead_id": leadID},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := enqueueParticipationIntegration(ctx, deps, target, updated); err != nil {
+		return nil, err
+	}
+	return emails, nil
+}
+
+func enqueueParticipationIntegration(ctx context.Context, deps RouteApplyDeps, target *contracts.Target, lead *Lead) error {
+	if deps.Integrations == nil {
+		return nil
+	}
+	payloadJSON, err := BuildDeliveryPayload(lead)
 	if err != nil {
 		return err
 	}
-	return deps.Notif.Enqueue(ctx, q, adminIDs, "new_lead", map[string]any{"lead_id": leadID})
+	if target.IntegrationID != 0 {
+		if err := deps.Integrations.EnqueueConnectionDelivery(ctx, target.IntegrationID, lead.ID, payloadJSON); err != nil {
+			return err
+		}
+	}
+	if target.Delivery == "webhook" && target.WebhookID != 0 {
+		return deps.Integrations.EnqueueParticipationWebhook(ctx, target.WebhookID, lead.ID, payloadJSON)
+	}
+	return nil
 }
 
 // LoadCustomValues fills lead.CustomValues from lead_custom_values.
@@ -147,6 +212,9 @@ func LoadCustomValues(ctx context.Context, q database.Querier, l *Lead) error {
 // ApplyRouteFieldMap copies publisher lead field values onto the lead per route_field_map rows.
 func ApplyRouteFieldMap(ctx context.Context, q database.Querier, repo *Repository, lead *Lead, maps []routing.RouteFieldMapEntry) error {
 	for _, m := range maps {
+		if m.DstType == "builtin" && m.DstBuiltin != nil && IsMoneyBuiltin(*m.DstBuiltin) {
+			continue
+		}
 		if m.DstType == "builtin" && m.DstBuiltin != nil {
 			val, ok := readLeadBuiltinForRoute(lead, m.SrcType, m.SrcBuiltin, m.SrcCustomFieldID)
 			if !ok {

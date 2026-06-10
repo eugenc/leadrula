@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"strings"
+
+	"github.com/echayko/leadrula/backend/internal/leads"
 )
 
 // responseMapEntry is one row of a trigger's response_map config.
@@ -20,7 +22,7 @@ type responseMapEntry struct {
 var validBuiltinFields = map[string]bool{
 	"first_name": true, "last_name": true, "phone": true, "email": true,
 	"address": true, "city": true, "state": true, "zip": true, "source": true,
-	"external_id": true,
+	"external_id": true, "cost": true, "revenue": true,
 }
 
 // applyResponseMap reads the trigger's response_map config, extracts values from
@@ -64,6 +66,18 @@ func (s *Service) applyResponseMap(ctx context.Context, triggerID, leadID int64,
 		case "builtin":
 			if e.BuiltinField == nil || !validBuiltinFields[*e.BuiltinField] {
 				log.Printf("response_map: trigger %d unknown builtin field %v", triggerID, e.BuiltinField)
+				continue
+			}
+			if leads.IsMoneyBuiltin(*e.BuiltinField) {
+				amount := leads.ParseMoney(val)
+				if amount == nil {
+					continue
+				}
+				if _, err := s.pool.Exec(ctx,
+					fmt.Sprintf(`UPDATE leads SET %s = $3 WHERE id = $1 AND owner_account_id = $2`, *e.BuiltinField),
+					leadID, accountID, *amount); err != nil {
+					log.Printf("response_map: trigger %d write money builtin %s: %v", triggerID, *e.BuiltinField, err)
+				}
 				continue
 			}
 			sql := fmt.Sprintf(`UPDATE leads SET %s = $3 WHERE id = $1 AND owner_account_id = $2`, *e.BuiltinField)

@@ -5,6 +5,9 @@ import "time"
 const (
 	AccountStatusActive    = "active"
 	AccountStatusSuspended = "suspended"
+
+	BuyerKindDirect      = "direct"
+	BuyerKindMarketplace = "marketplace"
 )
 
 type Account struct {
@@ -16,6 +19,7 @@ type Account struct {
 	Website               string    `json:"website"`
 	Timezone              string    `json:"timezone"`
 	OperationalStatus     string    `json:"operational_status"`
+	BuyerKind             string    `json:"buyer_kind,omitempty"`
 	CreatedAt             time.Time `json:"created_at"`
 }
 
@@ -69,9 +73,10 @@ type UpdateInviteParams struct {
 }
 
 type UpdateBuyerParams struct {
-	Name     *string
-	Website  *string
-	Timezone *string
+	Name      *string
+	Website   *string
+	Timezone  *string
+	BuyerKind *string
 }
 
 type UpdatePublisherParams struct {
@@ -90,9 +95,10 @@ type CreateBuyerParams struct {
 }
 
 type CreateBuyerResult struct {
-	Buyer       BuyerSummary
-	InviteToken string
-	AdminEmail  string
+	Buyer            BuyerSummary
+	InviteToken      string
+	AdminEmail       string
+	AdminProvisioned bool
 }
 
 type CreatePublisherParams struct {

@@ -3,6 +3,7 @@ import {
   Building2,
   Calendar,
   CalendarClock,
+  CalendarPlus,
   CheckSquare,
   CircleDot,
   FileText,
@@ -10,14 +11,17 @@ import {
   List,
   Mail,
   MapPin,
-  Megaphone,
+  Import,
   Phone,
   Tag,
   Type,
   User,
+  Zap,
   type LucideIcon,
 } from "lucide-react";
 import type { CustomField, Lead } from "@/types";
+import { formatMoney } from "@/lib/utils";
+import { formatCustomDateForDisplay } from "./customFieldDate";
 
 export const STATUS_LABELS: Record<string, string> = {
   review: "In Review",
@@ -30,6 +34,10 @@ export function formatStatus(status: string): string {
   return STATUS_LABELS[status] ?? status.charAt(0).toUpperCase() + status.slice(1);
 }
 
+export function leadSourceLabel(lead: Lead): string {
+  return lead.source_name ?? lead.source ?? "—";
+}
+
 export interface SystemColumn {
   id: string;
   label: string;
@@ -40,7 +48,7 @@ export const SYSTEM_COLUMNS: SystemColumn[] = [
   { id: "name", label: "Name", sortKey: "first_name" },
   { id: "phone", label: "Phone", sortKey: "phone" },
   { id: "email", label: "Email", sortKey: "email" },
-  { id: "source", label: "Source", sortKey: "source" },
+  { id: "source", label: "Source", sortKey: "source_name" },
   { id: "buyer", label: "Buyer", sortKey: "buyer_name" },
   { id: "assignee", label: "Assignee", sortKey: "assignee_name" },
   { id: "pipeline", label: "Pipeline", sortKey: "pipeline_name" },
@@ -53,6 +61,9 @@ export const SYSTEM_COLUMNS: SystemColumn[] = [
   { id: "city", label: "City", sortKey: "city" },
   { id: "state", label: "State", sortKey: "state" },
   { id: "zip", label: "Zip", sortKey: "zip" },
+  { id: "cost", label: "Cost" },
+  { id: "revenue", label: "Revenue" },
+  { id: "net_profit", label: "Net Profit" },
 ];
 
 export const PIPELINE_COLUMNS: SystemColumn[] = [
@@ -84,6 +95,15 @@ export const DEFAULT_BOARD_CARD_FIELDS = [
 ];
 
 export const BOARD_CARD_FIELDS_PREF_KEY = "board_card_fields";
+
+export function columnsEqual(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((c, i) => c === b[i]);
+}
+
+export function resetToDefaultColumns(defaultCols: string[], validIds: string[]): string[] {
+  const next = defaultCols.filter((id) => validIds.includes(id));
+  return next.length ? next : [...defaultCols];
+}
 
 export function parseBoardCardFields(raw: unknown): string[] | null {
   if (!Array.isArray(raw)) return null;
@@ -138,14 +158,14 @@ export function formatTimeInStage(enteredAt: string): string {
 
 function renderCustomValue(v: unknown, field?: CustomField): string {
   if (v == null) return "—";
+  if (field && (field.type === "date" || field.type === "datetime") && typeof v === "string") {
+    return formatCustomDateForDisplay(v, field.type, field.format);
+  }
   if (typeof v === "string") {
     if (!v) return "—";
     return v;
   }
   if (typeof v === "number" || typeof v === "boolean") return String(v);
-  if (field && (field.type === "date" || field.type === "datetime")) {
-    return String(v);
-  }
   return JSON.stringify(v);
 }
 
@@ -158,7 +178,7 @@ export function cellValue(lead: Lead, colId: string, customFields: CustomField[]
     case "email":
       return lead.email ?? "—";
     case "source":
-      return lead.source ?? "—";
+      return leadSourceLabel(lead);
     case "buyer":
       return lead.buyer_name ?? "—";
     case "assignee":
@@ -185,6 +205,12 @@ export function cellValue(lead: Lead, colId: string, customFields: CustomField[]
       return lead.state ?? "—";
     case "zip":
       return lead.zip ?? "—";
+    case "cost":
+      return lead.cost != null ? formatMoney(lead.cost) : "—";
+    case "revenue":
+      return lead.revenue != null ? formatMoney(lead.revenue) : "—";
+    case "net_profit":
+      return lead.net_profit != null ? formatMoney(lead.net_profit) : "—";
     default:
       if (colId.startsWith("custom_")) {
         const fieldId = colId.slice(7);
@@ -243,13 +269,13 @@ export function boardSortOptions(customFields: CustomField[]): { group: string; 
 const SYSTEM_COLUMN_ICONS: Record<string, LucideIcon> = {
   phone: Phone,
   email: Mail,
-  source: Megaphone,
+  source: Import,
   buyer: Building2,
   assignee: User,
   status: CircleDot,
   tags: Tag,
-  action_at: CalendarClock,
-  created_at: Calendar,
+  action_at: Zap,
+  created_at: CalendarPlus,
   stage_entered_at: CalendarClock,
   address: MapPin,
   city: MapPin,
@@ -264,8 +290,9 @@ function customFieldIcon(type: CustomField["type"]): LucideIcon {
     case "number":
       return Hash;
     case "date":
-    case "datetime":
       return Calendar;
+    case "datetime":
+      return CalendarClock;
     case "dropdown":
       return List;
     case "checkbox":

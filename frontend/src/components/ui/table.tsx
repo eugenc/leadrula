@@ -2,8 +2,13 @@ import { cn } from "@/lib/utils";
 
 export function Table({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={cn("overflow-hidden rounded-lg border border-gray-100 bg-surface-card", className)}>
-      <table className="w-full border-collapse">{children}</table>
+    <div
+      className={cn(
+        "min-w-0 overflow-x-auto rounded-lg border border-gray-100 bg-surface-card",
+        className
+      )}
+    >
+      <table className="min-w-full w-max border-collapse">{children}</table>
     </div>
   );
 }
@@ -20,7 +25,7 @@ export function TH({ children, className }: { children?: React.ReactNode; classN
   return (
     <th
       className={cn(
-        "px-4 text-xs font-semibold uppercase tracking-wide text-gray-500",
+        "min-w-[7.5rem] whitespace-nowrap px-4 text-xs font-semibold uppercase tracking-wide text-gray-500",
         className
       )}
     >
@@ -58,6 +63,8 @@ export function TR({
 
 export function TD({ children, className }: { children?: React.ReactNode; className?: string }) {
   return (
-    <td className={cn("px-4 align-middle text-sm text-gray-700", className)}>{children}</td>
+    <td className={cn("min-w-[7.5rem] px-4 align-middle text-sm text-gray-700", className)}>
+      {children}
+    </td>
   );
 }

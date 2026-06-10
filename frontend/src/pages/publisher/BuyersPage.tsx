@@ -21,7 +21,11 @@ import { toast } from "@/store/toastStore";
 import { errorMessage, isInviteEmailError } from "@/lib/api";
 import { queryClient } from "@/lib/queryClient";
 import { Link2, Plus } from "lucide-react";
-import type { Partnership } from "@/types";
+import type { BuyerKind, Partnership } from "@/types";
+
+function formatBuyerKind(kind: BuyerKind) {
+  return kind === "marketplace" ? "Marketplace" : "Direct";
+}
 
 const emptyForm = {
   name: "",
@@ -159,6 +163,7 @@ export function BuyersPage() {
             <THead>
               <tr>
                 <TH>Buyer</TH>
+                <TH>Type</TH>
                 <TH>Handler ID</TH>
                 <TH>Leads</TH>
                 <TH>Balance</TH>
@@ -168,6 +173,7 @@ export function BuyersPage() {
               {(buyers ?? []).map((b) => (
                 <TR key={b.id} onClick={() => openBuyer(b.id, b.lead_count)}>
                   <TD className="font-medium text-gray-800">{b.name}</TD>
+                  <TD className="text-gray-600">{formatBuyerKind(b.buyer_kind)}</TD>
                   <TD className="font-mono text-xs text-gray-500">{b.handler_id}</TD>
                   <TD>{b.lead_count}</TD>
                   <TD className={cn(b.balance < 0 && "font-semibold text-danger")}>{formatMoney(b.balance)}</TD>
@@ -235,8 +241,16 @@ export function BuyersPage() {
                       collaborate_enabled: form.collaborate_enabled,
                     },
                     {
-                      onSuccess: () => {
-                        toast.success(`Buyer created — invite sent to ${form.admin_email.trim()}`);
+                      onSuccess: (buyer) => {
+                        const invoiceMsg =
+                          startingBalance > 0
+                            ? ` — ${formatMoney(startingBalance)} invoice sent`
+                            : "";
+                        const email = form.admin_email.trim();
+                        const accessMsg = buyer.admin_provisioned
+                          ? `${email} already has access and can switch accounts`
+                          : `invite sent to ${email}`;
+                        toast.success(`Buyer created${invoiceMsg} — ${accessMsg}`);
                         setOpen(false);
                         setForm(emptyForm);
                       },

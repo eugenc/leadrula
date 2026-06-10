@@ -196,7 +196,8 @@ func SourceFieldMap(ctx context.Context, q database.Querier, sourceID int64) ([]
 func RouteForSource(ctx context.Context, q database.Querier, sourceID int64) (*Route, error) {
 	return scanRouteOptional(q.QueryRow(ctx,
 		`SELECT `+routeCols+routeFrom+`
-		 WHERE r.source_id=$1 AND r.origin='source' AND r.is_active`, sourceID))
+		 WHERE r.source_id=$1 AND r.origin='source' AND r.is_active
+		   AND (r.destination <> 'buyer' OR (c.status = 'active' AND c.deleted_at IS NULL))`, sourceID))
 }
 
 // BuyerRouteForSourceAndBuyer finds an active buyer route for a source and contract buyer.
@@ -205,7 +206,7 @@ func BuyerRouteForSourceAndBuyer(ctx context.Context, q database.Querier, publis
 		`SELECT `+routeCols+routeFrom+`
 		 JOIN contracts c ON c.id = r.contract_id
 		 WHERE r.publisher_id=$1 AND r.source_id=$2 AND r.origin='source' AND r.destination='buyer'
-		   AND r.is_active AND c.buyer_id=$3 AND c.deleted_at IS NULL
+		   AND r.is_active AND c.buyer_id=$3 AND c.deleted_at IS NULL AND c.status = 'active'
 		 LIMIT 1`, publisherID, sourceID, buyerID))
 }
 
@@ -213,7 +214,8 @@ func BuyerRouteForSourceAndBuyer(ctx context.Context, q database.Querier, publis
 func MatchRouteByStage(ctx context.Context, q database.Querier, publisherID, stageID int64) (*Route, error) {
 	return scanRouteOptional(q.QueryRow(ctx,
 		`SELECT `+routeCols+routeFrom+`
-		 WHERE r.publisher_id=$1 AND r.origin='pipeline' AND r.origin_stage_id=$2 AND r.is_active`,
+		 WHERE r.publisher_id=$1 AND r.origin='pipeline' AND r.origin_stage_id=$2 AND r.is_active
+		   AND (r.destination <> 'buyer' OR (c.status = 'active' AND c.deleted_at IS NULL))`,
 		publisherID, stageID))
 }
 
@@ -227,6 +229,11 @@ func scanRouteOptional(row pgx.Row) (*Route, error) {
 		return nil, err
 	}
 	return rt, nil
+}
+
+// GetByID loads a route by primary key.
+func GetByID(ctx context.Context, q database.Querier, id int64) (*Route, error) {
+	return scanRoute(q.QueryRow(ctx, `SELECT `+routeCols+routeFrom+` WHERE r.id=$1`, id))
 }
 
 // RouteFieldMap returns lead-field mapping rows for a route.

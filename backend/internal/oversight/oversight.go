@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/echayko/leadrula/backend/internal/accounts"
 	"github.com/echayko/leadrula/backend/internal/auth"
@@ -140,18 +141,29 @@ func (h *Handler) createBuyer(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	buyer, err := h.accountsSvc.CreateBuyer(r.Context(), accounts.CreateBuyerParams{
+	p := auth.FromContext(r.Context())
+	adminEmail := strings.TrimSpace(strings.ToLower(body.AdminEmail))
+	has, err := h.accounts.PublisherHasBuyerAdminEmail(r.Context(), p.AccountID, adminEmail)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if has {
+		httpx.WriteError(w, httpx.Conflict("buyer with this admin email is already on your account"))
+		return
+	}
+	res, err := h.accountsSvc.CreateBuyer(r.Context(), accounts.CreateBuyerParams{
 		Name:            body.Name,
 		Website:         body.Website,
 		Timezone:        body.Timezone,
-		AdminEmail:      body.AdminEmail,
+		AdminEmail:      adminEmail,
 		AdminFirstName:  body.AdminFirstName,
 		AdminLastName:   body.AdminLastName,
 		StartingBalance: body.StartingBalance,
 	})
 	inviteMailFailed := false
 	if err != nil {
-		if buyer == nil {
+		if res == nil {
 			httpx.WriteError(w, err)
 			return
 		}
@@ -162,16 +174,21 @@ func (h *Handler) createBuyer(w http.ResponseWriter, r *http.Request) {
 		}
 		inviteMailFailed = true
 	}
+	buyer := &res.Buyer
 	if body.CollaborateEnabled && h.collab != nil {
-		p := auth.FromContext(r.Context())
 		if err := h.collab.GrantOnCreate(r.Context(), p.AccountID, buyer.ID, p.UserID); err != nil {
 			httpx.WriteError(w, err)
 			return
 		}
 	}
 	if h.partners != nil {
-		p := auth.FromContext(r.Context())
 		if err := h.partners.GrantOnCreate(r.Context(), p.AccountID, buyer.ID, p.UserID); err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+	}
+	if body.StartingBalance > 0 && h.billing != nil {
+		if _, err := h.billing.CreateStartingBalanceInvoice(r.Context(), p.AccountID, buyer.ID, body.StartingBalance); err != nil {
 			httpx.WriteError(w, err)
 			return
 		}
@@ -198,15 +215,16 @@ func (h *Handler) getBuyer(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) updateBuyer(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name     *string `json:"name"`
-		Website  *string `json:"website"`
-		Timezone *string `json:"timezone"`
+		Name      *string `json:"name"`
+		Website   *string `json:"website"`
+		Timezone  *string `json:"timezone"`
+		BuyerKind *string `json:"buyer_kind"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
 	a, err := h.accountsSvc.UpdateBuyer(r.Context(), id(r), accounts.UpdateBuyerParams{
-		Name: body.Name, Website: body.Website, Timezone: body.Timezone,
+		Name: body.Name, Website: body.Website, Timezone: body.Timezone, BuyerKind: body.BuyerKind,
 	})
 	if err != nil {
 		httpx.WriteError(w, err)
@@ -219,7 +237,7 @@ func (h *Handler) buyerDetail(ctx context.Context, a *accounts.Account) map[stri
 	bal, _ := h.billing.GetBalance(ctx, a.ID)
 	out := map[string]any{
 		"id": a.ID, "public_id": a.PublicID, "handler_id": a.HandlerID, "name": a.Name, "type": a.Type,
-		"website": a.Website, "timezone": a.Timezone, "balance": bal,
+		"website": a.Website, "timezone": a.Timezone, "buyer_kind": a.BuyerKind, "balance": bal,
 		"admin_name": "", "admin_email": "", "admin_status": "none",
 	}
 	st, err := h.accounts.BuyerAdminStatus(ctx, a.ID)

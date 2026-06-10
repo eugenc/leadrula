@@ -31,13 +31,17 @@ type Compensation struct {
 	ReturnStageID            *int64   `json:"return_stage_id,omitempty"`
 	Delivery                 string   `json:"delivery"`
 	Position                 int      `json:"position"`
+	PayoutFrequency          *string  `json:"payout_frequency,omitempty"`
+	PayoutWeekday            *int     `json:"payout_weekday,omitempty"`
+	PayoutMonthDay           *int     `json:"payout_month_day,omitempty"`
 }
 
 const compensationCols = `id, contract_id, kind,
 	flat_amount::float8, bid_min::float8, bid_max::float8, rev_percent::float8, profit_percent::float8,
 	cap_period, cap_total, cap_max_daily, trigger, trigger_stage_id,
 	source_pipeline_id, source_stage_id, counterparty_pipeline_id, counterparty_stage_id,
-	return_stage_id, delivery, position`
+	return_stage_id, delivery, position,
+	payout_frequency, payout_weekday, payout_month_day`
 
 func scanCompensation(row pgx.Row) (*Compensation, error) {
 	c := &Compensation{}
@@ -47,6 +51,7 @@ func scanCompensation(row pgx.Row) (*Compensation, error) {
 		&c.CapPeriod, &c.CapTotal, &c.CapMaxDaily, &c.Trigger, &c.TriggerStageID,
 		&c.SourcePipelineID, &c.SourceStageID, &c.CounterpartyPipelineID, &c.CounterpartyStageID,
 		&c.ReturnStageID, &c.Delivery, &c.Position,
+		&c.PayoutFrequency, &c.PayoutWeekday, &c.PayoutMonthDay,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -102,30 +107,34 @@ func (s *Service) ListCompensationsForBuyer(ctx context.Context, buyerID, contra
 }
 
 type CompensationParams struct {
-	Kind                   string
-	FlatAmount             *float64
-	BidMin                 *float64
-	BidMax                 *float64
-	RevPercent             *float64
-	ProfitPercent          *float64
-	CapPeriod              string
-	CapTotal               *int
-	CapMaxDaily            *int
-	Trigger                string
-	TriggerStageID         *int64
-	SourcePipelineID       *int64
-	SourceStageID          *int64
-	CounterpartyPipelineID *int64
-	CounterpartyStageID    *int64
-	ReturnStageID          *int64
-	Delivery               string
-	Position               int
+	Kind                   string   `json:"kind"`
+	FlatAmount             *float64 `json:"flat_amount"`
+	BidMin                 *float64 `json:"bid_min"`
+	BidMax                 *float64 `json:"bid_max"`
+	RevPercent             *float64 `json:"rev_percent"`
+	ProfitPercent          *float64 `json:"profit_percent"`
+	CapPeriod              string   `json:"cap_period"`
+	CapTotal               *int     `json:"cap_total"`
+	CapMaxDaily            *int     `json:"cap_max_daily"`
+	Trigger                string   `json:"trigger"`
+	TriggerStageID         *int64   `json:"trigger_stage_id"`
+	SourcePipelineID       *int64   `json:"source_pipeline_id"`
+	SourceStageID          *int64   `json:"source_stage_id"`
+	CounterpartyPipelineID *int64   `json:"counterparty_pipeline_id"`
+	CounterpartyStageID    *int64   `json:"counterparty_stage_id"`
+	ReturnStageID          *int64   `json:"return_stage_id"`
+	Delivery               string   `json:"delivery"`
+	Position               int      `json:"position"`
+	PayoutFrequency        *string  `json:"payout_frequency"`
+	PayoutWeekday          *int     `json:"payout_weekday"`
+	PayoutMonthDay         *int     `json:"payout_month_day"`
 }
 
 func (s *Service) AddCompensation(ctx context.Context, publisherID, contractID int64, p CompensationParams) (*Compensation, error) {
 	if _, err := s.Get(ctx, publisherID, contractID); err != nil {
 		return nil, err
 	}
+	p = normalizeCompensationPipeline(p)
 	if err := validateCompensationParams(p); err != nil {
 		return nil, err
 	}
@@ -134,19 +143,22 @@ func (s *Service) AddCompensation(ctx context.Context, publisherID, contractID i
 		    contract_id, kind, flat_amount, bid_min, bid_max, rev_percent, profit_percent,
 		    cap_period, cap_total, cap_max_daily, trigger, trigger_stage_id,
 		    source_pipeline_id, source_stage_id, counterparty_pipeline_id, counterparty_stage_id,
-		    return_stage_id, delivery, position)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+		    return_stage_id, delivery, position,
+		    payout_frequency, payout_weekday, payout_month_day)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
 		 RETURNING `+compensationCols,
 		contractID, p.Kind, p.FlatAmount, p.BidMin, p.BidMax, p.RevPercent, p.ProfitPercent,
 		p.CapPeriod, p.CapTotal, p.CapMaxDaily, p.Trigger, p.TriggerStageID,
 		p.SourcePipelineID, p.SourceStageID, p.CounterpartyPipelineID, p.CounterpartyStageID,
-		p.ReturnStageID, p.Delivery, p.Position))
+		p.ReturnStageID, p.Delivery, p.Position,
+		p.PayoutFrequency, p.PayoutWeekday, p.PayoutMonthDay))
 }
 
 func (s *Service) UpdateCompensation(ctx context.Context, publisherID, contractID, compID int64, p CompensationParams) (*Compensation, error) {
 	if _, err := s.Get(ctx, publisherID, contractID); err != nil {
 		return nil, err
 	}
+	p = normalizeCompensationPipeline(p)
 	if err := validateCompensationParams(p); err != nil {
 		return nil, err
 	}
@@ -158,14 +170,16 @@ func (s *Service) UpdateCompensation(ctx context.Context, publisherID, contractI
 		    trigger = $12, trigger_stage_id = $13,
 		    source_pipeline_id = $14, source_stage_id = $15,
 		    counterparty_pipeline_id = $16, counterparty_stage_id = $17,
-		    return_stage_id = $18, delivery = $19, position = $20
+		    return_stage_id = $18, delivery = $19, position = $20,
+		    payout_frequency = $21, payout_weekday = $22, payout_month_day = $23
 		 WHERE id = $1 AND contract_id = $2
 		 RETURNING `+compensationCols,
 		compID, contractID,
 		p.Kind, p.FlatAmount, p.BidMin, p.BidMax, p.RevPercent, p.ProfitPercent,
 		p.CapPeriod, p.CapTotal, p.CapMaxDaily, p.Trigger, p.TriggerStageID,
 		p.SourcePipelineID, p.SourceStageID, p.CounterpartyPipelineID, p.CounterpartyStageID,
-		p.ReturnStageID, p.Delivery, p.Position))
+		p.ReturnStageID, p.Delivery, p.Position,
+		p.PayoutFrequency, p.PayoutWeekday, p.PayoutMonthDay))
 }
 
 func (s *Service) DeleteCompensation(ctx context.Context, publisherID, contractID, compID int64) error {
@@ -206,7 +220,23 @@ var allowedCompTriggers = map[string]bool{
 }
 
 var allowedCompDelivery = map[string]bool{
-	"leads": true, "leads_pipeline": true,
+	"leads": true, "leads_pipeline": true, "webhook": true,
+}
+
+func normalizeCompensationPipeline(p CompensationParams) CompensationParams {
+	delivery := strings.TrimSpace(p.Delivery)
+	if delivery == "" {
+		delivery = "leads_pipeline"
+	}
+	p.Delivery = delivery
+	if delivery == "leads" {
+		p.SourcePipelineID = nil
+		p.SourceStageID = nil
+		p.CounterpartyPipelineID = nil
+		p.CounterpartyStageID = nil
+		p.ReturnStageID = nil
+	}
+	return p
 }
 
 func validateCompensationParams(p CompensationParams) error {
@@ -233,7 +263,7 @@ func validateCompensationParams(p CompensationParams) error {
 		delivery = "leads_pipeline"
 	}
 	if !allowedCompDelivery[delivery] {
-		return httpx.Validation("delivery must be leads or leads_pipeline")
+		return httpx.Validation("delivery must be leads, leads_pipeline, or webhook")
 	}
 	switch kind {
 	case "flat_rate":
@@ -265,7 +295,7 @@ func validateCompensationParams(p CompensationParams) error {
 			return httpx.Validation("trigger_stage_id is required for buyer_stage trigger")
 		}
 	}
-	return nil
+	return validatePayoutParams(p.PayoutFrequency, p.PayoutWeekday, p.PayoutMonthDay)
 }
 
 func defaultTriggerForKind(kind string) string {

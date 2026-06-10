@@ -79,3 +79,18 @@ func passwordResetEmail(baseURL, fullName, link string) string {
 		footer:   "This link expires in 2 hours. If you did not request a reset, you can ignore this email.",
 	})
 }
+
+func notificationEmail(baseURL, fullName, label, link string) string {
+	greeting := "Hi,"
+	if fullName != "" {
+		greeting = "Hi " + fullName + ","
+	}
+	return renderEmail(emailParams{
+		baseURL:  baseURL,
+		greeting: greeting,
+		body:     label,
+		ctaText:  "View in LeadRula",
+		ctaURL:   link,
+		footer:   "You can change notification settings in Settings → Notifications.",
+	})
+}

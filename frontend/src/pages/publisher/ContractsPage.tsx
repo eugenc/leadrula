@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   useContracts,
   useCreateContract,
@@ -21,13 +21,12 @@ import { formatMoney } from "@/lib/utils";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import { ContractDetailDrawer } from "@/features/admin/ContractDetailDrawer";
+import { DeleteContractConfirmDialog } from "@/features/admin/DeleteContractConfirmDialog";
 import { ContractStatusBadge } from "@/features/admin/contractStatus";
 import { formatContractCap } from "@/features/admin/contractCap";
 import {
   CreateContractCompensationList,
-  compensationDraftToBody,
-  compensationsValid,
-  emptyCompensationDraft,
+  blankCompensationDraft,
   type CompensationDraft,
 } from "@/features/admin/CreateContractCompensationList";
 import {
@@ -38,28 +37,47 @@ import type { ContractLeadCriteria } from "@/types";
 import {
   CONTRACT_LEAD_TYPES,
   formatContractLeadType,
-  isContractLeadType,
 } from "@/features/admin/contractLeadType";
 import {
   CONTRACT_TYPES,
   counterpartyLabel,
   formatBuyerWithType,
   formatContractType,
-  isContractType,
 } from "@/features/admin/contractType";
+import { ContractDeliverySection } from "@/features/admin/ContractDeliverySection";
+import {
+  emptyContractDelivery,
+  type ContractDeliveryDraft,
+} from "@/features/admin/contractCompensation";
+import { ContractFormTabs } from "@/features/admin/ContractFormTabs";
+import { allRequiredSectionsComplete } from "@/features/admin/contractSectionCompleteness";
+import { buildContractPayload } from "@/features/admin/contractDraftPayload";
+import {
+  emptyContractOffer,
+  type ContractOfferDraft,
+} from "@/features/admin/contractOffer";
+import { ContractOfferSection } from "@/features/admin/ContractOfferSection";
+import { isOpenSellOffer } from "@/features/admin/contractSectionCompleteness";
 import type { Contract } from "@/types";
 
 export function ContractsPage() {
   const { data: contracts, isLoading, isError, error } = useContracts();
   const remove = useDeleteContract();
   const [open, setOpen] = useState(false);
+  const [createSession, setCreateSession] = useState(0);
   const [selected, setSelected] = useState<Contract | null>(null);
+  const [contractToDelete, setContractToDelete] = useState<Contract | null>(null);
 
   return (
     <>
       <PageHeader
         action={
-          <Button onClick={() => setOpen(true)}>
+          <Button
+            onClick={() => {
+              setCreateSession((n) => n + 1);
+              setOpen(true);
+            }}
+          >
             <Plus className="h-4 w-4" /> New Contract
           </Button>
         }
@@ -83,14 +101,17 @@ export function ContractsPage() {
               <TH>Rate / Lead</TH>
               <TH>Distributed</TH>
               <TH>Status</TH>
-              <TH />
+              <TH className="min-w-0 w-12" />
             </tr>
           </THead>
           <TBody>
             {(contracts ?? []).map((c) => (
               <TR key={c.id} onClick={() => setSelected(c)}>
                 <TD>{formatContractType(c.contract_type) || "Sell"}</TD>
-                <TD className="font-semibold">{formatBuyerWithType(c.buyer_name, c.buyer_account_type)}</TD>
+                <TD className="font-semibold">
+                  {formatBuyerWithType(c.buyer_name, c.buyer_account_type) ||
+                    (c.participations?.length ? `${c.participations.length} buyer(s)` : "Open offer")}
+                </TD>
                 <TD>{c.name}</TD>
                 <TD>{formatContractLeadType(c.lead_type) || "—"}</TD>
                 <TD>{formatContractCap(c)}</TD>
@@ -105,7 +126,7 @@ export function ContractsPage() {
                       variant="danger"
                       onClick={(e) => {
                         e.stopPropagation();
-                        remove.mutate(c.id, { onError: (err) => toast.error(errorMessage(err)) });
+                        setContractToDelete(c);
                       }}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -118,29 +139,95 @@ export function ContractsPage() {
         </Table>
       )}
 
-      <CreateContractDrawer open={open} onClose={() => setOpen(false)} />
+      <CreateContractDrawer
+        open={open}
+        createSession={createSession}
+        onClose={() => setOpen(false)}
+        onDraftCreated={(c) => {
+          setOpen(false);
+          setSelected(c);
+        }}
+      />
       <ContractDetailDrawer contract={selected} onClose={() => setSelected(null)} />
+      <DeleteContractConfirmDialog
+        open={contractToDelete != null}
+        onClose={() => setContractToDelete(null)}
+        contractName={contractToDelete?.name ?? ""}
+        buyerLabel={
+          contractToDelete
+            ? formatBuyerWithType(contractToDelete.buyer_name, contractToDelete.buyer_account_type) || undefined
+            : undefined
+        }
+        loading={remove.isPending}
+        onConfirm={() => {
+          if (!contractToDelete) return;
+          remove.mutate(contractToDelete.id, {
+            onSuccess: () => {
+              toast.success("Contract deleted");
+              setContractToDelete(null);
+              if (selected?.id === contractToDelete.id) setSelected(null);
+            },
+            onError: (err) => toast.error(errorMessage(err)),
+          });
+        }}
+      />
       </PageBody>
     </>
   );
 }
 
-function CreateContractDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+function initialCreateContractState() {
+  return {
+    form: {
+      contract_type: "sell" as "buy" | "sell",
+      buyer_id: 0,
+      name: "",
+      lead_type: "",
+      description: "",
+    },
+    compensations: [blankCompensationDraft()] as CompensationDraft[],
+    deliveryDraft: emptyContractDelivery(),
+    leadCriteria: emptyLeadCriteria(),
+    offerDraft: emptyContractOffer(),
+  };
+}
+
+function CreateContractDrawer({
+  open,
+  createSession,
+  onClose,
+  onDraftCreated,
+}: {
+  open: boolean;
+  createSession: number;
+  onClose: () => void;
+  onDraftCreated: (contract: Contract) => void;
+}) {
   const { data: buyers } = useBuyers();
   const { data: partnerPublishers } = usePartnerPublishers();
   const create = useCreateContract();
   const linkPub = useLinkPublisherPartnership();
-  const [form, setForm] = useState({
-    contract_type: "sell" as "buy" | "sell",
-    buyer_id: 0,
-    name: "Contract",
-    lead_type: "",
-    description: "",
-  });
-  const [compensations, setCompensations] = useState<CompensationDraft[]>(() => [
-    emptyCompensationDraft({ source_pipeline_id: 0, source_stage_id: 0, counterparty_pipeline_id: 0, return_stage_id: 0 }),
-  ]);
-  const [leadCriteria, setLeadCriteria] = useState<ContractLeadCriteria>(emptyLeadCriteria);
+  const [form, setForm] = useState(initialCreateContractState().form);
+  const [compensations, setCompensations] = useState<CompensationDraft[]>(
+    initialCreateContractState().compensations
+  );
+  const [deliveryDraft, setDeliveryDraft] = useState<ContractDeliveryDraft>(
+    initialCreateContractState().deliveryDraft
+  );
+  const [leadCriteria, setLeadCriteria] = useState<ContractLeadCriteria>(
+    initialCreateContractState().leadCriteria
+  );
+  const [offerDraft, setOfferDraft] = useState<ContractOfferDraft>(initialCreateContractState().offerDraft);
+
+  useEffect(() => {
+    if (!open) return;
+    const s = initialCreateContractState();
+    setForm(s.form);
+    setCompensations(s.compensations);
+    setDeliveryDraft(s.deliveryDraft);
+    setLeadCriteria(s.leadCriteria);
+    setOfferDraft(s.offerDraft);
+  }, [open, createSession]);
 
   function set<K extends keyof typeof form>(k: K, v: (typeof form)[K]) {
     setForm((f) => ({ ...f, [k]: v }));
@@ -158,57 +245,41 @@ function CreateContractDrawer({ open, onClose }: { open: boolean; onClose: () =>
 
   const counterpartyIsPublisher = (partnerPublishers ?? []).some((p) => p.id === form.buyer_id);
   const isBuy = form.contract_type === "buy";
-  const primary = compensations[0];
 
-  const counterpartyValid =
-    !!form.buyer_id &&
-    (isBuy
-      ? counterpartyIsPublisher
-      : (buyers ?? []).some((b) => b.id === form.buyer_id) || counterpartyIsPublisher);
+  const canSaveDraft = !!form.name.trim();
+  const openOffer = isOpenSellOffer(form);
+  const canCreate = allRequiredSectionsComplete({
+    form,
+    compensations,
+    delivery: deliveryDraft,
+    leadCriteria,
+    offer: offerDraft,
+  });
 
-  const routingValid =
-    primary?.delivery === "leads" ||
-    (!!primary?.source_stage_id && !!primary?.counterparty_pipeline_id && !!primary?.return_stage_id);
-
-  const canCreate =
-    counterpartyValid &&
-    isContractType(form.contract_type) &&
-    isContractLeadType(form.lead_type) &&
-    compensationsValid(compensations) &&
-    routingValid;
-
-  function submit() {
-    const first = compensations[0];
-    const rate = first?.kind === "flat_rate" && first.flat_amount !== "" ? Number(first.flat_amount) : 0;
-    const body: Record<string, unknown> = {
-      contract_type: form.contract_type,
-      buyer_id: form.buyer_id,
-      name: form.name,
-      lead_type: form.lead_type,
-      description: form.description,
-      rate_per_lead: rate,
-      source_pipeline_id: first?.source_pipeline_id ?? 0,
-      source_stage_id: first?.source_stage_id ?? 0,
-      buyer_pipeline_id: first?.counterparty_pipeline_id ?? 0,
-      return_stage_id: first?.return_stage_id ?? 0,
-      cap_period: first?.cap_period ?? "one_time",
-      cap_total: compensationDraftToBody(first).cap_total,
-      cap_max_daily: compensationDraftToBody(first).cap_max_daily,
-      delivery: first?.delivery ?? "leads_pipeline",
-      compensations: compensations.map(compensationDraftToBody),
-      lead_criteria: leadCriteria,
-    };
+  function runCreate(status: "draft" | "active", onSuccess: () => void) {
+    const body = buildContractPayload({
+      status,
+      form,
+      compensations,
+      delivery: deliveryDraft,
+      leadCriteria,
+      offer: offerDraft,
+    });
 
     const run = () =>
       create.mutate(body, {
-        onSuccess: () => {
-          toast.success("Contract created");
-          onClose();
+        onSuccess: (created) => {
+          toast.success(status === "draft" ? "Draft saved" : "Contract created");
+          if (status === "draft") {
+            onDraftCreated(created);
+          } else {
+            onSuccess();
+          }
         },
         onError: (e) => toast.error(errorMessage(e)),
       });
 
-    if (counterpartyIsPublisher) {
+    if (status === "active" && counterpartyIsPublisher) {
       const pub = (partnerPublishers ?? []).find((p) => p.id === form.buyer_id);
       if (pub?.handler_id) {
         linkPub.mutate(pub.handler_id, {
@@ -232,103 +303,140 @@ function CreateContractDrawer({ open, onClose }: { open: boolean; onClose: () =>
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={!canCreate} onClick={submit}>
+          <Button
+            variant="secondary"
+            disabled={!canSaveDraft || create.isPending}
+            onClick={() => runCreate("draft", onClose)}
+          >
+            Save draft
+          </Button>
+          <Button disabled={!canCreate || create.isPending} onClick={() => runCreate("active", onClose)}>
             Create
           </Button>
         </>
       }
     >
-      <div className="space-y-4">
-        <div>
-          <SectionLabel className="mb-2">Contract Details</SectionLabel>
-          <div className="space-y-3">
-            <div>
-              <Label>Contract type</Label>
-              <Select
-                value={form.contract_type}
-                onChange={(e) => setContractType(e.target.value as "buy" | "sell")}
-              >
-                {CONTRACT_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label>{counterpartyLabel(form.contract_type)}</Label>
-              <Select value={form.buyer_id} onChange={(e) => set("buyer_id", Number(e.target.value))}>
-                <option value={0}>Select…</option>
-                {isBuy ? (
-                  (partnerPublishers ?? []).map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {formatBuyerWithType(p.name, "publisher")}
+      <ContractFormTabs
+        key={`new-contract-${createSession}`}
+        resetKey={createSession}
+        showCheckmarks={false}
+        form={form}
+        compensations={compensations}
+        delivery={deliveryDraft}
+        leadCriteria={leadCriteria}
+        panels={{
+          details: (
+            <div className="space-y-3">
+              <div>
+                <Label>Contract type</Label>
+                <Select
+                  value={form.contract_type}
+                  onChange={(e) => setContractType(e.target.value as "buy" | "sell")}
+                >
+                  {CONTRACT_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
                     </option>
-                  ))
-                ) : (
-                  <>
-                    {(buyers ?? []).map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {formatBuyerWithType(b.name, "buyer")}
-                      </option>
-                    ))}
-                    {(partnerPublishers ?? []).map((p) => (
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <Label>
+                  {counterpartyLabel(form.contract_type)}
+                  {!isBuy ? " (optional — leave empty for open offer)" : ""}
+                </Label>
+                <Select value={form.buyer_id} onChange={(e) => set("buyer_id", Number(e.target.value))}>
+                  <option value={0}>{isBuy ? "Select…" : "Open offer (no buyer yet)"}</option>
+                  {isBuy ? (
+                    (partnerPublishers ?? []).map((p) => (
                       <option key={p.id} value={p.id}>
                         {formatBuyerWithType(p.name, "publisher")}
                       </option>
-                    ))}
-                  </>
+                    ))
+                  ) : (
+                    <>
+                      {(buyers ?? []).map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {formatBuyerWithType(b.name, "buyer")}
+                        </option>
+                      ))}
+                      {(partnerPublishers ?? []).map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {formatBuyerWithType(p.name, "publisher")}
+                        </option>
+                      ))}
+                    </>
+                  )}
+                </Select>
+                {isBuy && (partnerPublishers ?? []).length === 0 && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Link a publisher partner under Partnerships before creating a buy contract.
+                  </p>
                 )}
-              </Select>
-              {isBuy && (partnerPublishers ?? []).length === 0 && (
-                <p className="mt-1 text-xs text-gray-500">
-                  Link a publisher partner under Partnerships before creating a buy contract.
-                </p>
-              )}
-              {counterpartyIsPublisher && (
-                <p className="mt-1 text-xs text-gray-500">
-                  A mirrored {form.contract_type === "sell" ? "buy" : "sell"} contract will be created on the other publisher.
-                </p>
-              )}
+                {counterpartyIsPublisher && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    A mirrored {form.contract_type === "sell" ? "buy" : "sell"} contract will be created on the other publisher.
+                  </p>
+                )}
+              </div>
+              <div>
+                <Label>Name</Label>
+                <Input value={form.name} onChange={(e) => set("name", e.target.value)} />
+              </div>
+              <div>
+                <Label>Lead type</Label>
+                <Select value={form.lead_type} onChange={(e) => set("lead_type", e.target.value)}>
+                  <option value="">Select…</option>
+                  {CONTRACT_LEAD_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <Label>Description</Label>
+                <Textarea value={form.description} onChange={(e) => set("description", e.target.value)} />
+              </div>
             </div>
-            <div>
-              <Label>Name</Label>
-              <Input value={form.name} onChange={(e) => set("name", e.target.value)} />
-            </div>
-            <div>
-              <Label>Lead type</Label>
-              <Select value={form.lead_type} onChange={(e) => set("lead_type", e.target.value)}>
-                <option value="">Select…</option>
-                {CONTRACT_LEAD_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label>Description</Label>
-              <Textarea value={form.description} onChange={(e) => set("description", e.target.value)} />
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <SectionLabel className="mb-2">Compensation</SectionLabel>
-          <CreateContractCompensationList
-            buyerId={form.buyer_id}
-            items={compensations}
-            onChange={setCompensations}
-          />
-        </div>
-
-        <ContractLeadCriteriaSection
-          buyerId={form.buyer_id}
-          buyerPipelineId={primary?.counterparty_pipeline_id ?? 0}
-          value={leadCriteria}
-          onChange={setLeadCriteria}
-        />
-      </div>
+          ),
+          compensation: (
+            <CreateContractCompensationList
+              buyerId={form.buyer_id}
+              contractType={form.contract_type}
+              buyerPipelineId={deliveryDraft.counterparty_pipeline_id}
+              leadType={form.lead_type}
+              items={compensations}
+              onChange={setCompensations}
+              blankNewRows
+            />
+          ),
+          delivery: openOffer ? (
+            <ContractOfferSection value={offerDraft} onChange={setOfferDraft} />
+          ) : (
+            <ContractDeliverySection
+              buyerId={form.buyer_id}
+              contractType={form.contract_type}
+              value={deliveryDraft}
+              onChange={setDeliveryDraft}
+            />
+          ),
+          criteria: (
+            <ContractLeadCriteriaSection
+              buyerId={form.buyer_id}
+              buyerPipelineId={deliveryDraft.counterparty_pipeline_id}
+              contractType={form.contract_type}
+              value={leadCriteria}
+              onChange={setLeadCriteria}
+            />
+          ),
+          returns: (
+            <p className="text-sm text-gray-500">
+              Return rules can be configured after the contract is saved.
+            </p>
+          ),
+        }}
+      />
     </FormDrawer>
   );
 }

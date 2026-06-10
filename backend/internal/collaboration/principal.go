@@ -63,6 +63,22 @@ func (s *Service) resolveSwitch(ctx context.Context, real *auth.Principal, claim
 		if !ok {
 			return nil, ErrNotFound
 		}
+	case "buyer":
+		if targetType != "buyer" {
+			return nil, ErrNotFound
+		}
+		var ok bool
+		_ = s.repo.pool.QueryRow(ctx,
+			`SELECT EXISTS(
+				SELECT 1 FROM users u
+				JOIN users u2 ON u2.email = u.email
+				WHERE u.account_id = $1 AND u2.account_id = $2
+				  AND u.role = 'admin' AND u2.role = 'admin'
+				  AND u.is_active AND u2.is_active
+			)`, originID, targetID).Scan(&ok)
+		if !ok {
+			return nil, ErrNotFound
+		}
 	default:
 		return nil, ErrNotFound
 	}

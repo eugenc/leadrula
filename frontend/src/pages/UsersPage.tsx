@@ -62,7 +62,7 @@ export function UsersPage() {
                 <TH>Email</TH>
                 <TH>Role</TH>
                 <TH>Status</TH>
-                <TH />
+                <TH className="min-w-0 w-12" />
               </tr>
             </THead>
             <TBody>

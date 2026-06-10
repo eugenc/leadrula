@@ -21,6 +21,9 @@ func (h *Handler) RegisterPublisher(r chi.Router) {
 	r.Get("/contracts/{id}/return-rules", h.listRules)
 	r.Get("/contracts/{id}/compensations", h.listCompensations)
 	r.Get("/contracts/{id}/lead-criteria", h.getLeadCriteria)
+	r.Get("/contracts/{id}/participations", h.listParticipations)
+	r.Get("/payouts/summary", h.payoutSummary)
+	r.Get("/payouts/by-compensation", h.payoutByCompensation)
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireRole("admin"))
@@ -33,6 +36,11 @@ func (h *Handler) RegisterPublisher(r chi.Router) {
 		r.Delete("/contracts/{id}/compensations/{compId}", h.deleteCompensation)
 		r.Post("/contracts/{id}/leads/{leadId}/accrue", h.accrueManual)
 		r.Patch("/contracts/{id}/lead-criteria", h.saveLeadCriteria)
+		r.Patch("/contracts/{id}/offer", h.updateOffer)
+		r.Post("/contracts/{id}/participations", h.addParticipation)
+		r.Post("/contracts/{id}/invites", h.createInvite)
+		r.Post("/participations/{id}/accept-counter", h.acceptCounter)
+		r.Post("/participations/{id}/reject-counter", h.rejectCounter)
 		r.Patch("/return-rules/{ruleId}", h.updateRule)
 		r.Delete("/return-rules/{ruleId}", h.deleteRule)
 	})
@@ -41,6 +49,12 @@ func (h *Handler) RegisterPublisher(r chi.Router) {
 // RegisterBuyer mounts the buyer's read-only contract + return-rule config.
 func (h *Handler) RegisterBuyer(r chi.Router) {
 	r.Get("/contracts", h.buyerList)
+	r.Get("/participations", h.buyerListParticipations)
+	r.Get("/participations/{id}", h.buyerGetParticipation)
+	r.With(auth.RequireRole("admin")).Post("/participations/{id}/accept", h.buyerAcceptParticipation)
+	r.With(auth.RequireRole("admin")).Post("/participations/{id}/decline", h.buyerDeclineParticipation)
+	r.With(auth.RequireRole("admin")).Post("/participations/{id}/counter", h.buyerCounterParticipation)
+	r.With(auth.RequireRole("admin")).Post("/contract-invites/{token}/attach", h.buyerAttachInvite)
 	r.Get("/contracts/{id}/publisher-stages", h.buyerPublisherStages)
 	r.Get("/contracts/{id}/return-rules", h.buyerListRules)
 	r.Get("/contracts/{id}/compensations", h.buyerListCompensations)
@@ -69,28 +83,33 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, c)
 }
 
+type contractCreateBody struct {
+	Status                string               `json:"status"`
+	BuyerID               int64                `json:"buyer_id"`
+	BuyerHandlerID        string               `json:"buyer_handler_id"`
+	CounterpartyHandlerID string               `json:"counterparty_handler_id"`
+	ContractType          string               `json:"contract_type"`
+	Name                  string               `json:"name"`
+	Description           string               `json:"description"`
+	LeadType              string               `json:"lead_type"`
+	CapPeriod             string               `json:"cap_period"`
+	CapTotal              *int                 `json:"cap_total"`
+	CapMaxDaily           *int                 `json:"cap_max_daily"`
+	SourcePipelineID      int64                `json:"source_pipeline_id"`
+	SourceStageID         int64                `json:"source_stage_id"`
+	BuyerPipelineID       int64                `json:"buyer_pipeline_id"`
+	ReturnStageID         int64                `json:"return_stage_id"`
+	RatePerLead           float64              `json:"rate_per_lead"`
+	Delivery              string               `json:"delivery"`
+	Compensations         []CompensationParams `json:"compensations"`
+	LeadCriteria         *LeadCriteria        `json:"lead_criteria"`
+	AllowedDeliveryModes []string             `json:"allowed_delivery_modes"`
+	DistributionStrategy string               `json:"distribution_strategy"`
+}
+
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	var body struct {
-		BuyerID              int64   `json:"buyer_id"`
-		BuyerHandlerID       string  `json:"buyer_handler_id"`
-		CounterpartyHandlerID string `json:"counterparty_handler_id"`
-		ContractType         string  `json:"contract_type"`
-		Name                 string  `json:"name"`
-		Description          string  `json:"description"`
-		LeadType             string  `json:"lead_type"`
-		CapPeriod            string  `json:"cap_period"`
-		CapTotal             *int    `json:"cap_total"`
-		CapMaxDaily          *int    `json:"cap_max_daily"`
-		SourcePipelineID     int64   `json:"source_pipeline_id"`
-		SourceStageID        int64   `json:"source_stage_id"`
-		BuyerPipelineID      int64   `json:"buyer_pipeline_id"`
-		ReturnStageID        int64   `json:"return_stage_id"`
-		RatePerLead          float64 `json:"rate_per_lead"`
-		Delivery             string  `json:"delivery"`
-		Compensations        []CompensationParams `json:"compensations"`
-		LeadCriteria         *LeadCriteria        `json:"lead_criteria"`
-	}
+	var body contractCreateBody
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
@@ -100,6 +119,20 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := validateContractType("publisher", contractType); err != nil {
 		httpx.WriteError(w, err)
+		return
+	}
+
+	status := strings.TrimSpace(body.Status)
+	if status == "" {
+		status = "active"
+	}
+	if status == "draft" {
+		c, err := h.svc.CreateDraft(r.Context(), p.AccountID, createParamsFromCreateBody(body, contractType))
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		httpx.JSON(w, http.StatusCreated, c)
 		return
 	}
 
@@ -120,8 +153,39 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if buyerID == 0 && contractType == "sell" && len(body.AllowedDeliveryModes) > 0 {
+		if err := validateLeadType(body.LeadType, true); err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		capPeriod := body.CapPeriod
+		if capPeriod == "" {
+			capPeriod = "one_time"
+		}
+		if err := validateCapLimits(capPeriod, body.CapTotal, body.CapMaxDaily); err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		comps := body.Compensations
+		for i := range comps {
+			if err := validateCompensationParams(comps[i]); err != nil {
+				httpx.WriteError(w, err)
+				return
+			}
+		}
+		params := createParamsFromCreateBody(body, contractType)
+		params.Compensations = comps
+		params.CapPeriod = capPeriod
+		c, err := h.svc.CreateActiveOffer(r.Context(), p.AccountID, params)
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		httpx.JSON(w, http.StatusCreated, c)
+		return
+	}
 	if buyerID == 0 {
-		msg := "counterparty is required"
+		msg := "counterparty is required (or set allowed_delivery_modes for an open sell offer)"
 		if contractType == "buy" {
 			msg = "publisher counterparty is required"
 		}
@@ -138,6 +202,10 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateLeadType(body.LeadType, true); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if err := validateLeadCriteriaForActivation(body.LeadCriteria); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
@@ -158,24 +226,11 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	c, err := h.svc.Create(r.Context(), p.AccountID, CreateParams{
-		BuyerID:          buyerID,
-		ContractType:     contractType,
-		Name:             body.Name,
-		Description:      body.Description,
-		LeadType:         body.LeadType,
-		CapPeriod:        capPeriod,
-		CapTotal:         body.CapTotal,
-		CapMaxDaily:      body.CapMaxDaily,
-		SourcePipelineID: body.SourcePipelineID,
-		SourceStageID:    body.SourceStageID,
-		BuyerPipelineID:  body.BuyerPipelineID,
-		ReturnStageID:    body.ReturnStageID,
-		RatePerLead:      body.RatePerLead,
-		Delivery:         body.Delivery,
-		Compensations:    comps,
-		LeadCriteria:     body.LeadCriteria,
-	})
+	params := createParamsFromCreateBody(body, contractType)
+	params.BuyerID = buyerID
+	params.CapPeriod = capPeriod
+	params.Compensations = comps
+	c, err := h.svc.Create(r.Context(), p.AccountID, params)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -185,19 +240,67 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	var body struct {
-		Name          *string  `json:"name"`
-		RatePerLead   *float64 `json:"rate_per_lead"`
-		Status        *string  `json:"status"`
-		Description   *string  `json:"description"`
-		LeadType      *string  `json:"lead_type"`
-		ContractType  *string  `json:"contract_type"`
-		CapPeriod     *string  `json:"cap_period"`
-		CapTotal      *int     `json:"cap_total"`
-		CapMaxDaily   *int     `json:"cap_max_daily"`
-	}
+	var body contractPatchBody
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
+	}
+	contractID := idp(r, "id")
+	existing, err := h.svc.Get(r.Context(), p.AccountID, contractID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if body.Status != nil && *body.Status == "draft" && existing.Status != "draft" {
+		httpx.WriteError(w, httpx.Validation("cannot revert an active contract to draft"))
+		return
+	}
+	if body.Status != nil && *body.Status == "active" && existing.Status == "draft" {
+		params := patchToCreateParams(body, existing)
+		var c *Contract
+		var err error
+		if params.ContractType == "sell" && params.BuyerID == 0 {
+			c, err = h.svc.ActivateOfferDraft(r.Context(), p.AccountID, contractID, params)
+		} else {
+			c, err = h.svc.ActivateDraft(r.Context(), p.AccountID, contractID, params)
+		}
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		httpx.JSON(w, http.StatusOK, c)
+		return
+	}
+	if existing.Status == "active" && (body.AllowedDeliveryModes != nil || body.DistributionStrategy != nil) {
+		c, err := h.svc.UpdateOffer(r.Context(), p.AccountID, contractID, OfferUpdateParams{
+			AllowedDeliveryModes: func() *[]string {
+				if body.AllowedDeliveryModes != nil {
+					return &body.AllowedDeliveryModes
+				}
+				return nil
+			}(),
+			DistributionStrategy: body.DistributionStrategy,
+		})
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		httpx.JSON(w, http.StatusOK, c)
+		return
+	}
+	if existing.Status == "draft" && body.isDraftSave() {
+		c, err := h.svc.UpdateDraft(r.Context(), p.AccountID, contractID, patchToCreateParams(body, existing))
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		httpx.JSON(w, http.StatusOK, c)
+		return
+	}
+	if body.Status != nil && existing.Status != "draft" {
+		if err := validatePublisherContractStatus(*body.Status); err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
 	}
 	if body.LeadType != nil {
 		if err := validateLeadType(*body.LeadType, true); err != nil {
@@ -217,7 +320,39 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		}
 		body.CapPeriod = &period
 	}
-	c, err := h.svc.Update(r.Context(), p.AccountID, idp(r, "id"), UpdateParams{
+	if body.Delivery != nil {
+		delivery := *body.Delivery
+		sourcePipelineID := int64(0)
+		sourceStageID := int64(0)
+		buyerPipelineID := int64(0)
+		returnStageID := int64(0)
+		if body.SourcePipelineID != nil {
+			sourcePipelineID = *body.SourcePipelineID
+		}
+		if body.SourceStageID != nil {
+			sourceStageID = *body.SourceStageID
+		}
+		if body.BuyerPipelineID != nil {
+			buyerPipelineID = *body.BuyerPipelineID
+		}
+		if body.ReturnStageID != nil {
+			returnStageID = *body.ReturnStageID
+		}
+		c, err := h.svc.UpdateDelivery(r.Context(), p.AccountID, contractID, DeliveryUpdateParams{
+			Delivery:         delivery,
+			SourcePipelineID: sourcePipelineID,
+			SourceStageID:    sourceStageID,
+			BuyerPipelineID:  buyerPipelineID,
+			ReturnStageID:    returnStageID,
+		})
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		httpx.JSON(w, http.StatusOK, c)
+		return
+	}
+	c, err := h.svc.Update(r.Context(), p.AccountID, contractID, UpdateParams{
 		Name:          body.Name,
 		RatePerLead:   body.RatePerLead,
 		Status:        body.Status,
@@ -364,6 +499,9 @@ func decodeCompensationBody(w http.ResponseWriter, r *http.Request) (Compensatio
 		ReturnStageID          *int64   `json:"return_stage_id"`
 		Delivery               string   `json:"delivery"`
 		Position               int      `json:"position"`
+		PayoutFrequency        *string  `json:"payout_frequency"`
+		PayoutWeekday          *int     `json:"payout_weekday"`
+		PayoutMonthDay         *int     `json:"payout_month_day"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return CompensationParams{}, false
@@ -395,6 +533,9 @@ func decodeCompensationBody(w http.ResponseWriter, r *http.Request) (Compensatio
 		ReturnStageID:          body.ReturnStageID,
 		Delivery:               body.Delivery,
 		Position:               body.Position,
+		PayoutFrequency:        body.PayoutFrequency,
+		PayoutWeekday:          body.PayoutWeekday,
+		PayoutMonthDay:         body.PayoutMonthDay,
 	}, true
 }
 
@@ -601,6 +742,18 @@ var allowedLeadTypes = map[string]bool{
 	"Data": true, "Appointment": true, "Call": true,
 }
 
+var allowedPublisherContractStatuses = map[string]bool{
+	"active": true, "paused": true, "terminated": true,
+}
+
+func validatePublisherContractStatus(status string) error {
+	status = strings.TrimSpace(status)
+	if !allowedPublisherContractStatuses[status] {
+		return httpx.Validation("status must be active, paused, or terminated")
+	}
+	return nil
+}
+
 func validateLeadType(s string, required bool) error {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -645,4 +798,180 @@ func validateCapLimits(period string, capTotal, capMaxDaily *int) error {
 		return httpx.Validation("cap_max_daily is only allowed for weekly or monthly cap periods")
 	}
 	return nil
+}
+
+func (h *Handler) payoutSummary(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	sum, err := h.svc.PayoutSummary(r.Context(), p.AccountID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, sum)
+}
+
+func (h *Handler) payoutByCompensation(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	rows, err := h.svc.PayoutByCompensation(r.Context(), p.AccountID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if rows == nil {
+		rows = []CompensationPayoutRow{}
+	}
+	httpx.JSON(w, http.StatusOK, rows)
+}
+
+type contractPatchBody struct {
+	Name               *string              `json:"name"`
+	RatePerLead        *float64             `json:"rate_per_lead"`
+	Status             *string              `json:"status"`
+	Description        *string              `json:"description"`
+	LeadType           *string              `json:"lead_type"`
+	ContractType       *string              `json:"contract_type"`
+	CapPeriod          *string              `json:"cap_period"`
+	CapTotal           *int                 `json:"cap_total"`
+	CapMaxDaily        *int                 `json:"cap_max_daily"`
+	BuyerID            *int64               `json:"buyer_id"`
+	Delivery           *string              `json:"delivery"`
+	SourcePipelineID   *int64               `json:"source_pipeline_id"`
+	SourceStageID      *int64               `json:"source_stage_id"`
+	BuyerPipelineID    *int64               `json:"buyer_pipeline_id"`
+	ReturnStageID      *int64               `json:"return_stage_id"`
+	Compensations      []CompensationParams `json:"compensations"`
+	LeadCriteria          *LeadCriteria        `json:"lead_criteria"`
+	AllowedDeliveryModes  []string             `json:"allowed_delivery_modes"`
+	DistributionStrategy  *string              `json:"distribution_strategy"`
+}
+
+func (b contractPatchBody) isDraftSave() bool {
+	return b.Name != nil || b.BuyerID != nil || b.ContractType != nil || b.LeadType != nil ||
+		b.Description != nil || b.Delivery != nil || b.Compensations != nil || b.LeadCriteria != nil ||
+		b.SourcePipelineID != nil || b.SourceStageID != nil || b.BuyerPipelineID != nil || b.ReturnStageID != nil ||
+		b.RatePerLead != nil || b.CapPeriod != nil || b.CapTotal != nil || b.CapMaxDaily != nil ||
+		len(b.AllowedDeliveryModes) > 0 || b.DistributionStrategy != nil
+}
+
+func createParamsFromCreateBody(body contractCreateBody, contractType string) CreateParams {
+	delivery := strings.TrimSpace(body.Delivery)
+	if delivery == "" && len(body.Compensations) > 0 {
+		delivery = body.Compensations[0].Delivery
+	}
+	capPeriod := body.CapPeriod
+	if capPeriod == "" {
+		capPeriod = "one_time"
+	}
+	return CreateParams{
+		BuyerID:          body.BuyerID,
+		ContractType:     contractType,
+		Name:             body.Name,
+		Description:      body.Description,
+		LeadType:         body.LeadType,
+		CapPeriod:        capPeriod,
+		CapTotal:         body.CapTotal,
+		CapMaxDaily:      body.CapMaxDaily,
+		SourcePipelineID: body.SourcePipelineID,
+		SourceStageID:    body.SourceStageID,
+		BuyerPipelineID:  body.BuyerPipelineID,
+		ReturnStageID:    body.ReturnStageID,
+		RatePerLead:      body.RatePerLead,
+		Delivery:         delivery,
+		Compensations:          body.Compensations,
+		LeadCriteria:           body.LeadCriteria,
+		AllowedDeliveryModes:   body.AllowedDeliveryModes,
+		DistributionStrategy:   body.DistributionStrategy,
+	}
+}
+
+func patchToCreateParams(body contractPatchBody, existing *Contract) CreateParams {
+	name := existing.Name
+	if body.Name != nil {
+		name = *body.Name
+	}
+	desc := existing.Description
+	if body.Description != nil {
+		desc = *body.Description
+	}
+	leadType := existing.LeadType
+	if body.LeadType != nil {
+		leadType = *body.LeadType
+	}
+	contractType := existing.ContractType
+	if body.ContractType != nil {
+		contractType = *body.ContractType
+	}
+	buyerID := derefInt64(existing.BuyerID)
+	if body.BuyerID != nil {
+		buyerID = *body.BuyerID
+	}
+	capPeriod := existing.CapPeriod
+	if body.CapPeriod != nil {
+		capPeriod = *body.CapPeriod
+	}
+	capTotal := existing.CapTotal
+	if body.CapTotal != nil {
+		capTotal = body.CapTotal
+	}
+	capMaxDaily := existing.CapMaxDaily
+	if body.CapMaxDaily != nil {
+		capMaxDaily = body.CapMaxDaily
+	}
+	rate := existing.RatePerLead
+	if body.RatePerLead != nil {
+		rate = *body.RatePerLead
+	}
+	sourcePipeline := derefInt64(existing.SourcePipelineID)
+	if body.SourcePipelineID != nil {
+		sourcePipeline = *body.SourcePipelineID
+	}
+	sourceStage := derefInt64(existing.SourceStageID)
+	if body.SourceStageID != nil {
+		sourceStage = *body.SourceStageID
+	}
+	buyerPipeline := derefInt64(existing.BuyerPipelineID)
+	if body.BuyerPipelineID != nil {
+		buyerPipeline = *body.BuyerPipelineID
+	}
+	returnStage := derefInt64(existing.ReturnStageID)
+	if body.ReturnStageID != nil {
+		returnStage = *body.ReturnStageID
+	}
+	delivery := ""
+	if body.Delivery != nil {
+		delivery = *body.Delivery
+	}
+	comps := body.Compensations
+	if comps == nil {
+		comps = []CompensationParams{}
+	}
+	criteria := body.LeadCriteria
+	modes := existing.AllowedDeliveryModes
+	if body.AllowedDeliveryModes != nil {
+		modes = body.AllowedDeliveryModes
+	}
+	strategy := existing.DistributionStrategy
+	if body.DistributionStrategy != nil {
+		strategy = *body.DistributionStrategy
+	}
+	return CreateParams{
+		BuyerID:                buyerID,
+		ContractType:           contractType,
+		Name:                   name,
+		Description:            desc,
+		LeadType:               leadType,
+		CapPeriod:              capPeriod,
+		CapTotal:               capTotal,
+		CapMaxDaily:      capMaxDaily,
+		SourcePipelineID: sourcePipeline,
+		SourceStageID:    sourceStage,
+		BuyerPipelineID:  buyerPipeline,
+		ReturnStageID:    returnStage,
+		RatePerLead:      rate,
+		Delivery:         delivery,
+		Compensations:          comps,
+		LeadCriteria:           criteria,
+		AllowedDeliveryModes:   modes,
+		DistributionStrategy:   strategy,
+	}
 }

@@ -12,10 +12,15 @@ import (
 // Target is the minimal contract info the intake/routing flow needs.
 type Target struct {
 	ID              int64
+	ParticipationID int64
 	BuyerID         int64
 	BuyerPipelineID int64
+	BuyerStageID    int64
 	RatePerLead     float64
 	CompensationID  int64
+	Delivery        string
+	IntegrationID   int64
+	WebhookID       int64
 }
 
 const perLeadCompSQL = `
@@ -25,7 +30,7 @@ FROM contract_compensations cc
 JOIN contracts c ON c.id = cc.contract_id
 WHERE cc.contract_id = $1 AND cc.trigger = 'per_lead'
   AND cc.kind IN ('flat_rate', 'bid')
-  AND c.deleted_at IS NULL
+  AND c.deleted_at IS NULL AND c.status = 'active'
 ORDER BY cc.position, cc.id
 LIMIT 1`
 
@@ -47,7 +52,7 @@ func loadLegacyTarget(ctx context.Context, q database.Querier, contractID int64)
 	t := &Target{}
 	err := q.QueryRow(ctx,
 		`SELECT id, buyer_id, buyer_pipeline_id, rate_per_lead::float8
-		 FROM contracts WHERE id = $1 AND deleted_at IS NULL`, contractID).Scan(
+		 FROM contracts WHERE id = $1 AND deleted_at IS NULL AND status = 'active'`, contractID).Scan(
 		&t.ID, &t.BuyerID, &t.BuyerPipelineID, &t.RatePerLead)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -65,7 +70,7 @@ func loadPerLeadTargetByComp(ctx context.Context, q database.Querier, compID int
 		        COALESCE(cc.flat_amount, cc.bid_max, 0)::float8, cc.id
 		 FROM contract_compensations cc
 		 JOIN contracts c ON c.id = cc.contract_id
-		 WHERE cc.id = $1 AND cc.trigger = 'per_lead' AND c.deleted_at IS NULL`,
+		 WHERE cc.id = $1 AND cc.trigger = 'per_lead' AND c.deleted_at IS NULL AND c.status = 'active'`,
 		compID).Scan(&t.ID, &t.BuyerID, &t.BuyerPipelineID, &t.RatePerLead, &t.CompensationID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -84,7 +89,71 @@ func GetTarget(ctx context.Context, q database.Querier, contractID int64, routeC
 	return loadPerLeadTarget(ctx, q, contractID)
 }
 
+// GetTargetForRoute picks a participation and loads its routing target.
+func GetTargetForRoute(ctx context.Context, q database.Querier, contractID int64, routeCompensationID *int64, leadCost float64) (*Target, error) {
+	if routeCompensationID != nil && *routeCompensationID != 0 {
+		return loadPerLeadTargetByComp(ctx, q, *routeCompensationID)
+	}
+	partID, _, err := PickParticipation(ctx, q, contractID, leadCost)
+	if err != nil {
+		return nil, err
+	}
+	if partID == 0 {
+		return loadPerLeadTarget(ctx, q, contractID)
+	}
+	return loadParticipationTarget(ctx, q, partID)
+}
+
+func loadParticipationTarget(ctx context.Context, q database.Querier, participationID int64) (*Target, error) {
+	t := &Target{}
+	var delivery string
+	err := q.QueryRow(ctx,
+		`SELECT p.contract_id, p.id, p.buyer_id,
+		        COALESCE(p.buyer_pipeline_id, cc.counterparty_pipeline_id, 0),
+		        COALESCE(p.buyer_target_stage_id, 0),
+		        COALESCE(cc.flat_amount, cc.bid_max, 0)::float8, cc.id,
+		        COALESCE(p.delivery, cc.delivery, 'leads'),
+		        COALESCE(p.integration_connection_id, 0),
+		        COALESCE(p.outbound_webhook_id, 0)
+		 FROM contract_participations p
+		 JOIN LATERAL (
+		   SELECT id, flat_amount, bid_max, counterparty_pipeline_id, delivery
+		   FROM contract_compensations
+		   WHERE participation_id = p.id AND trigger = 'per_lead'
+		   ORDER BY position, id LIMIT 1
+		 ) cc ON true
+		 WHERE p.id = $1 AND p.status = 'active'`,
+		participationID).Scan(
+		&t.ID, &t.ParticipationID, &t.BuyerID, &t.BuyerPipelineID, &t.BuyerStageID,
+		&t.RatePerLead, &t.CompensationID, &delivery, &t.IntegrationID, &t.WebhookID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, httpx.NotFound("participation not found")
+		}
+		return nil, err
+	}
+	t.Delivery = delivery
+	return t, nil
+}
+
 // GetTargetByContract is backward-compatible entry without route compensation.
 func GetTargetByContract(ctx context.Context, q database.Querier, contractID int64) (*Target, error) {
 	return GetTarget(ctx, q, contractID, nil)
+}
+
+// RequireActiveContract rejects delivery when the contract is missing or not active.
+func RequireActiveContract(ctx context.Context, q database.Querier, contractID int64) error {
+	var status string
+	err := q.QueryRow(ctx,
+		`SELECT status FROM contracts WHERE id = $1 AND deleted_at IS NULL`, contractID).Scan(&status)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return httpx.NotFound("contract not found")
+		}
+		return err
+	}
+	if status != "active" {
+		return httpx.BusinessRule("contract is not active")
+	}
+	return nil
 }

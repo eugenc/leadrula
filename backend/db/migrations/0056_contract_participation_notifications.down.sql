@@ -1,0 +1,1 @@
+-- notification_type enum values cannot be removed in PostgreSQL

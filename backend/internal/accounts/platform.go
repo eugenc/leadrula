@@ -48,11 +48,11 @@ func (s *Service) CreatePublisher(ctx context.Context, p CreatePublisherParams) 
 }
 
 func (s *Service) CreatePlatformBuyer(ctx context.Context, p CreateBuyerParams) (*Account, error) {
-	summary, err := s.CreateBuyer(ctx, p)
+	res, err := s.CreateBuyer(ctx, p)
 	if err != nil {
 		return nil, err
 	}
-	acct, err := s.repo.GetAccount(ctx, summary.ID)
+	acct, err := s.repo.GetAccount(ctx, res.Buyer.ID)
 	if err != nil {
 		return nil, err
 	}

@@ -37,6 +37,7 @@ func (h *Handler) RegisterPublicRoutes(r chi.Router) {
 
 // RegisterQueueRoutes mounts the publisher admin intake queue routes.
 func (h *Handler) RegisterQueueRoutes(r chi.Router) {
+	r.Get("/inbound-log", h.listInboundLog)
 	r.Get("/intake-queue", h.listQueue)
 	r.With(auth.RequireRole("admin")).Post("/intake-queue/{id}/route", h.route)
 	r.With(auth.RequireRole("admin")).Post("/intake-queue/{id}/reject", h.reject)
@@ -101,6 +102,29 @@ func (h *Handler) action(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func (h *Handler) listInboundLog(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	q := r.URL.Query()
+	logType := q.Get("type")
+	if logType == "" {
+		logType = "all"
+	}
+	result, err := h.svc.ListInboundLog(r.Context(), p.AccountID, ListInboundLogParams{
+		Type:      logType,
+		Status:    q.Get("status"),
+		Search:    q.Get("q"),
+		Source:    q.Get("source"),
+		WebhookID: int64(parseInt(q.Get("webhook_id"))),
+		Page:      int(parseInt(q.Get("page"))),
+		Limit:     int(parseInt(q.Get("limit"))),
+	})
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, result)
+}
+
 func (h *Handler) listQueue(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	q := r.URL.Query()
@@ -137,6 +161,7 @@ func (h *Handler) listRoutingLog(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) route(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
+		RouteID    int64 `json:"route_id"`
 		PipelineID int64 `json:"pipeline_id"`
 		StageID    int64 `json:"stage_id"`
 		BuyerID    int64 `json:"buyer_id"`
@@ -144,7 +169,11 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	if err := h.svc.RouteFromQueue(r.Context(), idp(r), body.PipelineID, body.StageID, body.BuyerID, p.UserID); err != nil {
+	if body.RouteID == 0 && body.BuyerID == 0 {
+		httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, "route_id or buyer_id is required")
+		return
+	}
+	if err := h.svc.RouteFromQueue(r.Context(), idp(r), body.RouteID, body.PipelineID, body.StageID, body.BuyerID, p.UserID); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}

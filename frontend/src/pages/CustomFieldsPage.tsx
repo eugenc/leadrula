@@ -142,7 +142,7 @@ export function CustomFieldsPage() {
                 <TH>Key</TH>
                 <TH>Type</TH>
                 <TH>Active</TH>
-                <TH />
+                <TH className="min-w-0 w-12" />
               </tr>
             </THead>
             <TBody>

@@ -421,9 +421,19 @@ func (s *Service) auditAndNotifyRequest(ctx context.Context, pubID, buyerID, act
 	}
 	pubName, _ := s.repo.AccountName(ctx, pubID)
 	buyerPubID, _ := s.repo.GetAccountPublicID(ctx, buyerID)
-	return s.notif.Enqueue(ctx, s.repo.pool, adminIDs, "collaboration_request", map[string]any{
-		"direction": "publisher_to_buyer", "publisher_name": pubName, "buyer_id": buyerPubID, "collaboration_id": collabID,
+	emails, err := s.notif.Deliver(ctx, s.repo.pool, notifications.DeliverParams{
+		AccountID: buyerID,
+		UserIDs:   adminIDs,
+		EventType: "collaboration_request",
+		Payload: map[string]any{
+			"direction": "publisher_to_buyer", "publisher_name": pubName, "buyer_id": buyerPubID, "collaboration_id": collabID,
+		},
 	})
+	if err != nil {
+		return err
+	}
+	s.notif.SendEmails(emails)
+	return nil
 }
 
 func (s *Service) auditAndNotifyInvite(ctx context.Context, pubID, buyerID, actorID, targetUserID int64, collabID int64) error {
@@ -434,9 +444,19 @@ func (s *Service) auditAndNotifyInvite(ctx context.Context, pubID, buyerID, acto
 	}
 	buyerName, _ := s.repo.AccountName(ctx, buyerID)
 	buyerPubID, _ := s.repo.GetAccountPublicID(ctx, buyerID)
-	return s.notif.Enqueue(ctx, s.repo.pool, []int64{targetUserID}, "collaboration_request", map[string]any{
-		"direction": "buyer_to_publisher", "buyer_name": buyerName, "buyer_id": buyerPubID, "collaboration_id": collabID,
+	emails, err := s.notif.Deliver(ctx, s.repo.pool, notifications.DeliverParams{
+		AccountID: pubID,
+		UserIDs:   []int64{targetUserID},
+		EventType: "collaboration_request",
+		Payload: map[string]any{
+			"direction": "buyer_to_publisher", "buyer_name": buyerName, "buyer_id": buyerPubID, "collaboration_id": collabID,
+		},
 	})
+	if err != nil {
+		return err
+	}
+	s.notif.SendEmails(emails)
+	return nil
 }
 
 func (s *Service) adminUserIDs(ctx context.Context, accountID int64) ([]int64, error) {

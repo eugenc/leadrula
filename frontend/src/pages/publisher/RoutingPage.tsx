@@ -113,7 +113,7 @@ export function RoutingPage() {
                 <TH>Target</TH>
                 <TH>Delivery</TH>
                 <TH>Active</TH>
-                <TH />
+                <TH className="min-w-0 w-12" />
               </tr>
             </THead>
             <TBody>
@@ -213,7 +213,9 @@ function RouteDrawerContent({
 
   const selectedContract = (contracts ?? []).find((c) => c.id === contractId);
   const { data: buyerStages } = useStages(
-    destination === "buyer" && delivery === "leads_pipeline" ? selectedContract?.buyer_pipeline_id : undefined
+    destination === "buyer" && delivery === "leads_pipeline"
+      ? selectedContract?.buyer_pipeline_id ?? undefined
+      : undefined
   );
 
   const publisherDestAllowed = origin === "source";

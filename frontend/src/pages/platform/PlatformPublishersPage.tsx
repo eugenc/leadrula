@@ -1,11 +1,7 @@
 import { useEffect, useState } from "react";
 import { format } from "date-fns";
-import { ArrowRightLeft, Plus } from "lucide-react";
-import {
-  useCreatePublisher,
-  usePlatformPublishers,
-  useSwitchAccount,
-} from "@/features/auth/switchHooks";
+import { Plus } from "lucide-react";
+import { useCreatePublisher, usePlatformPublishers } from "@/features/auth/switchHooks";
 import { PlatformAccountStatusBadge } from "@/pages/platform/PlatformAccountStatusBadge";
 import { PlatformPublisherDetailDrawer } from "@/pages/platform/PlatformPublisherDetailDrawer";
 import type { PlatformAccount } from "@/types";
@@ -53,7 +49,6 @@ export function PlatformPublishersPage() {
     page,
     limit,
   });
-  const switchAccount = useSwitchAccount();
   const create = useCreatePublisher();
 
   const rows = data?.items ?? [];
@@ -111,13 +106,10 @@ export function PlatformPublishersPage() {
                   <TH>Handler ID</TH>
                   <TH>Timezone</TH>
                   <TH>Created</TH>
-                  <TH />
                 </tr>
               </THead>
               <TBody>
-                {rows.map((p) => {
-                  const suspended = p.operational_status === "suspended";
-                  return (
+                {rows.map((p) => (
                     <TR
                       key={p.id}
                       className="cursor-pointer"
@@ -132,25 +124,8 @@ export function PlatformPublishersPage() {
                       <TD className="text-gray-500">
                         {p.created_at ? format(new Date(p.created_at), "MMM d, yyyy") : "—"}
                       </TD>
-                      <TD>
-                        <div className="flex justify-end">
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={switchAccount.isPending || suspended}
-                            title={suspended ? "Account suspended" : undefined}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              switchAccount.mutate(p.id);
-                            }}
-                          >
-                            <ArrowRightLeft className="h-3.5 w-3.5" /> Open
-                          </Button>
-                        </div>
-                      </TD>
                     </TR>
-                  );
-                })}
+                  ))}
               </TBody>
             </Table>
 

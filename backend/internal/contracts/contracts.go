@@ -4,9 +4,11 @@ package contracts
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/database"
+	"github.com/echayko/leadrula/backend/internal/notifications"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,17 +19,17 @@ type Contract struct {
 	PublicID         string    `json:"public_id"`
 	HandlerID        string    `json:"handler_id"`
 	PublisherID      int64     `json:"-"`
-	BuyerID          int64     `json:"buyer_id"`
+	BuyerID          *int64    `json:"buyer_id,omitempty"`
 	BuyerName        string    `json:"buyer_name,omitempty"`
 	BuyerAccountType string    `json:"buyer_account_type,omitempty"`
 	PublisherName    string    `json:"publisher_name,omitempty"`
 	Name             string    `json:"name"`
 	Description      string    `json:"description,omitempty"`
 	LeadType         string    `json:"lead_type,omitempty"`
-	SourcePipelineID int64     `json:"source_pipeline_id"`
-	SourceStageID    int64     `json:"source_stage_id"`
-	BuyerPipelineID  int64     `json:"buyer_pipeline_id"`
-	ReturnStageID    int64     `json:"return_stage_id"`
+	SourcePipelineID *int64    `json:"source_pipeline_id,omitempty"`
+	SourceStageID    *int64    `json:"source_stage_id,omitempty"`
+	BuyerPipelineID  *int64    `json:"buyer_pipeline_id,omitempty"`
+	ReturnStageID    *int64    `json:"return_stage_id,omitempty"`
 	RatePerLead      float64   `json:"rate_per_lead"`
 	Status           string    `json:"status"`
 	CapPeriod        string    `json:"cap_period"`
@@ -35,8 +37,13 @@ type Contract struct {
 	CapMaxDaily      *int      `json:"cap_max_daily,omitempty"`
 	ContractType     string    `json:"contract_type"`
 	MirrorContractID *int64    `json:"mirror_contract_id,omitempty"`
-	LeadCount        int       `json:"lead_count"`
-	CreatedAt        time.Time `json:"created_at"`
+	LeadCount              int       `json:"lead_count"`
+	AllowedDeliveryModes   []string  `json:"allowed_delivery_modes,omitempty"`
+	DistributionStrategy   string    `json:"distribution_strategy,omitempty"`
+	ParentContractID       *int64    `json:"parent_contract_id,omitempty"`
+	InviteToken            string    `json:"invite_token,omitempty"`
+	Participations         []Participation `json:"participations,omitempty"`
+	CreatedAt              time.Time `json:"created_at"`
 }
 
 type ReturnRule struct {
@@ -59,10 +66,24 @@ type PublisherStage struct {
 }
 
 type Service struct {
-	pool *pgxpool.Pool
+	pool            *pgxpool.Pool
+	payoutTransfers PayoutTransferExecutor
+	notif           *notifications.Service
+	accounts        adminUserIDs
+}
+
+type adminUserIDs interface {
+	AdminUserIDs(ctx context.Context, q database.Querier, accountID int64) ([]int64, error)
 }
 
 func NewService(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
+
+func (s *Service) SetPayoutExecutor(e PayoutTransferExecutor) { s.payoutTransfers = e }
+
+func (s *Service) SetNotifier(n *notifications.Service, accounts adminUserIDs) {
+	s.notif = n
+	s.accounts = accounts
+}
 
 func (s *Service) Pool() *pgxpool.Pool { return s.pool }
 
@@ -100,8 +121,9 @@ func (s *Service) List(ctx context.Context, publisherID int64) ([]Contract, erro
 		        COALESCE(c.description, ''), COALESCE(c.lead_type, ''),
 		        c.source_pipeline_id, c.source_stage_id, c.buyer_pipeline_id, c.return_stage_id,
 		        c.rate_per_lead::float8, c.status, c.cap_period, c.cap_total, c.cap_max_daily,
-		        c.created_at, c.contract_type, c.mirror_contract_id, a.name, a.type, `+contractLeadCountSubquery+`
-		 FROM contracts c JOIN accounts a ON a.id = c.buyer_id
+		        c.created_at, c.contract_type, c.mirror_contract_id,
+		        COALESCE(a.name, ''), COALESCE(a.type::text, ''), `+contractLeadCountSubquery+`
+		 FROM contracts c LEFT JOIN accounts a ON a.id = c.buyer_id
 		 WHERE c.publisher_id = $1 AND c.deleted_at IS NULL
 		 ORDER BY c.created_at DESC`, publisherID)
 	if err != nil {
@@ -124,9 +146,21 @@ func (s *Service) List(ctx context.Context, publisherID int64) ([]Contract, erro
 }
 
 func (s *Service) Get(ctx context.Context, publisherID, id int64) (*Contract, error) {
-	return scanContract(s.pool.QueryRow(ctx,
+	c, err := scanContract(s.pool.QueryRow(ctx,
 		`SELECT `+contractCols+` FROM contracts WHERE id = $1 AND publisher_id = $2 AND deleted_at IS NULL`,
 		id, publisherID))
+	if err != nil {
+		return nil, err
+	}
+	if err := s.enrichOffer(ctx, c); err != nil {
+		return nil, err
+	}
+	parts, err := s.listParticipationsByContract(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	c.Participations = parts
+	return c, nil
 }
 
 func (s *Service) ListForBuyer(ctx context.Context, buyerID int64) ([]Contract, error) {
@@ -179,8 +213,10 @@ type CreateParams struct {
 	ReturnStageID    int64
 	RatePerLead      float64
 	Delivery         string
-	Compensations    []CompensationParams
-	LeadCriteria     *LeadCriteria
+	Compensations          []CompensationParams
+	LeadCriteria           *LeadCriteria
+	AllowedDeliveryModes   []string
+	DistributionStrategy   string
 }
 
 func (s *Service) Create(ctx context.Context, publisherID int64, p CreateParams) (*Contract, error) {
@@ -225,6 +261,89 @@ type UpdateParams struct {
 	CapTotal      *int
 	CapMaxDaily   *int
 	PatchCap      bool
+}
+
+type DeliveryUpdateParams struct {
+	Delivery         string
+	SourcePipelineID int64
+	SourceStageID    int64
+	BuyerPipelineID  int64
+	ReturnStageID    int64
+}
+
+func (s *Service) UpdateDelivery(ctx context.Context, publisherID, contractID int64, p DeliveryUpdateParams) (*Contract, error) {
+	if _, err := s.Get(ctx, publisherID, contractID); err != nil {
+		return nil, err
+	}
+	delivery := strings.TrimSpace(p.Delivery)
+	if delivery == "" {
+		delivery = "leads_pipeline"
+	}
+	if !allowedCompDelivery[delivery] {
+		return nil, httpx.Validation("delivery must be leads or leads_pipeline")
+	}
+	sourcePipelineID := p.SourcePipelineID
+	sourceStageID := p.SourceStageID
+	buyerPipelineID := p.BuyerPipelineID
+	returnStageID := p.ReturnStageID
+	if delivery == "leads" {
+		sourcePipelineID = 0
+		sourceStageID = 0
+		buyerPipelineID = 0
+		returnStageID = 0
+	} else if sourceStageID == 0 || buyerPipelineID == 0 || returnStageID == 0 {
+		return nil, httpx.Validation("source_stage_id, buyer_pipeline_id, and return_stage_id are required for pipeline delivery")
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	c, err := scanContract(tx.QueryRow(ctx,
+		`UPDATE contracts SET
+		   source_pipeline_id = $3,
+		   source_stage_id = $4,
+		   buyer_pipeline_id = $5,
+		   return_stage_id = $6
+		 WHERE id = $1 AND publisher_id = $2 AND deleted_at IS NULL
+		 RETURNING `+contractCols,
+		contractID, publisherID,
+		nullableID(sourcePipelineID), nullableID(sourceStageID),
+		nullableID(buyerPipelineID), nullableID(returnStageID)))
+	if err != nil {
+		return nil, err
+	}
+
+	var compSourcePipeline, compSourceStage, compBuyerPipeline, compReturnStage any
+	if delivery == "leads" {
+		compSourcePipeline = nil
+		compSourceStage = nil
+		compBuyerPipeline = nil
+		compReturnStage = nil
+	} else {
+		compSourcePipeline = sourcePipelineID
+		compSourceStage = sourceStageID
+		compBuyerPipeline = buyerPipelineID
+		compReturnStage = returnStageID
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE contract_compensations SET
+		   source_pipeline_id = $2,
+		   source_stage_id = $3,
+		   counterparty_pipeline_id = $4,
+		   return_stage_id = $5,
+		   delivery = $6
+		 WHERE contract_id = $1`,
+		contractID, compSourcePipeline, compSourceStage, compBuyerPipeline, compReturnStage, delivery); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return c, nil
 }
 
 func (s *Service) Update(ctx context.Context, publisherID, id int64, p UpdateParams) (*Contract, error) {

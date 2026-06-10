@@ -6,22 +6,40 @@ import { Avatar } from "@/components/ui/misc";
 import { Dropdown, DropdownItem } from "@/components/ui/dropdown";
 import { useNotifications, useMarkRead } from "@/hooks/useNotifications";
 import { queryClient } from "@/lib/queryClient";
-import { cn, formatRole } from "@/lib/utils";
+import { cn, formatMoney, formatRole } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import type { NotificationItem } from "@/types";
+import { useUIStore } from "@/store/uiStore";
 import { AccountSwitcher } from "./AccountSwitcher";
+import { SwitchSessionIndicator } from "./SwitchSessionIndicator";
 import { ThemeToggle } from "./ThemeToggle";
 
 const labels: Record<string, string> = {
   new_lead: "New lead received",
   lead_returned: "A lead was returned",
-  dispute_update: "Dispute resolved",
   collaboration_request: "Collaboration request",
   partnership_request: "Partnership request",
   partnership_accepted: "Partnership accepted",
 };
 
+function accountPrefix(accountType: string | undefined) {
+  if (accountType === "buyer") return "/b";
+  if (accountType === "publisher") return "/p";
+  return null;
+}
+
 function notifLabel(n: NotificationItem) {
+  if (n.type === "dispute_update") {
+    const outcome = n.payload.outcome as string | undefined;
+    if (outcome === "accepted") return "Dispute accepted";
+    if (outcome === "rejected") return "Dispute rejected";
+    return "Dispute resolved";
+  }
+  if (n.type === "new_invoice") {
+    const amount = n.payload.amount as number | undefined;
+    if (typeof amount === "number") return `New invoice for ${formatMoney(amount)}`;
+    return "New invoice received";
+  }
   if (n.type === "collaboration_request") {
     const dir = n.payload.direction as string | undefined;
     if (dir === "publisher_to_buyer") {
@@ -53,6 +71,13 @@ function notifLabel(n: NotificationItem) {
 }
 
 function notifPath(n: NotificationItem, accountType: string | undefined) {
+  const prefix = accountPrefix(accountType);
+  if (n.type === "new_lead" || n.type === "lead_returned") {
+    if (prefix && typeof n.payload.lead_id === "number") return `${prefix}/leads`;
+  }
+  if (n.type === "dispute_update" || n.type === "new_invoice") {
+    if (accountType === "buyer") return "/b/billing";
+  }
   if (n.type === "collaboration_request") {
     if (accountType === "buyer") return "/b/collaboration";
     if (accountType === "publisher") return "/p/collaboration";
@@ -77,6 +102,7 @@ export function Topbar({ title }: { title: string }) {
     <header className="sticky top-0 z-30 flex h-13 shrink-0 items-center justify-between border-b border-gray-100 bg-surface-card px-6">
       <h1 className="text-xl font-semibold text-gray-800">{title}</h1>
       <div className="flex items-center gap-4">
+        <SwitchSessionIndicator />
         <AccountSwitcher />
         <ThemeToggle />
         <Dropdown
@@ -110,10 +136,11 @@ export function Topbar({ title }: { title: string }) {
                 onClick={() => {
                   markRead.mutate(n.id);
                   const path = notifPath(n, user?.account_type);
-                  if (path) {
-                    setOpen(false);
-                    navigate(path);
-                  }
+                  const leadId =
+                    typeof n.payload.lead_id === "number" ? n.payload.lead_id : null;
+                  if (path || leadId != null) setOpen(false);
+                  if (path) navigate(path);
+                  if (leadId != null) useUIStore.getState().openDetail(leadId);
                 }}
                 className={cn(
                   "h-auto flex-col items-start py-2",

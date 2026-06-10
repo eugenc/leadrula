@@ -174,7 +174,12 @@ export function useCreateLeadView() {
       sort?: string;
       sort_dir?: string;
     }) => post<SavedLeadView>(`${ns()}/leads/views`, body),
-    onSuccess: () => {
+    onSuccess: (created, vars) => {
+      const placement = vars.placement === "list" ? "list" : "board";
+      qc.setQueryData<SavedLeadView[]>(["lead-views", placement], (old) => [
+        ...(old ?? []),
+        created,
+      ]);
       qc.invalidateQueries({ queryKey: ["lead-views"] });
     },
   });

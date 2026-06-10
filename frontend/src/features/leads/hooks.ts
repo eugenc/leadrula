@@ -38,6 +38,7 @@ export interface LeadFilters {
   action_overdue?: boolean;
   view_id?: string;
   filters?: string;
+  q?: string;
   page?: number;
   limit?: number;
   sort?: string;
@@ -191,6 +192,7 @@ export interface ImportLeadsPayload {
   pipeline_id?: number;
   stage_id?: number;
   default_tags?: string[];
+  import_filename?: string;
   mapping: { csv_column: string; target: string }[];
   rows: Record<string, string>[];
 }

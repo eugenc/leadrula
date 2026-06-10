@@ -42,17 +42,30 @@ type LoginResult struct {
 }
 
 func (s *Service) Login(ctx context.Context, email, password string) (*LoginResult, error) {
-	u, err := s.repo.FindUserByEmail(ctx, email)
-	if err != nil || u.PasswordHash == nil || !u.IsActive {
+	email = strings.TrimSpace(strings.ToLower(email))
+	users, err := s.repo.FindUsersByEmail(ctx, email)
+	if err != nil {
+		return nil, err
+	}
+	var matched []*AuthUser
+	for i := range users {
+		u := &users[i]
+		if u.PasswordHash == nil || !u.IsActive {
+			continue
+		}
+		if u.AccountOpStatus == AccountStatusSuspended {
+			continue
+		}
+		ok, err := auth.VerifyPassword(password, *u.PasswordHash)
+		if err != nil || !ok {
+			continue
+		}
+		matched = append(matched, u)
+	}
+	if len(matched) == 0 {
 		return nil, httpx.NewError(httpx.CodeUnauthorized, "invalid credentials")
 	}
-	if u.AccountOpStatus == AccountStatusSuspended {
-		return nil, httpx.NewError(httpx.CodeUnauthorized, "account is suspended")
-	}
-	ok, err := auth.VerifyPassword(password, *u.PasswordHash)
-	if err != nil || !ok {
-		return nil, httpx.NewError(httpx.CodeUnauthorized, "invalid credentials")
-	}
+	u := matched[0]
 	_ = s.repo.TouchLogin(ctx, u.ID)
 	return s.issue(u)
 }
@@ -290,7 +303,7 @@ func (s *Service) Invite(ctx context.Context, accountID int64, email, fullName, 
 		role = "user"
 	}
 
-	if _, err := s.repo.FindUserByEmail(ctx, email); err == nil {
+	if _, err := s.repo.FindUserByEmailInAccount(ctx, accountID, email); err == nil {
 		return nil, httpx.Conflict("email already registered")
 	} else if err != ErrNotFound {
 		return nil, err
@@ -335,7 +348,7 @@ func (s *Service) sendInviteEmail(to, fullName, token string) error {
 	return nil
 }
 
-func (s *Service) CreateBuyer(ctx context.Context, p CreateBuyerParams) (*BuyerSummary, error) {
+func (s *Service) CreateBuyer(ctx context.Context, p CreateBuyerParams) (*CreateBuyerResult, error) {
 	p.Name = strings.TrimSpace(p.Name)
 	p.Website = strings.TrimSpace(p.Website)
 	p.AdminEmail = strings.TrimSpace(strings.ToLower(p.AdminEmail))
@@ -356,10 +369,29 @@ func (s *Service) CreateBuyer(ctx context.Context, p CreateBuyerParams) (*BuyerS
 		return nil, httpx.Validation("invalid timezone")
 	}
 
-	if _, err := s.repo.FindUserByEmail(ctx, p.AdminEmail); err == nil {
-		return nil, httpx.Conflict("email already registered")
-	} else if err != ErrNotFound {
+	existing, err := s.repo.FindUserByEmail(ctx, p.AdminEmail)
+	if err != nil && err != ErrNotFound {
 		return nil, err
+	}
+	if existing != nil {
+		if existing.AccountType != "buyer" {
+			return nil, httpx.Conflict("email already registered")
+		}
+		existingAdmin, err := s.repo.FindBuyerAdminByEmail(ctx, p.AdminEmail)
+		if err != nil {
+			if err == ErrNotFound {
+				return nil, httpx.Conflict("email already registered")
+			}
+			return nil, err
+		}
+		res, err := s.repo.CreateBuyerWithExistingAdmin(ctx, p, existingAdmin)
+		if err != nil {
+			if database.IsUniqueViolation(err) {
+				return nil, httpx.Conflict("email already registered")
+			}
+			return nil, err
+		}
+		return res, nil
 	}
 
 	token := randomToken()
@@ -372,9 +404,9 @@ func (s *Service) CreateBuyer(ctx context.Context, p CreateBuyerParams) (*BuyerS
 	}
 	adminName := strings.TrimSpace(p.AdminFirstName + " " + p.AdminLastName)
 	if err := s.sendInviteEmail(res.AdminEmail, adminName, res.InviteToken); err != nil {
-		return &res.Buyer, err
+		return res, err
 	}
-	return &res.Buyer, nil
+	return res, nil
 }
 
 func (s *Service) UpdateBuyer(ctx context.Context, id int64, p UpdateBuyerParams) (*Account, error) {
@@ -398,6 +430,13 @@ func (s *Service) UpdateBuyer(ctx context.Context, id int64, p UpdateBuyerParams
 			return nil, httpx.Validation("invalid timezone")
 		}
 		p.Timezone = &tz
+	}
+	if p.BuyerKind != nil {
+		kind := strings.TrimSpace(*p.BuyerKind)
+		if kind != BuyerKindDirect && kind != BuyerKindMarketplace {
+			return nil, httpx.Validation("invalid buyer_kind")
+		}
+		p.BuyerKind = &kind
 	}
 
 	a, err := s.repo.UpdateBuyer(ctx, id, p)
@@ -460,6 +499,13 @@ func (s *Service) UpdateBuyerByPublicID(ctx context.Context, publicID string, p 
 			return nil, httpx.Validation("invalid timezone")
 		}
 		p.Timezone = &tz
+	}
+	if p.BuyerKind != nil {
+		kind := strings.TrimSpace(*p.BuyerKind)
+		if kind != BuyerKindDirect && kind != BuyerKindMarketplace {
+			return nil, httpx.Validation("invalid buyer_kind")
+		}
+		p.BuyerKind = &kind
 	}
 
 	a, err := s.repo.UpdateBuyerByPublicID(ctx, publicID, p)
@@ -562,7 +608,7 @@ func (s *Service) UpdateUser(ctx context.Context, accountID, userID int64, p Upd
 			return nil, httpx.Validation("email is required")
 		}
 		p.Email = &email
-		if existing, err := s.repo.FindUserByEmail(ctx, email); err == nil && existing.ID != userID {
+		if existing, err := s.repo.FindUserByEmailInAccount(ctx, accountID, email); err == nil && existing.ID != userID {
 			return nil, httpx.Conflict("email already registered")
 		} else if err != nil && err != ErrNotFound {
 			return nil, err
@@ -658,7 +704,7 @@ func (s *Service) UpdateInvite(ctx context.Context, accountID, inviteID int64, p
 			return nil, httpx.Validation("email is required")
 		}
 		if newEmail != inv.Email {
-			if _, err := s.repo.FindUserByEmail(ctx, newEmail); err == nil {
+			if _, err := s.repo.FindUserByEmailInAccount(ctx, accountID, newEmail); err == nil {
 				return nil, httpx.Conflict("email already registered")
 			} else if err != ErrNotFound {
 				return nil, err

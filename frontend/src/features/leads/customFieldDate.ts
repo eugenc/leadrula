@@ -56,6 +56,21 @@ export function formatCustomDate(date: Date, formatToken: string): string {
   return format(date, toDateFnsPattern(formatToken));
 }
 
+const DISPLAY_DATE = "MMM d, yyyy";
+const DISPLAY_DATETIME = "MMM d, h:mma";
+
+export function formatCustomDateForDisplay(
+  value: string,
+  type: string,
+  fieldFormat?: string | null
+): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "—";
+  const d = parseCustomDate(trimmed, effectiveFieldFormat(type, fieldFormat));
+  if (!d) return trimmed;
+  return format(d, type === "datetime" ? DISPLAY_DATETIME : DISPLAY_DATE);
+}
+
 export function normalizeCustomDateValue(value: string, type: string, fieldFormat?: string | null): string {
   const trimmed = value.trim();
   if (!trimmed) return "";

@@ -20,6 +20,7 @@ import type {
   RouteFieldMapEntry,
   RouteFieldMapOptions,
   Contract,
+  ContractParticipation,
   ContractCompensation,
   ContractLeadCriteria,
   Dispute,
@@ -32,6 +33,9 @@ import type {
   RuleCondition,
   StageRule,
   Transaction,
+  Invoice,
+  PayoutSummary,
+  CompensationPayoutRow,
   UserRow,
   CustomField,
   DisqReason,
@@ -313,9 +317,25 @@ export function useContracts(enabled = true) {
     enabled: enabled && !!accountId,
   });
 }
+
+export function useContractDetail(contractId: number | null) {
+  return useQuery({
+    queryKey: ["contract-detail", contractId],
+    queryFn: () => get<Contract>(`/publisher/contracts/${contractId}`),
+    enabled: !!contractId,
+  });
+}
 export function useCreateContract() {
-  const inv = useInvalidate(["contracts"]);
-  return useMutation({ mutationFn: (body: Record<string, unknown>) => post(`/publisher/contracts`, body), onSuccess: inv });
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) => post<Contract>(`/publisher/contracts`, body),
+    onSuccess: (created) => {
+      qc.invalidateQueries({ queryKey: ["contracts"] });
+      if (created?.id) {
+        qc.invalidateQueries({ queryKey: ["contract-detail", created.id] });
+      }
+    },
+  });
 }
 export function useUpdateContract() {
   const inv = useInvalidate(["contracts"]);
@@ -325,9 +345,146 @@ export function useUpdateContract() {
     onSuccess: inv,
   });
 }
+export function useSaveContractDelivery() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ contractId, body }: { contractId: number; body: Record<string, unknown> }) =>
+      patch(`/publisher/contracts/${contractId}`, body),
+    onSuccess: (_, v) => {
+      qc.invalidateQueries({ queryKey: ["contracts"] });
+      qc.invalidateQueries({ queryKey: ["contract-compensations", v.contractId] });
+    },
+  });
+}
+export function useSaveContractDraft() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ contractId, body }: { contractId: number; body: Record<string, unknown> }) =>
+      patch(`/publisher/contracts/${contractId}`, { ...body, status: "draft" }),
+    onSuccess: (_, v) => {
+      qc.invalidateQueries({ queryKey: ["contracts"] });
+      qc.invalidateQueries({ queryKey: ["contract-detail", v.contractId] });
+      qc.invalidateQueries({ queryKey: ["contract-compensations", v.contractId] });
+      qc.invalidateQueries({ queryKey: ["contract-lead-criteria", v.contractId] });
+    },
+  });
+}
+export function useActivateContract() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ contractId, body }: { contractId: number; body: Record<string, unknown> }) =>
+      patch(`/publisher/contracts/${contractId}`, { ...body, status: "active" }),
+    onSuccess: (_, v) => {
+      qc.invalidateQueries({ queryKey: ["contracts"] });
+      qc.invalidateQueries({ queryKey: ["contract-compensations", v.contractId] });
+      qc.invalidateQueries({ queryKey: ["contract-lead-criteria", v.contractId] });
+    },
+  });
+}
 export function useDeleteContract() {
   const inv = useInvalidate(["contracts"]);
   return useMutation({ mutationFn: (id: number) => del(`/publisher/contracts/${id}`), onSuccess: inv });
+}
+
+export function useContractParticipations(contractId: number | null) {
+  return useQuery({
+    queryKey: ["contract-participations", contractId],
+    queryFn: () => get<ContractParticipation[]>(`/publisher/contracts/${contractId}/participations`),
+    enabled: !!contractId,
+  });
+}
+
+export function useAddContractParticipation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ contractId, body }: { contractId: number; body: Record<string, unknown> }) =>
+      post(`/publisher/contracts/${contractId}/participations`, body),
+    onSuccess: (_, v) => {
+      qc.invalidateQueries({ queryKey: ["contracts"] });
+      qc.invalidateQueries({ queryKey: ["contract-detail", v.contractId] });
+      qc.invalidateQueries({ queryKey: ["contract-participations", v.contractId] });
+    },
+  });
+}
+
+export function useContractInvite() {
+  return useMutation({
+    mutationFn: (contractId: number) =>
+      post<{ token: string; handler_id: string }>(`/publisher/contracts/${contractId}/invites`, {}),
+  });
+}
+
+export function useAcceptCounter() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (participationId: number) =>
+      post<Contract>(`/publisher/participations/${participationId}/accept-counter`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["contracts"] }),
+  });
+}
+
+export function useRejectCounter() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (participationId: number) =>
+      post(`/publisher/participations/${participationId}/reject-counter`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["contracts"] }),
+  });
+}
+
+export function useUpdateContractOffer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ contractId, body }: { contractId: number; body: Record<string, unknown> }) =>
+      patch(`/publisher/contracts/${contractId}/offer`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["contracts"] }),
+  });
+}
+
+export function useBuyerParticipations() {
+  const accountId = useAuthStore((s) => s.user?.account_id);
+  return useQuery({
+    queryKey: ["buyer-participations", accountId],
+    queryFn: () => get<ContractParticipation[]>(`/buyer/participations`),
+    enabled: !!accountId,
+  });
+}
+
+export function useAcceptParticipation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
+      post(`/buyer/participations/${id}/accept`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["buyer-participations"] });
+      qc.invalidateQueries({ queryKey: ["buyer-contracts"] });
+    },
+  });
+}
+
+export function useDeclineParticipation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => post(`/buyer/participations/${id}/decline`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["buyer-participations"] }),
+  });
+}
+
+export function useCounterParticipation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
+      post(`/buyer/participations/${id}/counter`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["buyer-participations"] }),
+  });
+}
+
+export function useAttachContractInvite() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (token: string) => post<ContractParticipation>(`/buyer/contract-invites/${token}/attach`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["buyer-participations"] }),
+  });
 }
 
 export function useContractCompensations(contractId: number | null, buyer = false) {
@@ -743,8 +900,13 @@ export function useMapQueueField() {
 export function useRouteQueue() {
   const inv = useInvalidate(["intake-queue", "leads"]);
   return useMutation({
-    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
-      post(`/publisher/intake-queue/${id}/route`, body),
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: number;
+      body: { route_id?: number; buyer_id?: number; pipeline_id?: number; stage_id?: number };
+    }) => post(`/publisher/intake-queue/${id}/route`, body),
     onSuccess: inv,
   });
 }
@@ -895,6 +1057,25 @@ export function useTransactions(scope: "publisher" | "buyer", buyerId?: number, 
     queryFn: () => get<Transaction[]>(`/${scope}/billing/transactions${q ? `?${q}` : ""}`),
   });
 }
+
+export function usePayoutSummary() {
+  const isPublisher = useAuthStore.getState().user?.account_type === "publisher";
+  return useQuery({
+    queryKey: ["payout-summary"],
+    queryFn: () => get<PayoutSummary>("/publisher/payouts/summary"),
+    enabled: isPublisher,
+  });
+}
+
+export function usePayoutByCompensation() {
+  const isPublisher = useAuthStore.getState().user?.account_type === "publisher";
+  return useQuery({
+    queryKey: ["payout-by-compensation"],
+    queryFn: () => get<CompensationPayoutRow[]>("/publisher/payouts/by-compensation"),
+    enabled: isPublisher,
+  });
+}
+
 export function useBalance() {
   const isBuyer = useAuthStore.getState().user?.account_type === "buyer";
   return useQuery({
@@ -912,6 +1093,28 @@ export type PaymentMethod = {
   is_default: boolean;
 };
 
+export type StripeIntentResult = {
+  client_secret: string;
+  publishable_key?: string;
+};
+
+export type BuyerStripeConfig = {
+  buyer_kind: "direct" | "marketplace";
+  publishable_key?: string;
+};
+
+export type PublisherKeysStatus = {
+  status: string;
+  publishable_key_prefix?: string;
+};
+
+export function useBuyerStripeConfig() {
+  return useQuery({
+    queryKey: ["buyer-stripe-config"],
+    queryFn: () => get<BuyerStripeConfig>("/buyer/billing/stripe/config"),
+  });
+}
+
 export function usePaymentMethods() {
   return useQuery({
     queryKey: ["payment-methods"],
@@ -921,7 +1124,7 @@ export function usePaymentMethods() {
 
 export function useCreateSetupIntent() {
   return useMutation({
-    mutationFn: () => post<{ client_secret: string }>("/buyer/billing/stripe/setup-intent", {}),
+    mutationFn: () => post<StripeIntentResult>("/buyer/billing/stripe/setup-intent", {}),
   });
 }
 
@@ -936,16 +1139,41 @@ export function useDetachPaymentMethod() {
 export function useCreateTopupIntent() {
   return useMutation({
     mutationFn: (amountCents: number) =>
-      post<{ client_secret: string }>("/buyer/billing/balance/topup-intent", { amount_cents: amountCents }),
+      post<StripeIntentResult>("/buyer/billing/balance/topup-intent", { amount_cents: amountCents }),
+  });
+}
+
+export function useConfirmTopup() {
+  const inv = useInvalidate(["balance", "transactions"]);
+  return useMutation({
+    mutationFn: (paymentIntentId: string) =>
+      post<{ ok: boolean }>("/buyer/billing/balance/confirm-topup", { payment_intent_id: paymentIntentId }),
+    onSuccess: inv,
   });
 }
 
 export function useStripeConnect() {
   return useMutation({
     mutationFn: () =>
-      post<{ onboarding_url: string }>("/publisher/billing/stripe/connect", {
+      post<{ oauth_url: string }>("/publisher/billing/stripe/connect", {
         return_base_url: window.location.origin,
       }),
+  });
+}
+
+export function useStripeKeysStatus() {
+  return useQuery({
+    queryKey: ["stripe-keys-status"],
+    queryFn: () => get<PublisherKeysStatus>("/publisher/billing/stripe/keys/status"),
+  });
+}
+
+export function useSaveStripeKeys() {
+  const inv = useInvalidate(["stripe-keys-status", "invoices"]);
+  return useMutation({
+    mutationFn: (body: { secret_key: string; publishable_key: string }) =>
+      post<{ ok: boolean }>("/publisher/billing/stripe/keys", body),
+    onSuccess: inv,
   });
 }
 
@@ -978,8 +1206,71 @@ export function useResolveDispute() {
   });
 }
 export function useManualInvoice() {
-  const inv = useInvalidate(["transactions"]);
-  return useMutation({ mutationFn: (body: Record<string, unknown>) => post(`/publisher/billing/manual-invoice`, body), onSuccess: inv });
+  const inv = useInvalidate(["transactions", "invoices"]);
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) => post(`/publisher/billing/invoices`, body),
+    onSuccess: inv,
+  });
+}
+
+export function useInvoices(scope: "publisher" | "buyer", status?: string) {
+  const base = scope === "publisher" ? "/publisher" : "/buyer";
+  const q = status ? `?status=${encodeURIComponent(status)}` : "";
+  return useQuery({
+    queryKey: ["invoices", scope, status ?? ""],
+    queryFn: () => get<Invoice[]>(`${base}/billing/invoices${q}`),
+  });
+}
+
+export function useCreateInvoice() {
+  const inv = useInvalidate(["invoices", "transactions"]);
+  return useMutation({
+    mutationFn: (body: { buyer_id: number; amount: number; description: string }) =>
+      post<Invoice>(`/publisher/billing/invoices`, body),
+    onSuccess: inv,
+  });
+}
+
+export function useMarkInvoicePaid() {
+  const inv = useInvalidate(["invoices", "transactions"]);
+  return useMutation({
+    mutationFn: ({
+      id,
+      payment_method,
+      note,
+    }: {
+      id: number;
+      payment_method: string;
+      note?: string;
+    }) => post<Invoice>(`/publisher/billing/invoices/${id}/mark-paid`, { payment_method, note }),
+    onSuccess: inv,
+  });
+}
+
+export function useVoidInvoice() {
+  const inv = useInvalidate(["invoices"]);
+  return useMutation({
+    mutationFn: (id: number) => post<Invoice>(`/publisher/billing/invoices/${id}/void`, {}),
+    onSuccess: inv,
+  });
+}
+
+export function usePayInvoiceIntent() {
+  return useMutation({
+    mutationFn: (invoiceId: number) =>
+      post<StripeIntentResult>(`/buyer/billing/invoices/${invoiceId}/pay-intent`, {}),
+  });
+}
+
+export function useConfirmInvoicePayment() {
+  const inv = useInvalidate(["balance", "transactions", "invoices"]);
+  return useMutation({
+    mutationFn: ({ invoiceId, paymentIntentId }: { invoiceId: number; paymentIntentId: string }) =>
+      post<{ ok: boolean }>(`/buyer/billing/invoices/${invoiceId}/confirm-payment`, {
+        payment_intent_id: paymentIntentId,
+      }),
+    onSuccess: inv,
+  });
 }
 
 // ── API keys ──────────────────────────────────────────────────────

@@ -109,17 +109,17 @@ func (s *Service) insertContract(ctx context.Context, tx pgx.Tx, publisherID int
 	var c *Contract
 	var err error
 	for range 10 {
-		hid := handlerid.Generate("C")
+		hid := handlerid.GenerateContract()
 		c, err = scanContract(tx.QueryRow(ctx,
 			`INSERT INTO contracts(publisher_id, buyer_id, name, description, lead_type, contract_type,
 			    cap_period, cap_total, cap_max_daily,
-			    source_pipeline_id, source_stage_id, buyer_pipeline_id, return_stage_id, rate_per_lead, handler_id)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+			    source_pipeline_id, source_stage_id, buyer_pipeline_id, return_stage_id, rate_per_lead, handler_id, status)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'active')
 			 RETURNING `+contractCols,
 			publisherID, p.BuyerID, p.Name, p.Description, p.LeadType, contractType,
 			capPeriod, p.CapTotal, p.CapMaxDaily,
-			p.SourcePipelineID, p.SourceStageID,
-			p.BuyerPipelineID, p.ReturnStageID, p.RatePerLead, hid))
+			nullableID(p.SourcePipelineID), nullableID(p.SourceStageID),
+			nullableID(p.BuyerPipelineID), nullableID(p.ReturnStageID), p.RatePerLead, hid))
 		if err == nil {
 			return c, nil
 		}
@@ -169,12 +169,14 @@ func (s *Service) insertCompensations(ctx context.Context, tx pgx.Tx, contractID
 			    contract_id, kind, flat_amount, bid_min, bid_max, rev_percent, profit_percent,
 			    cap_period, cap_total, cap_max_daily, trigger, trigger_stage_id,
 			    source_pipeline_id, source_stage_id, counterparty_pipeline_id, counterparty_stage_id,
-			    return_stage_id, delivery, position)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+			    return_stage_id, delivery, position,
+			    payout_frequency, payout_weekday, payout_month_day)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
 			contractID, c.Kind, c.FlatAmount, c.BidMin, c.BidMax, c.RevPercent, c.ProfitPercent,
 			c.CapPeriod, c.CapTotal, c.CapMaxDaily, c.Trigger, c.TriggerStageID,
 			c.SourcePipelineID, c.SourceStageID, c.CounterpartyPipelineID, c.CounterpartyStageID,
-			c.ReturnStageID, delivery, pos)
+			c.ReturnStageID, delivery, pos,
+			c.PayoutFrequency, c.PayoutWeekday, c.PayoutMonthDay)
 		if err != nil {
 			return err
 		}

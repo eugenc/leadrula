@@ -1,11 +1,7 @@
 import { useEffect, useState } from "react";
 import { format } from "date-fns";
-import { ArrowRightLeft, Plus } from "lucide-react";
-import {
-  useCreatePlatformBuyer,
-  usePlatformBuyers,
-  useSwitchAccount,
-} from "@/features/auth/switchHooks";
+import { Plus } from "lucide-react";
+import { useCreatePlatformBuyer, usePlatformBuyers } from "@/features/auth/switchHooks";
 import { PlatformAccountStatusBadge } from "@/pages/platform/PlatformAccountStatusBadge";
 import { PlatformBuyerDetailDrawer } from "@/pages/platform/PlatformBuyerDetailDrawer";
 import type { PlatformAccount } from "@/types";
@@ -58,7 +54,6 @@ export function PlatformBuyersPage() {
     page,
     limit,
   });
-  const switchAccount = useSwitchAccount();
   const create = useCreatePlatformBuyer();
 
   const rows = data?.items ?? [];
@@ -133,13 +128,10 @@ export function PlatformBuyersPage() {
                   <TH>Handler ID</TH>
                   <TH>Timezone</TH>
                   <TH>Created</TH>
-                  <TH />
                 </tr>
               </THead>
               <TBody>
-                {rows.map((b) => {
-                  const suspended = b.operational_status === "suspended";
-                  return (
+                {rows.map((b) => (
                     <TR
                       key={b.id}
                       className="cursor-pointer"
@@ -154,25 +146,8 @@ export function PlatformBuyersPage() {
                       <TD className="text-gray-500">
                         {b.created_at ? format(new Date(b.created_at), "MMM d, yyyy") : "—"}
                       </TD>
-                      <TD>
-                        <div className="flex justify-end">
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={switchAccount.isPending || suspended}
-                            title={suspended ? "Account suspended" : undefined}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              switchAccount.mutate(b.id);
-                            }}
-                          >
-                            <ArrowRightLeft className="h-3.5 w-3.5" /> Open
-                          </Button>
-                        </div>
-                      </TD>
                     </TR>
-                  );
-                })}
+                  ))}
               </TBody>
             </Table>
 

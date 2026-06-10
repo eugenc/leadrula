@@ -1,11 +1,14 @@
-import { Badge } from "@/components/ui/misc";
+import { Button } from "@/components/ui/button";
+import { FilterSelect } from "@/components/ui/input";
+import type { WebhookDelivery } from "@/types";
 
-export type LogTypeFilter = "intake" | "webhooks" | "all";
+export type LogTypeFilter = "intake" | "webhooks" | "integrations" | "all";
 
 export const LOG_TYPE_FILTERS: { value: LogTypeFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "intake", label: "Sources" },
   { value: "webhooks", label: "Webhooks" },
+  { value: "integrations", label: "Integrations" },
 ];
 
 export type LogFilter = "all" | "pending_review" | "routed" | "rejected";
@@ -32,14 +35,91 @@ export function webhookDeliveryStatusLabel(status: string) {
   return status === "skipped" ? "Captured" : status;
 }
 
-export function webhookDeliveryStatusBadge(status: string) {
-  return <Badge>{webhookDeliveryStatusLabel(status)}</Badge>;
+export function integrationDeliveryStatusLabel(status: string) {
+  if (status === "failed") return "Failed";
+  if (status === "dead") return "Dead";
+  return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
+export function statusLabel(status: string) {
+  if (status === "pending_review") return "Pending";
+  if (status === "routed") return "Routed";
+  if (status === "returned") return "Returned";
+  if (status === "rejected") return "Rejected";
+  return status;
+}
+
+export function statusText(status: string) {
+  return <span className="text-sm text-gray-700">{statusLabel(status)}</span>;
+}
+
+export function webhookDeliveryStatusText(status: string) {
+  return <span className="text-sm text-gray-700">{webhookDeliveryStatusLabel(status)}</span>;
+}
+
+export function integrationDeliveryStatusText(status: string) {
+  return <span className="text-sm text-gray-700">{integrationDeliveryStatusLabel(status)}</span>;
+}
+
+/** @deprecated use statusText */
 export function statusBadge(status: string) {
-  if (status === "pending_review") return <Badge variant="review">Pending</Badge>;
-  if (status === "routed") return <Badge variant="distributed">Routed</Badge>;
-  if (status === "returned") return <Badge variant="closed">Returned</Badge>;
-  if (status === "rejected") return <Badge variant="closed">Rejected</Badge>;
-  return <Badge>{status}</Badge>;
+  return statusText(status);
+}
+
+/** @deprecated use webhookDeliveryStatusText */
+export function webhookDeliveryStatusBadge(status: string) {
+  return webhookDeliveryStatusText(status);
+}
+
+export function canReplayDelivery(d: WebhookDelivery) {
+  return d.status === "skipped" && !d.lead_id;
+}
+
+export function LogPagination({
+  page,
+  limit,
+  total,
+  onPageChange,
+  onLimitChange,
+}: {
+  page: number;
+  limit: number;
+  total: number;
+  onPageChange: (page: number) => void;
+  onLimitChange: (limit: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-500">
+      <span>
+        {total === 0
+          ? "No results"
+          : `${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total}`}
+      </span>
+      <div className="flex items-center gap-3">
+        <FilterSelect value={limit} onChange={(e) => onLimitChange(Number(e.target.value))} className="w-24">
+          {PAGE_SIZES.map((n) => (
+            <option key={n} value={n}>
+              {n} / page
+            </option>
+          ))}
+        </FilterSelect>
+        <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
+          Previous
+        </Button>
+        <span>
+          Page {page} of {totalPages}
+        </span>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={page >= totalPages}
+          onClick={() => onPageChange(page + 1)}
+        >
+          Next
+        </Button>
+      </div>
+    </div>
+  );
 }

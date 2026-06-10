@@ -6,14 +6,14 @@ import {
   useOpenDispute,
 } from "@/features/admin/hooks";
 import { BuyerStripeBilling } from "@/features/billing/BuyerStripeBilling";
+import { BuyerOutstandingInvoices } from "@/features/billing/BuyerInvoices";
 import { PageBody } from "@/components/layout/PageBody";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Label, Textarea } from "@/components/ui/input";
 import { Badge, Spinner, EmptyState, StatCard } from "@/components/ui/misc";
 import { FormDrawer } from "@/components/ui/dialog";
-import { formatMoney } from "@/lib/utils";
-import { cn } from "@/lib/utils";
+import { cn, formatMoney, formatTxnType } from "@/lib/utils";
 import { format } from "date-fns";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
@@ -46,6 +46,8 @@ export function BuyerBillingPage() {
           />
         </div>
 
+        <BuyerOutstandingInvoices />
+
         <BuyerStripeBilling />
 
         {isLoading ? (
@@ -57,19 +59,21 @@ export function BuyerBillingPage() {
             <THead>
               <tr>
                 <TH>Type</TH>
+                <TH>Publisher</TH>
                 <TH>Lead</TH>
                 <TH>Amount</TH>
                 <TH>Balance</TH>
                 <TH>When</TH>
-                <TH />
+                <TH className="min-w-0 w-12" />
               </tr>
             </THead>
             <TBody>
               {(txns ?? []).map((t) => (
                 <TR key={t.id}>
                   <TD>
-                    <Badge variant={txnBadgeVariant(t)}>{t.type}</Badge>
+                    <Badge variant={txnBadgeVariant(t)}>{formatTxnType(t.type)}</Badge>
                   </TD>
+                  <TD className="font-medium text-gray-800">{t.publisher_name ?? "—"}</TD>
                   <TD>{t.lead_name ?? "—"}</TD>
                   <TD className={t.amount < 0 ? "font-medium text-danger-fg" : "text-jade-700"}>
                     {formatMoney(t.amount)}

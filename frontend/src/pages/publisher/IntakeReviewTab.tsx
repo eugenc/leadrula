@@ -33,7 +33,7 @@ export function IntakeReviewTab() {
             <TH>Phone</TH>
             <TH>Source</TH>
             <TH>Received</TH>
-            <TH />
+            <TH className="min-w-0 w-12" />
           </tr>
         </THead>
         <TBody>

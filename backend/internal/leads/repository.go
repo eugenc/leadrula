@@ -33,6 +33,7 @@ var builtinFields = map[string]bool{
 
 const leadCols = `id, public_id, owner_account_id, publisher_id, contract_id,
 	first_name, last_name, phone, email, address, city, state, zip, source, external_id,
+	cost, revenue,
 	pipeline_id, stage_id, position, assigned_user_id, action_at, status,
 	disqualification_reason_id, created_at, updated_at, tags`
 
@@ -42,6 +43,7 @@ func scanLead(row pgx.Row) (*Lead, error) {
 	l := &Lead{}
 	err := row.Scan(&l.ID, &l.PublicID, &l.OwnerAccountID, &l.PublisherID, &l.ContractID,
 		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.Source, &l.ExternalID,
+		&l.Cost, &l.Revenue,
 		&l.PipelineID, &l.StageID, &l.Position, &l.AssignedUserID, &l.ActionAt, &l.Status,
 		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt, &l.Tags)
 	if err != nil {
@@ -146,19 +148,23 @@ func (r *Repository) Get(ctx context.Context, p *auth.Principal, leadID int64) (
 	if err := r.attachLeadNames(ctx, l); err != nil {
 		return nil, err
 	}
+	if err := r.EnrichLeadEconomics(ctx, p.AccountType, l); err != nil {
+		return nil, err
+	}
 	return l, nil
 }
 
 func (r *Repository) attachLeadNames(ctx context.Context, l *Lead) error {
 	return r.pool.QueryRow(ctx,
-		`SELECT CASE WHEN ba.type = 'buyer' THEN ba.name ELSE NULL END, u.full_name, u.prefs->>'avatar_url',
-		        pl.name, st.name
+		`SELECT CASE WHEN ba.type = 'buyer' THEN ba.name ELSE NULL END, rs.name,
+		        u.full_name, u.prefs->>'avatar_url', pl.name, st.name
 		 FROM leads l
 		 LEFT JOIN accounts ba ON ba.id = l.owner_account_id AND ba.type = 'buyer'
+		 LEFT JOIN routing_sources rs ON rs.slug = l.source AND rs.publisher_id = l.publisher_id
 		 LEFT JOIN users u ON u.id = l.assigned_user_id
 		 LEFT JOIN pipelines pl ON pl.id = l.pipeline_id
 		 LEFT JOIN pipeline_stages st ON st.id = l.stage_id
-		 WHERE l.id = $1`, l.ID).Scan(&l.BuyerName, &l.AssigneeName, &l.AssigneeAvatarURL, &l.PipelineName, &l.StageName)
+		 WHERE l.id = $1`, l.ID).Scan(&l.BuyerName, &l.SourceName, &l.AssigneeName, &l.AssigneeAvatarURL, &l.PipelineName, &l.StageName)
 }
 
 func (r *Repository) attachCustomValues(ctx context.Context, l *Lead) error {
@@ -205,6 +211,7 @@ type ListFilters struct {
 	ActionOverdue bool
 	Conditions    []FilterCondition
 	FilterTZ      string
+	Search        string
 }
 
 type ListOptions struct {
@@ -224,6 +231,7 @@ var listSortCols = map[string]string{
 	"phone":         "l.phone",
 	"email":         "l.email",
 	"source": "l.source",
+	"source_name":    "rs.name",
 	"status":        "l.status",
 	"action_at":     "l.action_at",
 	"buyer_name":     "buyer_name",
@@ -236,15 +244,18 @@ var listSortCols = map[string]string{
 
 const listFrom = ` FROM leads l
 	LEFT JOIN accounts ba ON ba.id = l.owner_account_id AND ba.type = 'buyer'
+	LEFT JOIN routing_sources rs ON rs.slug = l.source AND rs.publisher_id = l.publisher_id
 	LEFT JOIN users u ON u.id = l.assigned_user_id
 	LEFT JOIN pipelines pl ON pl.id = l.pipeline_id
 	LEFT JOIN pipeline_stages st ON st.id = l.stage_id`
 
 const listSelect = `l.id, l.public_id, l.owner_account_id, l.publisher_id, l.contract_id,
 	l.first_name, l.last_name, l.phone, l.email, l.address, l.city, l.state, l.zip, l.source, l.external_id,
+	l.cost, l.revenue,
 	l.pipeline_id, l.stage_id, l.position, l.assigned_user_id, l.action_at, l.status,
 	l.disqualification_reason_id, l.created_at, l.updated_at, l.tags,
 	CASE WHEN ba.type = 'buyer' THEN ba.name ELSE NULL END AS buyer_name,
+	rs.name AS source_name,
 	u.full_name AS assignee_name,
 	u.prefs->>'avatar_url' AS assignee_avatar_url,
 	pl.name AS pipeline_name,
@@ -260,8 +271,9 @@ func scanListLead(row pgx.Row) (*Lead, error) {
 	l := &Lead{}
 	err := row.Scan(&l.ID, &l.PublicID, &l.OwnerAccountID, &l.PublisherID, &l.ContractID,
 		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.Source, &l.ExternalID,
+		&l.Cost, &l.Revenue,
 		&l.PipelineID, &l.StageID, &l.Position, &l.AssignedUserID, &l.ActionAt, &l.Status,
-		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt, &l.Tags, &l.BuyerName, &l.AssigneeName, &l.AssigneeAvatarURL,
+		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt, &l.Tags, &l.BuyerName, &l.SourceName, &l.AssigneeName, &l.AssigneeAvatarURL,
 		&l.PipelineName, &l.StageName, &l.StageEnteredAt)
 	if err != nil {
 		return nil, err
@@ -309,40 +321,77 @@ func (r *Repository) listWhere(p *auth.Principal, f ListFilters) (string, []any)
 		if err != nil {
 			where += " AND false"
 		}
-		return where, args
+	} else {
+		if f.Status != "" {
+			add("l.status =", f.Status)
+		}
+		if f.Source != "" {
+			add("l.source =", f.Source)
+		}
+		if f.PipelineID != 0 {
+			add("l.pipeline_id =", f.PipelineID)
+		}
+		if f.StageID != 0 {
+			add("l.stage_id =", f.StageID)
+		}
+		if f.Assigned != 0 {
+			add("l.assigned_user_id =", f.Assigned)
+		}
+		if f.Tag != "" {
+			args = append(args, f.Tag)
+			where += fmt.Sprintf(" AND $%d = ANY(l.tags)", len(args))
+		}
+		if f.ActionOverdue {
+			where += " AND l.action_at IS NOT NULL AND l.action_at < now()"
+		}
+		if f.ActionOn != "" && f.ActionTZ != "" {
+			args = append(args, f.ActionOn, f.ActionTZ)
+			dateArg := len(args) - 1
+			tzArg := len(args)
+			where += fmt.Sprintf(
+				" AND l.action_at >= ($%d::date AT TIME ZONE $%d) AND l.action_at < (($%d::date + interval '1 day') AT TIME ZONE $%d)",
+				dateArg, tzArg, dateArg, tzArg,
+			)
+		}
 	}
 
-	if f.Status != "" {
-		add("l.status =", f.Status)
+	if f.Search != "" {
+		where, args = appendLeadSearch(where, args, f.Search)
 	}
-	if f.Source != "" {
-		add("l.source =", f.Source)
+	return where, args
+}
+
+const leadStatusSearchLabel = `CASE l.status
+	WHEN 'review' THEN 'in review'
+	WHEN 'distributed' THEN 'distributed'
+	WHEN 'returned' THEN 'returned'
+	WHEN 'closed' THEN 'closed'
+	ELSE l.status
+END`
+
+func appendLeadSearch(where string, args []any, term string) (string, []any) {
+	term = strings.TrimSpace(term)
+	if term == "" {
+		return where, args
 	}
-	if f.PipelineID != 0 {
-		add("l.pipeline_id =", f.PipelineID)
-	}
-	if f.StageID != 0 {
-		add("l.stage_id =", f.StageID)
-	}
-	if f.Assigned != 0 {
-		add("l.assigned_user_id =", f.Assigned)
-	}
-	if f.Tag != "" {
-		args = append(args, f.Tag)
-		where += fmt.Sprintf(" AND $%d = ANY(l.tags)", len(args))
-	}
-	if f.ActionOverdue {
-		where += " AND l.action_at IS NOT NULL AND l.action_at < now()"
-	}
-	if f.ActionOn != "" && f.ActionTZ != "" {
-		args = append(args, f.ActionOn, f.ActionTZ)
-		dateArg := len(args) - 1
-		tzArg := len(args)
-		where += fmt.Sprintf(
-			" AND l.action_at >= ($%d::date AT TIME ZONE $%d) AND l.action_at < (($%d::date + interval '1 day') AT TIME ZONE $%d)",
-			dateArg, tzArg, dateArg, tzArg,
-		)
-	}
+	like := "%" + term + "%"
+	args = append(args, like)
+	n := len(args)
+	where += fmt.Sprintf(` AND (
+		l.first_name ILIKE $%d OR
+		l.last_name ILIKE $%d OR
+		(l.first_name || ' ' || l.last_name) ILIKE $%d OR
+		l.email ILIKE $%d OR
+		l.phone ILIKE $%d OR
+		l.address ILIKE $%d OR
+		l.city ILIKE $%d OR
+		l.state ILIKE $%d OR
+		l.zip ILIKE $%d OR
+		concat_ws(' ', l.address, l.city, l.state, l.zip) ILIKE $%d OR
+		ba.name ILIKE $%d OR
+		l.status ILIKE $%d OR
+		(%s) ILIKE $%d
+	)`, n, n, n, n, n, n, n, n, n, n, n, n, leadStatusSearchLabel, n)
 	return where, args
 }
 
@@ -450,6 +499,9 @@ func (r *Repository) List(ctx context.Context, p *auth.Principal, o ListOptions)
 	if items == nil {
 		items = []Lead{}
 	}
+	if err := r.EnrichLeadEconomicsBatch(ctx, p.AccountType, items); err != nil {
+		return nil, err
+	}
 	return &ListResult{Items: items, Total: total, Page: page, Limit: limit}, nil
 }
 
@@ -510,6 +562,9 @@ func (r *Repository) attachCustomValuesBatch(ctx context.Context, leads []Lead) 
 
 func (r *Repository) UpdateBuiltins(ctx context.Context, accountID, leadID int64, fields map[string]*string) error {
 	for f, v := range fields {
+		if IsMoneyBuiltin(f) {
+			continue
+		}
 		if !builtinFields[f] || v == nil {
 			continue
 		}

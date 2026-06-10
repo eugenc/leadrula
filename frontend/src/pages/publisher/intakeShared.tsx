@@ -4,6 +4,7 @@ import {
   useRouteQueue,
   useBuyers,
   useSources,
+  useRoutes,
   useCreateField,
 } from "@/features/admin/hooks";
 import { useCustomFields } from "@/features/leads/hooks";
@@ -18,53 +19,111 @@ import { Dialog, FormDrawer } from "@/components/ui/dialog";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import { RerunIntakeButton } from "@/features/intake/RerunIntakeButton";
-import type { QueueItem } from "@/types";
+import type { QueueItem, Route } from "@/types";
 
 export { LOG_FILTERS, PAGE_SIZES, statusBadge, type LogFilter } from "@/features/intake/logShared";
 
-export const BUILTINS = ["first_name", "last_name", "phone", "email", "address", "city", "state", "zip"];
+export const BUILTINS = ["first_name", "last_name", "phone", "email", "address", "city", "state", "zip", "cost", "revenue"];
+
+function routeLabel(rt: Route): string {
+  if (rt.destination === "buyer") {
+    const buyer = rt.buyer_name ?? rt.contract_name ?? "Buyer";
+    const stage = rt.target_stage_name ? ` → ${rt.target_stage_name}` : "";
+    return `${buyer} (buyer pipeline${stage})`;
+  }
+  const pipeline = rt.target_pipeline_name ?? "Your pipeline";
+  const stage = rt.target_stage_name ? ` → ${rt.target_stage_name}` : "";
+  return `${pipeline} (your pipeline${stage})`;
+}
 
 export function RouteDialog({ item, onClose }: { item: QueueItem; onClose: () => void }) {
   const { data: buyers } = useBuyers();
-  const route = useRouteQueue();
+  const { data: sources } = useSources();
+  const { data: routes } = useRoutes();
+  const routeQueue = useRouteQueue();
+  const [selectedRouteId, setSelectedRouteId] = useState(0);
   const [buyerId, setBuyerId] = useState(0);
+
+  const sourceId = useMemo(() => {
+    if (!item.source) return null;
+    return (sources ?? []).find((s) => s.slug === item.source)?.id ?? null;
+  }, [item.source, sources]);
+
+  const sourceRoutes = useMemo(() => {
+    if (!sourceId) return [];
+    return (routes ?? []).filter((rt) => rt.is_active && rt.source_id === sourceId);
+  }, [routes, sourceId]);
+
+  const useFallback = sourceRoutes.length === 0;
+  const canSubmit = useFallback ? buyerId > 0 : selectedRouteId > 0;
+
+  function submit() {
+    const body = useFallback ? { buyer_id: buyerId } : { route_id: selectedRouteId };
+    routeQueue.mutate(
+      { id: item.id, body },
+      {
+        onSuccess: () => {
+          toast.success("Lead routed");
+          onClose();
+        },
+        onError: (e) => toast.error(errorMessage(e)),
+      }
+    );
+  }
 
   return (
     <Dialog open onClose={onClose} title={`Route ${item.first_name} ${item.last_name}`}>
       <div className="space-y-3">
-        <div>
-          <Label>Send to buyer</Label>
-          <Select value={buyerId} onChange={(e) => setBuyerId(Number(e.target.value))}>
-            <option value={0}>Select a buyer…</option>
-            {(buyers ?? []).map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
+        {sourceRoutes.length > 0 ? (
+          <div className="space-y-2">
+            <Label>Route</Label>
+            {sourceRoutes.map((rt) => (
+              <label
+                key={rt.id}
+                className="flex cursor-pointer items-start gap-2 rounded-md border border-gray-100 p-3 hover:bg-gray-50"
+              >
+                <input
+                  type="radio"
+                  name="route"
+                  className="mt-0.5"
+                  checked={selectedRouteId === rt.id}
+                  onChange={() => setSelectedRouteId(rt.id)}
+                />
+                <div>
+                  <p className="text-sm font-medium text-gray-800">{rt.name}</p>
+                  <p className="text-xs text-gray-500">{routeLabel(rt)}</p>
+                </div>
+              </label>
             ))}
-          </Select>
-          <p className="mt-1 text-xs text-gray-400">
-            The lead lands in the buyer's contract pipeline and the buyer is charged the contract rate.
-          </p>
-        </div>
+          </div>
+        ) : (
+          <>
+            <p className="text-sm text-gray-500">
+              {item.source
+                ? `No active routes configured for source "${item.source}". Pick a buyer manually.`
+                : "No source slug on this lead. Pick a buyer manually."}
+            </p>
+            <div>
+              <Label>Send to buyer</Label>
+              <Select value={buyerId} onChange={(e) => setBuyerId(Number(e.target.value))}>
+                <option value={0}>Select a buyer…</option>
+                {(buyers ?? []).map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </Select>
+              <p className="mt-1 text-xs text-gray-400">
+                The lead lands in the buyer's contract pipeline and the buyer is charged the contract rate.
+              </p>
+            </div>
+          </>
+        )}
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button
-            disabled={!buyerId}
-            onClick={() =>
-              route.mutate(
-                { id: item.id, body: { buyer_id: buyerId } },
-                {
-                  onSuccess: () => {
-                    toast.success("Lead routed");
-                    onClose();
-                  },
-                  onError: (e) => toast.error(errorMessage(e)),
-                }
-              )
-            }
-          >
+          <Button disabled={!canSubmit || routeQueue.isPending} onClick={submit}>
             Route Lead
           </Button>
         </div>

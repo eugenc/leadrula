@@ -34,12 +34,18 @@ type Lead struct {
 	DeletedAt        *time.Time      `json:"deleted_at,omitempty"`
 	CustomValues     map[string]json.RawMessage `json:"custom_values"`
 	BuyerName         *string                   `json:"buyer_name,omitempty"`
+	SourceName        *string                   `json:"source_name,omitempty"`
 	AssigneeName      *string                   `json:"assignee_name,omitempty"`
 	AssigneeAvatarURL *string                   `json:"assignee_avatar_url,omitempty"`
 	PipelineName      *string                   `json:"pipeline_name,omitempty"`
 	StageName         *string                   `json:"stage_name,omitempty"`
 	StageEnteredAt    time.Time                 `json:"stage_entered_at"`
 	Tags              []string                  `json:"tags"`
+	Cost              *float64                  `json:"cost,omitempty"`
+	Revenue           *float64                  `json:"revenue,omitempty"`
+	GrossProfit       *float64                  `json:"gross_profit,omitempty"`
+	NetProfit         *float64                  `json:"net_profit,omitempty"`
+	PurchasePrice     *float64                  `json:"purchase_price,omitempty"`
 }
 
 type ListResult struct {

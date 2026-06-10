@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
@@ -63,6 +64,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		StageID:    parseInt(q.Get("stage_id")),
 		Assigned:   parseInt(q.Get("assigned")),
 		Tag:        q.Get("tag"),
+		Search:     strings.TrimSpace(q.Get("q")),
 	}
 	tz := h.svc.AccountTimezone(r.Context(), p.AccountID)
 	f.FilterTZ = tz
@@ -244,6 +246,12 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
+	}
+	for k := range body.Fields {
+		if IsMoneyBuiltin(k) {
+			httpx.WriteError(w, httpx.Validation("cost and revenue cannot be edited manually"))
+			return
+		}
 	}
 	if len(body.Fields) > 0 {
 		if err := h.svc.repo.UpdateBuiltins(r.Context(), p.AccountID, leadID, body.Fields); err != nil {

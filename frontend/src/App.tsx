@@ -18,6 +18,7 @@ import { CustomFieldsPage } from "@/pages/CustomFieldsPage";
 import { UsersPage } from "@/pages/UsersPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { SettingsLayout } from "@/pages/SettingsLayout";
+import { NotificationsSettingsPage } from "@/pages/NotificationsSettingsPage";
 import { ApiKeysPage } from "@/pages/buyer/ApiKeysPage";
 
 import { IntakeLogLayout } from "@/pages/publisher/IntakeLogLayout";
@@ -48,7 +49,6 @@ import { PlatformPublishersPage } from "@/pages/platform/PlatformPublishersPage"
 import { PlatformBuyersPage } from "@/pages/platform/PlatformBuyersPage";
 import { IntegrationsLayout } from "@/pages/IntegrationsLayout";
 import { IntegrationsConnectionsTab } from "@/pages/IntegrationsConnectionsTab";
-import { IntegrationsDeliveriesTab } from "@/pages/IntegrationsDeliveriesTab";
 import { homePath } from "@/lib/homePath";
 
 function RootRedirect() {
@@ -78,6 +78,7 @@ export default function App() {
                 <Route path="users" element={<Navigate to="/platform/settings/users" replace />} />
                 <Route path="settings" element={<SettingsLayout />}>
                   <Route index element={<SettingsPage />} />
+                  <Route path="notifications" element={<NotificationsSettingsPage />} />
                   <Route path="users" element={<UsersPage />} />
                 </Route>
               </Route>
@@ -108,12 +109,13 @@ export default function App() {
                 <Route path="billing" element={<PublisherBillingPage />} />
                 <Route path="users" element={<Navigate to="/p/settings/users" replace />} />
                 <Route path="api" element={<Navigate to="/p/settings/api" replace />} />
+                <Route path="integrations/deliveries" element={<Navigate to="/p/log?type=integrations" replace />} />
                 <Route path="integrations" element={<IntegrationsLayout />}>
                   <Route index element={<IntegrationsConnectionsTab />} />
-                  <Route path="deliveries" element={<IntegrationsDeliveriesTab />} />
                 </Route>
                 <Route path="settings" element={<SettingsLayout />}>
                   <Route index element={<SettingsPage />} />
+                  <Route path="notifications" element={<NotificationsSettingsPage />} />
                   <Route path="billing" element={<Navigate to="/p/billing" replace />} />
                   <Route path="users" element={<UsersPage />} />
                   <Route path="api" element={<ApiKeysPage />} />
@@ -142,12 +144,13 @@ export default function App() {
                 <Route path="users" element={<Navigate to="/b/settings/users" replace />} />
                 <Route path="api" element={<Navigate to="/b/settings/api" replace />} />
                 <Route path="webhooks" element={<WebhooksPage />} />
+                <Route path="integrations/deliveries" element={<Navigate to="/b/logs" replace />} />
                 <Route path="integrations" element={<IntegrationsLayout />}>
                   <Route index element={<IntegrationsConnectionsTab />} />
-                  <Route path="deliveries" element={<IntegrationsDeliveriesTab />} />
                 </Route>
                 <Route path="settings" element={<SettingsLayout />}>
                   <Route index element={<SettingsPage />} />
+                  <Route path="notifications" element={<NotificationsSettingsPage />} />
                   <Route path="billing" element={<Navigate to="/b/billing" replace />} />
                   <Route path="users" element={<UsersPage />} />
                   <Route path="api" element={<ApiKeysPage />} />

@@ -18,6 +18,10 @@ export function counterpartyLabel(_contractType?: string): string {
   return "Buyer";
 }
 
+export function counterpartyPipelineLabel(contractType?: string): string {
+  return contractType === "buy" ? "Publisher pipeline" : "Buyer pipeline";
+}
+
 export function formatAccountTypeLabel(type: string | undefined): string {
   if (type === "publisher") return "Publisher";
   return "Buyer";

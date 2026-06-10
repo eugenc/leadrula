@@ -27,7 +27,7 @@ import {
 import { useContracts } from "@/features/admin/hooks";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Badge, Spinner, EmptyState } from "@/components/ui/misc";
-import { FilterSelect } from "@/components/ui/input";
+import { FilterSelect, Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Dropdown, DropdownItem } from "@/components/ui/dropdown";
@@ -92,6 +92,8 @@ export function LeadsListPage() {
   const [visibleCols, setVisibleCols] = useState<string[]>(DEFAULT_VISIBLE_COLUMNS);
   const [colsOpen, setColsOpen] = useState(false);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [selectAllMatching, setSelectAllMatching] = useState(false);
   const [fetchingIds, setFetchingIds] = useState(false);
@@ -109,6 +111,8 @@ export function LeadsListPage() {
     setSort(view.sort ?? "created_at");
     setSortDir(view.sort_dir ?? "desc");
     setVisibleCols(view.columns?.length ? [...view.columns] : [...DEFAULT_VISIBLE_COLUMNS]);
+    setSearch("");
+    setDebouncedSearch("");
     setPage(1);
   }, []);
 
@@ -129,22 +133,24 @@ export function LeadsListPage() {
     () => ({
       view_id: viewChanged ? undefined : activeId,
       filters: viewChanged ? JSON.stringify(conditions) : undefined,
+      q: debouncedSearch || undefined,
       page,
       limit,
       sort,
       sort_dir: sortDir,
     }),
-    [viewChanged, activeId, conditions, page, limit, sort, sortDir]
+    [viewChanged, activeId, conditions, debouncedSearch, page, limit, sort, sortDir]
   );
 
   const bulkListFilters = useMemo(
     () => ({
       view_id: viewChanged ? undefined : activeId,
       filters: viewChanged ? JSON.stringify(conditions) : undefined,
+      q: debouncedSearch || undefined,
       sort,
       sort_dir: sortDir,
     }),
-    [viewChanged, activeId, conditions, sort, sortDir]
+    [viewChanged, activeId, conditions, debouncedSearch, sort, sortDir]
   );
 
   const { data, isLoading, isError, error } = useLeads(filters);
@@ -170,13 +176,18 @@ export function LeadsListPage() {
   }
 
   useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
     setPage(1);
-  }, [conditions, limit]);
+  }, [conditions, limit, debouncedSearch]);
 
   useEffect(() => {
     setSelected(new Set());
     setSelectAllMatching(false);
-  }, [conditions, limit, sort, sortDir, activeId, viewChanged]);
+  }, [conditions, limit, sort, sortDir, activeId, viewChanged, debouncedSearch]);
 
   const allColumnIds = useMemo(() => {
     const custom = (customFields ?? [])
@@ -261,9 +272,16 @@ export function LeadsListPage() {
             sortDir={sortDir}
             onViewApply={applyView}
           />
-          <Button variant="ghost" size="sm" onClick={() => setFiltersExpanded((e) => !e)}>
+          <Button variant="outline" size="sm" onClick={() => setFiltersExpanded((e) => !e)}>
             {filtersExpanded ? "Hide filters" : "Edit filters"}
           </Button>
+          <Input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name, email, phone, address, buyer, or status…"
+            className="h-7 w-72 text-sm"
+          />
           <div className="ml-auto flex items-center gap-2">
             {canCreate && (
               <>
@@ -320,6 +338,8 @@ export function LeadsListPage() {
               visibleCols={visibleCols}
               allColumnIds={allColumnIds}
               customFields={customFields ?? []}
+              defaultCols={DEFAULT_VISIBLE_COLUMNS}
+              lockedCols={DEFAULT_VISIBLE_COLUMNS}
               onChange={setVisibleCols}
             />
           </div>
@@ -372,7 +392,7 @@ export function LeadsListPage() {
               <THead>
                 <tr>
                   {isAdmin && (
-                    <TH className="w-10">
+                    <TH className="w-10 min-w-10">
                       <input
                         type="checkbox"
                         checked={
@@ -419,7 +439,7 @@ export function LeadsListPage() {
                 {leads.map((l) => (
                   <TR key={l.id} onClick={() => openDetail(l.id)}>
                     {isAdmin && (
-                      <TD className="w-10">
+                      <TD className="w-10 min-w-10">
                         <div onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"

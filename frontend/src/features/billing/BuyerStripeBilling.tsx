@@ -5,9 +5,11 @@ import {
   useCreateSetupIntent,
   useDetachPaymentMethod,
   useCreateTopupIntent,
+  useConfirmTopup,
   useBalance,
+  useBuyerStripeConfig,
 } from "@/features/admin/hooks";
-import { stripeConfigured, stripePromise } from "@/features/billing/stripe";
+import { isStripeAvailable, stripePromiseForIntent } from "@/features/billing/stripe";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Card, Spinner } from "@/components/ui/misc";
@@ -16,40 +18,54 @@ import { errorMessage } from "@/lib/api";
 import { useQueryClient } from "@tanstack/react-query";
 
 export function BuyerStripeBilling() {
-  if (!stripeConfigured || !stripePromise) {
+  const { data: stripeConfig, isLoading } = useBuyerStripeConfig();
+  const publishableKey = stripeConfig?.publishable_key;
+  const isDirect = stripeConfig?.buyer_kind === "direct";
+
+  if (isLoading) return <Spinner className="h-6 w-6" />;
+
+  if (!isStripeAvailable(publishableKey)) {
     return (
       <Card className="p-4 text-sm text-gray-500">
-        Stripe is not configured. Set{" "}
-        <code className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-700">
-          VITE_STRIPE_PUBLISHABLE_KEY
-        </code>{" "}
-        to enable payments.
+        {isDirect
+          ? "Your publisher has not configured Stripe for online payments yet."
+          : "Stripe is not configured. Set VITE_STRIPE_PUBLISHABLE_KEY to enable payments."}
       </Card>
     );
   }
 
   return (
     <div className="mb-6 grid gap-4 lg:grid-cols-2">
-      <PaymentMethodsCard />
-      <TopupCard />
+      <PaymentMethodsCard defaultPublishableKey={publishableKey} isDirect={isDirect} />
+      <TopupCard defaultPublishableKey={publishableKey} isDirect={isDirect} />
     </div>
   );
 }
 
-function PaymentMethodsCard() {
+function PaymentMethodsCard({
+  defaultPublishableKey,
+  isDirect,
+}: {
+  defaultPublishableKey?: string;
+  isDirect: boolean;
+}) {
   const { data: methods, isLoading, refetch } = usePaymentMethods();
   const detach = useDetachPaymentMethod();
   const createSetup = useCreateSetupIntent();
   const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [publishableKey, setPublishableKey] = useState<string | undefined>(defaultPublishableKey);
 
   async function startAddCard() {
     try {
       const res = await createSetup.mutateAsync();
       setClientSecret(res.client_secret);
+      setPublishableKey(res.publishable_key ?? defaultPublishableKey);
     } catch (e) {
       toast.error(errorMessage(e));
     }
   }
+
+  const stripeForElements = clientSecret ? stripePromiseForIntent(publishableKey) : null;
 
   return (
     <Card className="p-4">
@@ -87,8 +103,8 @@ function PaymentMethodsCard() {
           )}
         </ul>
       )}
-      {clientSecret && stripePromise ? (
-        <Elements stripe={stripePromise} options={{ clientSecret }} key={clientSecret}>
+      {clientSecret && stripeForElements ? (
+        <Elements stripe={stripeForElements} options={{ clientSecret }} key={clientSecret}>
           <SetupCardForm
             onDone={() => {
               setClientSecret(null);
@@ -101,6 +117,9 @@ function PaymentMethodsCard() {
         <Button variant="secondary" disabled={createSetup.isPending} onClick={() => void startAddCard()}>
           Add card
         </Button>
+      )}
+      {isDirect && (
+        <p className="mt-2 text-xs text-gray-400">Cards are saved on your publisher&apos;s Stripe account.</p>
       )}
     </Card>
   );
@@ -144,9 +163,16 @@ function SetupCardForm({ onDone, onCancel }: { onDone: () => void; onCancel: () 
   );
 }
 
-function TopupCard() {
+function TopupCard({
+  defaultPublishableKey,
+  isDirect,
+}: {
+  defaultPublishableKey?: string;
+  isDirect: boolean;
+}) {
   const [amount, setAmount] = useState(100);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [publishableKey, setPublishableKey] = useState<string | undefined>(defaultPublishableKey);
   const createIntent = useCreateTopupIntent();
 
   async function startTopup() {
@@ -157,17 +183,25 @@ function TopupCard() {
     try {
       const res = await createIntent.mutateAsync(Math.round(amount * 100));
       setClientSecret(res.client_secret);
+      setPublishableKey(res.publishable_key ?? defaultPublishableKey);
     } catch (e) {
       toast.error(errorMessage(e));
     }
   }
 
+  const stripeForElements = clientSecret ? stripePromiseForIntent(publishableKey) : null;
+
   return (
     <Card className="p-4">
       <h3 className="mb-3 text-base font-semibold text-gray-800">Add funds</h3>
-      {clientSecret && stripePromise ? (
-        <Elements stripe={stripePromise} options={{ clientSecret }} key={clientSecret}>
-          <TopupPaymentForm amount={amount} onDone={() => setClientSecret(null)} onCancel={() => setClientSecret(null)} />
+      {clientSecret && stripeForElements ? (
+        <Elements stripe={stripeForElements} options={{ clientSecret }} key={clientSecret}>
+          <TopupPaymentForm
+            amount={amount}
+            isDirect={isDirect}
+            onDone={() => setClientSecret(null)}
+            onCancel={() => setClientSecret(null)}
+          />
         </Elements>
       ) : (
         <div className="flex items-end gap-2">
@@ -186,10 +220,12 @@ function TopupCard() {
 
 function TopupPaymentForm({
   amount,
+  isDirect,
   onDone,
   onCancel,
 }: {
   amount: number;
+  isDirect: boolean;
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -197,6 +233,7 @@ function TopupPaymentForm({
   const elements = useElements();
   const qc = useQueryClient();
   const { refetch: refetchBalance } = useBalance();
+  const confirmTopup = useConfirmTopup();
   const [busy, setBusy] = useState(false);
 
   async function submit(e: React.FormEvent) {
@@ -214,7 +251,15 @@ function TopupPaymentForm({
       return;
     }
     if (paymentIntent?.status === "succeeded") {
-      toast.success("Payment received — balance updating shortly");
+      if (isDirect) {
+        try {
+          await confirmTopup.mutateAsync(paymentIntent.id);
+        } catch (e) {
+          toast.error(errorMessage(e));
+          return;
+        }
+      }
+      toast.success("Payment received");
       await refetchBalance();
       void qc.invalidateQueries({ queryKey: ["transactions"] });
       onDone();

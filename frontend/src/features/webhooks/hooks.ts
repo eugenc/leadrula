@@ -168,6 +168,7 @@ export function useReplayWebhookDelivery() {
     onSuccess: (_, { webhookId }) => {
       qc.invalidateQueries({ queryKey: ["webhook-deliveries", webhookId] });
       qc.invalidateQueries({ queryKey: ["account-webhook-deliveries"] });
+      qc.invalidateQueries({ queryKey: ["inbound-log"] });
       qc.invalidateQueries({ queryKey: ["webhook-sample-payload", webhookId] });
       qc.invalidateQueries({ queryKey: ["leads"] });
     },

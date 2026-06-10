@@ -11,6 +11,10 @@ import (
 
 // TryAccrueOnBuyerStage records rev/profit share when a lead enters a configured stage.
 func TryAccrueOnBuyerStage(ctx context.Context, q database.Querier, contractID, leadID, stageID int64) error {
+	cost, revenue, err := leadCostRevenue(ctx, q, leadID)
+	if err != nil {
+		return err
+	}
 	rows, err := q.Query(ctx,
 		`SELECT id, kind, rev_percent, profit_percent
 		 FROM contract_compensations
@@ -28,11 +32,14 @@ func TryAccrueOnBuyerStage(ctx context.Context, q database.Querier, contractID, 
 		if err := rows.Scan(&compID, &kind, &rev, &profit); err != nil {
 			return err
 		}
-		amount := accrualPlaceholderAmount(kind, rev, profit)
+		amount := accrualAmount(kind, rev, profit, cost, revenue)
 		if amount <= 0 {
 			continue
 		}
 		if err := insertAccrual(ctx, q, compID, leadID, amount, "stage"); err != nil {
+			return err
+		}
+		if err := RecordEarningStage(ctx, q, compID, leadID, amount); err != nil {
 			return err
 		}
 	}
@@ -66,11 +73,18 @@ func AccrueManual(ctx context.Context, q database.Querier, publisherID, contract
 	if kind != "rev_share" && kind != "profit_share" {
 		return httpx.Validation("manual accrual applies to rev_share or profit_share only")
 	}
-	amount := accrualPlaceholderAmount(kind, rev, profit)
-	if amount <= 0 {
-		return httpx.Validation("compensation has no accrual percent configured")
+	cost, revenue, err := leadCostRevenue(ctx, q, leadID)
+	if err != nil {
+		return err
 	}
-	return insertAccrual(ctx, q, compensationID, leadID, amount, "manual")
+	amount := accrualAmount(kind, rev, profit, cost, revenue)
+	if amount <= 0 {
+		return httpx.Validation("lead has no revenue basis for accrual")
+	}
+	if err := insertAccrual(ctx, q, compensationID, leadID, amount, "manual"); err != nil {
+		return err
+	}
+	return RecordEarningStage(ctx, q, compensationID, leadID, amount)
 }
 
 func insertAccrual(ctx context.Context, q database.Querier, compID, leadID int64, amount float64, source string) error {
@@ -80,17 +94,6 @@ func insertAccrual(ctx context.Context, q database.Querier, compID, leadID int64
 		 ON CONFLICT (compensation_id, lead_id, trigger_source) DO NOTHING`,
 		compID, leadID, amount, source)
 	return err
-}
-
-// v1: accrual rows store percent as placeholder amount until revenue basis exists.
-func accrualPlaceholderAmount(kind string, rev, profit *float64) float64 {
-	if kind == "rev_share" && rev != nil {
-		return *rev
-	}
-	if kind == "profit_share" && profit != nil {
-		return *profit
-	}
-	return 0
 }
 
 func loadContractOwner(ctx context.Context, q database.Querier, contractID, publisherID int64) (*Contract, error) {

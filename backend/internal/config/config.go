@@ -32,9 +32,10 @@ type Config struct {
 	S3SecretKey string
 	S3PublicURL string
 
-	StripeSecretKey     string
+	StripeSecretKey       string
 	StripeWebhookSecret string
 	StripePlatformFee   float64
+	StripeConnectClient string
 
 	IntegrationEncKey              string
 	IntegrationOAuthRedirectBase   string
@@ -73,6 +74,7 @@ func Load() *Config {
 		StripeSecretKey:     os.Getenv("STRIPE_SECRET_KEY"),
 		StripeWebhookSecret: os.Getenv("STRIPE_WEBHOOK_SECRET"),
 		StripePlatformFee:   getfloat("STRIPE_PLATFORM_FEE", 0.10),
+		StripeConnectClient: os.Getenv("STRIPE_CONNECT_CLIENT_ID"),
 
 		IntegrationEncKey:            os.Getenv("INTEGRATION_ENC_KEY"),
 		IntegrationOAuthRedirectBase: getenv("INTEGRATION_OAUTH_REDIRECT_BASE", "http://localhost:8080"),

@@ -63,6 +63,28 @@ func (s *Service) canSwitchTo(ctx context.Context, origin *switchOrigin, targetI
 		if !ok {
 			return httpx.Forbidden("no active partnership with this buyer")
 		}
+	case "buyer":
+		if origin.Role != "admin" {
+			return httpx.Forbidden("only admins can switch accounts")
+		}
+		if targetType != "buyer" {
+			return httpx.Forbidden("buyers can only switch to other buyer accounts")
+		}
+		if targetID == origin.AccountID {
+			return httpx.Forbidden("already on this account")
+		}
+		var ok bool
+		_ = s.repo.pool.QueryRow(ctx,
+			`SELECT EXISTS(
+				SELECT 1 FROM users u
+				JOIN users u2 ON u2.email = u.email
+				WHERE u.account_id = $1 AND u2.account_id = $2
+				  AND u.role = 'admin' AND u2.role = 'admin'
+				  AND u.is_active AND u2.is_active
+			)`, origin.AccountID, targetID).Scan(&ok)
+		if !ok {
+			return httpx.Forbidden("no access to this buyer account")
+		}
 	default:
 		return httpx.Forbidden("account switching not available for this account type")
 	}
@@ -185,6 +207,20 @@ func (s *Service) ListSwitchable(ctx context.Context, actor *auth.Principal) ([]
 			 WHERE p.publisher_id = $1 AND p.status = 'active'
 			   AND a.operational_status = 'active' AND a.deleted_at IS NULL
 			 ORDER BY a.name`, origin.AccountID)
+	case "buyer":
+		if origin.Role != "admin" {
+			return []map[string]any{}, nil
+		}
+		rows, err = s.repo.pool.Query(ctx,
+			`SELECT a.public_id, a.handler_id, a.type, a.name
+			 FROM accounts a
+			 JOIN users u ON u.account_id = a.id
+			 WHERE a.type = 'buyer'
+			   AND u.email = (SELECT email FROM users WHERE id = $2)
+			   AND u.role = 'admin' AND u.is_active
+			   AND a.id <> (SELECT account_id FROM users WHERE id = $2)
+			   AND a.operational_status = 'active' AND a.deleted_at IS NULL
+			 ORDER BY a.name`, origin.AccountID, actor.UserID)
 	default:
 		return []map[string]any{}, nil
 	}

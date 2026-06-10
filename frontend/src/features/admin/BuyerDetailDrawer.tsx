@@ -19,7 +19,7 @@ import {
   useResendBuyerAdminInvite,
 } from "@/features/admin/hooks";
 import { useAuthStore } from "@/store/authStore";
-import type { CurrentUser } from "@/types";
+import type { BuyerKind, CurrentUser } from "@/types";
 
 function collabBadge(status: string) {
   switch (status) {
@@ -90,12 +90,14 @@ function DrawerContent({
   const [name, setName] = useState("");
   const [website, setWebsite] = useState("");
   const [timezone, setTimezone] = useState("America/Toronto");
+  const [buyerKind, setBuyerKind] = useState<BuyerKind>("direct");
 
   useEffect(() => {
     if (!buyer) return;
     setName(buyer.name);
     setWebsite(buyer.website);
     setTimezone(buyer.timezone);
+    setBuyerKind(buyer.buyer_kind);
   }, [buyer]);
 
   const trimmedName = name.trim();
@@ -104,7 +106,8 @@ function DrawerContent({
     buyer != null &&
     trimmedName === buyer.name &&
     trimmedWebsite === buyer.website &&
-    timezone === buyer.timezone;
+    timezone === buyer.timezone &&
+    buyerKind === buyer.buyer_kind;
   const invalid = !trimmedName;
   const saving = update.isPending;
   const collabStatus = collab?.status ?? "none";
@@ -116,6 +119,7 @@ function DrawerContent({
     if (trimmedName !== buyer.name) body.name = trimmedName;
     if (trimmedWebsite !== buyer.website) body.website = trimmedWebsite;
     if (timezone !== buyer.timezone) body.timezone = timezone;
+    if (buyerKind !== buyer.buyer_kind) body.buyer_kind = buyerKind;
     if (Object.keys(body).length === 0) return;
 
     update.mutate(
@@ -284,6 +288,13 @@ function DrawerContent({
                   {tz}
                 </option>
               ))}
+            </Select>
+          </div>
+          <div>
+            <Label>Type</Label>
+            <Select value={buyerKind} onChange={(e) => setBuyerKind(e.target.value as BuyerKind)}>
+              <option value="direct">Direct</option>
+              <option value="marketplace">Marketplace</option>
             </Select>
           </div>
           <div>

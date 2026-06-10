@@ -1,25 +1,36 @@
-import { useEffect, useState } from "react";
-import { useRoutingLog, useRejectQueue } from "@/features/admin/hooks";
+import { useEffect, useMemo, useState } from "react";
+import { useRoutingLog } from "@/features/admin/hooks";
+import { useAccountWebhookDeliveries, useWebhooks } from "@/features/webhooks/hooks";
 import { useAuthStore } from "@/store/authStore";
-import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Input, FilterSelect } from "@/components/ui/input";
+import { FilterInput, FilterSelect } from "@/components/ui/input";
 import { Spinner, EmptyState, Badge } from "@/components/ui/misc";
+import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { format } from "date-fns";
-import { toast } from "@/store/toastStore";
-import { errorMessage } from "@/lib/api";
 import type { QueueItem } from "@/types";
 import {
   LOG_FILTERS,
   LOG_TYPE_FILTERS,
-  PAGE_SIZES,
+  LogPagination,
+  WEBHOOK_DELIVERY_FILTERS,
   statusBadge,
   type LogFilter,
   type LogTypeFilter,
+  type WebhookDeliveryStatusFilter,
 } from "./logShared";
-import { WebhookDeliveriesLogSection } from "./WebhookDeliveriesLogSection";
+import { useInboundLog } from "./hooks";
+import { UnifiedInboundLogTable } from "./UnifiedInboundLogTable";
+import {
+  inboundItemsToRows,
+  mergeInboundRows,
+  queueItemsToRows,
+  webhookDeliveriesToRows,
+} from "./inboundLog";
 import { RerunIntakeButton } from "./RerunIntakeButton";
 import { QueueItemDrawer, RouteDialog } from "@/pages/publisher/intakeShared";
+import { useRejectQueue } from "@/features/admin/hooks";
+import { toast } from "@/store/toastStore";
+import { errorMessage } from "@/lib/api";
 
 type LogSource = "publisher" | "buyer";
 
@@ -28,8 +39,10 @@ interface IntakeLogTableProps {
   readOnly?: boolean;
   emptyTitle?: string;
   sourceSlug?: string;
+  initialLogType?: LogTypeFilter;
 }
 
+/** Compact source-only log for SourcesPage drawer — unchanged. */
 export function IntakeLogSection({
   source,
   readOnly,
@@ -75,7 +88,6 @@ export function IntakeLogSection({
 
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(total / limit));
   const hasFilters = logFilter !== "all" || debouncedSearch !== "" || !!sourceSlug;
 
   if (isLoading) return <Spinner className="h-6 w-6" />;
@@ -88,11 +100,11 @@ export function IntakeLogSection({
 
       {!compact && (
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <Input
+          <FilterInput
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search name, phone, source…"
-            className="max-w-sm"
+            className="max-w-sm w-auto"
           />
           <div className="flex flex-wrap gap-2">
             {LOG_FILTERS.map((f) => (
@@ -121,7 +133,7 @@ export function IntakeLogSection({
                 <TH>Received</TH>
                 <TH>Status</TH>
                 <TH>Unmapped</TH>
-                {!readOnly && <TH />}
+                {!readOnly && <TH className="min-w-0 w-12" />}
               </tr>
             </THead>
             <TBody>
@@ -158,40 +170,13 @@ export function IntakeLogSection({
           </Table>
 
           {!compact && (
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-500">
-              <span>
-                {total === 0
-                  ? "No results"
-                  : `${(page - 1) * limit + 1}–${Math.min(page * limit, total)} of ${total}`}
-              </span>
-              <div className="flex items-center gap-3">
-                <FilterSelect
-                  value={limit}
-                  onChange={(e) => setLimit(Number(e.target.value))}
-                  className="w-24"
-                >
-                  {PAGE_SIZES.map((n) => (
-                    <option key={n} value={n}>
-                      {n} / page
-                    </option>
-                  ))}
-                </FilterSelect>
-                <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-                  Previous
-                </Button>
-                <span>
-                  Page {page} of {totalPages}
-                </span>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={page >= totalPages}
-                  onClick={() => setPage((p) => p + 1)}
-                >
-                  Next
-                </Button>
-              </div>
-            </div>
+            <LogPagination
+              page={page}
+              limit={limit}
+              total={total}
+              onPageChange={setPage}
+              onLimitChange={setLimit}
+            />
           )}
         </>
       )}
@@ -235,19 +220,169 @@ export function IntakeLogTable({
   readOnly = false,
   emptyTitle = source === "buyer" ? "No contract leads yet." : "No intake history yet.",
   sourceSlug,
+  initialLogType = "all",
 }: IntakeLogTableProps) {
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === "admin";
   const canReplayWebhooks = isAdmin;
-  const [logType, setLogType] = useState<LogTypeFilter>("all");
 
-  const showIntake = logType === "intake" || logType === "all";
-  const showWebhooks = logType === "webhooks" || logType === "all";
+  const [logType, setLogType] = useState<LogTypeFilter>(initialLogType);
+  const [logFilter, setLogFilter] = useState<LogFilter>("all");
+  const [webhookStatus, setWebhookStatus] = useState<WebhookDeliveryStatusFilter>("");
+  const [webhookId, setWebhookId] = useState<number | "">("");
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [logType, logFilter, webhookStatus, webhookId, limit, debouncedSearch, sourceSlug]);
+
+  const { data: webhooks } = useWebhooks();
+
+  const intakeFilters = {
+    status: logFilter,
+    page,
+    limit,
+    q: debouncedSearch || undefined,
+    source: sourceSlug,
+  };
+
+  const webhookFilters = {
+    status: webhookStatus || undefined,
+    webhookId: webhookId === "" ? undefined : webhookId,
+    page,
+    limit,
+  };
+
+  const inboundFilters = {
+    type: (logType === "integrations" ? "integration" : "all") as "all" | "integration",
+    page,
+    limit,
+  };
+
+  const showIntakeData = logType === "intake" || (logType === "all" && source === "buyer");
+  const showWebhookData = logType === "webhooks" || (logType === "all" && source === "buyer");
+  const showInboundData =
+    (logType === "all" || logType === "integrations") && source === "publisher";
+
+  const intakeQuery = useRoutingLog(source, intakeFilters);
+  const webhookQuery = useAccountWebhookDeliveries(webhookFilters);
+  const inboundQuery = useInboundLog(inboundFilters, showInboundData);
+
+  const buyerAllIntakeQuery = useRoutingLog("buyer", { status: "all", page, limit });
+  const buyerAllWebhookQuery = useAccountWebhookDeliveries({ page, limit });
+
+  const { rows, total, isLoading, hasFilters, refetchWebhooks } = useMemo(() => {
+    if (logType === "intake") {
+      const items = showIntakeData ? (intakeQuery.data?.items ?? []) : [];
+      return {
+        rows: queueItemsToRows(items),
+        total: intakeQuery.data?.total ?? 0,
+        isLoading: showIntakeData && intakeQuery.isLoading,
+        hasFilters: logFilter !== "all" || debouncedSearch !== "" || !!sourceSlug,
+        refetchWebhooks: () => intakeQuery.refetch(),
+      };
+    }
+    if (logType === "webhooks") {
+      const items = showWebhookData ? (webhookQuery.data?.items ?? []) : [];
+      return {
+        rows: webhookDeliveriesToRows(items),
+        total: webhookQuery.data?.total ?? 0,
+        isLoading: showWebhookData && webhookQuery.isLoading,
+        hasFilters: webhookStatus !== "" || webhookId !== "",
+        refetchWebhooks: () => webhookQuery.refetch(),
+      };
+    }
+
+    if (logType === "integrations") {
+      const items = inboundQuery.data?.items ?? [];
+      return {
+        rows: inboundItemsToRows(items),
+        total: inboundQuery.data?.total ?? 0,
+        isLoading: inboundQuery.isLoading,
+        hasFilters: false,
+        refetchWebhooks: () => inboundQuery.refetch(),
+      };
+    }
+
+    // All
+    if (source === "publisher") {
+      const items = inboundQuery.data?.items ?? [];
+      return {
+        rows: inboundItemsToRows(items),
+        total: inboundQuery.data?.total ?? 0,
+        isLoading: inboundQuery.isLoading,
+        hasFilters: false,
+        refetchWebhooks: () => inboundQuery.refetch(),
+      };
+    }
+
+    // Buyer "All" — approximate client merge
+    const intakeRows = queueItemsToRows(buyerAllIntakeQuery.data?.items ?? []);
+    const webhookRows = webhookDeliveriesToRows(buyerAllWebhookQuery.data?.items ?? []);
+    const merged = mergeInboundRows(intakeRows, webhookRows, limit);
+    const intakeTotal = buyerAllIntakeQuery.data?.total ?? 0;
+    const webhookTotal = buyerAllWebhookQuery.data?.total ?? 0;
+    return {
+      rows: merged,
+      total: intakeTotal + webhookTotal,
+      isLoading: buyerAllIntakeQuery.isLoading || buyerAllWebhookQuery.isLoading,
+      hasFilters: false,
+      refetchWebhooks: () => {
+        buyerAllIntakeQuery.refetch();
+        buyerAllWebhookQuery.refetch();
+      },
+    };
+  }, [
+    logType,
+    source,
+    intakeQuery.data,
+    intakeQuery.isLoading,
+    webhookQuery.data,
+    webhookQuery.isLoading,
+    inboundQuery.data,
+    inboundQuery.isLoading,
+    buyerAllIntakeQuery.data,
+    buyerAllIntakeQuery.isLoading,
+    buyerAllWebhookQuery.data,
+    buyerAllWebhookQuery.isLoading,
+    logFilter,
+    debouncedSearch,
+    sourceSlug,
+    webhookStatus,
+    webhookId,
+    limit,
+    webhookQuery,
+    inboundQuery,
+    buyerAllIntakeQuery,
+    buyerAllWebhookQuery,
+  ]);
+
+  const emptyMessage =
+    logType === "webhooks"
+      ? "No webhook deliveries yet."
+      : logType === "integrations"
+        ? "No integration deliveries yet."
+        : logType === "all"
+          ? "No intake history yet."
+          : emptyTitle;
+
+  const typeFilters =
+    source === "publisher"
+      ? LOG_TYPE_FILTERS
+      : LOG_TYPE_FILTERS.filter((f) => f.value !== "integrations");
 
   return (
     <>
       <div className="mb-4 flex flex-wrap gap-2">
-        {LOG_TYPE_FILTERS.map((f) => (
+        {typeFilters.map((f) => (
           <Button
             key={f.value}
             size="sm"
@@ -259,24 +394,72 @@ export function IntakeLogTable({
         ))}
       </div>
 
-      {showIntake && (
-        <IntakeLogSection
-          source={source}
-          readOnly={readOnly}
-          emptyTitle={emptyTitle}
-          sectionTitle={logType === "all" ? "Sources" : undefined}
-          sourceSlug={sourceSlug}
-        />
-      )}
-
-      {showWebhooks && (
-        <div className={logType === "all" ? "mt-8" : undefined}>
-          <WebhookDeliveriesLogSection
-            canReplay={canReplayWebhooks}
-            sectionTitle={logType === "all" ? "Webhooks" : undefined}
+      {logType === "intake" && (
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <FilterInput
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name, phone, source…"
+            className="max-w-sm w-auto"
           />
+          <div className="flex flex-wrap gap-2">
+            {LOG_FILTERS.map((f) => (
+              <Button
+                key={f.value}
+                size="sm"
+                variant={logFilter === f.value ? "primary" : "secondary"}
+                onClick={() => setLogFilter(f.value)}
+              >
+                {f.label}
+              </Button>
+            ))}
+          </div>
         </div>
       )}
+
+      {logType === "webhooks" && (
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <FilterSelect
+            className="h-7 min-w-[10rem] w-auto"
+            value={webhookId === "" ? "" : String(webhookId)}
+            onChange={(e) => setWebhookId(e.target.value === "" ? "" : Number(e.target.value))}
+          >
+            <option value="">All webhooks</option>
+            {(webhooks ?? []).map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name}
+              </option>
+            ))}
+          </FilterSelect>
+          <div className="flex flex-wrap gap-2">
+            {WEBHOOK_DELIVERY_FILTERS.map((f) => (
+              <Button
+                key={f.value}
+                size="sm"
+                variant={webhookStatus === f.value ? "primary" : "secondary"}
+                onClick={() => setWebhookStatus(f.value)}
+              >
+                {f.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <UnifiedInboundLogTable
+        rows={rows}
+        total={total}
+        page={page}
+        limit={limit}
+        isLoading={isLoading}
+        emptyTitle={emptyMessage}
+        hasFilters={hasFilters}
+        readOnly={readOnly}
+        canReplayWebhooks={canReplayWebhooks}
+        onPageChange={setPage}
+        onLimitChange={setLimit}
+        onWebhookReplayed={refetchWebhooks}
+      />
     </>
   );
 }

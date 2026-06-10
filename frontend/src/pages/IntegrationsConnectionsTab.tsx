@@ -1,12 +1,16 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
-import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
-import { Spinner, EmptyState } from "@/components/ui/misc";
 import { FormDrawer } from "@/components/ui/dialog";
-import { SystemIntegrationsCatalog } from "@/features/integrations/SystemIntegrationsCatalog";
+import { IntegrationsCatalog } from "@/features/integrations/IntegrationsCatalog";
+import { isHiddenIntegrationSlug } from "@/features/integrations/constants";
+import { StripeOAuthReturnHandler, StripeSetupDrawer } from "@/features/integrations/StripeIntegration";
+import { useAuthStore } from "@/store/authStore";
+import {
+  useStripeConnectStatus,
+  useStripeKeysStatus,
+} from "@/features/admin/hooks";
 import {
   useIntegrationProviders,
   useIntegrationConnections,
@@ -16,16 +20,38 @@ import {
 } from "@/features/integrations/hooks";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
-import type { IntegrationProvider } from "@/types";
+import type { IntegrationConnection, IntegrationProvider } from "@/types";
 
 export function IntegrationsConnectionsTab() {
   const [params] = useSearchParams();
+  const isPublisher = useAuthStore((s) => s.user?.account_type === "publisher");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [stripeDrawerOpen, setStripeDrawerOpen] = useState(false);
   const [preselectedSlug, setPreselectedSlug] = useState<string | undefined>();
 
+  const openStripeDrawer = useCallback(() => setStripeDrawerOpen(true), []);
+
   const { data: providers } = useIntegrationProviders();
-  const { data: connections, isLoading } = useIntegrationConnections();
-  const remove = useDeleteIntegrationConnection();
+  const { data: connections } = useIntegrationConnections();
+  const { data: stripeConnect } = useStripeConnectStatus();
+  const { data: stripeKeys } = useStripeKeysStatus();
+
+  const visibleConnections = useMemo(
+    () => (connections ?? []).filter((c) => !isHiddenIntegrationSlug(c.provider_slug)),
+    [connections]
+  );
+
+  const activeSlugs = useMemo(() => {
+    const slugs = new Set<string>();
+    for (const c of visibleConnections) {
+      if (c.status === "active") slugs.add(c.provider_slug);
+    }
+    return slugs;
+  }, [visibleConnections]);
+
+  const stripeActive =
+    isPublisher &&
+    (stripeConnect?.status === "active" || stripeKeys?.status === "verified");
 
   useEffect(() => {
     const connected = params.get("connected");
@@ -46,57 +72,25 @@ export function IntegrationsConnectionsTab() {
 
   return (
     <>
-      <PageHeader
-        action={<Button onClick={() => openDrawer()}>Add connection</Button>}
-      />
+      <StripeOAuthReturnHandler onReturn={openStripeDrawer} />
 
-      <SystemIntegrationsCatalog
+      <IntegrationsCatalog
         providers={providers ?? []}
-        onConnect={(slug) => openDrawer(slug)}
+        isPublisher={isPublisher}
+        activeSlugs={activeSlugs}
+        stripeActive={stripeActive}
+        onManage={(slug) => openDrawer(slug)}
+        onStripeConnect={openStripeDrawer}
+        onAddIntegration={() => openDrawer()}
       />
 
-      <h2 className="mb-3 text-sm font-semibold text-gray-700">Your connections</h2>
-      {isLoading ? (
-        <Spinner className="h-6 w-6" />
-      ) : (connections ?? []).length === 0 ? (
-        <EmptyState title="No connections yet. Connect an integration above." />
-      ) : (
-        <Table>
-          <THead>
-            <tr>
-              <TH>Name</TH>
-              <TH>Provider</TH>
-              <TH>Status</TH>
-              <TH />
-            </tr>
-          </THead>
-          <TBody>
-            {(connections ?? []).map((c) => (
-              <TR key={c.id}>
-                <TD className="font-semibold">{c.name}</TD>
-                <TD>{c.provider_name}</TD>
-                <TD>{c.status}</TD>
-                <TD>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() =>
-                      remove.mutate(c.id, { onError: (e) => toast.error(errorMessage(e)) })
-                    }
-                  >
-                    Delete
-                  </Button>
-                </TD>
-              </TR>
-            ))}
-          </TBody>
-        </Table>
-      )}
+      <StripeSetupDrawer open={stripeDrawerOpen} onClose={() => setStripeDrawerOpen(false)} />
 
       <AddConnectionDrawer
         open={drawerOpen}
         onClose={closeDrawer}
         providers={providers ?? []}
+        connections={visibleConnections}
         initialSlug={preselectedSlug}
       />
     </>
@@ -107,31 +101,34 @@ function AddConnectionDrawer({
   open,
   onClose,
   providers,
+  connections,
   initialSlug,
 }: {
   open: boolean;
   onClose: () => void;
   providers: IntegrationProvider[];
+  connections: IntegrationConnection[];
   initialSlug?: string;
 }) {
   const [slug, setSlug] = useState("");
   const [name, setName] = useState("");
-  const [url, setUrl] = useState("");
-  const [secret, setSecret] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [locationId, setLocationId] = useState("");
   const [apiDomain, setApiDomain] = useState("com");
 
   const create = useCreateIntegrationConnection();
   const oauth = useOAuthConnect();
-  const selected = providers.find((p) => p.slug === slug);
+  const remove = useDeleteIntegrationConnection();
+  const effectiveSlug = slug || initialSlug || "";
+  const selected = providers.find((p) => p.slug === effectiveSlug);
+  const existingForSlug = connections.filter((c) => c.provider_slug === effectiveSlug);
+  const isManage = existingForSlug.length > 0;
+  const drawerTitle = isManage && selected ? `Manage ${selected.name}` : "Add Integration";
 
   useEffect(() => {
     if (!open) {
       setSlug("");
       setName("");
-      setUrl("");
-      setSecret("");
       setApiKey("");
       setLocationId("");
       return;
@@ -159,9 +156,7 @@ function AddConnectionDrawer({
     }
     let credentials: Record<string, unknown> = {};
     const config: Record<string, unknown> = {};
-    if (slug === "webhook") {
-      credentials = { url, secret, headers: {} };
-    } else if (slug === "ghl") {
+    if (slug === "ghl") {
       credentials = { api_key: apiKey };
       config.location_id = locationId;
     }
@@ -177,11 +172,18 @@ function AddConnectionDrawer({
     );
   }
 
+  function disconnect(id: number) {
+    remove.mutate(id, {
+      onSuccess: () => toast.success("Disconnected"),
+      onError: (e) => toast.error(errorMessage(e)),
+    });
+  }
+
   return (
     <FormDrawer
       open={open}
       onClose={onClose}
-      title="Add connection"
+      title={drawerTitle}
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>
@@ -194,12 +196,34 @@ function AddConnectionDrawer({
       }
     >
       <div className="space-y-3">
+        {isManage && (
+          <div className="space-y-2 border-b border-gray-100 pb-4">
+            <p className="text-sm font-semibold text-gray-800">Connected</p>
+            {existingForSlug.map((c) => (
+              <div key={c.id} className="flex items-center justify-between gap-2">
+                <span className="text-sm text-gray-700">{c.name}</span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={remove.isPending}
+                  onClick={() => disconnect(c.id)}
+                >
+                  Disconnect
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
         <div>
           <Label>Provider</Label>
           <Select value={slug} onChange={(e) => setSlug(e.target.value)}>
             <option value="">Select…</option>
             {providers
-              .filter((p) => p.direction === "outbound" || p.direction === "both")
+              .filter(
+                (p) =>
+                  (p.direction === "outbound" || p.direction === "both") &&
+                  !isHiddenIntegrationSlug(p.slug)
+              )
               .map((p) => (
                 <option key={p.slug} value={p.slug}>
                   {p.name}
@@ -211,18 +235,6 @@ function AddConnectionDrawer({
           <Label>Connection name</Label>
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="My CRM" />
         </div>
-        {slug === "webhook" && (
-          <>
-            <div>
-              <Label>Webhook URL</Label>
-              <Input value={url} onChange={(e) => setUrl(e.target.value)} />
-            </div>
-            <div>
-              <Label>HMAC secret (optional)</Label>
-              <Input value={secret} onChange={(e) => setSecret(e.target.value)} />
-            </div>
-          </>
-        )}
         {slug === "ghl" && (
           <>
             <div>
@@ -248,7 +260,7 @@ function AddConnectionDrawer({
           </div>
         )}
         {selected?.auth_type === "oauth2" && slug !== "zoho_crm" && (
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-gray-400">
             You will be redirected to {selected.name} to authorize access.
           </p>
         )}

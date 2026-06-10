@@ -34,18 +34,6 @@ type RouteIntegration struct {
 	IsActive       bool   `json:"is_active"`
 }
 
-type DeliveryItem struct {
-	ID          int64      `json:"id"`
-	LeadID      int64      `json:"lead_id"`
-	Provider    string     `json:"provider"`
-	Status      string     `json:"status"`
-	Attempts    int        `json:"attempts"`
-	ExternalID  *string    `json:"external_id,omitempty"`
-	LastError   *string    `json:"last_error,omitempty"`
-	DeliveredAt *time.Time `json:"delivered_at,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-}
-
 type Service struct {
 	pool      *pgxpool.Pool
 	encKey    []byte
@@ -311,6 +299,33 @@ func (s *Service) EnqueueDelivery(ctx context.Context, routeID, leadID int64, pa
 	return rows.Err()
 }
 
+// EnqueueConnectionDelivery enqueues CRM delivery for a participation integration.
+func (s *Service) EnqueueConnectionDelivery(ctx context.Context, connectionID, leadID int64, payloadJSON []byte) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO integration_delivery_queue (lead_id, connection_id, payload)
+		 VALUES ($1, $2, $3)`,
+		leadID, connectionID, payloadJSON)
+	return err
+}
+
+// EnqueueParticipationWebhook fires the first active lead.create trigger on a buyer webhook.
+func (s *Service) EnqueueParticipationWebhook(ctx context.Context, webhookID, leadID int64, payloadJSON []byte) error {
+	var triggerID, connID int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT t.id, COALESCE(w.outbound_connection_id, 0)
+		 FROM webhook_outbound_triggers t
+		 JOIN webhooks w ON w.id = t.webhook_id
+		 WHERE t.webhook_id = $1 AND t.trigger_event = 'lead.create' AND t.is_active AND w.is_active
+		 ORDER BY t.position, t.id LIMIT 1`, webhookID).Scan(&triggerID, &connID)
+	if err != nil {
+		return err
+	}
+	if connID == 0 {
+		return nil
+	}
+	return s.EnqueueWebhookDelivery(ctx, connID, triggerID, leadID, payloadJSON)
+}
+
 // EnqueueWebhookDelivery enqueues a pre-rendered payload for an outbound webhook trigger.
 // Unlike EnqueueDelivery (which uses route integrations), this targets a specific connection
 // directly and sets webhook_trigger_id so delivery logs can distinguish the source.
@@ -324,33 +339,6 @@ func (s *Service) EnqueueWebhookDelivery(ctx context.Context, connectionID, trig
 		 VALUES ($1, $2, $3, $4)`,
 		nullLeadID, connectionID, payload, triggerID)
 	return err
-}
-
-func (s *Service) ListDeliveries(ctx context.Context, accountID int64, status string) ([]DeliveryItem, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT q.id, q.lead_id, p.slug, q.status::text, q.attempts,
-		        q.external_id, q.last_error, q.delivered_at, q.created_at
-		 FROM integration_delivery_queue q
-		 JOIN integration_connections c ON c.id = q.connection_id
-		 JOIN integration_providers p ON p.id = c.provider_id
-		 WHERE c.account_id = $1
-		   AND ($2 = '' OR q.status = $2::delivery_status)
-		 ORDER BY q.created_at DESC LIMIT 200`, accountID, status)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []DeliveryItem
-	for rows.Next() {
-		var item DeliveryItem
-		if err := rows.Scan(&item.ID, &item.LeadID, &item.Provider, &item.Status,
-			&item.Attempts, &item.ExternalID, &item.LastError,
-			&item.DeliveredAt, &item.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, item)
-	}
-	return out, rows.Err()
 }
 
 func (s *Service) Provider(slug string) (providers.Provider, bool) {

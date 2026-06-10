@@ -35,6 +35,7 @@ func (s *Service) Repo() *Repository { return s.repo }
 // ChangeStage moves a lead to a new stage, enforcing destination prompts and
 // applying any matching return rule. Atomic per DB spec §4.2.
 func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, newStageID int64, actionAt *time.Time, disqReasonID *int64) (*Lead, []auth.ImpersonationChange, error) {
+	var pendingEmails []notifications.EmailJob
 	tx, err := s.repo.pool.Begin(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -131,9 +132,11 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		}
 		if rt != nil {
 			deps := RouteApplyDeps{Repo: s.repo, Accounts: s.accounts, Notif: s.notif, Integrations: s.integrations}
-			if err := ApplyRoute(ctx, tx, deps, rt, lead.PublisherID, leadID); err != nil {
+			emails, err := ApplyRoute(ctx, tx, deps, rt, lead.PublisherID, leadID)
+			if err != nil {
 				return nil, nil, err
 			}
+			pendingEmails = append(pendingEmails, emails...)
 			enqueueRouteID = rt.ID
 			updated, err = s.repo.GetByID(ctx, tx, leadID)
 			if err != nil {
@@ -155,22 +158,33 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 			return nil, nil, err
 		}
 		if ri != nil {
+			if err := contracts.RecordEarningReturn(ctx, tx, leadID, lead.ContractID); err != nil {
+				return nil, nil, err
+			}
 			if err := s.repo.MoveToPublisher(ctx, tx, leadID, ri.PublisherID, ri.SourcePipelineID, ri.ReturnStageID); err != nil {
 				return nil, nil, err
 			}
-			adminIDs, err := s.accounts.AdminUserIDs(ctx, tx, ri.PublisherID)
+			returned, err := s.repo.GetByID(ctx, tx, leadID)
 			if err != nil {
 				return nil, nil, err
 			}
-			if err := s.notif.Enqueue(ctx, tx, adminIDs, "lead_returned", map[string]any{"lead_id": leadID}); err != nil {
+			emails, err := s.notif.Deliver(ctx, tx, notifications.DeliverParams{
+				AccountID: ri.PublisherID,
+				UserIDs:   notifications.AssigneeIDs(returned.AssignedUserID),
+				EventType: "lead_returned",
+				Payload:   map[string]any{"lead_id": leadID},
+			})
+			if err != nil {
 				return nil, nil, err
 			}
+			pendingEmails = append(pendingEmails, emails...)
 		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, nil, err
 	}
+	s.notif.SendEmails(pendingEmails)
 	if enqueueRouteID != 0 {
 		TryEnqueueIntegrations(ctx, s.repo.Pool(), s.repo, s.integrations, enqueueRouteID, leadID)
 	}
@@ -226,6 +240,13 @@ func (s *Service) Redistribute(ctx context.Context, p *auth.Principal, leadID, c
 	if err != nil {
 		return nil, err
 	}
+	if err := CheckDuplicate(ctx, tx, target.BuyerID, lead.Phone, lead.Email, leadID); err != nil {
+		return nil, err
+	}
+	buyer, err := s.accounts.GetAccount(ctx, target.BuyerID)
+	if err != nil {
+		return nil, err
+	}
 	// land in the buyer pipeline's first stage
 	var firstStage int64
 	if err := tx.QueryRow(ctx,
@@ -245,21 +266,31 @@ func (s *Service) Redistribute(ctx context.Context, p *auth.Principal, leadID, c
 	if err := billing.Debit(ctx, tx, target.BuyerID, target.RatePerLead, leadID, target.ID, "lead re-distributed"); err != nil {
 		return nil, err
 	}
-	adminIDs, err := s.accounts.AdminUserIDs(ctx, tx, target.BuyerID)
-	if err != nil {
+	costBasis := costBasisFromLead(lead)
+	if err := contracts.RecordEarningDistribute(ctx, tx, target.CompensationID, leadID, target.RatePerLead, costBasis); err != nil {
 		return nil, err
 	}
-	if err := s.notif.Enqueue(ctx, tx, adminIDs, "new_lead", map[string]any{"lead_id": leadID}); err != nil {
+	if err := s.repo.SetCostAfterBuyerDistribution(ctx, tx, leadID, buyer.Type, target.RatePerLead); err != nil {
 		return nil, err
 	}
-
 	updated, err := s.repo.GetByID(ctx, tx, leadID)
 	if err != nil {
 		return nil, err
 	}
+	emails, err := s.notif.Deliver(ctx, tx, notifications.DeliverParams{
+		AccountID: target.BuyerID,
+		UserIDs:   notifications.AssigneeIDs(updated.AssignedUserID),
+		EventType: "new_lead",
+		Payload:   map[string]any{"lead_id": leadID},
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	s.notif.SendEmails(emails)
 	_ = s.repo.attachCustomValues(ctx, updated)
 	s.fireOutbound(ctx, target.BuyerID, "pipeline.place", updated, PipelineContext{
 		PipelineID: updated.PipelineID,

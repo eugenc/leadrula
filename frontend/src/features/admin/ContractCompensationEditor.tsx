@@ -11,20 +11,28 @@ import {
   parseCapInput,
 } from "@/features/admin/contractCap";
 import {
-  COMPENSATION_DELIVERY,
   COMPENSATION_KINDS,
   COMPENSATION_TRIGGERS,
   defaultTriggerForKind,
+  flatRateAmountLabel,
+  formatCompTrigger,
+  payoutFieldsToBody,
+  pipelineFieldsToBody,
   type CompensationKind,
+  type ContractDeliveryDraft,
 } from "@/features/admin/contractCompensation";
+import {
+  CompensationPayoutFields,
+  defaultPayoutDraft,
+  payoutDraftFromComp,
+  type PayoutDraftFields,
+} from "@/features/admin/CompensationPayoutFields";
 import {
   useAddContractCompensation,
   useDeleteContractCompensation,
   useUpdateContractCompensation,
   useBuyerStages,
-  useBuyerPipelines,
 } from "@/features/admin/hooks";
-import { usePipelines, useStages } from "@/features/leads/hooks";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import type { Contract, ContractCompensation } from "@/types";
@@ -41,13 +49,7 @@ type Draft = {
   cap_max_daily: string;
   trigger: string;
   trigger_stage_id: number;
-  source_pipeline_id: number;
-  source_stage_id: number;
-  counterparty_pipeline_id: number;
-  counterparty_stage_id: number;
-  return_stage_id: number;
-  delivery: string;
-};
+} & PayoutDraftFields;
 
 function draftFromComp(c: ContractCompensation): Draft {
   return {
@@ -62,12 +64,7 @@ function draftFromComp(c: ContractCompensation): Draft {
     cap_max_daily: capInputValue(c.cap_max_daily),
     trigger: c.trigger,
     trigger_stage_id: c.trigger_stage_id ?? 0,
-    source_pipeline_id: c.source_pipeline_id ?? 0,
-    source_stage_id: c.source_stage_id ?? 0,
-    counterparty_pipeline_id: c.counterparty_pipeline_id ?? 0,
-    counterparty_stage_id: c.counterparty_stage_id ?? 0,
-    return_stage_id: c.return_stage_id ?? 0,
-    delivery: c.delivery ?? "leads_pipeline",
+    ...payoutDraftFromComp(c),
   };
 }
 
@@ -84,16 +81,11 @@ function emptyDraft(contract: Contract): Draft {
     cap_max_daily: capInputValue(contract.cap_max_daily),
     trigger: "per_lead",
     trigger_stage_id: 0,
-    source_pipeline_id: contract.source_pipeline_id,
-    source_stage_id: contract.source_stage_id,
-    counterparty_pipeline_id: contract.buyer_pipeline_id,
-    counterparty_stage_id: 0,
-    return_stage_id: contract.return_stage_id,
-    delivery: "leads_pipeline",
+    ...defaultPayoutDraft(),
   };
 }
 
-function draftToBody(d: Draft): Record<string, unknown> {
+function draftToBody(d: Draft, deliveryDraft: ContractDeliveryDraft): Record<string, unknown> {
   const capTotal = parseCapInput(d.cap_total);
   const capMaxDaily = parseCapInput(d.cap_max_daily);
   return {
@@ -108,13 +100,10 @@ function draftToBody(d: Draft): Record<string, unknown> {
     cap_max_daily: capPeriodShowsDailyCap(d.cap_period) ? capMaxDaily : null,
     trigger: d.trigger,
     trigger_stage_id: d.trigger_stage_id || null,
-    source_pipeline_id: d.source_pipeline_id || null,
-    source_stage_id: d.source_stage_id || null,
-    counterparty_pipeline_id: d.counterparty_pipeline_id || null,
-    counterparty_stage_id: d.counterparty_stage_id || null,
-    return_stage_id: d.return_stage_id || null,
-    delivery: d.delivery,
+    ...pipelineFieldsToBody(deliveryDraft.delivery, deliveryDraft),
+    delivery: deliveryDraft.delivery,
     position: 0,
+    ...payoutFieldsToBody(d.payout_frequency, d.payout_weekday, d.payout_month_day),
   };
 }
 
@@ -127,13 +116,7 @@ function CompensationFields({
   draft: Draft;
   setDraft: (d: Draft) => void;
 }) {
-  const { data: pubPipelines } = usePipelines();
-  const { data: sourceStages } = useStages(draft.source_pipeline_id || undefined);
-  const { data: buyerPipelines } = useBuyerPipelines(contract.buyer_id || null);
-  const { data: buyerStages } = useBuyerStages(
-    contract.buyer_id,
-    draft.counterparty_pipeline_id || contract.buyer_pipeline_id
-  );
+  const { data: buyerStages } = useBuyerStages(contract.buyer_id ?? null, contract.buyer_pipeline_id ?? null);
 
   function set<K extends keyof Draft>(k: K, v: Draft[K]) {
     setDraft({ ...draft, [k]: v });
@@ -142,7 +125,7 @@ function CompensationFields({
   return (
     <div className="flex flex-col gap-2.5">
       <div>
-        <Label>Kind</Label>
+        <Label>Type</Label>
         <Select
           value={draft.kind}
           onChange={(e) => {
@@ -163,7 +146,7 @@ function CompensationFields({
       </div>
       {draft.kind === "flat_rate" && (
         <div>
-          <Label>Flat amount (USD)</Label>
+          <Label>{flatRateAmountLabel(contract.lead_type ?? "")}</Label>
           <Input type="number" min={0} step={0.01} value={draft.flat_amount} onChange={(e) => set("flat_amount", e.target.value)} />
         </div>
       )}
@@ -243,65 +226,14 @@ function CompensationFields({
         )}
       </div>
 
-      <SectionLabel className="mt-2">Delivery</SectionLabel>
-      <div>
-        <Label>Delivery mode</Label>
-        <Select value={draft.delivery} onChange={(e) => set("delivery", e.target.value)}>
-          {COMPENSATION_DELIVERY.map((d) => (
-            <option key={d.value} value={d.value}>
-              {d.label}
-            </option>
-          ))}
-        </Select>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <Label>Source pipeline</Label>
-          <Select value={draft.source_pipeline_id} onChange={(e) => set("source_pipeline_id", Number(e.target.value))}>
-            <option value={0}>Select…</option>
-            {(pubPipelines ?? []).map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div>
-          <Label>Source stage</Label>
-          <Select value={draft.source_stage_id} onChange={(e) => set("source_stage_id", Number(e.target.value))}>
-            <option value={0}>Select…</option>
-            {(sourceStages ?? []).map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </Select>
-        </div>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <Label>Counterparty pipeline</Label>
-          <Select value={draft.counterparty_pipeline_id} onChange={(e) => set("counterparty_pipeline_id", Number(e.target.value))}>
-            <option value={0}>Select…</option>
-            {(buyerPipelines ?? []).map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div>
-          <Label>Return stage</Label>
-          <Select value={draft.return_stage_id} onChange={(e) => set("return_stage_id", Number(e.target.value))}>
-            <option value={0}>Select…</option>
-            {(sourceStages ?? []).map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </Select>
-        </div>
-      </div>
+      <CompensationPayoutFields
+        draft={{
+          payout_frequency: draft.payout_frequency,
+          payout_weekday: draft.payout_weekday,
+          payout_month_day: draft.payout_month_day,
+        }}
+        onChange={(p) => setDraft({ ...draft, ...p })}
+      />
     </div>
   );
 }
@@ -309,9 +241,11 @@ function CompensationFields({
 export function ContractCompensationEditor({
   contract,
   items,
+  deliveryDraft,
 }: {
   contract: Contract;
   items: ContractCompensation[];
+  deliveryDraft: ContractDeliveryDraft;
 }) {
   const add = useAddContractCompensation();
   const update = useUpdateContractCompensation();
@@ -334,7 +268,7 @@ export function ContractCompensationEditor({
       toast.error("Invalid cap period");
       return;
     }
-    const body = draftToBody(draft);
+    const body = draftToBody(draft, deliveryDraft);
     if (editingId === "new") {
       add.mutate(
         { contractId: contract.id, body },
@@ -383,7 +317,7 @@ export function ContractCompensationEditor({
                   {COMPENSATION_KINDS.find((k) => k.value === c.kind)?.label ?? c.kind}
                 </div>
                 <div className="text-gray-500">
-                  {c.trigger} · {formatCapPeriod(c.cap_period)}
+                  {formatCompTrigger(c.trigger)} · {formatCapPeriod(c.cap_period)}
                   {c.flat_amount != null ? ` · $${c.flat_amount}/lead` : ""}
                   {c.bid_max != null ? ` · bid up to $${c.bid_max}` : ""}
                   {c.rev_percent != null ? ` · ${c.rev_percent}% rev` : ""}

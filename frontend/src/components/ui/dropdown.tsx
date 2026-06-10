@@ -75,10 +75,12 @@ export function DropdownSearch({
   value,
   onChange,
   placeholder = "Search…",
+  autoFocus,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
+  autoFocus?: boolean;
 }) {
   return (
     <div className="mb-1 border-b border-gray-100 px-2 py-1.5">
@@ -86,6 +88,7 @@ export function DropdownSearch({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
+        autoFocus={autoFocus}
         className="w-full border-none bg-transparent text-base text-gray-800 outline-none placeholder:text-gray-300"
       />
     </div>

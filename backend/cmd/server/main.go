@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/echayko/leadrula/backend/internal/config"
 	"github.com/echayko/leadrula/backend/internal/contracts"
 	"github.com/echayko/leadrula/backend/internal/customfields"
+	"github.com/echayko/leadrula/backend/internal/dashboard"
 	"github.com/echayko/leadrula/backend/internal/database"
 	"github.com/echayko/leadrula/backend/internal/integrations"
 	"github.com/echayko/leadrula/backend/internal/intake"
@@ -61,7 +63,7 @@ func main() {
 	accountsSvc := accounts.NewService(accountsRepo, tokens, email, avatars)
 	accountsH := accounts.NewHandler(accountsSvc)
 
-	notifSvc := notifications.NewService(pool)
+	notifSvc := notifications.NewService(pool, accountsRepo, email, cfg.AppBaseURL)
 	notifH := notifications.NewHandler(notifSvc)
 
 	collabRepo := collaboration.NewRepository(pool)
@@ -81,23 +83,32 @@ func main() {
 	cfSvc := customfields.NewService(pool)
 	cfH := customfields.NewHandler(cfSvc)
 
-	contractsSvc := contracts.NewService(pool)
-	contractsH := contracts.NewHandler(contractsSvc)
-
 	var sc *stripeClient.Client
 	if cfg.StripeSecretKey != "" {
-		sc = stripeClient.New(cfg.StripeSecretKey, cfg.AppBaseURL, cfg.StripePlatformFee)
+		sc = stripeClient.New(cfg.StripeSecretKey, cfg.StripeConnectClient, cfg.StripePlatformFee)
 	} else {
 		log.Println("warning: STRIPE_SECRET_KEY not set — Stripe billing endpoints disabled")
 	}
-	billingSvc := billing.NewService(pool, notifSvc, accountsRepo, sc)
-	billingH := billing.NewHandler(billingSvc, cfg.StripeWebhookSecret)
 
-	var integrationsSvc *integrations.Service
-	var integrationsEnq leads.IntegrationEnqueuer
 	var encKey []byte
 	if k, err := hex.DecodeString(cfg.IntegrationEncKey); err == nil && len(k) == 32 {
 		encKey = k
+	} else if cfg.IntegrationEncKey != "" {
+		log.Println("warning: INTEGRATION_ENC_KEY must be 64 hex chars (32 bytes) — publisher stripe keys disabled")
+	}
+
+	stripeOAuthRedirect := strings.TrimRight(cfg.IntegrationOAuthRedirectBase, "/") + "/publisher/billing/stripe/oauth/callback"
+	billingSvc := billing.NewService(pool, notifSvc, accountsRepo, sc, encKey, stripeOAuthRedirect)
+	billingH := billing.NewHandler(billingSvc, cfg.StripeWebhookSecret)
+
+	contractsSvc := contracts.NewService(pool)
+	contractsSvc.SetPayoutExecutor(billingSvc)
+	contractsSvc.SetNotifier(notifSvc, accountsRepo)
+	contractsH := contracts.NewHandler(contractsSvc)
+
+	var integrationsSvc *integrations.Service
+	var integrationsEnq leads.IntegrationEnqueuer
+	if len(encKey) == 32 {
 		oauthCfg := integrations.OAuthConfig{
 			RedirectBase:       cfg.IntegrationOAuthRedirectBase,
 			PipedriveClientID:  cfg.PipedriveClientID,
@@ -119,6 +130,10 @@ func main() {
 	leadsRepo := leads.NewRepository(pool)
 	leadsSvc := leads.NewService(leadsRepo, notifSvc, accountsRepo, pipelinesSvc, integrationsEnq)
 	leadsH := leads.NewHandler(leadsSvc)
+
+	dashboardRepo := dashboard.NewRepository(pool)
+	dashboardSvc := dashboard.NewService(dashboardRepo)
+	dashboardH := dashboard.NewHandler(dashboardSvc)
 
 	routingSvc := routing.NewService(pool)
 	routingH := routing.NewHandler(routingSvc)
@@ -156,6 +171,7 @@ func main() {
 	if cfg.StripeWebhookSecret != "" {
 		r.Post("/webhooks/stripe", billingH.StripeWebhook)
 	}
+	billingH.RegisterPublic(r)
 
 	requireAuth := auth.RequireAuth(tokens, collabSvc.ResolvePrincipal)
 
@@ -194,6 +210,7 @@ func main() {
 			integrations.NewHandler(integrationsSvc, "publisher", cfg.AppBaseURL).RegisterRoutes(p)
 		}
 		webhooksH.RegisterRoutes(p)
+		dashboardH.RegisterRoutes(p)
 	})
 
 	// buyer namespace
@@ -218,6 +235,7 @@ func main() {
 			integrations.NewHandler(integrationsSvc, "buyer", cfg.AppBaseURL).RegisterRoutes(b)
 		}
 		webhooksH.RegisterRoutes(b)
+		dashboardH.RegisterRoutes(b)
 	})
 
 	srv := &http.Server{

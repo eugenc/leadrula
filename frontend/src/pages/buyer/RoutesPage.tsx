@@ -47,7 +47,7 @@ export function RoutesPage() {
               <TH>Target</TH>
               <TH>Delivery</TH>
               <TH>Active</TH>
-              <TH />
+              <TH className="min-w-0 w-12" />
             </tr>
           </THead>
           <TBody>

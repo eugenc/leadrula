@@ -17,6 +17,7 @@ const titles: Record<string, string> = {
   fields: "Custom Fields",
   reasons: "Disqualification Reasons",
   routing: "Routing",
+  webhooks: "Webhooks",
   sources: "Sources",
   contracts: "Contracts",
   contract: "Contracts",

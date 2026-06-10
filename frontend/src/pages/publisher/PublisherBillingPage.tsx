@@ -1,22 +1,47 @@
 import { useState } from "react";
 import { useTransactions, useDisputes, useResolveDispute } from "@/features/admin/hooks";
 import { PublisherPayouts } from "@/features/billing/PublisherPayouts";
+import { PublisherInvoices } from "@/features/billing/PublisherInvoices";
+import { formatAccountTypeLabel, formatBuyerWithType } from "@/features/admin/contractType";
 import { PageBody } from "@/components/layout/PageBody";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge, Spinner, EmptyState } from "@/components/ui/misc";
-import { cn } from "@/lib/utils";
-import { formatMoney } from "@/lib/utils";
+import { cn, formatMoney, resolveTxnCategory, txnTypeBadgeClass } from "@/lib/utils";
 import { format } from "date-fns";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
+import type { Transaction } from "@/types";
+
+function formatAccountName(
+  name: string | null | undefined,
+  fallbackName?: string | null
+): string {
+  const n = name ?? fallbackName;
+  return n?.trim() || "—";
+}
+
+function formatAccountType(accountType: string | null | undefined): string {
+  if (!accountType) return "—";
+  return formatAccountTypeLabel(accountType);
+}
+
+function formatAccount(
+  name: string | null | undefined,
+  accountType: string | null | undefined,
+  fallbackName?: string | null
+): string {
+  const n = name ?? fallbackName;
+  if (!n) return "—";
+  return formatBuyerWithType(n, accountType ?? undefined) || n;
+}
 
 export function PublisherBillingPage() {
-  const [tab, setTab] = useState<"disputes" | "transactions" | "payouts">("disputes");
+  const [tab, setTab] = useState<"transactions" | "invoices" | "disputes" | "payouts">("transactions");
   return (
     <PageBody>
         <div className="mb-4 flex border-b border-gray-100">
-          {(["disputes", "transactions", "payouts"] as const).map((t) => (
+          {(["transactions", "invoices", "disputes", "payouts"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -29,8 +54,9 @@ export function PublisherBillingPage() {
             </button>
           ))}
         </div>
-        {tab === "disputes" && <Disputes />}
         {tab === "transactions" && <Transactions />}
+        {tab === "invoices" && <PublisherInvoices />}
+        {tab === "disputes" && <Disputes />}
         {tab === "payouts" && <PublisherPayouts />}
     </PageBody>
   );
@@ -45,17 +71,19 @@ function Disputes() {
     <Table>
       <THead>
         <tr>
-          <TH>Buyer</TH>
+          <TH>Account</TH>
           <TH>Reason</TH>
           <TH>Amount</TH>
           <TH>Opened</TH>
-          <TH />
+          <TH className="min-w-0 w-12" />
         </tr>
       </THead>
       <TBody>
         {(disputes ?? []).map((d) => (
           <TR key={d.id}>
-            <TD className="font-medium text-gray-800">{d.buyer_name}</TD>
+            <TD className="font-medium text-gray-800">
+              {formatAccount(d.counterparty_name, d.counterparty_account_type, d.buyer_name)}
+            </TD>
             <TD className="text-gray-600">{d.reason}</TD>
             <TD className="font-medium text-danger-fg">{formatMoney(d.amount)}</TD>
             <TD>{format(new Date(d.created_at), "MMM d")}</TD>
@@ -101,6 +129,8 @@ function Transactions() {
     <Table>
       <THead>
         <tr>
+          <TH>Transaction</TH>
+          <TH>Account</TH>
           <TH>Type</TH>
           <TH>Lead</TH>
           <TH>Amount</TH>
@@ -110,19 +140,30 @@ function Transactions() {
       </THead>
       <TBody>
         {(txns ?? []).map((t) => (
-          <TR key={t.id}>
-            <TD>
-              <Badge variant={t.amount < 0 ? "overdue" : "distributed"}>{t.type}</Badge>
-            </TD>
-            <TD>{t.lead_name ?? "—"}</TD>
-            <TD className={t.amount < 0 ? "font-medium text-danger-fg" : "text-jade-700"}>
-              {formatMoney(t.amount)}
-            </TD>
-            <TD>{formatMoney(t.balance_after)}</TD>
-            <TD>{format(new Date(t.created_at), "MMM d, h:mma")}</TD>
-          </TR>
+          <TransactionRow key={t.id} t={t} />
         ))}
       </TBody>
     </Table>
+  );
+}
+
+function TransactionRow({ t }: { t: Transaction }) {
+  const typeLabel = resolveTxnCategory(t);
+  return (
+    <TR>
+      <TD>
+        <Badge className={txnTypeBadgeClass(typeLabel)}>{typeLabel}</Badge>
+      </TD>
+      <TD className="font-medium text-gray-800">
+        {formatAccountName(t.counterparty_name, t.buyer_name)}
+      </TD>
+      <TD className="text-gray-600">{formatAccountType(t.counterparty_account_type)}</TD>
+      <TD>{t.lead_name ?? "—"}</TD>
+      <TD className={t.amount < 0 ? "font-medium text-danger-fg" : "text-jade-700"}>
+        {formatMoney(t.amount)}
+      </TD>
+      <TD>{formatMoney(t.balance_after)}</TD>
+      <TD>{format(new Date(t.created_at), "MMM d, h:mma")}</TD>
+    </TR>
   );
 }

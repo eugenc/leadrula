@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/echayko/leadrula/backend/internal/database"
+	"github.com/echayko/leadrula/backend/internal/accounts"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -18,29 +18,14 @@ type Notification struct {
 }
 
 type Service struct {
-	pool *pgxpool.Pool
+	pool     *pgxpool.Pool
+	accounts *accounts.Repository
+	email    *EmailSender
+	baseURL  string
 }
 
-func NewService(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
-
-// Enqueue inserts an in-app notification for each user. Runs inside the caller's
-// transaction when q is a tx, so it commits atomically with the triggering work.
-func (s *Service) Enqueue(ctx context.Context, q database.Querier, userIDs []int64, ntype string, payload map[string]any) error {
-	if len(userIDs) == 0 {
-		return nil
-	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	for _, uid := range userIDs {
-		if _, err := q.Exec(ctx,
-			`INSERT INTO notifications(user_id, type, payload) VALUES ($1,$2,$3)`,
-			uid, ntype, raw); err != nil {
-			return err
-		}
-	}
-	return nil
+func NewService(pool *pgxpool.Pool, accounts *accounts.Repository, email *EmailSender, baseURL string) *Service {
+	return &Service{pool: pool, accounts: accounts, email: email, baseURL: baseURL}
 }
 
 func (s *Service) List(ctx context.Context, userID int64) ([]Notification, error) {

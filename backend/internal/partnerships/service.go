@@ -181,6 +181,9 @@ func (s *Service) AcceptForPublisher(ctx context.Context, p *auth.Principal, par
 	if err != nil {
 		return nil, err
 	}
+	if err := s.accounts.SetBuyerKind(ctx, activated.BuyerID, accounts.BuyerKindMarketplace); err != nil {
+		return nil, err
+	}
 	if err := s.notifyAccepted(ctx, activated, "publisher"); err != nil {
 		return nil, err
 	}
@@ -228,6 +231,9 @@ func (s *Service) AcceptForBuyer(ctx context.Context, p *auth.Principal, partner
 	if err != nil {
 		return nil, err
 	}
+	if err := s.accounts.SetBuyerKind(ctx, activated.BuyerID, accounts.BuyerKindMarketplace); err != nil {
+		return nil, err
+	}
 	if err := s.notifyAccepted(ctx, activated, "buyer"); err != nil {
 		return nil, err
 	}
@@ -273,7 +279,17 @@ func (s *Service) notifyRequest(ctx context.Context, pubID, buyerID, actorID, pa
 	if err != nil {
 		return err
 	}
-	return s.notif.Enqueue(ctx, s.repo.pool, adminIDs, "partnership_request", payload)
+	emails, err := s.notif.Deliver(ctx, s.repo.pool, notifications.DeliverParams{
+		AccountID: targetAccountID,
+		UserIDs:   adminIDs,
+		EventType: "partnership_request",
+		Payload:   payload,
+	})
+	if err != nil {
+		return err
+	}
+	s.notif.SendEmails(emails)
+	return nil
 }
 
 func (s *Service) notifyAccepted(ctx context.Context, p *Partnership, acceptedBy string) error {
@@ -295,7 +311,17 @@ func (s *Service) notifyAccepted(ctx context.Context, p *Partnership, acceptedBy
 	if err != nil {
 		return err
 	}
-	return s.notif.Enqueue(ctx, s.repo.pool, adminIDs, "partnership_accepted", payload)
+	emails, err := s.notif.Deliver(ctx, s.repo.pool, notifications.DeliverParams{
+		AccountID: targetAccountID,
+		UserIDs:   adminIDs,
+		EventType: "partnership_accepted",
+		Payload:   payload,
+	})
+	if err != nil {
+		return err
+	}
+	s.notif.SendEmails(emails)
+	return nil
 }
 
 func (s *Service) itemForPublisher(ctx context.Context, p *Partnership) (*ListItem, error) {

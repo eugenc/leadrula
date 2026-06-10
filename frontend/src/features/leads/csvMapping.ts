@@ -47,6 +47,15 @@ const ALIASES: Record<string, string> = {
   campaignname: "source",
   campaign_name: "source",
   source: "source",
+  cost: "cost",
+  leadcost: "cost",
+  lead_cost: "cost",
+  cpl: "cost",
+  acquisitioncost: "cost",
+  acquisition_cost: "cost",
+  revenue: "revenue",
+  leadrevenue: "revenue",
+  lead_revenue: "revenue",
   tags: "tags",
   tag: "tags",
 };
@@ -62,6 +71,8 @@ export const MAPPING_TARGETS: { value: string; label: string }[] = [
   { value: "state", label: "State" },
   { value: "zip", label: "Zip" },
   { value: "source", label: "Source" },
+  { value: "cost", label: "Cost" },
+  { value: "revenue", label: "Revenue" },
   { value: "tags", label: "Tags" },
 ];
 

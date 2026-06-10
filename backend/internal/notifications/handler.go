@@ -17,6 +17,8 @@ func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/notifications", h.list)
+	r.Get("/notifications/settings", h.getSettings)
+	r.Patch("/notifications/settings", h.patchSettings)
 	r.Patch("/notifications/{id}/read", h.markRead)
 }
 
@@ -28,6 +30,30 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, items)
+}
+
+func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	out, err := h.svc.GetSettings(r.Context(), p)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) patchSettings(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body SettingsPatch
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	out, err := h.svc.PatchSettings(r.Context(), p, body)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) markRead(w http.ResponseWriter, r *http.Request) {

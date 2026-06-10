@@ -116,7 +116,7 @@ func seedBuyer(ctx context.Context, pool *pgxpool.Pool, publisherID, buyerID int
 	// contract
 	var contractID int64
 	for range 10 {
-		hid := handlerid.Generate("C")
+		hid := handlerid.GenerateContract()
 		err := pool.QueryRow(ctx,
 			`INSERT INTO contracts(publisher_id, buyer_id, name, source_pipeline_id, source_stage_id,
 			    buyer_pipeline_id, return_stage_id, rate_per_lead, handler_id)

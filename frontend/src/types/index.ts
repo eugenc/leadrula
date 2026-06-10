@@ -154,12 +154,18 @@ export interface Lead {
   updated_at: string;
   custom_values: Record<string, unknown>;
   buyer_name?: string | null;
+  source_name?: string | null;
   assignee_name?: string | null;
   assignee_avatar_url?: string | null;
   pipeline_name?: string | null;
   stage_name?: string | null;
   stage_entered_at?: string | null;
   tags?: string[];
+  cost?: number | null;
+  revenue?: number | null;
+  gross_profit?: number | null;
+  net_profit?: number | null;
+  purchase_price?: number | null;
 }
 
 export interface LeadListResponse {
@@ -214,7 +220,7 @@ export interface Contract {
   id: number;
   public_id: string;
   handler_id: string;
-  buyer_id: number;
+  buyer_id?: number | null;
   buyer_name?: string;
   buyer_account_type?: string;
   publisher_name?: string;
@@ -223,16 +229,41 @@ export interface Contract {
   contract_type?: string;
   mirror_contract_id?: number | null;
   lead_type?: string;
-  source_pipeline_id: number;
-  source_stage_id: number;
-  buyer_pipeline_id: number;
-  return_stage_id: number;
+  source_pipeline_id?: number | null;
+  source_stage_id?: number | null;
+  buyer_pipeline_id?: number | null;
+  return_stage_id?: number | null;
   rate_per_lead: number;
   status: string;
   cap_period?: string;
   cap_total?: number | null;
   cap_max_daily?: number | null;
   lead_count?: number;
+  allowed_delivery_modes?: string[];
+  distribution_strategy?: string;
+  parent_contract_id?: number | null;
+  invite_token?: string;
+  participations?: ContractParticipation[];
+}
+
+export interface ContractParticipation {
+  id: number;
+  contract_id: number;
+  buyer_id: number;
+  buyer_name?: string;
+  status: string;
+  delivery?: string;
+  buyer_pipeline_id?: number | null;
+  buyer_target_stage_id?: number | null;
+  integration_connection_id?: number | null;
+  outbound_webhook_id?: number | null;
+  counter_proposal?: unknown;
+  contract_name?: string;
+  publisher_name?: string;
+  lead_type?: string;
+  allowed_delivery_modes?: string[];
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface ContractLeadCriteria {
@@ -280,6 +311,9 @@ export interface ContractCompensation {
   return_stage_id?: number | null;
   delivery: string;
   position: number;
+  payout_frequency?: string | null;
+  payout_weekday?: number | null;
+  payout_month_day?: number | null;
 }
 
 export interface ReturnRule {
@@ -487,14 +521,76 @@ export interface QueueListResponse {
   limit: number;
 }
 
+export interface InboundLogItem {
+  kind: "source" | "webhook" | "integration";
+  direction: "inbound" | "outbound";
+  id: number;
+  created_at: string;
+  origin: string;
+  origin_slug: string;
+  lead_label: string;
+  lead_id?: number | null;
+  status: string;
+  unmapped_keys?: string[];
+  first_name?: string;
+  last_name?: string;
+  phone?: string | null;
+  source?: string | null;
+  raw_payload?: Record<string, unknown>;
+  webhook_id?: number;
+  error_message?: string | null;
+  provider_slug?: string;
+  connection_name?: string;
+  attempts?: number;
+}
+
+export interface InboundLogListResponse {
+  items: InboundLogItem[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface PayoutSummary {
+  hold: number;
+  cleared: number;
+  prepay_balance: number;
+  distributed_value: number;
+  returned_value: number;
+  cleared_from_prepay: number;
+}
+
+export interface CompensationPayoutRow {
+  compensation_id: number;
+  contract_id: number;
+  contract_name: string;
+  kind: string;
+  buyer_kind: string;
+  payout_frequency?: string | null;
+  payout_weekday?: number | null;
+  payout_month_day?: number | null;
+  hold: number;
+  cleared: number;
+  next_period_end?: string | null;
+  latest_transfer_status?: string | null;
+}
+
+export type TxnCategory = "Sale" | "Purchase" | "Topup" | "Credit" | "Refund" | "Invoice";
+
 export interface Transaction {
   id: number;
   public_id: string;
   buyer_id: number;
   lead_id: number | null;
   lead_name?: string | null;
+  buyer_name?: string | null;
+  publisher_name?: string | null;
   contract_id: number | null;
   type: "debit" | "credit" | "dispute_credit" | "manual_invoice" | "topup";
+  side?: "sale" | "purchase" | "prepay";
+  category?: TxnCategory;
+  counterparty_name?: string | null;
+  counterparty_account_type?: string | null;
   amount: number;
   balance_after: number;
   description: string;
@@ -506,19 +602,53 @@ export interface Dispute {
   transaction_id: number;
   buyer_id: number;
   buyer_name?: string;
+  counterparty_name?: string;
+  counterparty_account_type?: string;
   reason: string;
   status: "open" | "accepted" | "rejected";
   amount?: number;
   created_at: string;
 }
 
+export type InvoiceStatus = "open" | "paid" | "void";
+export type InvoiceKind = "starting_balance" | "prepay_request";
+export type InvoicePaymentMethod =
+  | "stripe"
+  | "bank_transfer"
+  | "check"
+  | "cash"
+  | "other_digital"
+  | "other";
+
+export interface Invoice {
+  id: number;
+  public_id: string;
+  publisher_id: number;
+  buyer_id: number;
+  buyer_name?: string | null;
+  publisher_name?: string | null;
+  amount: number;
+  description: string;
+  kind: InvoiceKind;
+  status: InvoiceStatus;
+  payment_method?: InvoicePaymentMethod | null;
+  payment_note?: string | null;
+  paid_at?: string | null;
+  created_at: string;
+  online_payable?: boolean;
+}
+
+export type BuyerKind = "direct" | "marketplace";
+
 export interface BuyerSummary {
   id: number;
   public_id: string;
   handler_id: string;
   name: string;
+  buyer_kind: BuyerKind;
   balance: number;
   lead_count: number;
+  admin_provisioned?: boolean;
 }
 
 export interface BuyerDetail {
@@ -530,6 +660,7 @@ export interface BuyerDetail {
   timezone: string;
   balance: number;
   type: string;
+  buyer_kind: BuyerKind;
   admin_name: string;
   admin_email: string;
   admin_status?: string;
@@ -587,6 +718,14 @@ export interface CalendarEvent {
   user_id: number | null;
   action_at: string;
   overdue: boolean;
+}
+
+export type NotificationChannelPrefs = { in_app: boolean; email: boolean };
+export type NotificationPrefs = Record<string, NotificationChannelPrefs>;
+
+export interface NotificationSettingsResponse {
+  account?: NotificationPrefs;
+  personal: NotificationPrefs;
 }
 
 export interface NotificationItem {
@@ -687,14 +826,3 @@ export interface RouteIntegration {
   is_active: boolean;
 }
 
-export interface IntegrationDeliveryItem {
-  id: number;
-  lead_id: number;
-  provider: string;
-  status: string;
-  attempts: number;
-  external_id?: string | null;
-  last_error?: string | null;
-  delivered_at?: string | null;
-  created_at: string;
-}

@@ -24,7 +24,6 @@ func NewHandler(svc *Service, namespace, appBaseURL string) *Handler {
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/integrations/providers", h.listProviders)
 	r.Get("/integrations/connections", h.listConnections)
-	r.Get("/integrations/deliveries", h.listDeliveries)
 	r.Get("/integrations/routes/{routeID}", h.listRouteIntegrations)
 
 	r.Group(func(r chi.Router) {
@@ -117,16 +116,6 @@ func (h *Handler) listRouteIntegrations(w http.ResponseWriter, r *http.Request) 
 	p := auth.FromContext(r.Context())
 	routeID, _ := strconv.ParseInt(chi.URLParam(r, "routeID"), 10, 64)
 	items, err := h.svc.ListRouteIntegrations(r.Context(), p.AccountID, p.AccountType, routeID)
-	if err != nil {
-		httpx.WriteError(w, err)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, items)
-}
-
-func (h *Handler) listDeliveries(w http.ResponseWriter, r *http.Request) {
-	p := auth.FromContext(r.Context())
-	items, err := h.svc.ListDeliveries(r.Context(), p.AccountID, r.URL.Query().Get("status"))
 	if err != nil {
 		httpx.WriteError(w, err)
 		return

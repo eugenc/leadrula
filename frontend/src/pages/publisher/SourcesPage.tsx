@@ -35,7 +35,7 @@ import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import type { Route, RouteFieldMapEntry, Source, SourceType } from "@/types";
 
-const BUILTINS = ["first_name", "last_name", "phone", "email", "address", "city", "state", "zip"];
+const BUILTINS = ["first_name", "last_name", "phone", "email", "address", "city", "state", "zip", "cost", "revenue"];
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
 function slugify(name: string) {
@@ -98,7 +98,7 @@ export function SourcesPage() {
                 <TH>Slug</TH>
                 <TH>Endpoint</TH>
                 <TH>Active</TH>
-                <TH />
+                <TH className="min-w-0 w-12" />
               </tr>
             </THead>
             <TBody>

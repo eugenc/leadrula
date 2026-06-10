@@ -63,6 +63,8 @@ type CreateLeadInput struct {
 	AssignedUserID *int64                     `json:"assigned_user_id"`
 	Tags           []string                   `json:"tags"`
 	CustomValues   map[string]json.RawMessage `json:"custom_values"`
+	Cost           *float64                   `json:"-"`
+	Revenue        *float64                   `json:"-"`
 	ToIntake       bool                       `json:"-"`
 }
 
@@ -122,12 +124,13 @@ func (r *importRow) UnmarshalJSON(b []byte) error {
 }
 
 type ImportLeadsInput struct {
-	Destination string          `json:"destination"`
-	PipelineID  flexInt64       `json:"pipeline_id"`
-	StageID     flexInt64       `json:"stage_id"`
-	DefaultTags []string        `json:"default_tags"`
-	Mapping     []ColumnMapping `json:"mapping"`
-	Rows        []importRow     `json:"rows"`
+	Destination    string          `json:"destination"`
+	PipelineID     flexInt64       `json:"pipeline_id"`
+	StageID        flexInt64       `json:"stage_id"`
+	DefaultTags    []string        `json:"default_tags"`
+	ImportFilename string          `json:"import_filename"`
+	Mapping        []ColumnMapping `json:"mapping"`
+	Rows           []importRow     `json:"rows"`
 }
 
 type ImportRowError struct {
@@ -212,6 +215,11 @@ func (s *Service) ImportLeads(ctx context.Context, p *auth.Principal, in ImportL
 		if len(in.DefaultTags) > 0 {
 			input.Tags = append(append([]string{}, in.DefaultTags...), input.Tags...)
 		}
+		if input.resolvedSource() == "" {
+			if fn := strings.TrimSpace(in.ImportFilename); fn != "" {
+				input.Source = "CSV upload: " + fn
+			}
+		}
 		if _, err := s.insertLead(ctx, p, input); err != nil {
 			result.Skipped++
 			result.Errors = append(result.Errors, ImportRowError{Row: i + 1, Message: err.Error()})
@@ -271,6 +279,10 @@ func mapImportRow(row importRow, mapping []ColumnMapping, pipelineID, stageID in
 					in.Tags = append(in.Tags, t)
 				}
 			}
+		case "cost":
+			in.Cost = ParseMoneyString(val)
+		case "revenue":
+			in.Revenue = ParseMoneyString(val)
 		}
 	}
 	if err := validateCreateInput(&in); err != nil {
@@ -329,6 +341,16 @@ func (s *Service) insertLead(ctx context.Context, p *auth.Principal, in CreateLe
 			continue
 		}
 		if err := s.repo.SetBuiltinField(ctx, tx, leadID, field, val); err != nil {
+			return 0, err
+		}
+	}
+	if in.Cost != nil {
+		if err := s.repo.SetMoneyField(ctx, tx, leadID, "cost", in.Cost); err != nil {
+			return 0, err
+		}
+	}
+	if in.Revenue != nil {
+		if err := s.repo.SetMoneyField(ctx, tx, leadID, "revenue", in.Revenue); err != nil {
 			return 0, err
 		}
 	}

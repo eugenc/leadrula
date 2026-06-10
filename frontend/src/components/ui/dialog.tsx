@@ -2,6 +2,11 @@ import { IconButton } from "@/components/layout/IconButton";
 import { cn } from "@/lib/utils";
 import { X } from "lucide-react";
 
+export const drawerTitleClass = "text-base font-semibold text-gray-800";
+export const drawerSubtitleClass = "mt-0.5 text-xs text-gray-400";
+export const formFieldClass =
+  "[&_label]:!mb-1 [&_label]:!text-sm [&_input]:!h-8 [&_input]:!text-sm [&_select]:!h-8 [&_select]:!text-sm [&_textarea]:!min-h-[60px] [&_textarea]:!text-sm";
+
 export function Dialog({
   open,
   onClose,
@@ -28,17 +33,17 @@ export function Dialog({
       />
       <div
         className={cn(
-          "relative z-10 flex w-full max-w-[400px] flex-col gap-5 rounded-lg bg-surface-card p-6 shadow-lg",
+          "relative z-10 flex w-full max-w-[400px] flex-col gap-4 rounded-lg bg-surface-card p-5 shadow-lg",
           className
         )}
       >
         {(title || subtitle) && (
           <div>
-            {title && <h3 className="text-lg font-semibold text-gray-800">{title}</h3>}
-            {subtitle && <p className="mt-1 text-base text-gray-500">{subtitle}</p>}
+            {title && <h3 className={drawerTitleClass}>{title}</h3>}
+            {subtitle && <p className={drawerSubtitleClass}>{subtitle}</p>}
           </div>
         )}
-        {children}
+        <div className={formFieldClass}>{children}</div>
         {footer && <div className="flex justify-end gap-2 pt-1">{footer}</div>}
       </div>
     </div>
@@ -96,10 +101,7 @@ export function Sheet({
 
 export const drawerHeaderClass =
   "flex items-start justify-between border-b border-gray-100 px-5 py-3.5";
-export const drawerTitleClass = "text-base font-semibold text-gray-800";
-export const drawerSubtitleClass = "mt-0.5 text-xs text-gray-400";
-export const drawerBodyClass =
-  "flex-1 overflow-y-auto px-5 py-4 [&_label]:!mb-1 [&_label]:!text-sm [&_input]:!h-8 [&_input]:!text-sm [&_select]:!h-8 [&_select]:!text-sm [&_textarea]:!min-h-[60px] [&_textarea]:!text-sm";
+export const drawerBodyClass = cn("flex-1 overflow-y-auto px-5 py-4", formFieldClass);
 export const drawerFooterClass = "border-t border-gray-100 px-5 py-3";
 
 export function DrawerHeader({

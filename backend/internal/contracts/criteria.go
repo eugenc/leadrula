@@ -2,10 +2,23 @@ package contracts
 
 import (
 	"context"
+	"strings"
 
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/jackc/pgx/v5"
 )
+
+var allowedFilterOperators = map[string]bool{
+	"eq": true, "neq": true, "contains": true, "not_empty": true, "gt": true, "lt": true,
+}
+
+func validateFilterRule(r FilterRule) error {
+	op := strings.TrimSpace(r.Operator)
+	if !allowedFilterOperators[op] {
+		return httpx.Validation("filter operator must be eq, neq, contains, not_empty, gt, or lt")
+	}
+	return nil
+}
 
 type RequiredField struct {
 	ID            int64  `json:"id,omitempty"`
@@ -166,6 +179,9 @@ func (s *Service) SaveLeadCriteria(ctx context.Context, publisherID, contractID 
 		}
 	}
 	for _, r := range c.FilterRules {
+		if err := validateFilterRule(r); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO contract_filter_rules(contract_id, field_type, builtin_field, custom_field_id, operator, value)
 			 VALUES ($1,$2,NULLIF($3,''),$4,$5,$6)`,
@@ -184,6 +200,30 @@ func (s *Service) SaveLeadCriteria(ctx context.Context, publisherID, contractID 
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+func deleteLeadCriteriaTx(ctx context.Context, tx pgx.Tx, contractID int64) error {
+	for _, table := range []string{
+		"contract_required_fields",
+		"contract_field_map",
+		"contract_filter_rules",
+		"contract_quality_rules",
+	} {
+		if _, err := tx.Exec(ctx, `DELETE FROM `+table+` WHERE contract_id = $1`, contractID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func replaceLeadCriteriaTx(ctx context.Context, tx pgx.Tx, contractID int64, c *LeadCriteria) error {
+	if c == nil {
+		return nil
+	}
+	if err := deleteLeadCriteriaTx(ctx, tx, contractID); err != nil {
+		return err
+	}
+	return saveLeadCriteriaTx(ctx, tx, contractID, c)
 }
 
 func saveLeadCriteriaTx(ctx context.Context, tx pgx.Tx, contractID int64, c *LeadCriteria) error {
@@ -207,6 +247,9 @@ func saveLeadCriteriaTx(ctx context.Context, tx pgx.Tx, contractID int64, c *Lea
 		}
 	}
 	for _, r := range c.FilterRules {
+		if err := validateFilterRule(r); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO contract_filter_rules(contract_id, field_type, builtin_field, custom_field_id, operator, value)
 			 VALUES ($1,$2,NULLIF($3,''),$4,$5,$6)`,
@@ -218,6 +261,47 @@ func saveLeadCriteriaTx(ctx context.Context, tx pgx.Tx, contractID int64, c *Lea
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO contract_quality_rules(contract_id, buyer_stage_id, on_fail) VALUES ($1,$2,$3)`,
 			contractID, r.BuyerStageID, r.OnFail); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func saveLeadCriteriaWithParticipation(ctx context.Context, tx pgx.Tx, contractID, participationID int64, c *LeadCriteria) error {
+	if c == nil {
+		return nil
+	}
+	for _, r := range c.RequiredFields {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO contract_required_fields(contract_id, participation_id, field_type, builtin_field, custom_field_id)
+			 VALUES ($1,$2,$3,NULLIF($4,''),$5)`,
+			contractID, participationID, r.FieldType, r.BuiltinField, r.CustomFieldID); err != nil {
+			return err
+		}
+	}
+	for _, e := range c.FieldMap {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO contract_field_map(contract_id, participation_id, src_type, src_builtin, src_custom_field_id, dst_type, dst_builtin, dst_custom_field_id)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+			contractID, participationID, e.SrcType, e.SrcBuiltin, e.SrcCustomFieldID, e.DstType, e.DstBuiltin, e.DstCustomFieldID); err != nil {
+			return err
+		}
+	}
+	for _, r := range c.FilterRules {
+		if err := validateFilterRule(r); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO contract_filter_rules(contract_id, participation_id, field_type, builtin_field, custom_field_id, operator, value)
+			 VALUES ($1,$2,$3,NULLIF($4,''),$5,$6,$7)`,
+			contractID, participationID, r.FieldType, r.BuiltinField, r.CustomFieldID, r.Operator, r.Value); err != nil {
+			return err
+		}
+	}
+	for _, r := range c.QualityRules {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO contract_quality_rules(contract_id, participation_id, buyer_stage_id, on_fail) VALUES ($1,$2,$3,$4)`,
+			contractID, participationID, r.BuyerStageID, r.OnFail); err != nil {
 			return err
 		}
 	}

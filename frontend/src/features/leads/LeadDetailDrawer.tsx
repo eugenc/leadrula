@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { Sheet, DrawerHeader, DrawerBody } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Textarea, Select } from "@/components/ui/input";
+import { Input, InputWithOverflowTooltip, Label, Textarea, Select } from "@/components/ui/input";
 import { Avatar, Badge, Spinner } from "@/components/ui/misc";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { ActionDot } from "./ActionDot";
 import { format, isPast } from "date-fns";
-import { cn } from "@/lib/utils";
+import { CircleHelp } from "lucide-react";
+import { cn, formatMoney } from "@/lib/utils";
 import { useUIStore } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
@@ -24,7 +25,7 @@ import {
 } from "./hooks";
 import { DeleteLeadConfirmDialog } from "./DeleteLeadConfirmDialog";
 import type { Lead } from "@/types";
-import { formatStatus } from "./leadsListColumns";
+import { formatStatus, leadSourceLabel } from "./leadsListColumns";
 import { LeadTagsEditor } from "./LeadTagsEditor";
 import { effectiveFieldFormat } from "@/features/admin/customFieldConstants";
 import {
@@ -46,10 +47,85 @@ const BUILTINS: { key: keyof Lead; label: string }[] = [
   { key: "zip", label: "Zip" },
 ];
 
+const DRAWER_TABS = [
+  { id: "details", label: "Details" },
+  { id: "notes", label: "Notes" },
+  { id: "history", label: "History" },
+  { id: "profit", label: "Profit" },
+] as const;
+
+type DrawerTab = (typeof DRAWER_TABS)[number]["id"];
+
 function isoToDatetimeLocal(iso: string): string {
   const d = new Date(iso);
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function moneyOrDash(v: number | null | undefined): string {
+  return v != null ? formatMoney(v) : "—";
+}
+
+function LabelWithHint({ label, hint }: { label: string; hint: string }) {
+  return (
+    <Label className="flex items-center gap-1.5">
+      {label}
+      <span className="group/hint relative inline-flex shrink-0">
+        <button
+          type="button"
+          className="inline-flex text-gray-400 hover:text-gray-600"
+          aria-label={hint}
+        >
+          <CircleHelp className="h-3.5 w-3.5" />
+        </button>
+        <span
+          role="tooltip"
+          className="pointer-events-none absolute left-0 top-full z-10 mt-1.5 w-56 rounded-md bg-[#101828] px-2 py-1.5 text-xs font-normal leading-snug text-[#F9FAFB] opacity-0 shadow-sm transition-opacity duration-150 group-hover/hint:opacity-100"
+        >
+          {hint}
+        </span>
+      </span>
+    </Label>
+  );
+}
+
+function LeadEconomics({ lead, accountType }: { lead: Lead; accountType?: string }) {
+  const isBuyer = accountType === "buyer";
+  return (
+    <div className="flex flex-col gap-2.5">
+      {isBuyer ? (
+        <div>
+          <Label>Purchase Price</Label>
+          <div className="mt-1 text-sm text-gray-700">{moneyOrDash(lead.purchase_price)}</div>
+        </div>
+      ) : (
+        <>
+          <div>
+            <Label>Cost</Label>
+            <div className="mt-1 text-sm text-gray-700">{moneyOrDash(lead.cost)}</div>
+          </div>
+          <div>
+            <Label>Revenue</Label>
+            <div className="mt-1 text-sm text-gray-700">{moneyOrDash(lead.revenue)}</div>
+          </div>
+          <div>
+            <LabelWithHint
+              label="Gross Profit"
+              hint="Sale price minus lead cost when this lead was sold to a buyer."
+            />
+            <div className="mt-1 text-sm text-gray-700">{moneyOrDash(lead.gross_profit)}</div>
+          </div>
+          <div>
+            <LabelWithHint
+              label="Net Profit"
+              hint="Revenue generated from rev share or profit share, minus lead cost."
+            />
+            <div className="mt-1 text-sm text-gray-700">{moneyOrDash(lead.net_profit)}</div>
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 export function LeadDetailDrawer() {
@@ -73,7 +149,7 @@ export function LeadDetailDrawer() {
 function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === "admin";
-  const [tab, setTab] = useState<"details" | "notes" | "history">("details");
+  const [tab, setTab] = useState<DrawerTab>("details");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const update = useUpdateLead();
   const setAction = useSetActionAt();
@@ -124,7 +200,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
     <div className="flex h-full flex-col">
       <DrawerHeader
         title={`${lead.first_name} ${lead.last_name}`}
-        subtitle={`${lead.source ?? "—"} · ${formatStatus(lead.status)}`}
+        subtitle={`${leadSourceLabel(lead)} · ${formatStatus(lead.status)}`}
         onClose={onClose}
       />
 
@@ -156,16 +232,16 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
       </div>
 
       <div className="flex border-b border-gray-100 px-5">
-        {(["details", "notes", "history"] as const).map((t) => (
+        {DRAWER_TABS.map(({ id, label }) => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
+            key={id}
+            onClick={() => setTab(id)}
             className={cn(
-              "-mb-px border-b-2 px-2.5 py-1.5 text-sm font-semibold capitalize transition-colors",
-              tab === t ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400 hover:text-gray-600"
+              "-mb-px border-b-2 px-2.5 py-1.5 text-sm font-semibold transition-colors",
+              tab === id ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400 hover:text-gray-600"
             )}
           >
-            {t}
+            {label}
           </button>
         ))}
       </div>
@@ -238,7 +314,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
                 {BUILTINS.map((b) => (
                   <div key={b.key as string}>
                     <Label>{b.label}</Label>
-                    <Input
+                    <InputWithOverflowTooltip
                       value={fields[b.key as string] ?? ""}
                       onChange={(e) => setFields((f) => ({ ...f, [b.key as string]: e.target.value }))}
                       onBlur={() => saveField(b.key as string)}
@@ -274,6 +350,9 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
         )}
         {tab === "notes" && <NotesTab leadId={lead.id} />}
         {tab === "history" && <HistoryTab leadId={lead.id} />}
+        {tab === "profit" && (
+          <LeadEconomics lead={lead} accountType={user?.account_type} />
+        )}
       </DrawerBody>
 
       {isAdmin && (
@@ -374,7 +453,7 @@ function CustomFieldValue({
   }
 
   return (
-    <Input
+    <InputWithOverflowTooltip
       value={val}
       type={type === "number" ? "number" : "text"}
       onChange={(e) => setVal(e.target.value)}

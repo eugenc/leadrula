@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/accounts"
+	"github.com/echayko/leadrula/backend/internal/contracts"
 	"github.com/echayko/leadrula/backend/internal/database"
 	"github.com/echayko/leadrula/backend/internal/notifications"
 	stripeClient "github.com/echayko/leadrula/backend/internal/stripe"
@@ -16,39 +17,52 @@ import (
 )
 
 type Transaction struct {
-	ID           int64     `json:"id"`
-	PublicID     string    `json:"public_id"`
-	BuyerID      int64     `json:"buyer_id"`
-	LeadID       *int64    `json:"lead_id"`
-	LeadName     *string   `json:"lead_name,omitempty"`
-	ContractID   *int64    `json:"contract_id"`
-	Type         string    `json:"type"`
-	Amount       float64   `json:"amount"`
-	BalanceAfter float64   `json:"balance_after"`
-	Description  string    `json:"description"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID                        int64     `json:"id"`
+	PublicID                  string    `json:"public_id"`
+	BuyerID                   int64     `json:"buyer_id"`
+	LeadID                    *int64    `json:"lead_id"`
+	LeadName                  *string   `json:"lead_name,omitempty"`
+	BuyerName                 *string   `json:"buyer_name,omitempty"`
+	PublisherName             *string   `json:"publisher_name,omitempty"`
+	ContractID                *int64    `json:"contract_id"`
+	Type                      string    `json:"type"`
+	Side                      string    `json:"side,omitempty"`
+	Category                  string    `json:"category,omitempty"`
+	CounterpartyName          *string   `json:"counterparty_name,omitempty"`
+	CounterpartyAccountType   *string   `json:"counterparty_account_type,omitempty"`
+	Amount                    float64   `json:"amount"`
+	BalanceAfter              float64   `json:"balance_after"`
+	Description               string    `json:"description"`
+	CreatedAt                 time.Time `json:"created_at"`
 }
 
 type Dispute struct {
-	ID            int64     `json:"id"`
-	TransactionID int64     `json:"transaction_id"`
-	BuyerID       int64     `json:"buyer_id"`
-	BuyerName     string    `json:"buyer_name,omitempty"`
-	Reason        string    `json:"reason"`
-	Status        string    `json:"status"`
-	Amount        float64   `json:"amount,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID                      int64     `json:"id"`
+	TransactionID           int64     `json:"transaction_id"`
+	BuyerID                 int64     `json:"buyer_id"`
+	BuyerName               string    `json:"buyer_name,omitempty"`
+	CounterpartyName        string    `json:"counterparty_name,omitempty"`
+	CounterpartyAccountType string    `json:"counterparty_account_type,omitempty"`
+	Reason                  string    `json:"reason"`
+	Status                  string    `json:"status"`
+	Amount                  float64   `json:"amount,omitempty"`
+	CreatedAt               time.Time `json:"created_at"`
 }
 
 type Service struct {
-	pool     *pgxpool.Pool
-	notif    *notifications.Service
-	accounts *accounts.Repository
-	stripe   *stripeClient.Client
+	pool                *pgxpool.Pool
+	notif               *notifications.Service
+	accounts            *accounts.Repository
+	stripe              *stripeClient.Client
+	encKey              []byte
+	stripeOAuthRedirect string
 }
 
-func NewService(pool *pgxpool.Pool, notif *notifications.Service, acc *accounts.Repository, sc *stripeClient.Client) *Service {
-	return &Service{pool: pool, notif: notif, accounts: acc, stripe: sc}
+func NewService(pool *pgxpool.Pool, notif *notifications.Service, acc *accounts.Repository, sc *stripeClient.Client, encKey []byte, stripeOAuthRedirect string) *Service {
+	return &Service{
+		pool: pool, notif: notif, accounts: acc, stripe: sc,
+		encKey: encKey, stripeOAuthRedirect: stripeOAuthRedirect,
+	}
 }
 
 // EnsureBalance creates a zero balance row if none exists.
@@ -100,31 +114,6 @@ func (s *Service) Topup(ctx context.Context, buyerID int64, amount float64, desc
 	return s.creditTxn(ctx, buyerID, amount, "credit", desc)
 }
 
-// ManualInvoice records a publisher-created debit/charge against a buyer.
-func (s *Service) ManualInvoice(ctx context.Context, buyerID int64, amount float64, desc string) (*Transaction, error) {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
-	if err := EnsureBalance(ctx, tx, buyerID); err != nil {
-		return nil, err
-	}
-	var balance float64
-	if err := tx.QueryRow(ctx, `SELECT balance::float8 FROM buyer_balances WHERE buyer_id=$1 FOR UPDATE`, buyerID).Scan(&balance); err != nil {
-		return nil, err
-	}
-	newBal := balance - amount
-	if _, err := tx.Exec(ctx, `UPDATE buyer_balances SET balance=$2 WHERE buyer_id=$1`, buyerID, newBal); err != nil {
-		return nil, err
-	}
-	t, err := insertTxn(ctx, tx, buyerID, "manual_invoice", -amount, newBal, desc)
-	if err != nil {
-		return nil, err
-	}
-	return t, tx.Commit(ctx)
-}
-
 func (s *Service) creditTxn(ctx context.Context, buyerID int64, amount float64, ttype, desc string) (*Transaction, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -164,8 +153,15 @@ func insertTxn(ctx context.Context, q database.Querier, buyerID int64, ttype str
 func (s *Service) ListTransactions(ctx context.Context, buyerID int64, txType string) ([]Transaction, error) {
 	q := `SELECT t.id, t.public_id, t.buyer_id, t.lead_id, t.contract_id, t.type,
 	             t.amount::float8, t.balance_after::float8, t.description, t.created_at,
-	             NULLIF(trim(coalesce(l.first_name,'') || ' ' || coalesce(l.last_name,'')), '')
-	      FROM transactions t LEFT JOIN leads l ON l.id = t.lead_id
+	             NULLIF(trim(coalesce(l.first_name,'') || ' ' || coalesce(l.last_name,'')), ''),
+	             NULLIF(trim(buyer.name), ''),
+	             NULLIF(COALESCE(pub_c.name, pub_l.name), '')
+	      FROM transactions t
+	      LEFT JOIN leads l ON l.id = t.lead_id
+	      LEFT JOIN accounts buyer ON buyer.id = t.buyer_id
+	      LEFT JOIN contracts c ON c.id = t.contract_id
+	      LEFT JOIN accounts pub_c ON pub_c.id = c.publisher_id
+	      LEFT JOIN accounts pub_l ON pub_l.id = l.publisher_id
 	      WHERE ($1 = 0 OR t.buyer_id = $1)
 	        AND ($2 = '' OR t.type = $2::txn_type)
 	      ORDER BY t.created_at DESC LIMIT 500`
@@ -178,10 +174,150 @@ func (s *Service) ListTransactions(ctx context.Context, buyerID int64, txType st
 	for rows.Next() {
 		var t Transaction
 		if err := rows.Scan(&t.ID, &t.PublicID, &t.BuyerID, &t.LeadID, &t.ContractID, &t.Type,
-			&t.Amount, &t.BalanceAfter, &t.Description, &t.CreatedAt, &t.LeadName); err != nil {
+			&t.Amount, &t.BalanceAfter, &t.Description, &t.CreatedAt, &t.LeadName, &t.BuyerName, &t.PublisherName); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+const publisherTxnScope = `
+  (
+    c.publisher_id = $1
+    OR (t.buyer_id = $1 AND c.publisher_id IS NOT NULL AND c.publisher_id <> $1)
+    OR (
+      t.type IN ('credit', 'topup', 'dispute_credit', 'manual_invoice')
+      AND EXISTS (
+        SELECT 1 FROM partnerships p
+        WHERE p.publisher_id = $1 AND p.buyer_id = t.buyer_id AND p.status = 'active'
+      )
+    )
+  )`
+
+const txnSideExpr = `
+  CASE
+    WHEN t.type IN ('credit', 'topup', 'dispute_credit')
+      AND EXISTS (
+        SELECT 1 FROM partnerships p
+        WHERE p.publisher_id = $1 AND p.buyer_id = t.buyer_id AND p.status = 'active'
+      ) THEN 'prepay'
+    WHEN c.publisher_id = $1 THEN 'sale'
+    WHEN t.buyer_id = $1 THEN 'purchase'
+    WHEN t.type = 'manual_invoice'
+      AND EXISTS (
+        SELECT 1 FROM partnerships p
+        WHERE p.publisher_id = $1 AND p.buyer_id = t.buyer_id AND p.status = 'active'
+      ) THEN 'sale'
+    ELSE ''
+  END`
+
+const txnCategoryExpr = `
+  CASE
+    WHEN ` + txnSideExpr + ` = 'prepay' AND t.type = 'topup' THEN 'Topup'
+    WHEN ` + txnSideExpr + ` = 'prepay' AND t.type = 'credit' THEN 'Credit'
+    WHEN ` + txnSideExpr + ` = 'prepay' AND t.type = 'dispute_credit' THEN 'Refund'
+    WHEN ` + txnSideExpr + ` = 'sale' AND t.type = 'manual_invoice' THEN 'Invoice'
+    WHEN ` + txnSideExpr + ` = 'sale' THEN 'Sale'
+    WHEN ` + txnSideExpr + ` = 'purchase' THEN 'Purchase'
+    ELSE ''
+  END`
+
+const txnCounterpartyNameExpr = `
+  CASE
+    WHEN ` + txnSideExpr + ` IN ('prepay', 'sale') THEN NULLIF(trim(buyer.name), '')
+    WHEN ` + txnSideExpr + ` = 'purchase' THEN NULLIF(trim(pub_c.name), '')
+  END`
+
+const txnCounterpartyTypeExpr = `
+  CASE
+    WHEN ` + txnSideExpr + ` IN ('prepay', 'sale') THEN buyer.type::text
+    WHEN ` + txnSideExpr + ` = 'purchase' THEN 'publisher'
+  END`
+
+// ListPublisherTransactions lists ledger rows for a publisher: sales, purchases, and buyer prepay.
+func (s *Service) ListPublisherTransactions(ctx context.Context, publisherID int64, filterBuyerID int64, txType string) ([]Transaction, error) {
+	q := `SELECT t.id, t.public_id, t.buyer_id, t.lead_id, t.contract_id, t.type,
+	             t.amount::float8, t.balance_after::float8, t.description, t.created_at,
+	             NULLIF(trim(coalesce(l.first_name,'') || ' ' || coalesce(l.last_name,'')), ''),
+	             NULLIF(trim(buyer.name), ''),
+	             NULLIF(COALESCE(pub_c.name, pub_l.name), ''),
+	             ` + txnSideExpr + `,
+	             ` + txnCategoryExpr + `,
+	             ` + txnCounterpartyNameExpr + `,
+	             ` + txnCounterpartyTypeExpr + `
+	      FROM transactions t
+	      LEFT JOIN leads l ON l.id = t.lead_id
+	      LEFT JOIN accounts buyer ON buyer.id = t.buyer_id
+	      LEFT JOIN contracts c ON c.id = t.contract_id
+	      LEFT JOIN accounts pub_c ON pub_c.id = c.publisher_id
+	      LEFT JOIN accounts pub_l ON pub_l.id = l.publisher_id
+	      WHERE ` + publisherTxnScope + `
+	        AND ($2 = 0 OR t.buyer_id = $2)
+	        AND ($3 = '' OR t.type = $3::txn_type)
+	      ORDER BY t.created_at DESC LIMIT 500`
+	rows, err := s.pool.Query(ctx, q, publisherID, filterBuyerID, txType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Transaction
+	for rows.Next() {
+		var t Transaction
+		if err := rows.Scan(&t.ID, &t.PublicID, &t.BuyerID, &t.LeadID, &t.ContractID, &t.Type,
+			&t.Amount, &t.BalanceAfter, &t.Description, &t.CreatedAt, &t.LeadName, &t.BuyerName, &t.PublisherName,
+			&t.Side, &t.Category, &t.CounterpartyName, &t.CounterpartyAccountType); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// ListPublisherDisputes lists open disputes on this publisher's contract sales.
+func (s *Service) ListPublisherDisputes(ctx context.Context, publisherID int64, status string) ([]Dispute, error) {
+	q := `SELECT d.id, d.transaction_id, d.buyer_id, d.reason, d.status, d.created_at,
+	             abs(t.amount)::float8,
+	             NULLIF(trim(buyer.name), ''),
+	             buyer.type::text
+	      FROM disputes d
+	      JOIN transactions t ON t.id = d.transaction_id
+	      JOIN accounts buyer ON buyer.id = d.buyer_id
+	      LEFT JOIN contracts c ON c.id = t.contract_id
+	      WHERE (
+	        c.publisher_id = $1
+	        OR (
+	          t.type = 'manual_invoice'
+	          AND EXISTS (
+	            SELECT 1 FROM partnerships p
+	            WHERE p.publisher_id = $1 AND p.buyer_id = d.buyer_id AND p.status = 'active'
+	          )
+	        )
+	      )
+	        AND ($2 = '' OR d.status = $2::dispute_status)
+	      ORDER BY d.created_at DESC`
+	rows, err := s.pool.Query(ctx, q, publisherID, status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Dispute
+	for rows.Next() {
+		var d Dispute
+		var cpName *string
+		var cpType *string
+		if err := rows.Scan(&d.ID, &d.TransactionID, &d.BuyerID, &d.Reason, &d.Status, &d.CreatedAt,
+			&d.Amount, &cpName, &cpType); err != nil {
+			return nil, err
+		}
+		if cpName != nil {
+			d.BuyerName = *cpName
+			d.CounterpartyName = *cpName
+		}
+		if cpType != nil {
+			d.CounterpartyAccountType = *cpType
+		}
+		out = append(out, d)
 	}
 	return out, rows.Err()
 }
@@ -245,10 +381,11 @@ func (s *Service) AcceptDispute(ctx context.Context, disputeID, adminID int64) e
 	var buyerID, txnID int64
 	var status string
 	var amount float64
+	var leadID, contractID *int64
 	err = tx.QueryRow(ctx,
-		`SELECT d.buyer_id, d.transaction_id, d.status, abs(t.amount)::float8
+		`SELECT d.buyer_id, d.transaction_id, d.status, abs(t.amount)::float8, t.lead_id, t.contract_id
 		 FROM disputes d JOIN transactions t ON t.id = d.transaction_id
-		 WHERE d.id = $1 FOR UPDATE`, disputeID).Scan(&buyerID, &txnID, &status, &amount)
+		 WHERE d.id = $1 FOR UPDATE`, disputeID).Scan(&buyerID, &txnID, &status, &amount, &leadID, &contractID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return httpx.NotFound("dispute not found")
 	}
@@ -278,10 +415,18 @@ func (s *Service) AcceptDispute(ctx context.Context, disputeID, adminID int64) e
 		disputeID, adminID); err != nil {
 		return err
 	}
-	if err := s.notifyBuyerAdmins(ctx, tx, buyerID, "accepted"); err != nil {
+	emails, err := s.notifyBuyerAdmins(ctx, tx, buyerID, "accepted")
+	if err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	if err := contracts.RecordEarningDispute(ctx, tx, txnID, leadID, contractID, amount); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	s.notif.SendEmails(emails)
+	return nil
 }
 
 func (s *Service) RejectDispute(ctx context.Context, disputeID, adminID int64) error {
@@ -308,16 +453,26 @@ func (s *Service) RejectDispute(ctx context.Context, disputeID, adminID int64) e
 		disputeID, adminID); err != nil {
 		return err
 	}
-	if err := s.notifyBuyerAdmins(ctx, tx, buyerID, "rejected"); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
-}
-
-func (s *Service) notifyBuyerAdmins(ctx context.Context, q database.Querier, buyerID int64, outcome string) error {
-	ids, err := s.accounts.AdminUserIDs(ctx, q, buyerID)
+	emails, err := s.notifyBuyerAdmins(ctx, tx, buyerID, "rejected")
 	if err != nil {
 		return err
 	}
-	return s.notif.Enqueue(ctx, q, ids, "dispute_update", map[string]any{"outcome": outcome})
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	s.notif.SendEmails(emails)
+	return nil
+}
+
+func (s *Service) notifyBuyerAdmins(ctx context.Context, q database.Querier, buyerID int64, outcome string) ([]notifications.EmailJob, error) {
+	ids, err := s.accounts.AdminUserIDs(ctx, q, buyerID)
+	if err != nil {
+		return nil, err
+	}
+	return s.notif.Deliver(ctx, q, notifications.DeliverParams{
+		AccountID: buyerID,
+		UserIDs:   ids,
+		EventType: "dispute_update",
+		Payload:   map[string]any{"outcome": outcome},
+	})
 }

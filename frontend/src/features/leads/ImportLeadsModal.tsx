@@ -74,6 +74,7 @@ export function ImportLeadsModal({ open, onClose }: Props) {
   const [pipelineId, setPipelineId] = useState(0);
   const [stageId, setStageId] = useState(0);
   const [importTags, setImportTags] = useState<string[]>([]);
+  const [importFilename, setImportFilename] = useState("");
   const [tagInput, setTagInput] = useState("");
   const [result, setResult] = useState<{ created: number; skipped: number; errors: { row: number; message: string }[] } | null>(null);
   const [importing, setImporting] = useState(false);
@@ -96,6 +97,7 @@ export function ImportLeadsModal({ open, onClose }: Props) {
     setPipelineId(0);
     setStageId(0);
     setImportTags([]);
+    setImportFilename("");
     setTagInput("");
     setResult(null);
     setImporting(false);
@@ -132,6 +134,7 @@ export function ImportLeadsModal({ open, onClose }: Props) {
       toast.error("Please upload a .csv file");
       return;
     }
+    setImportFilename(file.name);
     Papa.parse<Record<string, unknown>>(file, {
       header: true,
       skipEmptyLines: true,
@@ -174,6 +177,7 @@ export function ImportLeadsModal({ open, onClose }: Props) {
       pipeline_id: destination === "pipeline" ? Number(pipelineId) : undefined,
       stage_id: destination === "pipeline" ? Number(stageId) : undefined,
       default_tags: importTags.length ? importTags : undefined,
+      import_filename: importFilename || undefined,
       mapping: mappingArr,
     };
 

@@ -89,7 +89,7 @@ func applyPayloadMappings(ctx context.Context, tx database.Querier, repo *leads.
 			continue
 		}
 		if m.TargetType == "builtin" && m.BuiltinField != nil {
-			if err := repo.SetBuiltinField(ctx, tx, leadID, *m.BuiltinField, toText(v)); err != nil {
+			if err := leads.ApplyMappedBuiltin(ctx, tx, repo, leadID, *m.BuiltinField, v); err != nil {
 				return err
 			}
 		} else if m.TargetType == "custom" && m.CustomFieldID != nil {
@@ -126,6 +126,13 @@ func (s *Service) Ingest(ctx context.Context, publisherID int64, raw map[string]
 				}
 			}
 		}
+	}
+	lead, err := s.leads.GetByID(ctx, tx, leadID)
+	if err != nil {
+		return nil, err
+	}
+	if err := leads.CheckDuplicate(ctx, tx, publisherID, lead.Phone, lead.Email, leadID); err != nil {
+		return nil, err
 	}
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO lead_intake_queue(lead_id, raw_payload, source) VALUES ($1,$2,$3)`,
@@ -168,6 +175,13 @@ func (s *Service) IngestFromSource(ctx context.Context, publisherID int64, slug 
 	if err := applyPayloadMappings(ctx, tx, s.leads, leadID, sources, maps); err != nil {
 		return nil, err
 	}
+	lead, err := s.leads.GetByID(ctx, tx, leadID)
+	if err != nil {
+		return nil, err
+	}
+	if err := leads.CheckDuplicate(ctx, tx, publisherID, lead.Phone, lead.Email, leadID); err != nil {
+		return nil, err
+	}
 
 	rt, err := routing.RouteForSource(ctx, tx, src.ID)
 	if err != nil {
@@ -185,18 +199,18 @@ func (s *Service) IngestFromSource(ctx context.Context, publisherID int64, slug 
 		return &IngestResult{LeadID: publicID, Status: "review"}, nil
 	}
 
-	if err := leads.ApplyRoute(ctx, tx, s.routeDeps(), rt, publisherID, leadID); err != nil {
+	emails, err := leads.ApplyRoute(ctx, tx, s.routeDeps(), rt, publisherID, leadID)
+	if err != nil {
 		return nil, err
 	}
 	status := "review"
 	if rt.Destination == "buyer" && rt.Delivery == "leads_pipeline" {
 		status = "distributed"
-	} else if rt.Destination == "publisher" && rt.Delivery == "leads_pipeline" {
-		status = "distributed"
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	s.notif.SendEmails(emails)
 	leads.TryEnqueueIntegrations(ctx, s.leads.Pool(), s.leads, s.integrations, rt.ID, leadID)
 	return &IngestResult{LeadID: publicID, Status: status}, nil
 }
@@ -525,8 +539,8 @@ func (s *Service) scanQueueItem(ctx context.Context, q database.Querier, publish
 	return &it, nil
 }
 
-// RouteFromQueue manually routes a queued lead to a buyer (DB spec §4.1 manual path).
-func (s *Service) RouteFromQueue(ctx context.Context, queueID, pipelineID, stageID, buyerID, reviewerID int64) error {
+// RouteFromQueue manually routes a queued lead via a configured route or legacy buyer picker.
+func (s *Service) RouteFromQueue(ctx context.Context, queueID, routeID, pipelineID, stageID, buyerID, reviewerID int64) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -547,6 +561,46 @@ func (s *Service) RouteFromQueue(ctx context.Context, queueID, pipelineID, stage
 	if err := tx.QueryRow(ctx, `SELECT publisher_id, source FROM leads WHERE id=$1`, leadID).Scan(&publisherID, &sourceSlug); err != nil {
 		return err
 	}
+
+	if routeID > 0 {
+		rt, err := routing.GetByID(ctx, tx, routeID)
+		if err != nil {
+			return err
+		}
+		if rt.PublisherID != publisherID {
+			return httpx.NotFound("route not found")
+		}
+		if !rt.IsActive {
+			return httpx.BusinessRule("route is not active")
+		}
+		if sourceSlug != nil && *sourceSlug != "" {
+			src, err := routing.MatchSourceBySlug(ctx, tx, publisherID, *sourceSlug)
+			if err != nil {
+				return err
+			}
+			if src != nil {
+				if rt.SourceID == nil || *rt.SourceID != src.ID {
+					return httpx.BusinessRule("route does not match lead source")
+				}
+			}
+		}
+		emails, err := leads.ApplyRoute(ctx, tx, s.routeDeps(), rt, publisherID, leadID)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx,
+			`UPDATE lead_intake_queue SET status='routed', reviewed_by=$2, reviewed_at=now() WHERE id=$1`,
+			queueID, reviewerID); err != nil {
+			return err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return err
+		}
+		s.notif.SendEmails(emails)
+		leads.TryEnqueueIntegrations(ctx, s.pool, s.leads, s.integrations, routeID, leadID)
+		return nil
+	}
+
 	if sourceSlug != nil && *sourceSlug != "" {
 		src, err := routing.MatchSourceBySlug(ctx, tx, publisherID, *sourceSlug)
 		if err != nil {
@@ -583,6 +637,17 @@ func (s *Service) RouteFromQueue(ctx context.Context, queueID, pipelineID, stage
 	if target == nil {
 		return httpx.BusinessRule("selected buyer has no active contract")
 	}
+	lead, err := s.leads.GetByID(ctx, tx, leadID)
+	if err != nil {
+		return err
+	}
+	if err := leads.CheckDuplicate(ctx, tx, buyerID, lead.Phone, lead.Email, leadID); err != nil {
+		return err
+	}
+	buyer, err := s.accounts.GetAccount(ctx, buyerID)
+	if err != nil {
+		return err
+	}
 	if pipelineID == 0 {
 		pipelineID = target.BuyerPipelineID
 	}
@@ -603,6 +668,13 @@ func (s *Service) RouteFromQueue(ctx context.Context, queueID, pipelineID, stage
 	if err := billing.Debit(ctx, tx, buyerID, target.RatePerLead, leadID, target.ID, "lead routed from intake queue"); err != nil {
 		return err
 	}
+	costBasis := leads.CostBasisFromLead(lead)
+	if err := contracts.RecordEarningDistribute(ctx, tx, target.CompensationID, leadID, target.RatePerLead, costBasis); err != nil {
+		return err
+	}
+	if err := s.leads.SetCostAfterBuyerDistribution(ctx, tx, leadID, buyer.Type, target.RatePerLead); err != nil {
+		return err
+	}
 	if err := s.leads.SetStatus(ctx, tx, leadID, "distributed"); err != nil {
 		return err
 	}
@@ -611,14 +683,24 @@ func (s *Service) RouteFromQueue(ctx context.Context, queueID, pipelineID, stage
 		queueID, reviewerID); err != nil {
 		return err
 	}
-	adminIDs, err := s.accounts.AdminUserIDs(ctx, tx, buyerID)
+	routed, err := s.leads.GetByID(ctx, tx, leadID)
 	if err != nil {
 		return err
 	}
-	if err := s.notif.Enqueue(ctx, tx, adminIDs, "new_lead", map[string]any{"lead_id": leadID}); err != nil {
+	emails, err := s.notif.Deliver(ctx, tx, notifications.DeliverParams{
+		AccountID: buyerID,
+		UserIDs:   notifications.AssigneeIDs(routed.AssignedUserID),
+		EventType: "new_lead",
+		Payload:   map[string]any{"lead_id": leadID},
+	})
+	if err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	s.notif.SendEmails(emails)
+	return nil
 }
 
 // MapField saves a source payload mapping (when source exists) and applies the value to the lead.
@@ -698,8 +780,8 @@ func (s *Service) MapField(ctx context.Context, publisherID, queueID int64, sour
 		}
 	}
 
-	if targetType == "builtin" {
-		if err := s.leads.SetBuiltinField(ctx, tx, leadID, *builtinField, toText(v)); err != nil {
+	if targetType == "builtin" && builtinField != nil {
+		if err := leads.ApplyMappedBuiltin(ctx, tx, s.leads, leadID, *builtinField, v); err != nil {
 			return nil, err
 		}
 	} else if targetType == "custom" {

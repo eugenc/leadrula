@@ -34,7 +34,7 @@ import {
   type FilterCondition,
   type SavedLeadView,
 } from "./leadsViews";
-import { FilterSelect } from "@/components/ui/input";
+import { FilterSelect, Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Spinner, EmptyState } from "@/components/ui/misc";
 import { useUIStore } from "@/store/uiStore";
@@ -74,7 +74,7 @@ export function Board() {
   const { activeId, isLoading: activeLoading } = useActiveViewId("board");
   const { savedCardFields, saveCardFields, isLoading: cardFieldsLoading } = useBoardCardFields();
   const activeView = getViewById(views, activeId);
-  const viewApplied = useRef(false);
+  const prevActiveId = useRef<string | null>(null);
   const cardFieldsHydrated = useRef(false);
 
   const [conditions, setConditions] = useState<FilterCondition[]>([]);
@@ -83,6 +83,8 @@ export function Board() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [colsOpen, setColsOpen] = useState(false);
   const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
   const { data: customFields } = useCustomFields();
 
@@ -111,6 +113,8 @@ export function Board() {
       setConditions([...view.filters]);
       setSort(view.sort ?? "created_at");
       setSortDir(view.sort_dir ?? "desc");
+      setSearchTerm("");
+      setDebouncedSearch("");
       if (resetCardFields) {
         updateCardFields(boardCardFields(view.columns));
       }
@@ -119,10 +123,12 @@ export function Board() {
   );
 
   useEffect(() => {
-    if (viewsLoading || activeLoading || viewApplied.current) return;
-    applyView(activeView);
-    viewApplied.current = true;
-  }, [viewsLoading, activeLoading, activeView, applyView]);
+    if (viewsLoading || activeLoading) return;
+    if (prevActiveId.current === activeId) return;
+    const isInitial = prevActiveId.current === null;
+    prevActiveId.current = activeId;
+    applyView(getViewById(views, activeId), !isInitial);
+  }, [activeId, viewsLoading, activeLoading, views, applyView]);
 
   useEffect(() => {
     if (cardFieldsLoading || cardFieldsHydrated.current) return;
@@ -141,16 +147,22 @@ export function Board() {
     sort_dir: sortDir,
   });
 
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+
   const leadFilters = useMemo(
     () => ({
       pipeline_id: pipelineId,
       all: true as const,
       view_id: viewChanged ? undefined : activeId,
       filters: viewChanged ? JSON.stringify(conditions) : undefined,
+      q: debouncedSearch || undefined,
       sort,
       sort_dir: sortDir,
     }),
-    [pipelineId, viewChanged, activeId, conditions, sort, sortDir]
+    [pipelineId, viewChanged, activeId, conditions, debouncedSearch, sort, sortDir]
   );
 
   const { data: stages } = useStages(pipelineId);
@@ -163,16 +175,13 @@ export function Board() {
 
   const [board, setBoard] = useState<Record<number, Lead[]>>({});
   useEffect(() => {
-    if (!leads?.items) return;
     const grouped: Record<number, Lead[]> = {};
-    for (const l of leads.items) {
+    for (const l of leads?.items ?? []) {
       const sid = l.stage_id ?? 0;
       (grouped[sid] ??= []).push(l);
     }
     setBoard(grouped);
-  }, [leads]);
-
-  const leadItems = leads?.items ?? [];
+  }, [leads?.items]);
 
   const [prompt, setPrompt] = useState<{ leadId: number; stage: Stage } | null>(null);
   const [activeDrag, setActiveDrag] = useState<Lead | null>(null);
@@ -187,9 +196,8 @@ export function Board() {
   );
 
   function revert() {
-    if (!leadItems.length) return;
     const grouped: Record<number, Lead[]> = {};
-    for (const l of leadItems) {
+    for (const l of visibleLeads) {
       const sid = l.stage_id ?? 0;
       (grouped[sid] ??= []).push(l);
     }
@@ -286,6 +294,13 @@ export function Board() {
             </option>
           ))}
         </FilterSelect>
+        <Input
+          type="search"
+          placeholder="Search name, email, phone, address, buyer, or status…"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          className="h-7 w-72 text-sm"
+        />
         <LeadViewsMenu
           placement="board"
           filters={conditions}
@@ -308,10 +323,12 @@ export function Board() {
           visibleCols={activeCardFields}
           allColumnIds={allColumnIds}
           customFields={customFieldsList}
+          defaultCols={DEFAULT_BOARD_CARD_FIELDS}
+          lockedCols={DEFAULT_BOARD_CARD_FIELDS}
           onChange={updateCardFields}
           label="Card fields"
         />
-        <Button variant="ghost" size="sm" onClick={() => setFiltersExpanded((e) => !e)}>
+        <Button variant="outline" size="sm" onClick={() => setFiltersExpanded((e) => !e)}>
           {filtersExpanded ? "Hide filters" : "Edit filters"}
         </Button>
       </div>

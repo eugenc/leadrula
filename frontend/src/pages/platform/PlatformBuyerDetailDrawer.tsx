@@ -1,12 +1,17 @@
 import { useEffect, useState } from "react";
 import { format } from "date-fns";
+import { ArrowRightLeft } from "lucide-react";
 import { Sheet, DrawerHeader, DrawerBody, DrawerFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import { TIMEZONES } from "@/lib/timezones";
-import { useRemovePlatformBuyer, useUpdatePlatformBuyer } from "@/features/auth/switchHooks";
+import {
+  useRemovePlatformBuyer,
+  useSwitchAccount,
+  useUpdatePlatformBuyer,
+} from "@/features/auth/switchHooks";
 import { PlatformAccountStatusCell } from "@/pages/platform/PlatformAccountStatusCell";
 import { RemovePlatformAccountDialog } from "@/pages/platform/RemovePlatformAccountDialog";
 import type { AccountOperationalStatus, PlatformAccount } from "@/types";
@@ -28,6 +33,7 @@ export function PlatformBuyerDetailDrawer({
 function DrawerContent({ buyer, onClose }: { buyer: PlatformAccount; onClose: () => void }) {
   const update = useUpdatePlatformBuyer();
   const remove = useRemovePlatformBuyer();
+  const switchAccount = useSwitchAccount();
   const [removeOpen, setRemoveOpen] = useState(false);
   const [name, setName] = useState(buyer.name);
   const [timezone, setTimezone] = useState(buyer.timezone);
@@ -111,9 +117,19 @@ function DrawerContent({ buyer, onClose }: { buyer: PlatformAccount; onClose: ()
 
       <DrawerFooter>
         <div className="flex items-center justify-between gap-2">
-          <Button variant="danger" disabled={saving} onClick={() => setRemoveOpen(true)}>
-            Remove
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              disabled={switchAccount.isPending || status === "suspended"}
+              title={status === "suspended" ? "Account suspended" : undefined}
+              onClick={() => switchAccount.mutate(buyer.id)}
+            >
+              <ArrowRightLeft className="h-3.5 w-3.5" /> Open
+            </Button>
+            <Button variant="danger" disabled={saving} onClick={() => setRemoveOpen(true)}>
+              Remove
+            </Button>
+          </div>
           <div className="flex gap-2">
             <Button variant="secondary" onClick={onClose}>
               Cancel

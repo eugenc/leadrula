@@ -71,7 +71,7 @@ export function ApiKeysPage() {
                 <TH>Prefix</TH>
                 <TH>Last used</TH>
                 <TH>Status</TH>
-                <TH />
+                <TH className="min-w-0 w-12" />
               </tr>
             </THead>
             <TBody>

@@ -66,10 +66,13 @@ export function LeadViewsMenu({
     sort_dir: sortDir,
   });
 
-  function switchView(view: SavedLeadView) {
-    onFiltersChange(view.filters);
+  async function switchView(view: SavedLeadView) {
     onViewApply?.(view);
-    setActiveId(view.public_id).catch((err) => toast.error(errorMessage(err)));
+    try {
+      await setActiveId(view.public_id);
+    } catch (err) {
+      toast.error(errorMessage(err));
+    }
     setOpen(false);
   }
 

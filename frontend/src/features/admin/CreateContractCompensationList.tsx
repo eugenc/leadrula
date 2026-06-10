@@ -9,14 +9,24 @@ import {
   parseCapInput,
 } from "@/features/admin/contractCap";
 import {
-  COMPENSATION_DELIVERY,
   COMPENSATION_KINDS,
   COMPENSATION_TRIGGERS,
   defaultTriggerForKind,
+  flatRateAmountLabel,
+  payoutFieldsToBody,
+  pipelineFieldsToBody,
   type CompensationKind,
+  type ContractDeliveryDraft,
 } from "@/features/admin/contractCompensation";
-import { useBuyerPipelines, useBuyerStages } from "@/features/admin/hooks";
-import { usePipelines, useStages } from "@/features/leads/hooks";
+import { type ContractType } from "@/features/admin/contractType";
+import {
+  CompensationPayoutFields,
+  defaultPayoutDraft,
+  type PayoutDraftFields,
+} from "@/features/admin/CompensationPayoutFields";
+import { payoutDraftFromComp } from "@/features/admin/CompensationPayoutFields";
+import { useBuyerStages } from "@/features/admin/hooks";
+import type { ContractCompensation } from "@/types";
 
 export type CompensationDraft = {
   kind: CompensationKind;
@@ -30,20 +40,33 @@ export type CompensationDraft = {
   cap_max_daily: string;
   trigger: string;
   trigger_stage_id: number;
-  source_pipeline_id: number;
-  source_stage_id: number;
-  counterparty_pipeline_id: number;
-  counterparty_stage_id: number;
-  return_stage_id: number;
-  delivery: string;
-};
+} & PayoutDraftFields;
 
-export function emptyCompensationDraft(pipelines: {
-  source_pipeline_id: number;
-  source_stage_id: number;
-  counterparty_pipeline_id: number;
-  return_stage_id: number;
-}): CompensationDraft {
+export function compensationDraftFromComp(
+  c: ContractCompensation,
+  ratePerLead?: number
+): CompensationDraft {
+  let flatAmount = c.flat_amount != null ? String(c.flat_amount) : "";
+  if (flatAmount === "" && c.kind === "flat_rate" && ratePerLead != null && ratePerLead > 0) {
+    flatAmount = String(ratePerLead);
+  }
+  return {
+    kind: c.kind as CompensationKind,
+    flat_amount: flatAmount,
+    bid_min: c.bid_min != null ? String(c.bid_min) : "",
+    bid_max: c.bid_max != null ? String(c.bid_max) : "",
+    rev_percent: c.rev_percent != null ? String(c.rev_percent) : "",
+    profit_percent: c.profit_percent != null ? String(c.profit_percent) : "",
+    cap_period: c.cap_period ?? "one_time",
+    cap_total: capInputValue(c.cap_total),
+    cap_max_daily: capInputValue(c.cap_max_daily),
+    trigger: c.trigger,
+    trigger_stage_id: c.trigger_stage_id ?? 0,
+    ...payoutDraftFromComp(c),
+  };
+}
+
+export function emptyCompensationDraft(): CompensationDraft {
   return {
     kind: "flat_rate",
     flat_amount: "25",
@@ -56,16 +79,34 @@ export function emptyCompensationDraft(pipelines: {
     cap_max_daily: "",
     trigger: "per_lead",
     trigger_stage_id: 0,
-    source_pipeline_id: pipelines.source_pipeline_id,
-    source_stage_id: pipelines.source_stage_id,
-    counterparty_pipeline_id: pipelines.counterparty_pipeline_id,
-    counterparty_stage_id: 0,
-    return_stage_id: pipelines.return_stage_id,
-    delivery: "leads_pipeline",
+    ...defaultPayoutDraft(),
   };
 }
 
-export function compensationDraftToBody(d: CompensationDraft): Record<string, unknown> {
+/** Empty defaults for the New Contract create drawer (no pre-filled rate or payout). */
+export function blankCompensationDraft(): CompensationDraft {
+  return {
+    kind: "flat_rate",
+    flat_amount: "",
+    bid_min: "",
+    bid_max: "",
+    rev_percent: "",
+    profit_percent: "",
+    cap_period: "one_time",
+    cap_total: "",
+    cap_max_daily: "",
+    trigger: "per_lead",
+    trigger_stage_id: 0,
+    payout_frequency: "",
+    payout_weekday: 0,
+    payout_month_day: 0,
+  };
+}
+
+export function compensationDraftToBody(
+  d: CompensationDraft,
+  deliveryDraft: ContractDeliveryDraft
+): Record<string, unknown> {
   const capTotal = parseCapInput(d.cap_total);
   const capMaxDaily = parseCapInput(d.cap_max_daily);
   return {
@@ -80,12 +121,9 @@ export function compensationDraftToBody(d: CompensationDraft): Record<string, un
     cap_max_daily: capPeriodShowsDailyCap(d.cap_period) ? capMaxDaily : null,
     trigger: d.trigger,
     trigger_stage_id: d.trigger_stage_id || null,
-    source_pipeline_id: d.source_pipeline_id || null,
-    source_stage_id: d.source_stage_id || null,
-    counterparty_pipeline_id: d.counterparty_pipeline_id || null,
-    counterparty_stage_id: d.counterparty_stage_id || null,
-    return_stage_id: d.return_stage_id || null,
-    delivery: d.delivery,
+    ...pipelineFieldsToBody(deliveryDraft.delivery, deliveryDraft),
+    delivery: deliveryDraft.delivery,
+    ...payoutFieldsToBody(d.payout_frequency, d.payout_weekday, d.payout_month_day),
   };
 }
 
@@ -105,6 +143,8 @@ function CompensationCard({
   draft,
   index,
   buyerId,
+  buyerPipelineId,
+  leadType,
   onChange,
   onRemove,
   canRemove,
@@ -112,14 +152,13 @@ function CompensationCard({
   draft: CompensationDraft;
   index: number;
   buyerId: number;
+  buyerPipelineId: number;
+  leadType: string;
   onChange: (d: CompensationDraft) => void;
   onRemove: () => void;
   canRemove: boolean;
 }) {
-  const { data: pubPipelines } = usePipelines();
-  const { data: sourceStages } = useStages(draft.source_pipeline_id || undefined);
-  const { data: buyerPipelines } = useBuyerPipelines(buyerId || null);
-  const { data: buyerStages } = useBuyerStages(buyerId, draft.counterparty_pipeline_id || null);
+  const { data: buyerStages } = useBuyerStages(buyerId, buyerPipelineId || null);
 
   function set<K extends keyof CompensationDraft>(k: K, v: CompensationDraft[K]) {
     onChange({ ...draft, [k]: v });
@@ -137,7 +176,7 @@ function CompensationCard({
       </div>
       <div className="flex flex-col gap-2.5">
         <div>
-          <Label>Kind</Label>
+          <Label>Type</Label>
           <Select
             value={draft.kind}
             onChange={(e) => {
@@ -154,7 +193,7 @@ function CompensationCard({
         </div>
         {draft.kind === "flat_rate" && (
           <div>
-            <Label>Flat amount (USD)</Label>
+            <Label>{flatRateAmountLabel(leadType)}</Label>
             <Input type="number" min={0} step={0.01} value={draft.flat_amount} onChange={(e) => set("flat_amount", e.target.value)} />
           </div>
         )}
@@ -234,66 +273,14 @@ function CompensationCard({
           )}
         </div>
 
-        <SectionLabel className="mt-1">Delivery</SectionLabel>
-        <p className="text-xs text-gray-400">Default for this contract. Routes can override Lead vs Pipeline.</p>
-        <div>
-          <Label>Delivery mode</Label>
-          <Select value={draft.delivery} onChange={(e) => set("delivery", e.target.value)}>
-            {COMPENSATION_DELIVERY.map((d) => (
-              <option key={d.value} value={d.value}>
-                {d.label}
-              </option>
-            ))}
-          </Select>
-        </div>
-        {draft.delivery === "leads_pipeline" && (
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label>Source pipeline</Label>
-              <Select value={draft.source_pipeline_id} onChange={(e) => set("source_pipeline_id", Number(e.target.value))}>
-                <option value={0}>Select…</option>
-                {(pubPipelines ?? []).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label>Source stage</Label>
-              <Select value={draft.source_stage_id} onChange={(e) => set("source_stage_id", Number(e.target.value))}>
-                <option value={0}>Select…</option>
-                {(sourceStages ?? []).map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label>Counterparty pipeline</Label>
-              <Select value={draft.counterparty_pipeline_id} onChange={(e) => set("counterparty_pipeline_id", Number(e.target.value))}>
-                <option value={0}>Select…</option>
-                {(buyerPipelines ?? []).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label>Return stage</Label>
-              <Select value={draft.return_stage_id} onChange={(e) => set("return_stage_id", Number(e.target.value))}>
-                <option value={0}>Select…</option>
-                {(sourceStages ?? []).map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          </div>
-        )}
+        <CompensationPayoutFields
+          draft={{
+            payout_frequency: draft.payout_frequency,
+            payout_weekday: draft.payout_weekday,
+            payout_month_day: draft.payout_month_day,
+          }}
+          onChange={(p) => onChange({ ...draft, ...p })}
+        />
       </div>
     </div>
   );
@@ -301,13 +288,21 @@ function CompensationCard({
 
 export function CreateContractCompensationList({
   buyerId,
+  buyerPipelineId,
+  leadType,
   items,
   onChange,
+  blankNewRows,
 }: {
   buyerId: number;
+  contractType: ContractType;
+  buyerPipelineId: number;
+  leadType: string;
   items: CompensationDraft[];
   onChange: (items: CompensationDraft[]) => void;
+  blankNewRows?: boolean;
 }) {
+  const newRow = blankNewRows ? blankCompensationDraft : emptyCompensationDraft;
   return (
     <div className="flex flex-col gap-3">
       {items.map((d, i) => (
@@ -316,25 +311,14 @@ export function CreateContractCompensationList({
           index={i}
           draft={d}
           buyerId={buyerId}
+          buyerPipelineId={buyerPipelineId}
+          leadType={leadType}
           canRemove={items.length > 1}
           onChange={(next) => onChange(items.map((x, j) => (j === i ? next : x)))}
           onRemove={() => onChange(items.filter((_, j) => j !== i))}
         />
       ))}
-      <Button
-        variant="secondary"
-        onClick={() =>
-          onChange([
-            ...items,
-            emptyCompensationDraft({
-              source_pipeline_id: items[0]?.source_pipeline_id ?? 0,
-              source_stage_id: items[0]?.source_stage_id ?? 0,
-              counterparty_pipeline_id: items[0]?.counterparty_pipeline_id ?? 0,
-              return_stage_id: items[0]?.return_stage_id ?? 0,
-            }),
-          ])
-        }
-      >
+      <Button variant="secondary" onClick={() => onChange([...items, newRow()])}>
         Add compensation
       </Button>
     </div>

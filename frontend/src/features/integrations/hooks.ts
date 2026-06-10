@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, ns, post, del } from "@/lib/api";
 import type {
   IntegrationConnection,
-  IntegrationDeliveryItem,
   IntegrationProvider,
   RouteIntegration,
 } from "@/types";
@@ -62,14 +61,6 @@ export function useDeleteIntegrationConnection() {
       qc.invalidateQueries({ queryKey: ["integration-connections"] });
       qc.invalidateQueries({ queryKey: ["route-integrations"] });
     },
-  });
-}
-
-export function useIntegrationDeliveries(status = "") {
-  const q = status ? `?status=${status}` : "";
-  return useQuery({
-    queryKey: ["integration-deliveries", status],
-    queryFn: () => get<IntegrationDeliveryItem[]>(`${ns()}/integrations/deliveries${q}`),
   });
 }
 

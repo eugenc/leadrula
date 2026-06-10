@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
@@ -28,18 +29,33 @@ func (h *Handler) RegisterPublisher(r chi.Router) {
 	r.Get("/billing/disputes", h.pubDisputes)
 	r.With(auth.RequireRole("admin")).Post("/billing/disputes/{id}/accept", h.accept)
 	r.With(auth.RequireRole("admin")).Post("/billing/disputes/{id}/reject", h.reject)
-	r.With(auth.RequireRole("admin")).Post("/billing/manual-invoice", h.manualInvoice)
+	r.With(auth.RequireRole("admin")).Post("/billing/invoices", h.createInvoice)
+	r.With(auth.RequireRole("admin")).Get("/billing/invoices", h.pubInvoices)
+	r.With(auth.RequireRole("admin")).Post("/billing/invoices/{id}/mark-paid", h.markInvoicePaid)
+	r.With(auth.RequireRole("admin")).Post("/billing/invoices/{id}/void", h.voidInvoice)
 	r.With(auth.RequireRole("admin")).Post("/billing/stripe/connect", h.connectStripe)
 	r.With(auth.RequireRole("admin")).Get("/billing/stripe/status", h.stripeStatus)
+	r.With(auth.RequireRole("admin")).Post("/billing/stripe/keys", h.saveStripeKeys)
+	r.With(auth.RequireRole("admin")).Get("/billing/stripe/keys/status", h.stripeKeysStatus)
+}
+
+// RegisterPublic mounts unauthenticated billing callbacks.
+func (h *Handler) RegisterPublic(r chi.Router) {
+	r.Get("/publisher/billing/stripe/oauth/callback", h.stripeOAuthCallback)
 }
 
 // RegisterBuyer mounts the buyer's own balance + ledger + disputes.
 func (h *Handler) RegisterBuyer(r chi.Router) {
 	r.Get("/billing/balance", h.balance)
+	r.Get("/billing/stripe/config", h.buyerStripeConfig)
 	r.Post("/billing/balance/topup-intent", h.createTopupIntent)
+	r.Post("/billing/balance/confirm-topup", h.confirmTopup)
 	r.Get("/billing/transactions", h.buyerTransactions)
 	r.Get("/billing/disputes", h.buyerDisputes)
 	r.Post("/billing/disputes", h.openDispute)
+	r.Get("/billing/invoices", h.buyerInvoices)
+	r.Post("/billing/invoices/{id}/pay-intent", h.createInvoicePayIntent)
+	r.Post("/billing/invoices/{id}/confirm-payment", h.confirmInvoicePayment)
 	r.Post("/billing/stripe/setup-intent", h.createSetupIntent)
 	r.Get("/billing/stripe/payment-methods", h.listPaymentMethods)
 	r.Delete("/billing/stripe/payment-methods/{id}", h.detachPaymentMethod)
@@ -70,24 +86,34 @@ func (h *Handler) StripeWebhook(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "parse error", http.StatusBadRequest)
 			return
 		}
-		if pi.Metadata["purpose"] != "balance_topup" {
-			break
-		}
-		amountDollars := float64(pi.Amount) / 100.0
 		chargeID := ""
 		if pi.LatestCharge != nil {
 			chargeID = pi.LatestCharge.ID
 		} else if id, ok := event.Data.Object["latest_charge"].(string); ok {
 			chargeID = id
 		}
-		if err := h.svc.ConfirmTopup(r.Context(),
-			pi.Metadata["buyer_public_id"],
-			amountDollars,
-			pi.ID,
-			chargeID,
-		); err != nil {
-			http.Error(w, "topup failed", http.StatusInternalServerError)
-			return
+		amountDollars := float64(pi.Amount) / 100.0
+		switch pi.Metadata["purpose"] {
+		case "balance_topup":
+			if err := h.svc.ConfirmTopup(r.Context(),
+				pi.Metadata["buyer_public_id"],
+				amountDollars,
+				pi.ID,
+				chargeID,
+			); err != nil {
+				http.Error(w, "topup failed", http.StatusInternalServerError)
+				return
+			}
+		case "invoice_payment":
+			if err := h.svc.ConfirmInvoicePayment(r.Context(),
+				pi.Metadata["invoice_public_id"],
+				amountDollars,
+				pi.ID,
+				chargeID,
+			); err != nil {
+				http.Error(w, "invoice payment failed", http.StatusInternalServerError)
+				return
+			}
 		}
 	}
 	w.WriteHeader(http.StatusOK)
@@ -101,12 +127,28 @@ func (h *Handler) connectStripe(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	url, err := h.svc.ConnectStripe(r.Context(), p.AccountID, body.ReturnBaseURL)
+	oauthURL, err := h.svc.ConnectStripe(r.Context(), p.AccountID, body.ReturnBaseURL)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"onboarding_url": url})
+	httpx.JSON(w, http.StatusOK, map[string]any{"oauth_url": oauthURL})
+}
+
+func (h *Handler) stripeOAuthCallback(w http.ResponseWriter, r *http.Request) {
+	code := r.URL.Query().Get("code")
+	state := r.URL.Query().Get("state")
+	if code == "" || state == "" {
+		http.Error(w, "missing code or state", http.StatusBadRequest)
+		return
+	}
+	returnBaseURL, err := h.svc.CompleteStripeOAuth(r.Context(), code, state)
+	if err != nil {
+		http.Error(w, "oauth failed", http.StatusBadRequest)
+		return
+	}
+	target := returnBaseURL + "/p/integrations?stripe=complete"
+	http.Redirect(w, r, target, http.StatusFound)
 }
 
 func (h *Handler) stripeStatus(w http.ResponseWriter, r *http.Request) {
@@ -119,6 +161,42 @@ func (h *Handler) stripeStatus(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"status": status})
 }
 
+func (h *Handler) saveStripeKeys(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		SecretKey      string `json:"secret_key"`
+		PublishableKey string `json:"publishable_key"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	if err := h.svc.SavePublisherStripeKeys(r.Context(), p.AccountID, body.SecretKey, body.PublishableKey); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) stripeKeysStatus(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	st, err := h.svc.PublisherStripeKeysStatus(r.Context(), p.AccountID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, st)
+}
+
+func (h *Handler) buyerStripeConfig(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	cfg, err := h.svc.BuyerStripeConfig(r.Context(), p.AccountID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, cfg)
+}
+
 func (h *Handler) createTopupIntent(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
@@ -127,22 +205,41 @@ func (h *Handler) createTopupIntent(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	clientSecret, err := h.svc.CreateTopupIntent(r.Context(), p.AccountID, body.AmountCents)
+	result, err := h.svc.CreateTopupIntent(r.Context(), p.AccountID, body.AmountCents)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"client_secret": clientSecret})
+	httpx.JSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) confirmTopup(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		PaymentIntentID string `json:"payment_intent_id"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	if body.PaymentIntentID == "" {
+		httpx.WriteError(w, httpx.Validation("payment_intent_id is required"))
+		return
+	}
+	if err := h.svc.ConfirmDirectTopup(r.Context(), p.AccountID, body.PaymentIntentID); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) createSetupIntent(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	clientSecret, err := h.svc.CreateSetupIntent(r.Context(), p.AccountID)
+	result, err := h.svc.CreateSetupIntent(r.Context(), p.AccountID)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"client_secret": clientSecret})
+	httpx.JSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) listPaymentMethods(w http.ResponseWriter, r *http.Request) {
@@ -170,8 +267,9 @@ func (h *Handler) detachPaymentMethod(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) pubTransactions(w http.ResponseWriter, r *http.Request) {
-	buyerID, _ := strconv.ParseInt(r.URL.Query().Get("buyer_id"), 10, 64)
-	items, err := h.svc.ListTransactions(r.Context(), buyerID, r.URL.Query().Get("type"))
+	p := auth.FromContext(r.Context())
+	filterBuyerID, _ := strconv.ParseInt(r.URL.Query().Get("buyer_id"), 10, 64)
+	items, err := h.svc.ListPublisherTransactions(r.Context(), p.AccountID, filterBuyerID, r.URL.Query().Get("type"))
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -180,7 +278,8 @@ func (h *Handler) pubTransactions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) pubDisputes(w http.ResponseWriter, r *http.Request) {
-	items, err := h.svc.ListDisputes(r.Context(), 0, r.URL.Query().Get("status"))
+	p := auth.FromContext(r.Context())
+	items, err := h.svc.ListPublisherDisputes(r.Context(), p.AccountID, r.URL.Query().Get("status"))
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -206,7 +305,8 @@ func (h *Handler) reject(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func (h *Handler) manualInvoice(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) createInvoice(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
 	var body struct {
 		BuyerID     int64   `json:"buyer_id"`
 		Amount      float64 `json:"amount"`
@@ -215,12 +315,94 @@ func (h *Handler) manualInvoice(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	t, err := h.svc.ManualInvoice(r.Context(), body.BuyerID, body.Amount, body.Description)
+	inv, err := h.svc.CreatePrepayInvoice(r.Context(), p.AccountID, body.BuyerID, body.Amount, body.Description)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusCreated, t)
+	httpx.JSON(w, http.StatusCreated, inv)
+}
+
+func (h *Handler) pubInvoices(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	items, err := h.svc.ListPublisherInvoices(r.Context(), p.AccountID, r.URL.Query().Get("status"))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if items == nil {
+		items = []Invoice{}
+	}
+	httpx.JSON(w, http.StatusOK, items)
+}
+
+func (h *Handler) markInvoicePaid(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		PaymentMethod string `json:"payment_method"`
+		Note          string `json:"note"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	inv, err := h.svc.MarkInvoicePaid(r.Context(), p.AccountID, idp(r), p.UserID, body.PaymentMethod, body.Note)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, inv)
+}
+
+func (h *Handler) voidInvoice(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	inv, err := h.svc.VoidInvoice(r.Context(), p.AccountID, idp(r))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, inv)
+}
+
+func (h *Handler) buyerInvoices(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	items, err := h.svc.ListBuyerInvoices(r.Context(), p.AccountID, r.URL.Query().Get("status"))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if items == nil {
+		items = []Invoice{}
+	}
+	httpx.JSON(w, http.StatusOK, items)
+}
+
+func (h *Handler) createInvoicePayIntent(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	result, err := h.svc.CreateInvoicePaymentIntent(r.Context(), p.AccountID, idp(r))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) confirmInvoicePayment(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		PaymentIntentID string `json:"payment_intent_id"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	if body.PaymentIntentID == "" {
+		httpx.WriteError(w, httpx.Validation("payment_intent_id is required"))
+		return
+	}
+	if err := h.svc.ConfirmDirectInvoicePayment(r.Context(), p.AccountID, idp(r), body.PaymentIntentID); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) balance(w http.ResponseWriter, r *http.Request) {
@@ -274,3 +456,6 @@ func idp(r *http.Request) int64 {
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	return id
 }
+
+// unused import guard for url in redirects — kept for future query escaping
+var _ = url.Values{}

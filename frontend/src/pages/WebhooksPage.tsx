@@ -42,6 +42,7 @@ import { ArrowRightLeft, Copy, Eye, EyeOff, KeyRound, Pencil, Plus, Trash2, Zap 
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import type { Webhook, WebhookEvent, WebhookOutboundTrigger, OutboundTriggerEvent, OutboundFormat, OutboundMethod, OutboundFieldMapEntry, ResponseMapEntry, InboundCondition, WebhookDelivery } from "@/types";
+import { canReplayDelivery, webhookDeliveryStatusLabel } from "@/features/intake/logShared";
 
 type MappingContext = {
   deliveryId?: number;
@@ -132,12 +133,12 @@ function InboundConditionRow({
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 const BUILTINS = [
   "first_name", "last_name", "phone", "email", "address", "city", "state", "zip",
-  "source", "external_id", "action_at", "disqualification_reason_id",
+  "source", "external_id", "action_at", "disqualification_reason_id", "cost", "revenue",
 ];
 
 const OUTBOUND_BUILTINS = [
   "first_name", "last_name", "phone", "email", "address", "city", "state", "zip",
-  "source", "external_id", "public_id", "status",
+  "source", "external_id", "public_id", "status", "cost", "revenue",
 ];
 
 const OUTBOUND_META_FIELDS = [
@@ -285,7 +286,7 @@ export function WebhooksPage() {
                 <TH>Direction</TH>
                 <TH>Endpoint</TH>
                 <TH>Active</TH>
-                <TH />
+                <TH className="min-w-0 w-12" />
               </tr>
             </THead>
             <TBody>
@@ -639,7 +640,7 @@ function WebhookDrawer({
                   <p className="text-sm text-gray-500">No actions configured.</p>
                 ) : (
                   <Table>
-                    <THead><tr><TH>Conditions</TH><TH>Action</TH><TH /></tr></THead>
+                    <THead><tr><TH>Conditions</TH><TH>Action</TH><TH className="min-w-0 w-12" /></tr></THead>
                     <TBody>
                       {(actions ?? []).map((a) => (
                         <TR key={a.id}>
@@ -677,7 +678,7 @@ function WebhookDrawer({
                   <p className="text-sm text-gray-500">No outbound triggers configured.</p>
                 ) : (
                   <Table>
-                    <THead><tr><TH>Event</TH><TH>Active</TH><TH /></tr></THead>
+                    <THead><tr><TH>Event</TH><TH>Active</TH><TH className="min-w-0 w-12" /></tr></THead>
                     <TBody>
                       {(triggers ?? []).map((t) => (
                         <TR key={t.id}>
@@ -773,14 +774,6 @@ function WebhookDetailDrawer({
     });
   }
 
-  function deliveryStatusLabel(d: WebhookDelivery) {
-    return d.status === "skipped" ? "Captured" : d.status;
-  }
-
-  function canReplay(d: WebhookDelivery) {
-    return d.status === "skipped" && !d.lead_id;
-  }
-
   return (
     <FormDrawer open onClose={onClose} title={webhook.name} subtitle={`Webhook · ${webhook.slug}`} width={720}>
       <div className="space-y-4">
@@ -804,14 +797,14 @@ function WebhookDetailDrawer({
           ) : (
             <Table>
               <THead>
-                <tr><TH>Time</TH><TH>Status</TH><TH>Lead</TH><TH /></tr>
+                <tr><TH>Time</TH><TH>Status</TH><TH>Lead</TH><TH className="min-w-0 w-12" /></tr>
               </THead>
               <TBody>
                 {(deliveries?.items ?? []).map((d) => (
                   <Fragment key={d.id}>
                     <TR>
                       <TD className="text-xs">{format(new Date(d.created_at), "MMM d h:mma")}</TD>
-                      <TD><Badge>{deliveryStatusLabel(d)}</Badge></TD>
+                      <TD><Badge>{webhookDeliveryStatusLabel(d.status)}</Badge></TD>
                       <TD className="font-mono text-xs">{d.lead_public_id ?? "—"}</TD>
                       <TD>
                         <div className="flex justify-end gap-1">
@@ -825,7 +818,7 @@ function WebhookDetailDrawer({
                           >
                             Actions
                           </Button>
-                          {canReplay(d) && (
+                          {canReplayDelivery(d) && (
                             <Button
                               size="sm"
                               disabled={replay.isPending}
@@ -1182,7 +1175,7 @@ function ActionFieldMapping({
       </div>
       {(entries ?? []).length > 0 && (
         <Table>
-          <THead><tr><TH>Payload key</TH><TH>Lead field</TH><TH /></tr></THead>
+          <THead><tr><TH>Payload key</TH><TH>Lead field</TH><TH className="min-w-0 w-12" /></tr></THead>
           <TBody>
             {(entries ?? []).map((e) => (
               <TR key={e.id}>
@@ -1419,7 +1412,7 @@ function OutboundFieldMapping({
         <p className="text-sm text-gray-500">No parameters mapped yet.</p>
       ) : (
         <Table>
-          <THead><tr><TH>Param name</TH><TH>Source</TH><TH>Value</TH><TH /></tr></THead>
+          <THead><tr><TH>Param name</TH><TH>Source</TH><TH>Value</TH><TH className="min-w-0 w-12" /></tr></THead>
           <TBody>
             {entries.map((e, idx) => (
               <TR key={idx}>
