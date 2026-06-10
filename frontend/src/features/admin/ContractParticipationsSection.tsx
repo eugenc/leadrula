@@ -50,8 +50,8 @@ export function ContractParticipationsSection({ contract }: { contract: Contract
   function copyInvite() {
     invite.mutate(contract.id, {
       onSuccess: (info) => {
-        const path = `/b/contract-invite/${info.token}`;
-        void navigator.clipboard.writeText(path).then(() => toast.success("Invite link copied"));
+        const url = `${window.location.origin}/b/contract-invite/${info.token}`;
+        void navigator.clipboard.writeText(url).then(() => toast.success("Invite link copied"));
       },
       onError: (e) => toast.error(errorMessage(e)),
     });

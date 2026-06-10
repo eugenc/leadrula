@@ -520,7 +520,7 @@ function HistoryTab({ leadId }: { leadId: number }) {
             <div className="text-xs text-gray-400">
               {h.moved_by_name ?? "System"} · {format(new Date(h.created_at), "MMM d, h:mma")}
               {h.action_at_captured &&
-                ` · action ${format(new Date(h.action_at_captured), "MMM d, h:mma")}`}
+                ` · action ${format(new Date(h.action_at_captured), "MMM d, h:mm a")}`}
               {h.disqualification_reason && ` · ${h.disqualification_reason}`}
             </div>
           </div>

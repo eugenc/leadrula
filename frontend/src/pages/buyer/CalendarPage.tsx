@@ -57,7 +57,7 @@ export function CalendarPage() {
                     >
                       <span className="font-medium text-gray-800">{e.title}</span>
                       <span className={e.overdue ? "font-semibold text-danger" : "text-gray-400"}>
-                        {format(new Date(e.action_at), "h:mma")}
+                        {format(new Date(e.action_at), "h:mm a")}
                       </span>
                     </button>
                   ))}

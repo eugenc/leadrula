@@ -192,7 +192,7 @@ export function cellValue(lead: Lead, colId: string, customFields: CustomField[]
     case "tags":
       return (lead.tags ?? []).length ? (lead.tags ?? []).join(", ") : "—";
     case "action_at":
-      return lead.action_at ? format(new Date(lead.action_at), "MMM d, h:mma") : "—";
+      return lead.action_at ? format(new Date(lead.action_at), "MMM d, h:mm a") : "—";
     case "created_at":
       return format(new Date(lead.created_at), "MMM d, yyyy");
     case "stage_entered_at":

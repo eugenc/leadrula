@@ -36,6 +36,7 @@ import { PublisherBillingPage } from "@/pages/publisher/PublisherBillingPage";
 
 import { CalendarPage } from "@/pages/buyer/CalendarPage";
 import { ContractPage } from "@/pages/buyer/ContractPage";
+import { ContractInvitePage } from "@/pages/buyer/ContractInvitePage";
 import { BuyerBillingPage } from "@/pages/buyer/BuyerBillingPage";
 import { CollaborationLayout } from "@/pages/buyer/CollaborationLayout";
 import { CollaborationAccessTab } from "@/pages/buyer/CollaborationAccessTab";
@@ -134,6 +135,7 @@ export default function App() {
                 <Route path="fields" element={<CustomFieldsPage />} />
                 <Route path="publishers" element={<PublishersPage />} />
                 <Route path="contract" element={<ContractPage />} />
+                <Route path="contract-invite/:token" element={<ContractInvitePage />} />
                 <Route path="routes" element={<RoutesPage />} />
                 <Route path="collaboration" element={<CollaborationLayout />}>
                   <Route index element={<CollaborationAccessTab />} />

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, get } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { queryClient } from "@/lib/queryClient";
@@ -12,8 +12,15 @@ import type { Me } from "@/types";
 import { userFromMe } from "@/store/authStore";
 import { homePath } from "@/lib/homePath";
 
+function loginDestination(accountType: Me["account"]["type"], next: string | null) {
+  if (next && next.startsWith("/") && !next.startsWith("//")) return next;
+  return homePath(accountType);
+}
+
 export function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const next = searchParams.get("next");
   const setAuth = useAuthStore((s) => s.setAuth);
   const setTokens = useAuthStore((s) => s.setTokens);
   const [email, setEmail] = useState("");
@@ -33,7 +40,7 @@ export function LoginPage() {
       setTokens(access, refresh);
       const me = await get<Me>("/auth/me");
       setAuth(access, refresh, userFromMe(me));
-      navigate(homePath(me.account.type));
+      navigate(loginDestination(me.account.type, next));
     } catch {
       setError("Invalid email or password");
       useAuthStore.getState().logout();
