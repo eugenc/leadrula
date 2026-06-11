@@ -1280,7 +1280,24 @@ export function useApiKeys() {
 export function useCreateApiKey() {
   const inv = useInvalidate(["api-keys"]);
   return useMutation({
-    mutationFn: (name: string) => post<{ key: ApiKey; secret: string }>(`${ns()}/api-keys`, { name }),
+    mutationFn: (name: string) =>
+      post<{ key: ApiKey; secret: string }>(`${ns()}/api-keys`, { name: name.trim() }),
+    onSuccess: inv,
+  });
+}
+export function useUpdateApiKey() {
+  const inv = useInvalidate(["api-keys"]);
+  return useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) =>
+      patch<ApiKey>(`${ns()}/api-keys/${id}`, { name: name.trim() }),
+    onSuccess: inv,
+  });
+}
+export function useRotateApiKey() {
+  const inv = useInvalidate(["api-keys"]);
+  return useMutation({
+    mutationFn: (id: number) =>
+      post<{ key: ApiKey; secret: string }>(`${ns()}/api-keys/${id}/rotate`),
     onSuccess: inv,
   });
 }

@@ -9,11 +9,13 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -78,6 +80,49 @@ func (s *Service) List(ctx context.Context, accountID int64) ([]APIKey, error) {
 		out = append(out, k)
 	}
 	return out, rows.Err()
+}
+
+func (s *Service) UpdateName(ctx context.Context, accountID, keyID int64, name string) (*APIKey, error) {
+	k := &APIKey{}
+	err := s.pool.QueryRow(ctx,
+		`UPDATE api_keys SET name = $3
+		 WHERE id = $1 AND account_id = $2
+		 RETURNING id, name, key_prefix, scopes, last_used_at, revoked_at, created_at`,
+		keyID, accountID, name).Scan(
+		&k.ID, &k.Name, &k.KeyPrefix, &k.Scopes, &k.LastUsedAt, &k.RevokedAt, &k.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, httpx.NotFound("api key not found")
+		}
+		return nil, err
+	}
+	return k, nil
+}
+
+func (s *Service) Rotate(ctx context.Context, accountID, keyID int64) (*APIKey, string, error) {
+	secret := randString(32)
+	prefix := randString(8)
+	full := prefix + "." + secret
+
+	hash, err := auth.HashPassword(full)
+	if err != nil {
+		return nil, "", err
+	}
+
+	k := &APIKey{}
+	err = s.pool.QueryRow(ctx,
+		`UPDATE api_keys SET key_prefix = $3, key_hash = $4
+		 WHERE id = $1 AND account_id = $2 AND revoked_at IS NULL
+		 RETURNING id, name, key_prefix, scopes, last_used_at, revoked_at, created_at`,
+		keyID, accountID, prefix, hash).Scan(
+		&k.ID, &k.Name, &k.KeyPrefix, &k.Scopes, &k.LastUsedAt, &k.RevokedAt, &k.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, "", httpx.NotFound("api key not found")
+		}
+		return nil, "", err
+	}
+	return k, full, nil
 }
 
 func (s *Service) Revoke(ctx context.Context, accountID, keyID int64) error {
@@ -148,6 +193,8 @@ func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api-keys", h.list)
 	r.With(auth.RequireRole("admin")).Post("/api-keys", h.create)
+	r.With(auth.RequireRole("admin")).Patch("/api-keys/{id}", h.update)
+	r.With(auth.RequireRole("admin")).Post("/api-keys/{id}/rotate", h.rotate)
 	r.With(auth.RequireRole("admin")).Delete("/api-keys/{id}", h.revoke)
 }
 
@@ -170,7 +217,12 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	k, full, err := h.svc.Create(r.Context(), p.AccountID, body.Name, body.Scopes)
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, "name is required")
+		return
+	}
+	k, full, err := h.svc.Create(r.Context(), p.AccountID, name, body.Scopes)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -178,11 +230,49 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, map[string]any{"key": k, "secret": full})
 }
 
+func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	id, err := parseKeyID(w, r)
+	if err != nil {
+		return
+	}
+	var body struct {
+		Name string `json:"name"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, "name is required")
+		return
+	}
+	k, err := h.svc.UpdateName(r.Context(), p.AccountID, id, name)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, k)
+}
+
+func (h *Handler) rotate(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	id, err := parseKeyID(w, r)
+	if err != nil {
+		return
+	}
+	k, full, err := h.svc.Rotate(r.Context(), p.AccountID, id)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"key": k, "secret": full})
+}
+
 func (h *Handler) revoke(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	id, err := parseKeyID(w, r)
 	if err != nil {
-		httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, "invalid id")
 		return
 	}
 	if err := h.svc.Revoke(r.Context(), p.AccountID, id); err != nil {
@@ -190,6 +280,15 @@ func (h *Handler) revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func parseKeyID(w http.ResponseWriter, r *http.Request) (int64, error) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, "invalid id")
+		return 0, err
+	}
+	return id, nil
 }
 
 func randString(n int) string {

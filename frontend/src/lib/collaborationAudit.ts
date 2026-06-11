@@ -135,7 +135,12 @@ function actionFromPath(method: string, segments: string[]): string | null {
   if (joined.match(/^partnerships\/[^/]+\/reject$/)) return "Rejected partnership";
 
   if (joined === "api-keys") return method === "POST" ? "Created API key" : null;
-  if (joined.match(/^api-keys\/[^/]+$/)) return "Revoked API key";
+  if (joined.match(/^api-keys\/[^/]+$/)) {
+    if (method === "DELETE") return "Revoked API key";
+    if (method === "PATCH") return "Renamed API key";
+    return null;
+  }
+  if (joined.match(/^api-keys\/[^/]+\/rotate$/)) return "Rotated API key";
 
   if (joined.match(/^notifications\/[^/]+\/read$/)) return "Marked notification read";
 
