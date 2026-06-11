@@ -99,7 +99,12 @@ func (h *Handler) createConnection(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) createSunbaseConnection(w http.ResponseWriter, r *http.Request, accountID int64, name string, credentials json.RawMessage, config map[string]any) {
-	name = h.svc.ResolveSunbaseConnectionName(r.Context(), accountID, name)
+	var err error
+	name, err = h.svc.ResolveSunbaseConnectionName(r.Context(), accountID, name)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
 	if config == nil {
 		config = map[string]any{}
 	}
@@ -129,14 +134,14 @@ func (h *Handler) createSunbaseConnection(w http.ResponseWriter, r *http.Request
 	)
 	if err != nil {
 		_ = h.svc.DeleteConnection(r.Context(), accountID, conn.ID)
-		httpx.WriteError(w, err)
+		httpx.WriteError(w, wrapSunbaseProvisionErr("provision webhooks", err))
 		return
 	}
 	merged := webhooks.MergeSunbaseConfig(config, ids, endpointURL, fieldMapJSON)
 	if err := h.svc.FinalizeSunbaseConnection(r.Context(), conn.ID, merged); err != nil {
 		h.webhooks.DeleteSunbaseWebhooks(r.Context(), accountID, *ids)
 		_ = h.svc.DeleteConnection(r.Context(), accountID, conn.ID)
-		httpx.WriteError(w, err)
+		httpx.WriteError(w, wrapSunbaseProvisionErr("finalize connection", err))
 		return
 	}
 	conn.Config = merged

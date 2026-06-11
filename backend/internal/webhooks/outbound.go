@@ -183,24 +183,11 @@ func (s *Service) syncOutboundConnection(ctx context.Context, w *Webhook) error 
 	if err := s.pool.QueryRow(ctx,
 		`INSERT INTO integration_connections(account_id, provider_id, name, credentials, config)
 		 VALUES ($1,$2,$3,$4,'{}')
-		 ON CONFLICT ON CONSTRAINT uq_webhook_connection DO UPDATE
-		   SET credentials = EXCLUDED.credentials,
-		       name        = EXCLUDED.name
+		 ON CONFLICT (account_id, provider_id, name) DO UPDATE
+		   SET credentials = EXCLUDED.credentials
 		 RETURNING id`,
 		w.AccountID, providerID, name, encrypted).Scan(&connID); err != nil {
-		if err2 := s.pool.QueryRow(ctx,
-			`SELECT id FROM integration_connections WHERE account_id=$1 AND name=$2`,
-			w.AccountID, name).Scan(&connID); err2 != nil {
-			if err3 := s.pool.QueryRow(ctx,
-				`INSERT INTO integration_connections(account_id, provider_id, name, credentials, config)
-				 VALUES ($1,$2,$3,$4,'{}') RETURNING id`,
-				w.AccountID, providerID, name, encrypted).Scan(&connID); err3 != nil {
-				return err3
-			}
-		} else {
-			s.pool.Exec(ctx, //nolint
-				`UPDATE integration_connections SET credentials=$2 WHERE id=$1`, connID, encrypted)
-		}
+		return err
 	}
 	if _, err := s.pool.Exec(ctx,
 		`UPDATE webhooks SET outbound_connection_id=$2 WHERE id=$1`, w.ID, connID); err != nil {

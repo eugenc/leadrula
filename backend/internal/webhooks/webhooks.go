@@ -149,7 +149,7 @@ func NewService(pool *pgxpool.Pool, leadRepo *leads.Repository, leadSvc *leads.S
 	return &Service{pool: pool, leads: leadRepo, leadSvc: leadSvc, encKey: encKey, outbound: outbound}
 }
 
-const webhookCols = `id, account_id, name, slug, secret_prefix, is_active,
+const webhookCols = `id, account_id, name, slug, COALESCE(secret_prefix, ''), is_active,
     inbound_enabled, inbound_secret_required, outbound_enabled, outbound_sign_enabled,
     outbound_url, outbound_format, outbound_method,
     outbound_payload_template, outbound_field_map, outbound_response_map,

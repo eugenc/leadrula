@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/echayko/leadrula/backend/internal/integrations/providers"
@@ -12,6 +13,18 @@ import (
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/jackc/pgx/v5"
 )
+
+func wrapSunbaseProvisionErr(step string, err error) error {
+	if err == nil {
+		return nil
+	}
+	var appErr *httpx.AppError
+	if errors.As(err, &appErr) {
+		return appErr
+	}
+	log.Printf("sunbase %s: %v", step, err)
+	return httpx.ServiceUnavailable("failed to set up SunBase webhooks")
+}
 
 type InboundWebhookInfo struct {
 	ID             int64   `json:"id"`
@@ -107,7 +120,7 @@ func (s *Service) UpdateSunbaseConnection(
 	ids := webhooks.ParseSunbaseWebhookIDs(config)
 	if syncOutbound != nil && (ids.OutboundPost > 0 || ids.OutboundGet > 0) {
 		if err := syncOutbound(ctx, ids, endpointURL, fieldMapJSON); err != nil {
-			return nil, err
+			return nil, wrapSunbaseProvisionErr("sync outbound webhooks", err)
 		}
 	}
 
@@ -188,10 +201,10 @@ func sunbaseEndpointFromConfig(config map[string]any) string {
 	return providers.DefaultSunbaseEndpoint
 }
 
-func (s *Service) ResolveSunbaseConnectionName(ctx context.Context, accountID int64, name string) string {
+func (s *Service) ResolveSunbaseConnectionName(ctx context.Context, accountID int64, name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name != "" {
-		return name
+		return name, nil
 	}
 	const base = "SunBase"
 	for i := range 20 {
@@ -200,17 +213,19 @@ func (s *Service) ResolveSunbaseConnectionName(ctx context.Context, accountID in
 			candidate = fmt.Sprintf("%s %d", base, i+1)
 		}
 		var exists bool
-		_ = s.pool.QueryRow(ctx,
+		if err := s.pool.QueryRow(ctx,
 			`SELECT EXISTS(
 				SELECT 1 FROM integration_connections c
 				JOIN integration_providers p ON p.id = c.provider_id
 				WHERE c.account_id = $1 AND p.slug = 'sunbase' AND c.name = $2
-			)`, accountID, candidate).Scan(&exists)
+			)`, accountID, candidate).Scan(&exists); err != nil {
+			return "", err
+		}
 		if !exists {
-			return candidate
+			return candidate, nil
 		}
 	}
-	return base
+	return "", httpx.Conflict("could not generate unique SunBase connection name")
 }
 
 func schemaNameFromCredentials(credentialsRaw json.RawMessage, config map[string]any) string {
