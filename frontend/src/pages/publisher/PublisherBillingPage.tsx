@@ -6,8 +6,8 @@ import { formatAccountTypeLabel, formatBuyerWithType } from "@/features/admin/co
 import { PageBody } from "@/components/layout/PageBody";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Badge, Spinner, EmptyState } from "@/components/ui/misc";
-import { cn, formatMoney, resolveTxnCategory, txnTypeBadgeClass } from "@/lib/utils";
+import { Spinner, EmptyState } from "@/components/ui/misc";
+import { cn, formatMoney, resolveTxnCategory } from "@/lib/utils";
 import { format } from "date-fns";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
@@ -151,9 +151,7 @@ function TransactionRow({ t }: { t: Transaction }) {
   const typeLabel = resolveTxnCategory(t);
   return (
     <TR>
-      <TD>
-        <Badge className={txnTypeBadgeClass(typeLabel)}>{typeLabel}</Badge>
-      </TD>
+      <TD className="font-medium text-gray-800">{typeLabel}</TD>
       <TD className="font-medium text-gray-800">
         {formatAccountName(t.counterparty_name, t.buyer_name)}
       </TD>

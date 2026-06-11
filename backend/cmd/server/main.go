@@ -142,7 +142,7 @@ func main() {
 	calH := calendar.NewHandler(calSvc)
 
 	intakeSvc := intake.NewService(pool, leadsRepo, notifSvc, accountsRepo, integrationsEnq)
-	intakeH := intake.NewHandler(intakeSvc)
+	intakeH := intake.NewHandler(intakeSvc, apikeysSvc)
 
 	webhooksSvc := webhooks.NewService(pool, leadsRepo, leadsSvc, encKey, integrationsSvc)
 	webhooksH := webhooks.NewHandler(webhooksSvc)
@@ -161,6 +161,9 @@ func main() {
 		pub.Use(apikeysSvc.RequireAPIKey)
 		intakeH.RegisterPublicRoutes(pub)
 	})
+
+	// source ingest (per-source API-key auth)
+	intakeH.RegisterPublicSourceRoutes(r)
 
 	// inbound webhooks (per-webhook secret auth)
 	webhooksH.RegisterPublicRoutes(r)

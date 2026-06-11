@@ -13,19 +13,13 @@ import { Button } from "@/components/ui/button";
 import { Label, Textarea } from "@/components/ui/input";
 import { Badge, Spinner, EmptyState, StatCard } from "@/components/ui/misc";
 import { FormDrawer } from "@/components/ui/dialog";
-import { cn, formatMoney, formatTxnType } from "@/lib/utils";
+import { cn, formatMoney, resolveBuyerTxnCategory } from "@/lib/utils";
 import { format } from "date-fns";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import type { Dispute, Transaction } from "@/types";
 
 type BillingTab = "transactions" | "invoices" | "disputes" | "payments";
-
-function txnBadgeVariant(t: Transaction): "overdue" | "distributed" | "pending" {
-  if (t.type === "topup" || t.type === "credit" || t.type === "dispute_credit") return "distributed";
-  if (t.type === "manual_invoice" || t.amount < 0) return "overdue";
-  return "pending";
-}
 
 function disputeBadgeVariant(status: Dispute["status"]): "overdue" | "distributed" | "pending" {
   if (status === "accepted") return "distributed";
@@ -98,11 +92,11 @@ function Transactions() {
           </tr>
         </THead>
         <TBody>
-          {(txns ?? []).map((t) => (
+          {(txns ?? []).map((t) => {
+            const typeLabel = resolveBuyerTxnCategory(t);
+            return (
             <TR key={t.id}>
-              <TD>
-                <Badge variant={txnBadgeVariant(t)}>{formatTxnType(t.type)}</Badge>
-              </TD>
+              <TD className="font-medium text-gray-800">{typeLabel}</TD>
               <TD className="font-medium text-gray-800">{t.publisher_name ?? "—"}</TD>
               <TD>{t.lead_name ?? "—"}</TD>
               <TD className={t.amount < 0 ? "font-medium text-danger-fg" : "text-jade-700"}>
@@ -119,7 +113,8 @@ function Transactions() {
                 {disputedTxnIds.has(t.id) && <Badge variant="pending">disputed</Badge>}
               </TD>
             </TR>
-          ))}
+            );
+          })}
         </TBody>
       </Table>
 

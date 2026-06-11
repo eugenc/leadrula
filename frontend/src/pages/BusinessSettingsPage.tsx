@@ -8,7 +8,17 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import { TIMEZONES } from "@/lib/timezones";
+import {
+  COUNTRIES,
+  countryCodeForName,
+  countryNameForCode,
+  stateMatchesSubdivision,
+  subdivisionsForCountryCode,
+} from "@/lib/countries";
 import type { AccountType, Me } from "@/types";
+
+const fieldLabelClass = "text-sm font-medium text-gray-400";
+const fieldInputClass = "text-sm";
 
 function HandlerIDRow({
   handlerId,
@@ -51,10 +61,29 @@ type BusinessForm = {
   city: string;
   state: string;
   postal_code: string;
-  country: string;
+  countrySelect: string;
+  countryOther: string;
 };
 
+type ApiAddress = Pick<BusinessForm, "city" | "state" | "postal_code"> & { country: string };
+
+function effectiveCountry(form: Pick<BusinessForm, "countrySelect" | "countryOther">): string {
+  if (form.countrySelect === "OTHER") return form.countryOther.trim();
+  return countryNameForCode(form.countrySelect);
+}
+
+function formToApiAddress(form: BusinessForm): ApiAddress {
+  return {
+    city: form.city.trim(),
+    state: form.state.trim(),
+    postal_code: form.postal_code.trim(),
+    country: effectiveCountry(form),
+  };
+}
+
 function accountToForm(account: Me["account"]): BusinessForm {
+  const countryName = account.country ?? "";
+  const code = countryCodeForName(countryName);
   return {
     name: account.name ?? "",
     website: account.website ?? "",
@@ -66,7 +95,8 @@ function accountToForm(account: Me["account"]): BusinessForm {
     city: account.city ?? "",
     state: account.state ?? "",
     postal_code: account.postal_code ?? "",
-    country: account.country ?? "",
+    countrySelect: !countryName ? "" : code || "OTHER",
+    countryOther: code === "OTHER" ? countryName : "",
   };
 }
 
@@ -80,12 +110,33 @@ function buildPatch(form: BusinessForm, saved: BusinessForm): Partial<Me["accoun
   if (form.phone.trim() !== saved.phone) body.phone = form.phone.trim();
   if (form.address_line1.trim() !== saved.address_line1) body.address_line1 = form.address_line1.trim();
   if (form.address_line2.trim() !== saved.address_line2) body.address_line2 = form.address_line2.trim();
-  if (form.city.trim() !== saved.city) body.city = form.city.trim();
-  if (form.state.trim() !== saved.state) body.state = form.state.trim();
-  if (form.postal_code.trim() !== saved.postal_code) body.postal_code = form.postal_code.trim();
-  if (form.country.trim() !== saved.country) body.country = form.country.trim();
+
+  const address = formToApiAddress(form);
+  const savedAddress = formToApiAddress(saved);
+  if (address.city !== savedAddress.city) body.city = address.city;
+  if (address.state !== savedAddress.state) body.state = address.state;
+  if (address.postal_code !== savedAddress.postal_code) body.postal_code = address.postal_code;
+  if (address.country !== savedAddress.country) body.country = address.country;
+
   return body;
 }
+
+const emptyAccount: Me["account"] = {
+  id: "",
+  handler_id: "",
+  type: "buyer",
+  name: "",
+  timezone: "America/Toronto",
+  website: "",
+  contact_email: "",
+  phone: "",
+  address_line1: "",
+  address_line2: "",
+  city: "",
+  state: "",
+  postal_code: "",
+  country: "",
+};
 
 export function BusinessSettingsPage() {
   const user = useAuthStore((s) => s.user);
@@ -95,25 +146,7 @@ export function BusinessSettingsPage() {
   const { data: me } = useMe();
   const updateAccount = useUpdateMyAccount();
 
-  const saved = accountToForm(
-    me?.account ?? {
-      id: "",
-      handler_id: "",
-      type: "buyer",
-      name: "",
-      timezone: "America/Toronto",
-      website: "",
-      contact_email: "",
-      phone: "",
-      address_line1: "",
-      address_line2: "",
-      city: "",
-      state: "",
-      postal_code: "",
-      country: "",
-    }
-  );
-
+  const saved = accountToForm(me?.account ?? emptyAccount);
   const [form, setForm] = useState<BusinessForm>(saved);
 
   useEffect(() => {
@@ -135,6 +168,19 @@ export function BusinessSettingsPage() {
   const set = (key: keyof BusinessForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm((f) => ({ ...f, [key]: e.target.value }));
 
+  const onCountryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const code = e.target.value;
+    setForm((f) => {
+      const subdivisions = subdivisionsForCountryCode(code);
+      const keepState = stateMatchesSubdivision(f.state, subdivisions);
+      return {
+        ...f,
+        countrySelect: code,
+        state: keepState ? f.state : "",
+      };
+    });
+  };
+
   const save = () => {
     if (unchanged || invalid) return;
     updateAccount.mutate(patch, {
@@ -145,22 +191,29 @@ export function BusinessSettingsPage() {
 
   const handlerId = me?.account.handler_id;
   const typedAccountType = accountType as AccountType;
+  const countryIsOther = form.countrySelect === "OTHER";
+  const subdivisions = subdivisionsForCountryCode(form.countrySelect);
 
   return (
     <div className="max-w-xl space-y-4">
       <Card className="p-5">
-        <div className="flex flex-col gap-2.5">
+        <div className="flex flex-col gap-2">
           <div>
-            <Label>Company name</Label>
-            <Input value={form.name} onChange={set("name")} />
+            <Label className={fieldLabelClass}>Company name</Label>
+            <Input className={fieldInputClass} value={form.name} onChange={set("name")} />
           </div>
           <div>
-            <Label>Website</Label>
-            <Input value={form.website} onChange={set("website")} placeholder="https://example.com" />
+            <Label className={fieldLabelClass}>Website</Label>
+            <Input
+              className={fieldInputClass}
+              value={form.website}
+              onChange={set("website")}
+              placeholder="https://example.com"
+            />
           </div>
           <div>
-            <Label>Timezone</Label>
-            <Select value={form.timezone} onChange={set("timezone")}>
+            <Label className={fieldLabelClass}>Timezone</Label>
+            <Select className={fieldInputClass} value={form.timezone} onChange={set("timezone")}>
               {TIMEZONES.map((tz) => (
                 <option key={tz} value={tz}>
                   {tz}
@@ -169,8 +222,9 @@ export function BusinessSettingsPage() {
             </Select>
           </div>
           <div>
-            <Label>Business email</Label>
+            <Label className={fieldLabelClass}>Business email</Label>
             <Input
+              className={fieldInputClass}
               type="email"
               value={form.contact_email}
               onChange={set("contact_email")}
@@ -178,36 +232,66 @@ export function BusinessSettingsPage() {
             />
           </div>
           <div>
-            <Label>Phone</Label>
-            <Input value={form.phone} onChange={set("phone")} />
+            <Label className={fieldLabelClass}>Phone</Label>
+            <Input className={fieldInputClass} value={form.phone} onChange={set("phone")} />
           </div>
           <div>
-            <Label>Address line 1</Label>
-            <Input value={form.address_line1} onChange={set("address_line1")} />
+            <Label className={fieldLabelClass}>Address line 1</Label>
+            <Input className={fieldInputClass} value={form.address_line1} onChange={set("address_line1")} />
           </div>
           <div>
-            <Label>Address line 2</Label>
-            <Input value={form.address_line2} onChange={set("address_line2")} placeholder="Optional" />
+            <Label className={fieldLabelClass}>Address line 2</Label>
+            <Input
+              className={fieldInputClass}
+              value={form.address_line2}
+              onChange={set("address_line2")}
+              placeholder="Optional"
+            />
           </div>
-          <div className="grid grid-cols-2 gap-2.5">
-            <div>
-              <Label>City</Label>
-              <Input value={form.city} onChange={set("city")} />
-            </div>
-            <div>
-              <Label>State / province</Label>
-              <Input value={form.state} onChange={set("state")} />
-            </div>
+          <div>
+            <Label className={fieldLabelClass}>City</Label>
+            <Input className={fieldInputClass} value={form.city} onChange={set("city")} />
           </div>
-          <div className="grid grid-cols-2 gap-2.5">
+          <div>
+            <Label className={fieldLabelClass}>Country</Label>
+            <Select className={fieldInputClass} value={form.countrySelect} onChange={onCountryChange}>
+              <option value="">Select country</option>
+              {COUNTRIES.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+          {countryIsOther ? (
             <div>
-              <Label>Postal code</Label>
-              <Input value={form.postal_code} onChange={set("postal_code")} />
+              <Label className={fieldLabelClass}>Country name</Label>
+              <Input
+                className={fieldInputClass}
+                value={form.countryOther}
+                onChange={set("countryOther")}
+                placeholder="Enter country"
+              />
             </div>
-            <div>
-              <Label>Country</Label>
-              <Input value={form.country} onChange={set("country")} />
-            </div>
+          ) : null}
+          <div>
+            <Label className={fieldLabelClass}>State / province</Label>
+            {subdivisions ? (
+              <Select className={fieldInputClass} value={form.state} onChange={set("state")}>
+                <option value="">Select state / province</option>
+                {subdivisions.map((s) => (
+                  <option key={s.code} value={s.name}>
+                    {s.name}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <Input className={fieldInputClass} value={form.state} onChange={set("state")} />
+            )}
+          </div>
+          <div>
+            <Label className={fieldLabelClass}>Postal code</Label>
+            <Input className={fieldInputClass} value={form.postal_code} onChange={set("postal_code")} />
           </div>
         </div>
 

@@ -363,6 +363,7 @@ export interface Source {
   slug: string;
   type: SourceType;
   is_active: boolean;
+  api_key_required: boolean;
 }
 
 export interface Route {

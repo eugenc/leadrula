@@ -107,7 +107,8 @@ export function SourcesPage() {
                   <TD className="font-semibold">{s.name}</TD>
                   <TD className="font-mono">{s.slug}</TD>
                   <TD className="font-mono text-xs text-gray-500">
-                    POST {API_URL}/api/v1/sources/{s.slug}
+                    <div>POST {API_URL}/api/v1/sources/{s.slug}</div>
+                    <Badge className="mt-1">{s.api_key_required ? "Auth required" : "Open"}</Badge>
                   </TD>
                   <TD>
                     <div onClick={(e) => e.stopPropagation()}>
@@ -192,6 +193,7 @@ function SourceDrawerContent({
   const [slug, setSlug] = useState(source?.slug ?? "");
   const [slugTouched, setSlugTouched] = useState(false);
   const [isActive, setIsActive] = useState(source?.is_active ?? true);
+  const [apiKeyRequired, setApiKeyRequired] = useState(source?.api_key_required ?? true);
 
   useEffect(() => {
     setType("webhook");
@@ -199,12 +201,13 @@ function SourceDrawerContent({
     setSlug(source?.slug ?? "");
     setSlugTouched(false);
     setIsActive(source?.is_active ?? true);
+    setApiKeyRequired(source?.api_key_required ?? true);
   }, [source]);
 
   function submit() {
     if (editing) {
       update.mutate(
-        { id: source.id, body: { name, slug, is_active: isActive } },
+        { id: source.id, body: { name, slug, is_active: isActive, api_key_required: apiKeyRequired } },
         {
           onSuccess: () => {
             toast.success("Source updated");
@@ -215,7 +218,7 @@ function SourceDrawerContent({
       );
     } else {
       create.mutate(
-        { name, slug, type },
+        { name, slug, type, api_key_required: apiKeyRequired },
         {
           onSuccess: (src) => {
             onCreated?.(src);
@@ -289,6 +292,16 @@ function SourceDrawerContent({
           <p className="text-xs font-mono text-gray-500">
             POST {API_URL}/api/v1/sources/{slug}
           </p>
+        )}
+        <div className="flex items-center justify-between">
+          <div>
+            <Label>Require API key</Label>
+            <p className="text-xs text-gray-500">Publisher API key Bearer token on inbound POST requests</p>
+          </div>
+          <Switch checked={apiKeyRequired} onChange={setApiKeyRequired} />
+        </div>
+        {!apiKeyRequired && (
+          <p className="text-xs text-amber-700">Anyone with the source URL can POST payloads.</p>
         )}
         {editing && (
           <div className="flex items-center justify-between">

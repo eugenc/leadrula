@@ -35,6 +35,11 @@ func NewService(pool *pgxpool.Pool, leadRepo *leads.Repository, notif *notificat
 	return &Service{pool: pool, leads: leadRepo, notif: notif, accounts: acc, integrations: integrations}
 }
 
+// ResolveSourceBySlug finds an active source by globally unique slug.
+func (s *Service) ResolveSourceBySlug(ctx context.Context, slug string) (*routing.Source, error) {
+	return routing.ResolveSourceBySlug(ctx, s.pool, slug)
+}
+
 func (s *Service) routeDeps() leads.RouteApplyDeps {
 	return leads.RouteApplyDeps{Repo: s.leads, Accounts: s.accounts, Notif: s.notif, Integrations: s.integrations}
 }

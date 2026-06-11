@@ -66,6 +66,23 @@ func WebhookAuthFromContext(ctx context.Context) *WebhookAuth {
 	return a
 }
 
+// SourceAuth is resolved from a source slug (and optional API key).
+type SourceAuth struct {
+	SourceID    int64
+	PublisherID int64
+}
+
+const sourceAuthKey ctxKey = 4
+
+func WithSourceAuth(ctx context.Context, a *SourceAuth) context.Context {
+	return context.WithValue(ctx, sourceAuthKey, a)
+}
+
+func SourceAuthFromContext(ctx context.Context) *SourceAuth {
+	a, _ := ctx.Value(sourceAuthKey).(*SourceAuth)
+	return a
+}
+
 // ImpersonationChange is a before/after field diff recorded for collaboration audit.
 type ImpersonationChange struct {
 	Field string

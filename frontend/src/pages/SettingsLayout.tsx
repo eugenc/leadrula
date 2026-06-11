@@ -45,8 +45,8 @@ export function SettingsLayout() {
             end={tab.end}
             className={({ isActive }) =>
               cn(
-                "-mb-px border-b-2 px-4 py-2 text-base font-semibold transition-colors",
-                isActive ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400 hover:text-gray-600"
+                "-mb-px border-b-2 px-4 py-2 text-base font-medium transition-colors",
+                isActive ? "border-jade-500 text-gray-800" : "border-transparent text-gray-400 hover:text-gray-600"
               )
             }
           >

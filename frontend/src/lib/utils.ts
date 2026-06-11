@@ -31,6 +31,23 @@ export function formatTxnType(type: string): string {
     .join(" ");
 }
 
+export function resolveBuyerTxnCategory(t: { type: string }): string {
+  switch (t.type) {
+    case "debit":
+      return "Purchase";
+    case "credit":
+      return "Credit";
+    case "topup":
+      return "Topup";
+    case "dispute_credit":
+      return "Refund";
+    case "manual_invoice":
+      return "Invoice";
+    default:
+      return formatTxnType(t.type);
+  }
+}
+
 export function resolveTxnCategory(t: {
   category?: string;
   side?: string;
@@ -46,25 +63,4 @@ export function resolveTxnCategory(t: {
   if (t.type === "manual_invoice") return "Invoice";
   if (t.side === "sale" || t.type === "debit") return "Sale";
   return formatTxnType(t.type);
-}
-
-const txnGreenBadgeClass = "border-success-border bg-success-bg text-success-fg";
-const txnOrangeBadgeClass = "border-warning-border bg-warning-bg text-warning-fg";
-const txnRedBadgeClass = "border-danger-border bg-danger-bg text-danger-fg";
-const txnNeutralBadgeClass = "border-neutral-border bg-neutral-bg text-neutral-fg";
-
-export function txnTypeBadgeClass(typeLabel: string): string {
-  switch (typeLabel) {
-    case "Sale":
-    case "Topup":
-    case "Invoice":
-      return txnGreenBadgeClass;
-    case "Credit":
-      return txnOrangeBadgeClass;
-    case "Purchase":
-    case "Refund":
-      return txnRedBadgeClass;
-    default:
-      return txnNeutralBadgeClass;
-  }
 }

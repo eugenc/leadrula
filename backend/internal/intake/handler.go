@@ -5,17 +5,19 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/echayko/leadrula/backend/internal/apikeys"
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/go-chi/chi/v5"
 )
 
 type Handler struct {
-	svc *Service
+	svc     *Service
+	apikeys *apikeys.Service
 }
 
-func NewHandler(svc *Service) *Handler {
-	return &Handler{svc: svc}
+func NewHandler(svc *Service, apikeysSvc *apikeys.Service) *Handler {
+	return &Handler{svc: svc, apikeys: apikeysSvc}
 }
 
 func resolvePublisherID(r *http.Request) (int64, bool) {
@@ -31,8 +33,49 @@ func resolvePublisherID(r *http.Request) (int64, bool) {
 // RegisterPublicRoutes mounts the API-key-authenticated ingest endpoints.
 func (h *Handler) RegisterPublicRoutes(r chi.Router) {
 	r.Post("/api/v1/leads", h.ingest)
-	r.Post("/api/v1/sources/{slug}", h.ingestSource)
 	r.Post("/api/v1/leads/{id}/action", h.action)
+}
+
+// RegisterPublicSourceRoutes mounts source ingest with per-source API-key auth.
+func (h *Handler) RegisterPublicSourceRoutes(r chi.Router) {
+	r.With(h.AuthenticateSource).Post("/api/v1/sources/{slug}", h.ingestSource)
+}
+
+// AuthenticateSource resolves the source by slug and optionally verifies a publisher API key.
+func (h *Handler) AuthenticateSource(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		slug := chi.URLParam(r, "slug")
+		src, err := h.svc.ResolveSourceBySlug(r.Context(), slug)
+		if err != nil {
+			httpx.Err(w, http.StatusInternalServerError, httpx.CodeInternal, "source lookup failed")
+			return
+		}
+		if src == nil {
+			httpx.Err(w, http.StatusNotFound, httpx.CodeNotFound, "source not found")
+			return
+		}
+		if src.APIKeyRequired {
+			token := auth.Bearer(r)
+			if token == "" {
+				httpx.Err(w, http.StatusUnauthorized, httpx.CodeUnauthorized, "missing API key")
+				return
+			}
+			acct, err := h.apikeys.Verify(r.Context(), token)
+			if err != nil {
+				httpx.Err(w, http.StatusUnauthorized, httpx.CodeUnauthorized, "invalid API key")
+				return
+			}
+			if acct.AccountType != "publisher" || acct.AccountID != src.PublisherID {
+				httpx.Err(w, http.StatusForbidden, httpx.CodeForbidden, "publisher account required")
+				return
+			}
+		}
+		ctx := auth.WithSourceAuth(r.Context(), &auth.SourceAuth{
+			SourceID:    src.ID,
+			PublisherID: src.PublisherID,
+		})
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 // RegisterQueueRoutes mounts the publisher admin intake queue routes.
@@ -69,9 +112,9 @@ func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ingestSource(w http.ResponseWriter, r *http.Request) {
-	publisherID, ok := resolvePublisherID(r)
-	if !ok {
-		httpx.Err(w, http.StatusForbidden, httpx.CodeForbidden, "publisher account required")
+	sa := auth.SourceAuthFromContext(r.Context())
+	if sa == nil {
+		httpx.Err(w, http.StatusUnauthorized, httpx.CodeUnauthorized, "unauthorized")
 		return
 	}
 	slug := chi.URLParam(r, "slug")
@@ -79,7 +122,7 @@ func (h *Handler) ingestSource(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &raw) {
 		return
 	}
-	res, err := h.svc.IngestFromSource(r.Context(), publisherID, slug, raw)
+	res, err := h.svc.IngestFromSource(r.Context(), sa.PublisherID, slug, raw)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return

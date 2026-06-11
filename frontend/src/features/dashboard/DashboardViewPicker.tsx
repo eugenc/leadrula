@@ -3,7 +3,7 @@ import { useAuthStore } from "@/store/authStore";
 import { Button } from "@/components/ui/button";
 import { Input, Label, FilterSelect } from "@/components/ui/input";
 import { Card } from "@/components/ui/misc";
-import { Settings2, Plus, Trash2 } from "lucide-react";
+import { Settings2, Trash2 } from "lucide-react";
 import {
   type DashboardView,
   type WidgetId,
@@ -146,12 +146,6 @@ export function DashboardViewPicker({
     setConfigureOpen(false);
   };
 
-  const startNew = () => {
-    setDraft(emptyDraft(!!isBuyer));
-    setIsNew(true);
-    setConfigureOpen(true);
-  };
-
   const editCurrent = () => {
     if (view.public_id === "default") {
       setDraft(emptyDraft(!!isBuyer));
@@ -205,10 +199,6 @@ export function DashboardViewPicker({
               <Button variant="secondary" size="sm" onClick={editCurrent}>
                 <Settings2 className="h-4 w-4" />
                 Configure
-              </Button>
-              <Button variant="ghost" size="sm" onClick={startNew}>
-                <Plus className="h-4 w-4" />
-                New view
               </Button>
             </>
           )}

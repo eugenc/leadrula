@@ -15,13 +15,14 @@ import (
 )
 
 type Source struct {
-	ID          int64     `json:"id"`
-	PublisherID int64     `json:"-"`
-	Name        string    `json:"name"`
-	Slug        string    `json:"slug"`
-	Type        string    `json:"type"`
-	IsActive    bool      `json:"is_active"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID             int64     `json:"id"`
+	PublisherID    int64     `json:"-"`
+	Name           string    `json:"name"`
+	Slug           string    `json:"slug"`
+	Type           string    `json:"type"`
+	IsActive       bool      `json:"is_active"`
+	APIKeyRequired bool      `json:"api_key_required"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 type SourceFieldMapEntry struct {
@@ -153,16 +154,11 @@ func scanRoute(row pgx.Row) (*Route, error) {
 	return rt, nil
 }
 
-// MatchSourceBySlug finds an active source by slug. nil means no match.
-func MatchSourceBySlug(ctx context.Context, q database.Querier, publisherID int64, slug string) (*Source, error) {
-	if slug == "" {
-		return nil, nil
-	}
+const sourceCols = `id, publisher_id, name, slug, type, is_active, api_key_required, created_at`
+
+func scanSource(row pgx.Row) (*Source, error) {
 	s := &Source{}
-	err := q.QueryRow(ctx,
-		`SELECT id, publisher_id, name, slug, type, is_active, created_at
-		 FROM routing_sources WHERE publisher_id=$1 AND slug=$2 AND is_active`,
-		publisherID, slug).Scan(&s.ID, &s.PublisherID, &s.Name, &s.Slug, &s.Type, &s.IsActive, &s.CreatedAt)
+	err := row.Scan(&s.ID, &s.PublisherID, &s.Name, &s.Slug, &s.Type, &s.IsActive, &s.APIKeyRequired, &s.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -170,6 +166,28 @@ func MatchSourceBySlug(ctx context.Context, q database.Querier, publisherID int6
 		return nil, err
 	}
 	return s, nil
+}
+
+// MatchSourceBySlug finds an active source by slug. nil means no match.
+func MatchSourceBySlug(ctx context.Context, q database.Querier, publisherID int64, slug string) (*Source, error) {
+	if slug == "" {
+		return nil, nil
+	}
+	return scanSource(q.QueryRow(ctx,
+		`SELECT `+sourceCols+`
+		 FROM routing_sources WHERE publisher_id=$1 AND slug=$2 AND is_active`,
+		publisherID, slug))
+}
+
+// ResolveSourceBySlug finds an active source by globally unique slug.
+func ResolveSourceBySlug(ctx context.Context, q database.Querier, slug string) (*Source, error) {
+	if slug == "" {
+		return nil, nil
+	}
+	return scanSource(q.QueryRow(ctx,
+		`SELECT `+sourceCols+`
+		 FROM routing_sources WHERE slug=$1 AND is_active`,
+		slug))
 }
 
 // SourceFieldMap returns payload mapping rows for a source.
@@ -265,7 +283,7 @@ func RouteFieldMap(ctx context.Context, q database.Querier, routeID int64) ([]Ro
 
 func (s *Service) ListSources(ctx context.Context, publisherID int64) ([]Source, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, publisher_id, name, slug, type, is_active, created_at
+		`SELECT `+sourceCols+`
 		 FROM routing_sources WHERE publisher_id=$1 ORDER BY name`, publisherID)
 	if err != nil {
 		return nil, err
@@ -274,7 +292,7 @@ func (s *Service) ListSources(ctx context.Context, publisherID int64) ([]Source,
 	var out []Source
 	for rows.Next() {
 		var src Source
-		if err := rows.Scan(&src.ID, &src.PublisherID, &src.Name, &src.Slug, &src.Type, &src.IsActive, &src.CreatedAt); err != nil {
+		if err := rows.Scan(&src.ID, &src.PublisherID, &src.Name, &src.Slug, &src.Type, &src.IsActive, &src.APIKeyRequired, &src.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, src)
@@ -282,40 +300,34 @@ func (s *Service) ListSources(ctx context.Context, publisherID int64) ([]Source,
 	return out, rows.Err()
 }
 
-func (s *Service) CreateSource(ctx context.Context, publisherID int64, name, slug, sourceType string) (*Source, error) {
+func (s *Service) CreateSource(ctx context.Context, publisherID int64, name, slug, sourceType string, apiKeyRequired *bool) (*Source, error) {
 	if sourceType == "" {
 		return nil, httpx.Validation("type is required")
 	}
 	if sourceType != "webhook" {
 		return nil, httpx.Validation("type must be webhook")
 	}
-	src := &Source{}
-	err := s.pool.QueryRow(ctx,
-		`INSERT INTO routing_sources(publisher_id, name, slug, type) VALUES ($1,$2,$3,$4)
-		 RETURNING id, publisher_id, name, slug, type, is_active, created_at`,
-		publisherID, name, slug, sourceType).Scan(
-		&src.ID, &src.PublisherID, &src.Name, &src.Slug, &src.Type, &src.IsActive, &src.CreatedAt)
-	if err != nil {
-		if database.IsUniqueViolation(err) {
-			return nil, httpx.Conflict("a source with this slug already exists")
-		}
-		return nil, err
+	required := true
+	if apiKeyRequired != nil {
+		required = *apiKeyRequired
 	}
-	return src, nil
+	return scanSource(s.pool.QueryRow(ctx,
+		`INSERT INTO routing_sources(publisher_id, name, slug, type, api_key_required) VALUES ($1,$2,$3,$4,$5)
+		 RETURNING `+sourceCols,
+		publisherID, name, slug, sourceType, required))
 }
 
-func (s *Service) UpdateSource(ctx context.Context, publisherID, id int64, name, slug *string, isActive *bool) (*Source, error) {
-	src := &Source{}
-	err := s.pool.QueryRow(ctx,
+func (s *Service) UpdateSource(ctx context.Context, publisherID, id int64, name, slug *string, isActive, apiKeyRequired *bool) (*Source, error) {
+	src, err := scanSource(s.pool.QueryRow(ctx,
 		`UPDATE routing_sources SET
 		   name = COALESCE($3, name),
 		   slug = COALESCE($4, slug),
-		   is_active = COALESCE($5, is_active)
+		   is_active = COALESCE($5, is_active),
+		   api_key_required = COALESCE($6, api_key_required)
 		 WHERE id=$1 AND publisher_id=$2
-		 RETURNING id, publisher_id, name, slug, type, is_active, created_at`,
-		id, publisherID, name, slug, isActive).Scan(
-		&src.ID, &src.PublisherID, &src.Name, &src.Slug, &src.Type, &src.IsActive, &src.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+		 RETURNING `+sourceCols,
+		id, publisherID, name, slug, isActive, apiKeyRequired))
+	if err == nil && src == nil {
 		return nil, httpx.NotFound("source not found")
 	}
 	if err != nil && database.IsUniqueViolation(err) {
