@@ -55,7 +55,7 @@ func (s *Service) AcceptCounter(ctx context.Context, publisherID, participationI
 	newPart, err := scanParticipation(tx.QueryRow(ctx,
 		`INSERT INTO contract_participations(contract_id, buyer_id, status)
 		 VALUES ($1,$2,'pending')
-		 RETURNING `+participationCols,
+		 RETURNING `+participationReturningCols,
 		newContract.ID, part.BuyerID))
 	if err != nil {
 		return nil, err

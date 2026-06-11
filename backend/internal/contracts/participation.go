@@ -42,6 +42,12 @@ const participationCols = `p.id, p.contract_id, p.buyer_id, p.status::text, COAL
 	p.integration_connection_id, p.outbound_webhook_id,
 	p.counter_proposal, p.superseded_by_contract_id, p.created_at, p.updated_at`
 
+const participationReturningCols = `id, contract_id, buyer_id, status::text, COALESCE(delivery,''),
+	buyer_pipeline_id, buyer_target_stage_id,
+	source_pipeline_id, source_stage_id, return_stage_id,
+	integration_connection_id, outbound_webhook_id,
+	counter_proposal, superseded_by_contract_id, created_at, updated_at`
+
 func scanParticipationFields(
 	dest *Participation,
 	delivery *string,
@@ -253,7 +259,7 @@ func (s *Service) AddParticipation(ctx context.Context, publisherID, contractID 
 	part, err := scanParticipation(tx.QueryRow(ctx,
 		`INSERT INTO contract_participations(contract_id, buyer_id, status)
 		 VALUES ($1,$2,'pending')
-		 RETURNING `+participationCols,
+		 RETURNING `+participationReturningCols,
 		contractID, p.BuyerID))
 	if err != nil {
 		if database.IsUniqueViolation(err) {
@@ -369,7 +375,7 @@ func (s *Service) AcceptParticipation(ctx context.Context, buyerID, participatio
 		   outbound_webhook_id = $5, integration_connection_id = $6,
 		   counter_proposal = NULL, updated_at = now(), buyer_responded_at = now()
 		 WHERE id = $1
-		 RETURNING `+participationCols,
+		 RETURNING `+participationReturningCols,
 		participationID, delivery, buyerPipelineID, buyerStageID, webhookID, connID))
 	if err != nil {
 		return nil, err
@@ -437,7 +443,7 @@ func (s *Service) DeclineParticipation(ctx context.Context, buyerID, participati
 	}
 	updated, err := scanParticipation(s.pool.QueryRow(ctx,
 		`UPDATE contract_participations SET status = 'declined', updated_at = now(), buyer_responded_at = now()
-		 WHERE id = $1 RETURNING `+participationCols, participationID))
+		 WHERE id = $1 RETURNING `+participationReturningCols, participationID))
 	if err != nil {
 		return nil, err
 	}
@@ -461,7 +467,7 @@ func (s *Service) DeclineParticipationByPublisher(ctx context.Context, publisher
 	return scanParticipation(s.pool.QueryRow(ctx,
 		`UPDATE contract_participations SET status = 'pending', counter_proposal = NULL,
 		   publisher_responded_at = now(), updated_at = now()
-		 WHERE id = $1 RETURNING `+participationCols, participationID))
+		 WHERE id = $1 RETURNING `+participationReturningCols, participationID))
 }
 
 func (s *Service) CounterParticipation(ctx context.Context, buyerID, participationID int64, proposal json.RawMessage) (*Participation, error) {
@@ -475,7 +481,7 @@ func (s *Service) CounterParticipation(ctx context.Context, buyerID, participati
 	updated, err := scanParticipation(s.pool.QueryRow(ctx,
 		`UPDATE contract_participations SET status = 'counter_pending', counter_proposal = $2,
 		   updated_at = now(), buyer_responded_at = now()
-		 WHERE id = $1 RETURNING `+participationCols, participationID, proposal))
+		 WHERE id = $1 RETURNING `+participationReturningCols, participationID, proposal))
 	if err != nil {
 		return nil, err
 	}
