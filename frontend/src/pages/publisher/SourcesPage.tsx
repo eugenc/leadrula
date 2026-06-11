@@ -18,7 +18,7 @@ import { useCustomFields } from "@/features/leads/hooks";
 import { CreateCustomFieldDrawer } from "@/features/admin/CreateCustomFieldDrawer";
 import { BuiltinCustomFieldSelect } from "@/features/admin/BuiltinCustomFieldSelect";
 import { slugFieldKey } from "@/features/admin/customFieldConstants";
-import { buildPayloadSuggestions } from "@/features/leads/csvMapping";
+import { buildPayloadSuggestions, MAP_BUILTIN_FIELDS } from "@/features/leads/csvMapping";
 import { payloadValuePreview } from "@/features/intake/payloadKeys";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
@@ -35,7 +35,7 @@ import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import type { Route, RouteFieldMapEntry, Source, SourceType } from "@/types";
 
-const BUILTINS = ["first_name", "last_name", "phone", "email", "address", "city", "state", "zip", "cost", "revenue"];
+const BUILTINS = MAP_BUILTIN_FIELDS;
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
 function slugify(name: string) {
@@ -510,7 +510,7 @@ function SourceFieldMapContent({
                   Received {format(new Date(sample.received_at), "MMM d, yyyy h:mma")}
                 </p>
               )}
-              <pre className="max-h-48 overflow-auto rounded-md border border-gray-100 bg-gray-50 p-3 font-mono text-xs text-gray-800">
+              <pre className="max-h-48 overflow-auto rounded-md border border-gray-100 bg-gray-50 p-3 font-mono text-xs">
                 {JSON.stringify(payload, null, 2)}
               </pre>
               {mappableKeys.length > 0 && (
@@ -528,7 +528,7 @@ function SourceFieldMapContent({
                           className={
                             mapped || ignored
                               ? "rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 font-mono text-xs text-gray-400"
-                              : "rounded-full border border-gray-200 bg-white px-2 py-0.5 font-mono text-xs text-gray-800 hover:border-teal-300 hover:bg-teal-50"
+                              : "rounded-full border border-jade-200 bg-jade-50 px-2 py-0.5 font-mono text-xs text-gray-800 hover:border-jade-300 hover:bg-jade-100"
                           }
                         >
                           {k}
@@ -550,7 +550,7 @@ function SourceFieldMapContent({
                   {unmappedKeys.map((k) => (
                     <div key={k} className="rounded-md border border-gray-100 p-3">
                       <div className="mb-2">
-                        <span className="font-mono text-sm font-medium text-gray-800">{k}</span>
+                        <span className="font-mono text-sm font-medium">{k}</span>
                         <p className="mt-0.5 truncate text-xs text-gray-400">
                           {payloadValuePreview(payload, k)}
                         </p>

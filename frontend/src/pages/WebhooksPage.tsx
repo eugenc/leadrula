@@ -27,7 +27,7 @@ import { CreateCustomFieldDrawer } from "@/features/admin/CreateCustomFieldDrawe
 import { BuiltinCustomFieldSelect } from "@/features/admin/BuiltinCustomFieldSelect";
 import { useCreateField } from "@/features/admin/hooks";
 import { slugFieldKey } from "@/features/admin/customFieldConstants";
-import { buildPayloadSuggestions } from "@/features/leads/csvMapping";
+import { buildPayloadSuggestions, MAP_BUILTIN_FIELDS } from "@/features/leads/csvMapping";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
@@ -132,8 +132,10 @@ function InboundConditionRow({
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 const BUILTINS = [
-  "first_name", "last_name", "phone", "email", "address", "city", "state", "zip",
-  "source", "external_id", "action_at", "disqualification_reason_id", "cost", "revenue",
+  ...MAP_BUILTIN_FIELDS,
+  "external_id",
+  "action_at",
+  "disqualification_reason_id",
 ];
 
 const OUTBOUND_BUILTINS = [
@@ -1577,7 +1579,7 @@ function OutboundResponseMapping({
                 className="flex-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-jade-500"
               >
                 <optgroup label="Built-in">
-                  {["first_name", "last_name", "phone", "email", "address", "city", "state", "zip", "source", "external_id"].map((b) => (
+                  {["first_name", "last_name", "phone", "email", "address", "city", "state", "zip", "source", "external_id", "tags"].map((b) => (
                     <option key={b} value={b}>{b}</option>
                   ))}
                 </optgroup>

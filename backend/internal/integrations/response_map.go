@@ -22,7 +22,7 @@ type responseMapEntry struct {
 var validBuiltinFields = map[string]bool{
 	"first_name": true, "last_name": true, "phone": true, "email": true,
 	"address": true, "city": true, "state": true, "zip": true, "source": true,
-	"external_id": true, "cost": true, "revenue": true,
+	"external_id": true, "cost": true, "revenue": true, "tags": true,
 }
 
 // applyResponseMap reads the trigger's response_map config, extracts values from
@@ -58,7 +58,7 @@ func (s *Service) applyResponseMap(ctx context.Context, triggerID, leadID int64,
 	}
 
 	for _, e := range entries {
-		val, ok := resolveDotPath(respObj, e.ResponseKey)
+		val, ok := resolveDotPathValue(respObj, e.ResponseKey)
 		if !ok {
 			continue
 		}
@@ -66,6 +66,13 @@ func (s *Service) applyResponseMap(ctx context.Context, triggerID, leadID int64,
 		case "builtin":
 			if e.BuiltinField == nil || !validBuiltinFields[*e.BuiltinField] {
 				log.Printf("response_map: trigger %d unknown builtin field %v", triggerID, e.BuiltinField)
+				continue
+			}
+			if *e.BuiltinField == "tags" {
+				repo := leads.NewRepository(s.pool)
+				if err := leads.ApplyMappedTags(ctx, s.pool, repo, accountID, leadID, val); err != nil {
+					log.Printf("response_map: trigger %d write tags: %v", triggerID, err)
+				}
 				continue
 			}
 			if leads.IsMoneyBuiltin(*e.BuiltinField) {
@@ -80,8 +87,12 @@ func (s *Service) applyResponseMap(ctx context.Context, triggerID, leadID int64,
 				}
 				continue
 			}
+			str := anyToString(val)
+			if str == "" {
+				continue
+			}
 			sql := fmt.Sprintf(`UPDATE leads SET %s = $3 WHERE id = $1 AND owner_account_id = $2`, *e.BuiltinField)
-			if _, err := s.pool.Exec(ctx, sql, leadID, accountID, val); err != nil {
+			if _, err := s.pool.Exec(ctx, sql, leadID, accountID, str); err != nil {
 				log.Printf("response_map: trigger %d write builtin %s: %v", triggerID, *e.BuiltinField, err)
 			}
 		case "custom":
@@ -99,22 +110,31 @@ func (s *Service) applyResponseMap(ctx context.Context, triggerID, leadID int64,
 	}
 }
 
-// resolveDotPath traverses a nested map[string]any using dot-separated keys.
-// Returns the string representation of the value and whether it was found.
-func resolveDotPath(obj map[string]any, path string) (string, bool) {
+// resolveDotPathValue traverses a nested map using dot-separated keys and returns the raw value.
+func resolveDotPathValue(obj map[string]any, path string) (any, bool) {
 	parts := strings.SplitN(path, ".", 2)
 	val, ok := obj[parts[0]]
 	if !ok {
-		return "", false
+		return nil, false
 	}
 	if len(parts) == 1 {
-		return anyToString(val), true
+		return val, true
 	}
 	nested, ok := val.(map[string]any)
 	if !ok {
+		return nil, false
+	}
+	return resolveDotPathValue(nested, parts[1])
+}
+
+// resolveDotPath traverses a nested map[string]any using dot-separated keys.
+// Returns the string representation of the value and whether it was found.
+func resolveDotPath(obj map[string]any, path string) (string, bool) {
+	val, ok := resolveDotPathValue(obj, path)
+	if !ok {
 		return "", false
 	}
-	return resolveDotPath(nested, parts[1])
+	return anyToString(val), true
 }
 
 func anyToString(v any) string {

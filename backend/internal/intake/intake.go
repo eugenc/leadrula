@@ -73,7 +73,7 @@ func resolveIngestSource(raw map[string]any) string {
 	return ""
 }
 
-func applyPayloadMappings(ctx context.Context, tx database.Querier, repo *leads.Repository, leadID int64, flat map[string]any, maps []routing.SourceFieldMapEntry) error {
+func applyPayloadMappings(ctx context.Context, tx database.Querier, repo *leads.Repository, accountID, leadID int64, flat map[string]any, maps []routing.SourceFieldMapEntry) error {
 	for _, k := range builtinKeys {
 		if v, ok := flat[k]; ok {
 			if str := toText(v); str != "" {
@@ -89,7 +89,7 @@ func applyPayloadMappings(ctx context.Context, tx database.Querier, repo *leads.
 			continue
 		}
 		if m.TargetType == "builtin" && m.BuiltinField != nil {
-			if err := leads.ApplyMappedBuiltin(ctx, tx, repo, leadID, *m.BuiltinField, v); err != nil {
+			if err := leads.ApplyMappedField(ctx, tx, repo, accountID, leadID, *m.BuiltinField, v); err != nil {
 				return err
 			}
 		} else if m.TargetType == "custom" && m.CustomFieldID != nil {
@@ -172,7 +172,7 @@ func (s *Service) IngestFromSource(ctx context.Context, publisherID int64, slug 
 	if err != nil {
 		return nil, err
 	}
-	if err := applyPayloadMappings(ctx, tx, s.leads, leadID, sources, maps); err != nil {
+	if err := applyPayloadMappings(ctx, tx, s.leads, publisherID, leadID, sources, maps); err != nil {
 		return nil, err
 	}
 	lead, err := s.leads.GetByID(ctx, tx, leadID)
@@ -781,7 +781,7 @@ func (s *Service) MapField(ctx context.Context, publisherID, queueID int64, sour
 	}
 
 	if targetType == "builtin" && builtinField != nil {
-		if err := leads.ApplyMappedBuiltin(ctx, tx, s.leads, leadID, *builtinField, v); err != nil {
+		if err := leads.ApplyMappedField(ctx, tx, s.leads, publisherID, leadID, *builtinField, v); err != nil {
 			return nil, err
 		}
 	} else if targetType == "custom" {
@@ -847,7 +847,7 @@ func (s *Service) ReprocessQueueItem(ctx context.Context, publisherID, queueID i
 			}
 		}
 	}
-	if err := applyPayloadMappings(ctx, tx, s.leads, leadID, flat, maps); err != nil {
+	if err := applyPayloadMappings(ctx, tx, s.leads, publisherID, leadID, flat, maps); err != nil {
 		return nil, err
 	}
 

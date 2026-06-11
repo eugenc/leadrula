@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useUsersList, useInviteUser, useResendInvite } from "@/features/admin/hooks";
 import { UserDetailDrawer } from "@/features/admin/UserDetailDrawer";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -46,12 +47,14 @@ export function UsersPage() {
   return (
     <>
       <PageHeader
+        className="px-0 pt-0"
         action={
           <Button onClick={() => setOpen(true)}>
             <Plus className="h-4 w-4" /> Invite User
           </Button>
         }
       />
+      <PageBody className="px-0 pt-0 pb-0">
         {isLoading ? (
           <Spinner className="h-6 w-6" />
         ) : (
@@ -97,6 +100,7 @@ export function UsersPage() {
             </TBody>
           </Table>
         )}
+      </PageBody>
 
         <UserDetailDrawer user={selectedUser} onClose={() => setSelectedUser(null)} />
 

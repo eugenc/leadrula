@@ -267,7 +267,7 @@ func (s *Service) execCreate(ctx context.Context, accountID int64, event *Webhoo
 			case "reject":
 				return nil, &existing.ID, httpx.Conflict("lead with this external_id already exists")
 			case "update":
-				if err := s.applyMappedFields(ctx, s.leads.Pool(), accountID, existing.ID, builtins, customs); err != nil {
+				if err := s.applyMappedFields(ctx, s.leads.Pool(), accountID, existing.ID, flat, maps, builtins, customs); err != nil {
 					return nil, &existing.ID, err
 				}
 				return &IngestResult{LeadID: existing.PublicID, Action: "update", Status: "updated"}, &existing.ID, nil
@@ -306,7 +306,7 @@ func (s *Service) execCreate(ctx context.Context, accountID int64, event *Webhoo
 			}
 		}
 	}
-	if err := s.applyMappedFields(ctx, tx, accountID, leadID, builtins, customs); err != nil {
+	if err := s.applyMappedFields(ctx, tx, accountID, leadID, flat, maps, builtins, customs); err != nil {
 		return nil, &leadID, err
 	}
 
@@ -342,7 +342,7 @@ func (s *Service) execUpdate(ctx context.Context, accountID int64, event *Webhoo
 		return nil, nil, err
 	}
 	builtins, customs, _ := applyFieldMaps(flat, maps)
-	if err := s.applyMappedFields(ctx, s.leads.Pool(), accountID, lead.ID, builtins, customs); err != nil {
+	if err := s.applyMappedFields(ctx, s.leads.Pool(), accountID, lead.ID, flat, maps, builtins, customs); err != nil {
 		return nil, &lead.ID, err
 	}
 	return &IngestResult{LeadID: lead.PublicID, Action: "update", Status: "updated"}, &lead.ID, nil
@@ -464,12 +464,12 @@ func applyFieldMaps(flat map[string]any, maps []FieldMapEntry) (builtins map[str
 	return builtins, customs, externalID
 }
 
-func (s *Service) applyMappedFields(ctx context.Context, q database.Querier, accountID, leadID int64, builtins map[string]string, customs map[int64]json.RawMessage) error {
+func (s *Service) applyMappedFields(ctx context.Context, q database.Querier, accountID, leadID int64, flat map[string]any, maps []FieldMapEntry, builtins map[string]string, customs map[int64]json.RawMessage) error {
 	for field, val := range builtins {
 		if val == "" {
 			continue
 		}
-		if field == "action_at" || field == "disqualification_reason_id" {
+		if field == "action_at" || field == "disqualification_reason_id" || field == "tags" || leads.IsMoneyBuiltin(field) {
 			continue
 		}
 		if err := s.leads.SetBuiltinField(ctx, q, leadID, field, val); err != nil {
@@ -481,16 +481,24 @@ func (s *Service) applyMappedFields(ctx context.Context, q database.Querier, acc
 			return err
 		}
 	}
-	if tags, ok := builtins["tags"]; ok && tags != "" {
-		var tagList []string
-		for _, part := range strings.Split(tags, ",") {
-			if t := strings.TrimSpace(part); t != "" {
-				tagList = append(tagList, t)
-			}
+	for _, m := range maps {
+		if m.TargetType != "builtin" || m.BuiltinField == nil {
+			continue
 		}
-		if len(tagList) > 0 {
-			if err := s.leads.SetTags(ctx, accountID, leadID, tagList); err != nil {
+		v, ok := flat[m.SourceKey]
+		if !ok {
+			continue
+		}
+		switch *m.BuiltinField {
+		case "tags":
+			if err := leads.ApplyMappedTags(ctx, q, s.leads, accountID, leadID, v); err != nil {
 				return err
+			}
+		default:
+			if leads.IsMoneyBuiltin(*m.BuiltinField) {
+				if err := leads.ApplyMappedBuiltin(ctx, q, s.leads, leadID, *m.BuiltinField, v); err != nil {
+					return err
+				}
 			}
 		}
 	}

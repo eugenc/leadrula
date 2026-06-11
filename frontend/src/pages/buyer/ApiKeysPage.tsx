@@ -5,6 +5,7 @@ import {
 } from "@/features/admin/hooks";
 import { ApiKeyDetailDrawer } from "@/features/admin/ApiKeyDetailDrawer";
 import { PageHeader } from "@/components/layout/PageHeader";
+import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -83,6 +84,7 @@ export function ApiKeysPage() {
   return (
     <>
       <PageHeader
+        className="px-0 pt-0"
         action={
           <Button onClick={openCreate}>
             <Plus className="h-4 w-4" /> Generate Key
@@ -90,12 +92,13 @@ export function ApiKeysPage() {
         }
       />
 
-      {isLoading ? (
-        <Spinner className="h-6 w-6" />
-      ) : (keys ?? []).length === 0 ? (
-        <EmptyState title="No API keys yet." />
-      ) : (
-        <Table>
+      <PageBody className="px-0 pt-0 pb-0">
+        {isLoading ? (
+          <Spinner className="h-6 w-6" />
+        ) : (keys ?? []).length === 0 ? (
+          <EmptyState title="No API keys yet." />
+        ) : (
+          <Table>
           <THead>
             <tr>
               <TH>Name</TH>
@@ -118,8 +121,9 @@ export function ApiKeysPage() {
               </TR>
             ))}
           </TBody>
-        </Table>
-      )}
+          </Table>
+        )}
+      </PageBody>
 
       <ApiKeyDetailDrawer
         apiKey={resolvedSelected}

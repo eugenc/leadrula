@@ -19,6 +19,7 @@ import { usePipelines, useStages } from "@/features/leads/hooks";
 import { CreateCustomFieldDrawer } from "@/features/admin/CreateCustomFieldDrawer";
 import { BuiltinCustomFieldSelect } from "@/features/admin/BuiltinCustomFieldSelect";
 import { slugFieldKey } from "@/features/admin/customFieldConstants";
+import { MAP_BUILTIN_FIELDS } from "@/features/leads/csvMapping";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
@@ -33,7 +34,7 @@ import { errorMessage } from "@/lib/api";
 import { RouteIntegrationsPanel } from "@/features/integrations/RouteIntegrationsPanel";
 import type { CustomField, Route, RouteFieldMapEntry } from "@/types";
 
-const BUILTINS = ["first_name", "last_name", "phone", "email", "address", "city", "state", "zip"];
+const BUILTINS = MAP_BUILTIN_FIELDS;
 
 function pipelineStage(pipeline?: string | null, stage?: string | null) {
   if (!pipeline) return "—";

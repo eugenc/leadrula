@@ -1,7 +1,9 @@
 import { Label, Select } from "@/components/ui/input";
 import { ADD_CUSTOM_FIELD } from "./customFieldConstants";
 
-const DEFAULT_BUILTINS = ["first_name", "last_name", "phone", "email", "address", "city", "state", "zip"];
+import { MAP_BUILTIN_FIELDS } from "@/features/leads/csvMapping";
+
+const DEFAULT_BUILTINS = MAP_BUILTIN_FIELDS;
 
 export function BuiltinCustomFieldSelect({
   value,

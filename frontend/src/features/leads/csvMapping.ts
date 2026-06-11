@@ -76,6 +76,21 @@ export const MAPPING_TARGETS: { value: string; label: string }[] = [
   { value: "tags", label: "Tags" },
 ];
 
+export const MAP_BUILTIN_FIELDS = [
+  "first_name",
+  "last_name",
+  "phone",
+  "email",
+  "address",
+  "city",
+  "state",
+  "zip",
+  "source",
+  "cost",
+  "revenue",
+  "tags",
+];
+
 type MappingField = { id: number; name: string; field_key?: string };
 
 export function normalizeHeader(h: string): string {
