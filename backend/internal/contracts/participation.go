@@ -299,11 +299,11 @@ func (s *Service) copyContractTemplateToParticipation(ctx context.Context, tx pg
 }
 
 type AcceptParticipationParams struct {
-	Delivery                string
-	BuyerPipelineID         int64
-	BuyerTargetStageID      int64
-	IntegrationConnectionID int64
-	OutboundWebhookID       int64
+	Delivery                string `json:"delivery"`
+	BuyerPipelineID         int64  `json:"buyer_pipeline_id"`
+	BuyerTargetStageID      int64  `json:"buyer_target_stage_id"`
+	IntegrationConnectionID int64  `json:"integration_connection_id"`
+	OutboundWebhookID       int64  `json:"outbound_webhook_id"`
 }
 
 func (s *Service) AcceptParticipation(ctx context.Context, buyerID, participationID int64, p AcceptParticipationParams) (*Participation, error) {

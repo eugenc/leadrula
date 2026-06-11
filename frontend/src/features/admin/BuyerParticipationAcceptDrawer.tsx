@@ -1,19 +1,20 @@
 import { useState } from "react";
+import { Check } from "lucide-react";
 import { Sheet, DrawerHeader, DrawerBody, DrawerFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label, Select } from "@/components/ui/input";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import {
   useAcceptParticipation,
   useDeclineParticipation,
   useCounterParticipation,
-  useBuyerPipelines,
 } from "@/features/admin/hooks";
 import { Input } from "@/components/ui/input";
 import { useIntegrationConnections } from "@/features/integrations/hooks";
-import { useStages } from "@/features/leads/hooks";
+import { usePipelines, useStages } from "@/features/leads/hooks";
 import { PUBLISHER_DELIVERY_MODES } from "@/features/admin/contractOffer";
 import { formatParticipationStatus } from "@/features/admin/contractOffer";
 import { BuyerContractFieldMapSection } from "@/features/admin/BuyerContractFieldMapSection";
@@ -49,6 +50,7 @@ function DrawerContent({
   const counter = useCounterParticipation();
   const [step, setStep] = useState(0);
   const [mappingComplete, setMappingComplete] = useState(false);
+  const [showCounterOffer, setShowCounterOffer] = useState(false);
   const [counterRate, setCounterRate] = useState("");
   const allowed = participation.allowed_delivery_modes ?? ["leads", "leads_pipeline"];
   const modeOptions = PUBLISHER_DELIVERY_MODES.filter((m) => allowed.includes(m.value));
@@ -58,13 +60,32 @@ function DrawerContent({
   const [webhookId, setWebhookId] = useState(0);
   const [integrationId, setIntegrationId] = useState(0);
 
-  const { data: pipelines } = useBuyerPipelines(participation.buyer_id);
+  const { data: pipelines } = usePipelines();
   const { data: stages } = useStages(pipelineId || undefined);
   const { data: connections } = useIntegrationConnections();
 
   const actionable = participation.status === "pending" || participation.status === "counter_pending";
   const deliveryValid =
     delivery !== "leads_pipeline" || (pipelineId > 0 && stageId > 0);
+
+  function stepComplete(i: number): boolean {
+    if (i === 0) return step > 0;
+    if (i === 1) return step > 1;
+    if (i === 2) return mappingComplete;
+    if (i === 3) return step === 3;
+    return false;
+  }
+
+  function canGoToStep(target: number): boolean {
+    if (target <= step) return true;
+    if (target >= 2 && !deliveryValid) return false;
+    return true;
+  }
+
+  function goToStep(target: number) {
+    if (!canGoToStep(target)) return;
+    setStep(target);
+  }
 
   function submitAccept() {
     const body: Record<string, unknown> = { delivery };
@@ -121,12 +142,26 @@ function DrawerContent({
         onClose={onClose}
       />
       <DrawerBody>
-        <div className="mb-4 flex flex-wrap gap-2 text-xs font-semibold text-gray-400">
-          {STEPS.map((s, i) => (
-            <span key={s} className={i === step ? "text-jade-700" : ""}>
-              {i + 1}. {s}
-            </span>
-          ))}
+        <div className="mb-4 flex flex-wrap border-b border-gray-100">
+          {STEPS.map((s, i) => {
+            const done = stepComplete(i);
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={() => goToStep(i)}
+                disabled={!canGoToStep(i)}
+                className={cn(
+                  "-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-semibold transition-colors",
+                  step === i ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400",
+                  !canGoToStep(i) && "cursor-not-allowed opacity-50"
+                )}
+              >
+                {done && <Check className="h-3.5 w-3.5 text-jade-600" />}
+                <span>{s}</span>
+              </button>
+            );
+          })}
         </div>
 
         {step === 0 && (
@@ -137,7 +172,7 @@ function DrawerContent({
             {participation.status === "counter_pending" && (
               <p className="text-xs text-amber-700">You submitted a counter-offer awaiting publisher response.</p>
             )}
-            {participation.status === "pending" && (
+            {participation.status === "pending" && showCounterOffer && (
               <div className="mt-3 space-y-2 rounded-lg border border-gray-100 p-3">
                 <p className="text-xs font-semibold text-gray-500">Counter-offer (optional)</p>
                 <Label>Proposed flat rate per lead ($)</Label>
@@ -286,6 +321,17 @@ function DrawerContent({
         >
           Decline
         </Button>
+        {participation.status === "pending" && (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setShowCounterOffer((v) => !v);
+              setStep(0);
+            }}
+          >
+            Counteroffer
+          </Button>
+        )}
         {step > 0 && (
           <Button variant="secondary" onClick={() => setStep((s) => s - 1)}>
             Back
