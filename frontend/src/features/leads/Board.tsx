@@ -197,7 +197,7 @@ export function Board() {
 
   function revert() {
     const grouped: Record<number, Lead[]> = {};
-    for (const l of visibleLeads) {
+    for (const l of leads?.items ?? []) {
       const sid = l.stage_id ?? 0;
       (grouped[sid] ??= []).push(l);
     }
