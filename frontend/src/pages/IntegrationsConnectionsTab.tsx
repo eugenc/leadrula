@@ -315,7 +315,7 @@ function AddConnectionDrawer({
     );
   }
 
-  function disconnect(id: number) {
+  function disconnect(id: number, closeOnSuccess = false) {
     remove.mutate(id, {
       onSuccess: () => {
         toast.success("Disconnected");
@@ -324,6 +324,7 @@ function AddConnectionDrawer({
           setActiveConnection(null);
           setInboundWebhook(null);
         }
+        if (closeOnSuccess) onClose();
       },
       onError: (e) => toast.error(errorMessage(e)),
     });
@@ -339,6 +340,15 @@ function AddConnectionDrawer({
       footer={
         showSunbaseActive ? (
           <>
+            {activeConnection && (
+              <Button
+                variant="secondary"
+                disabled={remove.isPending}
+                onClick={() => disconnect(activeConnection.id, true)}
+              >
+                Disconnect
+              </Button>
+            )}
             <Button variant="secondary" onClick={onClose}>
               Done
             </Button>

@@ -65,6 +65,7 @@ npm run dev                    # http://localhost:5173
 2. Create a service with root directory `backend/`. It deploys via `backend/Dockerfile`
    (configured in `backend/railway.json`), which also builds the `bootstrap` and `seed-demo` binaries.
 3. Set env vars: `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `APP_BASE_URL` (the Vercel URL),
+   `API_BASE_URL` (the Railway API URL — same host as frontend `VITE_API_URL`; used for SunBase inbound webhook URLs shown in the UI),
    `CORS_ORIGINS` (the Vercel URL), and Mailgun API vars (`MAILGUN_API_KEY`, `MAILGUN_DOMAIN`, `MAILGUN_FROM`).
 4. Migrations run automatically on startup (`/healthz` is the health check). Create the first
    publisher admin once by opening a shell on the service and running

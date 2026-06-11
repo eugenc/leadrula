@@ -40,6 +40,7 @@ import (
 
 func main() {
 	cfg := config.Load()
+	warnLocalhostAPIBaseInProduction(cfg)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -260,4 +261,16 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
 	}
+}
+
+func warnLocalhostAPIBaseInProduction(cfg *config.Config) {
+	api := strings.ToLower(cfg.APIBaseURL)
+	if !strings.Contains(api, "localhost") && !strings.Contains(api, "127.0.0.1") {
+		return
+	}
+	db := strings.ToLower(cfg.DatabaseURL)
+	if strings.Contains(db, "localhost") || strings.Contains(db, "127.0.0.1") {
+		return
+	}
+	log.Println("warning: API_BASE_URL is localhost but DATABASE_URL looks production — inbound webhook URLs will be wrong")
 }

@@ -54,6 +54,8 @@ type Config struct {
 func Load() *Config {
 	_ = godotenv.Load()
 
+	oauthRedirectBase := getenv("INTEGRATION_OAUTH_REDIRECT_BASE", "http://localhost:8080")
+
 	cfg := &Config{
 		Port:             getenv("PORT", "8080"),
 		DatabaseURL:      getenv("DATABASE_URL", "postgres://crm:crm@localhost:5432/crm?sslmode=disable"),
@@ -62,7 +64,7 @@ func Load() *Config {
 		AccessTokenTTL:   getdur("ACCESS_TOKEN_TTL", 15*time.Minute),
 		RefreshTokenTTL:  getdur("REFRESH_TOKEN_TTL", 720*time.Hour),
 		AppBaseURL:       getenv("APP_BASE_URL", "http://localhost:5173"),
-		APIBaseURL:       getenv("API_BASE_URL", "http://localhost:8080"),
+		APIBaseURL:       firstNonEmpty(os.Getenv("API_BASE_URL"), oauthRedirectBase, "http://localhost:8080"),
 		CORSOrigins:      splitCSV(getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:5174")),
 		MailgunAPIKey:  os.Getenv("MAILGUN_API_KEY"),
 		MailgunDomain:  os.Getenv("MAILGUN_DOMAIN"),
@@ -79,7 +81,7 @@ func Load() *Config {
 		StripeConnectClient: os.Getenv("STRIPE_CONNECT_CLIENT_ID"),
 
 		IntegrationEncKey:            os.Getenv("INTEGRATION_ENC_KEY"),
-		IntegrationOAuthRedirectBase: getenv("INTEGRATION_OAUTH_REDIRECT_BASE", "http://localhost:8080"),
+		IntegrationOAuthRedirectBase: oauthRedirectBase,
 		PipedriveClientID:            os.Getenv("PIPEDRIVE_CLIENT_ID"),
 		PipedriveClientSecret:        os.Getenv("PIPEDRIVE_CLIENT_SECRET"),
 		HubSpotClientID:              os.Getenv("HUBSPOT_CLIENT_ID"),
@@ -134,4 +136,13 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
