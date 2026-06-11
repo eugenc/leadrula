@@ -25,7 +25,6 @@ import {
   type PayoutDraftFields,
 } from "@/features/admin/CompensationPayoutFields";
 import { payoutDraftFromComp } from "@/features/admin/CompensationPayoutFields";
-import { useBuyerStages } from "@/features/admin/hooks";
 import type { ContractCompensation } from "@/types";
 
 export type CompensationDraft = {
@@ -142,8 +141,8 @@ export function compensationsValid(items: CompensationDraft[]): boolean {
 function CompensationCard({
   draft,
   index,
-  buyerId,
-  buyerPipelineId,
+  buyerId: _buyerId,
+  buyerPipelineId: _buyerPipelineId,
   leadType,
   onChange,
   onRemove,
@@ -158,8 +157,6 @@ function CompensationCard({
   onRemove: () => void;
   canRemove: boolean;
 }) {
-  const { data: buyerStages } = useBuyerStages(buyerId, buyerPipelineId || null);
-
   function set<K extends keyof CompensationDraft>(k: K, v: CompensationDraft[K]) {
     onChange({ ...draft, [k]: v });
   }
@@ -234,17 +231,9 @@ function CompensationCard({
               </Select>
             </div>
             {draft.trigger === "buyer_stage" && (
-              <div>
-                <Label>Trigger stage</Label>
-                <Select value={draft.trigger_stage_id} onChange={(e) => set("trigger_stage_id", Number(e.target.value))}>
-                  <option value={0}>Select…</option>
-                  {(buyerStages ?? []).map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
+              <p className="text-xs text-gray-500">
+                Buyer will choose the trigger stage on their pipeline after the contract is active.
+              </p>
             )}
           </>
         )}

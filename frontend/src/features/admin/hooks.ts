@@ -640,6 +640,141 @@ export function useBuyerContracts() {
   });
 }
 
+export function useParticipationCompensations(participationId: number | null) {
+  return useQuery({
+    queryKey: ["participation-compensations", participationId],
+    queryFn: () => get<ContractCompensation[]>(`/buyer/participations/${participationId}/compensations`),
+    enabled: !!participationId,
+  });
+}
+
+export function useUpdateBuyerCompensationTriggerStage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      contractId,
+      compId,
+      triggerStageId,
+    }: {
+      contractId: number;
+      compId: number;
+      triggerStageId: number;
+    }) =>
+      patch(`/buyer/contracts/${contractId}/compensations/${compId}`, {
+        trigger_stage_id: triggerStageId,
+      }),
+    onSuccess: (_, v) => {
+      qc.invalidateQueries({ queryKey: ["contract-compensations", v.contractId] });
+    },
+  });
+}
+
+export function useUpdateParticipationCompensationTriggerStage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      participationId,
+      compId,
+      triggerStageId,
+    }: {
+      participationId: number;
+      compId: number;
+      triggerStageId: number;
+    }) =>
+      patch(`/buyer/participations/${participationId}/compensations/${compId}`, {
+        trigger_stage_id: triggerStageId,
+      }),
+    onSuccess: (_, v) => {
+      qc.invalidateQueries({ queryKey: ["participation-compensations", v.participationId] });
+    },
+  });
+}
+
+export function useBuyerContractFieldMap(contractId: number | null) {
+  return useQuery({
+    queryKey: ["buyer-contract-field-map", contractId],
+    queryFn: () => get<import("@/types").ContractFieldMapEntry[]>(`/buyer/contracts/${contractId}/field-map`),
+    enabled: !!contractId,
+  });
+}
+
+export function useBuyerParticipationFieldMap(participationId: number | null) {
+  return useQuery({
+    queryKey: ["buyer-participation-field-map", participationId],
+    queryFn: () =>
+      get<import("@/types").ContractFieldMapEntry[]>(`/buyer/participations/${participationId}/field-map`),
+    enabled: !!participationId,
+  });
+}
+
+export function useBuyerContractFieldMapOptions(contractId: number | null) {
+  return useQuery({
+    queryKey: ["buyer-contract-field-map-options", contractId],
+    queryFn: () =>
+      get<import("@/types").ContractFieldMapOptions>(`/buyer/contracts/${contractId}/field-map/options`),
+    enabled: !!contractId,
+  });
+}
+
+export function useBuyerParticipationFieldMapOptions(participationId: number | null) {
+  return useQuery({
+    queryKey: ["buyer-participation-field-map-options", participationId],
+    queryFn: () =>
+      get<import("@/types").ContractFieldMapOptions>(
+        `/buyer/participations/${participationId}/field-map/options`
+      ),
+    enabled: !!participationId,
+  });
+}
+
+export function useAddBuyerContractFieldMap() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ contractId, body }: { contractId: number; body: Record<string, unknown> }) =>
+      post(`/buyer/contracts/${contractId}/field-map`, body),
+    onSuccess: (_, v) => {
+      qc.invalidateQueries({ queryKey: ["buyer-contract-field-map", v.contractId] });
+      qc.invalidateQueries({ queryKey: ["buyer-contract-field-map-options", v.contractId] });
+    },
+  });
+}
+
+export function useAddBuyerParticipationFieldMap() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ participationId, body }: { participationId: number; body: Record<string, unknown> }) =>
+      post(`/buyer/participations/${participationId}/field-map`, body),
+    onSuccess: (_, v) => {
+      qc.invalidateQueries({ queryKey: ["buyer-participation-field-map", v.participationId] });
+      qc.invalidateQueries({ queryKey: ["buyer-participation-field-map-options", v.participationId] });
+    },
+  });
+}
+
+export function useDeleteBuyerContractFieldMap() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ contractId, mapId }: { contractId: number; mapId: number }) =>
+      del(`/buyer/contracts/${contractId}/field-map/${mapId}`),
+    onSuccess: (_, v) => {
+      qc.invalidateQueries({ queryKey: ["buyer-contract-field-map", v.contractId] });
+      qc.invalidateQueries({ queryKey: ["buyer-contract-field-map-options", v.contractId] });
+    },
+  });
+}
+
+export function useDeleteBuyerParticipationFieldMap() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ participationId, mapId }: { participationId: number; mapId: number }) =>
+      del(`/buyer/participations/${participationId}/field-map/${mapId}`),
+    onSuccess: (_, v) => {
+      qc.invalidateQueries({ queryKey: ["buyer-participation-field-map", v.participationId] });
+      qc.invalidateQueries({ queryKey: ["buyer-participation-field-map-options", v.participationId] });
+    },
+  });
+}
+
 export function useMyPublisher() {
   return useQuery({
     queryKey: ["my-publisher"],

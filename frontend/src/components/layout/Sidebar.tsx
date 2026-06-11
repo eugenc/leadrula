@@ -65,7 +65,7 @@ const publisherNav: NavGroup[] = [
       { to: "/p/sources", label: "Sources", icon: Import, adminOnly: true },
       { to: "/p/webhooks", label: "Webhooks", icon: Webhook, adminOnly: true },
       { to: "/p/routing", label: "Routing", icon: Route, adminOnly: true },
-      { to: "/p/log", label: "Log", icon: Logs, adminOnly: true },
+      { to: "/p/log", label: "Logs", icon: Logs, adminOnly: true },
     ],
   },
 ];
@@ -103,8 +103,14 @@ const buyerNav: NavGroup[] = [
     items: [
       { to: "/b/publishers", label: "Publishers", icon: Building2 },
       { to: "/b/contract", label: "Contracts", icon: FileText },
-      { to: "/b/routes", label: "Routes", icon: Route },
       { to: "/b/collaboration", label: "Collaboration", icon: Handshake, adminOnly: true },
+    ],
+  },
+  {
+    label: "Routing",
+    items: [
+      { to: "/b/routes", label: "Routes", icon: Route },
+      { to: "/b/webhooks", label: "Webhooks", icon: Webhook, adminOnly: true },
       { to: "/b/logs", label: "Logs", icon: Logs, adminOnly: true },
     ],
   },
@@ -118,10 +124,7 @@ const buyerSettings: NavGroup = {
 };
 
 const buyerBottomNav: NavGroup = {
-  items: [
-    { to: "/b/webhooks", label: "Webhooks", icon: Webhook, adminOnly: true },
-    { to: "/b/integrations", label: "Integrations", icon: Plug, adminOnly: true },
-  ],
+  items: [{ to: "/b/integrations", label: "Integrations", icon: Plug, adminOnly: true }],
 };
 
 const platformNav: NavGroup[] = [

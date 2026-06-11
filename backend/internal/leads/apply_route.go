@@ -85,6 +85,9 @@ func applyBuyerRoute(ctx context.Context, q database.Querier, deps RouteApplyDep
 	if err != nil {
 		return nil, err
 	}
+	if err := contracts.RequireFieldMappingComplete(ctx, q, *route.ContractID, target.BuyerID, target.ParticipationID); err != nil {
+		return nil, err
+	}
 	if err := CheckDuplicate(ctx, q, target.BuyerID, lead.Phone, lead.Email, leadID); err != nil {
 		return nil, err
 	}
@@ -97,6 +100,15 @@ func applyBuyerRoute(ctx context.Context, q database.Querier, deps RouteApplyDep
 	}
 	if err := ApplyRouteFieldMap(ctx, q, deps.Repo, lead, maps); err != nil {
 		return nil, err
+	}
+	contractMaps, err := contracts.ContractFieldMapForRoute(ctx, q, *route.ContractID, target.ParticipationID)
+	if err != nil {
+		return nil, err
+	}
+	if len(contractMaps) > 0 {
+		if err := ApplyRouteFieldMap(ctx, q, deps.Repo, lead, contractMaps); err != nil {
+			return nil, err
+		}
 	}
 
 	buyer, err := deps.Accounts.GetAccount(ctx, target.BuyerID)

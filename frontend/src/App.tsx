@@ -18,6 +18,7 @@ import { CustomFieldsPage } from "@/pages/CustomFieldsPage";
 import { UsersPage } from "@/pages/UsersPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { SettingsLayout } from "@/pages/SettingsLayout";
+import { BusinessSettingsPage } from "@/pages/BusinessSettingsPage";
 import { NotificationsSettingsPage } from "@/pages/NotificationsSettingsPage";
 import { ApiKeysPage } from "@/pages/buyer/ApiKeysPage";
 
@@ -117,6 +118,7 @@ export default function App() {
                 <Route path="settings" element={<SettingsLayout />}>
                   <Route index element={<SettingsPage />} />
                   <Route path="notifications" element={<NotificationsSettingsPage />} />
+                  <Route path="business" element={<BusinessSettingsPage />} />
                   <Route path="billing" element={<Navigate to="/p/billing" replace />} />
                   <Route path="users" element={<UsersPage />} />
                   <Route path="api" element={<ApiKeysPage />} />
@@ -153,6 +155,7 @@ export default function App() {
                 <Route path="settings" element={<SettingsLayout />}>
                   <Route index element={<SettingsPage />} />
                   <Route path="notifications" element={<NotificationsSettingsPage />} />
+                  <Route path="business" element={<BusinessSettingsPage />} />
                   <Route path="billing" element={<Navigate to="/b/billing" replace />} />
                   <Route path="users" element={<UsersPage />} />
                   <Route path="api" element={<ApiKeysPage />} />

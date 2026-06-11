@@ -344,8 +344,8 @@ export function usePatchPrefs() {
 export function useUpdateMyAccount() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (timezone: string) =>
-      patch<{ account: Me["account"] }>("/auth/me/account", { timezone }),
+    mutationFn: (body: Partial<Me["account"]>) =>
+      patch<{ account: Me["account"] }>("/auth/me/account", body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
   });
 }

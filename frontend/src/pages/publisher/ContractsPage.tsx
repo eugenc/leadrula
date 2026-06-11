@@ -319,7 +319,6 @@ function CreateContractDrawer({
       <ContractFormTabs
         key={`new-contract-${createSession}`}
         resetKey={createSession}
-        showCheckmarks={false}
         form={form}
         compensations={compensations}
         delivery={deliveryDraft}

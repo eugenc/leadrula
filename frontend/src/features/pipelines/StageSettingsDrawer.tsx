@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Sheet, DrawerHeader, DrawerBody } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { IconButton } from "@/components/layout/IconButton";
 import { Spinner, Switch } from "@/components/ui/misc";
@@ -132,6 +132,9 @@ function blankCondition(): RuleCondition {
 function blankAction(): RuleAction {
   return { verb: "update", domain: "lead", field: "" };
 }
+
+const ACTION_VERBS = [{ value: "update", label: "Update" }] as const;
+const showVerbPicker = ACTION_VERBS.length > 1;
 
 function isCompleteCondition(c: RuleCondition): boolean {
   return c.field !== "";
@@ -538,18 +541,18 @@ function RuleEditor({
   const canSave = canSaveRule(value);
 
   return (
-    <div className="rounded-lg border border-jade-200 bg-surface-card p-4 shadow-sm">
-      <div className="mb-4 flex items-center gap-2">
-        <Label className="shrink-0">Match</Label>
+    <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+      <div className="mb-4 flex items-center gap-2 text-sm font-medium text-gray-700">
+        <span className="shrink-0">Match</span>
         <Select
           value={value.condition_logic}
           onChange={(e) => onChange({ ...value, condition_logic: e.target.value as "and" | "or" })}
-          className="w-24"
+          className="w-24 shrink-0 font-medium"
         >
           <option value="and">ALL</option>
           <option value="or">ANY</option>
         </Select>
-        <span className="text-xs text-gray-400">of the conditions</span>
+        <span className="text-sm text-gray-400">of the conditions</span>
       </div>
 
       <SectionLabel className="mb-2">Conditions</SectionLabel>
@@ -854,79 +857,64 @@ function ActionRow({
   onRemove: () => void;
 }) {
   const incomplete = !isCompleteAction(action);
+  const fields = incomplete ? [] : actionFields(action.domain, lk.customFields);
+  const def = incomplete ? undefined : findField(fields, action.field) ?? fields[0];
 
-  if (incomplete) {
-    return (
-      <div className="flex flex-wrap items-center gap-2 rounded-md border border-gray-100 bg-gray-50 p-2">
-        <Select value="update" disabled className="w-24">
-          <option value="update">Update</option>
-        </Select>
+  return (
+    <div className="relative rounded-md border border-gray-100 bg-surface-card p-2">
+      <div className="flex items-center gap-2 pr-9">
+        {showVerbPicker && (
+          <Select value={action.verb} disabled className="w-24 shrink-0">
+            {ACTION_VERBS.map((v) => (
+              <option key={v.value} value={v.value}>
+                {v.label}
+              </option>
+            ))}
+          </Select>
+        )}
         <Select
-          value=""
+          value={incomplete ? "" : action.domain}
           onChange={(e) => {
             const domain = e.target.value as "lead" | "pipeline" | "user";
             if (domain) onChange(makeAction(domain, lk));
           }}
-          className="w-36"
+          className="min-w-0 flex-1"
         >
-          <option value="">Select domain</option>
+          {incomplete && <option value="">Select domain</option>}
           {ACTION_DOMAINS.map((d) => (
             <option key={d.value} value={d.value}>
               {d.label}
             </option>
           ))}
         </Select>
-        <IconButton variant="danger" onClick={onRemove}>
-          <Trash2 className="h-3.5 w-3.5" />
-        </IconButton>
       </div>
-    );
-  }
-
-  const fields = actionFields(action.domain, lk.customFields);
-  const def = findField(fields, action.field) ?? fields[0];
-
-  return (
-    <div className="flex flex-wrap items-center gap-2 rounded-md border border-gray-100 bg-gray-50 p-2">
-      <Select value="update" disabled className="w-24">
-        <option value="update">Update</option>
-      </Select>
-
-      <Select
-        value={action.domain}
-        onChange={(e) => onChange(makeAction(e.target.value as "lead" | "pipeline" | "user", lk))}
-        className="w-28"
-      >
-        {ACTION_DOMAINS.map((d) => (
-          <option key={d.value} value={d.value}>
-            {d.label}
-          </option>
-        ))}
-      </Select>
-
-      <Select
-        value={def.field}
-        onChange={(e) => onChange(makeAction(action.domain, lk, e.target.value))}
-        className="min-w-[140px]"
-      >
-        {fields.map((f) => (
-          <option key={f.field} value={f.field}>
-            {f.label}
-          </option>
-        ))}
-      </Select>
-
-      <ActionValue
-        kind={def.kind}
-        def={def}
-        value={action.value}
-        lk={lk}
-        onChange={(v) => onChange({ ...action, value: v })}
-      />
-
-      <IconButton variant="danger" onClick={onRemove}>
+      <IconButton variant="danger" className="absolute right-1 top-1" onClick={onRemove}>
         <Trash2 className="h-3.5 w-3.5" />
       </IconButton>
+
+      {!incomplete && def && (
+        <div className="mt-2 flex flex-col gap-2">
+          <Select
+            value={def.field}
+            onChange={(e) => onChange(makeAction(action.domain, lk, e.target.value))}
+            className="w-full"
+          >
+            {fields.map((f) => (
+              <option key={f.field} value={f.field}>
+                {f.label}
+              </option>
+            ))}
+          </Select>
+          <ActionValue
+            kind={def.kind}
+            def={def}
+            value={action.value}
+            lk={lk}
+            fullWidth
+            onChange={(v) => onChange({ ...action, value: v })}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -937,25 +925,29 @@ function ActionValue({
   value,
   lk,
   onChange,
+  fullWidth = false,
 }: {
   kind: FieldKind;
   def: FieldDef;
   value: unknown;
   lk: Lookups;
   onChange: (v: unknown) => void;
+  fullWidth?: boolean;
 }) {
+  const fieldClass = fullWidth ? "w-full" : "min-w-[130px]";
+
   switch (kind) {
     case "date": {
       const mode = modeOf(value);
       return (
-        <>
+        <div className={fullWidth ? "flex flex-col gap-2" : "contents"}>
           <Select
             value={mode}
             onChange={(e) => {
               const m = e.target.value;
               onChange(m === "plus_days" ? { mode: m, days: daysOf(value) } : { mode: m });
             }}
-            className="w-36"
+            className={fullWidth ? "w-full" : "w-36"}
           >
             <option value="today">Today</option>
             <option value="plus_days">Days from today</option>
@@ -967,15 +959,15 @@ function ActionValue({
               min={0}
               value={String(daysOf(value))}
               onChange={(e) => onChange({ mode: "plus_days", days: Number(e.target.value) })}
-              className="w-16"
+              className={fullWidth ? "w-full" : "w-16"}
             />
           )}
-        </>
+        </div>
       );
     }
     case "status":
       return (
-        <Select value={asStr(value)} onChange={(e) => onChange(e.target.value)} className="min-w-[130px]">
+        <Select value={asStr(value)} onChange={(e) => onChange(e.target.value)} className={fieldClass}>
           {LEAD_STATUSES.map((s) => (
             <option key={s} value={s}>
               {formatStatus(s)}
@@ -988,7 +980,7 @@ function ActionValue({
         <Select
           value={String(asNum(value))}
           onChange={(e) => onChange(Number(e.target.value))}
-          className="min-w-[130px]"
+          className={fieldClass}
         >
           {lk.stages.map((s) => (
             <option key={s.id} value={s.id}>
@@ -1002,7 +994,7 @@ function ActionValue({
         <Select
           value={value == null ? "" : String(asNum(value))}
           onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
-          className="min-w-[130px]"
+          className={fieldClass}
         >
           <option value="">Unassigned</option>
           {lk.users.map((u) => (
@@ -1017,7 +1009,7 @@ function ActionValue({
         <Select
           value={value == null ? "" : String(asNum(value))}
           onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
-          className="min-w-[130px]"
+          className={fieldClass}
         >
           <option value="">Clear</option>
           {lk.reasons.map((r) => (
@@ -1032,7 +1024,7 @@ function ActionValue({
         <Select
           value={value ? "true" : "false"}
           onChange={(e) => onChange(e.target.value === "true")}
-          className="w-28"
+          className={fullWidth ? "w-full" : "w-28"}
         >
           <option value="true">Checked</option>
           <option value="false">Unchecked</option>
@@ -1044,7 +1036,7 @@ function ActionValue({
           type="number"
           value={String(asNum(value))}
           onChange={(e) => onChange(Number(e.target.value))}
-          className="w-24"
+          className={fullWidth ? "w-full" : "w-24"}
         />
       );
     case "tags":
@@ -1059,14 +1051,14 @@ function ActionValue({
                 .filter(Boolean)
             )
           }
-          className="min-w-[160px]"
+          className={fullWidth ? "w-full" : "min-w-[160px]"}
           placeholder="tag1, tag2"
         />
       );
     default:
       if (def.options?.length) {
         return (
-          <Select value={asStr(value)} onChange={(e) => onChange(e.target.value)} className="min-w-[130px]">
+          <Select value={asStr(value)} onChange={(e) => onChange(e.target.value)} className={fieldClass}>
             {def.options.map((o) => (
               <option key={o} value={o}>
                 {o}
@@ -1079,7 +1071,7 @@ function ActionValue({
         <Input
           value={asStr(value)}
           onChange={(e) => onChange(e.target.value)}
-          className="min-w-[140px]"
+          className={fullWidth ? "w-full" : "min-w-[140px]"}
           placeholder="value"
         />
       );

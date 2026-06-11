@@ -16,13 +16,16 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
-const accountCols = `id, public_id, handler_id, type, name, website, timezone, operational_status, buyer_kind, created_at`
+const accountCols = `id, public_id, handler_id, type, name, website, timezone, operational_status, buyer_kind,
+	contact_email, phone, address_line1, address_line2, city, state, postal_code, country, created_at`
 
 func scanAccount(row pgx.Row) (*Account, error) {
 	a := &Account{}
 	err := row.Scan(
 		&a.ID, &a.PublicID, &a.HandlerID, &a.Type, &a.Name, &a.Website, &a.Timezone,
-		&a.OperationalStatus, &a.BuyerKind, &a.CreatedAt)
+		&a.OperationalStatus, &a.BuyerKind,
+		&a.ContactEmail, &a.Phone, &a.AddressLine1, &a.AddressLine2, &a.City, &a.State, &a.PostalCode, &a.Country,
+		&a.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -267,10 +270,19 @@ func (r *Repository) UpdateBuyer(ctx context.Context, id int64, p UpdateBuyerPar
 			name = COALESCE($2, name),
 			website = COALESCE($3, website),
 			timezone = COALESCE($4, timezone),
-			buyer_kind = COALESCE($5::buyer_kind, buyer_kind)
+			buyer_kind = COALESCE($5::buyer_kind, buyer_kind),
+			contact_email = COALESCE($6, contact_email),
+			phone = COALESCE($7, phone),
+			address_line1 = COALESCE($8, address_line1),
+			address_line2 = COALESCE($9, address_line2),
+			city = COALESCE($10, city),
+			state = COALESCE($11, state),
+			postal_code = COALESCE($12, postal_code),
+			country = COALESCE($13, country)
 		WHERE id = $1 AND type = 'buyer' AND deleted_at IS NULL
 		RETURNING ` + accountCols
-	return scanAccount(r.pool.QueryRow(ctx, q, id, p.Name, p.Website, p.Timezone, p.BuyerKind))
+	return scanAccount(r.pool.QueryRow(ctx, q, id, p.Name, p.Website, p.Timezone, p.BuyerKind,
+		p.ContactEmail, p.Phone, p.AddressLine1, p.AddressLine2, p.City, p.State, p.PostalCode, p.Country))
 }
 
 func (r *Repository) UpdateBuyerByPublicID(ctx context.Context, publicID string, p UpdateBuyerParams) (*Account, error) {
@@ -279,10 +291,19 @@ func (r *Repository) UpdateBuyerByPublicID(ctx context.Context, publicID string,
 			name = COALESCE($2, name),
 			website = COALESCE($3, website),
 			timezone = COALESCE($4, timezone),
-			buyer_kind = COALESCE($5::buyer_kind, buyer_kind)
+			buyer_kind = COALESCE($5::buyer_kind, buyer_kind),
+			contact_email = COALESCE($6, contact_email),
+			phone = COALESCE($7, phone),
+			address_line1 = COALESCE($8, address_line1),
+			address_line2 = COALESCE($9, address_line2),
+			city = COALESCE($10, city),
+			state = COALESCE($11, state),
+			postal_code = COALESCE($12, postal_code),
+			country = COALESCE($13, country)
 		WHERE public_id = $1 AND type = 'buyer' AND deleted_at IS NULL
 		RETURNING ` + accountCols
-	return scanAccount(r.pool.QueryRow(ctx, q, publicID, p.Name, p.Website, p.Timezone, p.BuyerKind))
+	return scanAccount(r.pool.QueryRow(ctx, q, publicID, p.Name, p.Website, p.Timezone, p.BuyerKind,
+		p.ContactEmail, p.Phone, p.AddressLine1, p.AddressLine2, p.City, p.State, p.PostalCode, p.Country))
 }
 
 func (r *Repository) SetBuyerKind(ctx context.Context, buyerID int64, kind string) error {
@@ -302,10 +323,20 @@ func (r *Repository) UpdatePublisher(ctx context.Context, publicID string, p Upd
 	const q = `
 		UPDATE accounts SET
 			name = COALESCE($2, name),
-			timezone = COALESCE($3, timezone)
+			website = COALESCE($3, website),
+			timezone = COALESCE($4, timezone),
+			contact_email = COALESCE($5, contact_email),
+			phone = COALESCE($6, phone),
+			address_line1 = COALESCE($7, address_line1),
+			address_line2 = COALESCE($8, address_line2),
+			city = COALESCE($9, city),
+			state = COALESCE($10, state),
+			postal_code = COALESCE($11, postal_code),
+			country = COALESCE($12, country)
 		WHERE public_id = $1 AND type = 'publisher' AND deleted_at IS NULL
 		RETURNING ` + accountCols
-	return scanAccount(r.pool.QueryRow(ctx, q, publicID, p.Name, p.Timezone))
+	return scanAccount(r.pool.QueryRow(ctx, q, publicID, p.Name, p.Website, p.Timezone,
+		p.ContactEmail, p.Phone, p.AddressLine1, p.AddressLine2, p.City, p.State, p.PostalCode, p.Country))
 }
 
 func (r *Repository) SoftDeleteAccount(ctx context.Context, publicID, accountType string) error {

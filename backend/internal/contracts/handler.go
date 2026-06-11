@@ -58,9 +58,20 @@ func (h *Handler) RegisterBuyer(r chi.Router) {
 	r.Get("/contracts/{id}/publisher-stages", h.buyerPublisherStages)
 	r.Get("/contracts/{id}/return-rules", h.buyerListRules)
 	r.Get("/contracts/{id}/compensations", h.buyerListCompensations)
+	r.Get("/contracts/{id}/field-map", h.buyerListContractFieldMap)
+	r.Get("/contracts/{id}/field-map/options", h.buyerContractFieldMapOptions)
+	r.Get("/participations/{id}/compensations", h.buyerListParticipationCompensations)
+	r.Get("/participations/{id}/field-map", h.buyerListParticipationFieldMap)
+	r.Get("/participations/{id}/field-map/options", h.buyerParticipationFieldMapOptions)
 	r.With(auth.RequireRole("admin")).Post("/contracts/{id}/return-rules", h.buyerAddRule)
 	r.With(auth.RequireRole("admin")).Patch("/contracts/{id}/return-rules/{ruleId}", h.buyerUpdateRule)
 	r.With(auth.RequireRole("admin")).Delete("/contracts/{id}/return-rules/{ruleId}", h.buyerDeleteRule)
+	r.With(auth.RequireRole("admin")).Patch("/contracts/{id}/compensations/{compId}", h.buyerPatchContractCompensation)
+	r.With(auth.RequireRole("admin")).Patch("/participations/{id}/compensations/{compId}", h.buyerPatchParticipationCompensation)
+	r.With(auth.RequireRole("admin")).Post("/contracts/{id}/field-map", h.buyerAddContractFieldMap)
+	r.With(auth.RequireRole("admin")).Delete("/contracts/{id}/field-map/{mapId}", h.buyerDeleteContractFieldMap)
+	r.With(auth.RequireRole("admin")).Post("/participations/{id}/field-map", h.buyerAddParticipationFieldMap)
+	r.With(auth.RequireRole("admin")).Delete("/participations/{id}/field-map/{mapId}", h.buyerDeleteParticipationFieldMap)
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {

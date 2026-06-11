@@ -142,6 +142,7 @@ func (s *Service) loadLeadCriteria(ctx context.Context, contractID int64) (*Lead
 }
 
 func (s *Service) SaveLeadCriteria(ctx context.Context, publisherID, contractID int64, c LeadCriteria) error {
+	c.FieldMap = nil
 	if _, err := s.Get(ctx, publisherID, contractID); err != nil {
 		return err
 	}
@@ -167,14 +168,6 @@ func (s *Service) SaveLeadCriteria(ctx context.Context, publisherID, contractID 
 			`INSERT INTO contract_required_fields(contract_id, field_type, builtin_field, custom_field_id)
 			 VALUES ($1,$2,NULLIF($3,''),$4)`,
 			contractID, r.FieldType, r.BuiltinField, r.CustomFieldID); err != nil {
-			return err
-		}
-	}
-	for _, e := range c.FieldMap {
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO contract_field_map(contract_id, src_type, src_builtin, src_custom_field_id, dst_type, dst_builtin, dst_custom_field_id)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-			contractID, e.SrcType, e.SrcBuiltin, e.SrcCustomFieldID, e.DstType, e.DstBuiltin, e.DstCustomFieldID); err != nil {
 			return err
 		}
 	}
@@ -235,14 +228,6 @@ func saveLeadCriteriaTx(ctx context.Context, tx pgx.Tx, contractID int64, c *Lea
 			`INSERT INTO contract_required_fields(contract_id, field_type, builtin_field, custom_field_id)
 			 VALUES ($1,$2,NULLIF($3,''),$4)`,
 			contractID, r.FieldType, r.BuiltinField, r.CustomFieldID); err != nil {
-			return err
-		}
-	}
-	for _, e := range c.FieldMap {
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO contract_field_map(contract_id, src_type, src_builtin, src_custom_field_id, dst_type, dst_builtin, dst_custom_field_id)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-			contractID, e.SrcType, e.SrcBuiltin, e.SrcCustomFieldID, e.DstType, e.DstBuiltin, e.DstCustomFieldID); err != nil {
 			return err
 		}
 	}

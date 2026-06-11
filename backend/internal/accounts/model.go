@@ -11,16 +11,24 @@ const (
 )
 
 type Account struct {
-	ID                  int64     `json:"-"`
-	PublicID              string    `json:"id"`
-	HandlerID             string    `json:"handler_id"`
-	Type                  string    `json:"type"`
-	Name                  string    `json:"name"`
-	Website               string    `json:"website"`
-	Timezone              string    `json:"timezone"`
-	OperationalStatus     string    `json:"operational_status"`
-	BuyerKind             string    `json:"buyer_kind,omitempty"`
-	CreatedAt             time.Time `json:"created_at"`
+	ID                int64     `json:"-"`
+	PublicID            string    `json:"id"`
+	HandlerID           string    `json:"handler_id"`
+	Type                string    `json:"type"`
+	Name                string    `json:"name"`
+	Website             string    `json:"website"`
+	Timezone            string    `json:"timezone"`
+	OperationalStatus   string    `json:"operational_status"`
+	BuyerKind           string    `json:"buyer_kind,omitempty"`
+	ContactEmail        string    `json:"contact_email"`
+	Phone               string    `json:"phone"`
+	AddressLine1        string    `json:"address_line1"`
+	AddressLine2        string    `json:"address_line2"`
+	City                string    `json:"city"`
+	State               string    `json:"state"`
+	PostalCode          string    `json:"postal_code"`
+	Country             string    `json:"country"`
+	CreatedAt           time.Time `json:"created_at"`
 }
 
 type User struct {
@@ -73,15 +81,53 @@ type UpdateInviteParams struct {
 }
 
 type UpdateBuyerParams struct {
-	Name      *string
-	Website   *string
-	Timezone  *string
-	BuyerKind *string
+	Name         *string
+	Website      *string
+	Timezone     *string
+	BuyerKind    *string
+	ContactEmail *string
+	Phone        *string
+	AddressLine1 *string
+	AddressLine2 *string
+	City         *string
+	State        *string
+	PostalCode   *string
+	Country      *string
 }
 
 type UpdatePublisherParams struct {
-	Name     *string
-	Timezone *string
+	Name         *string
+	Website      *string
+	Timezone     *string
+	ContactEmail *string
+	Phone        *string
+	AddressLine1 *string
+	AddressLine2 *string
+	City         *string
+	State        *string
+	PostalCode   *string
+	Country      *string
+}
+
+type UpdateMyAccountParams struct {
+	Name         *string `json:"name"`
+	Website      *string `json:"website"`
+	Timezone     *string `json:"timezone"`
+	ContactEmail *string `json:"contact_email"`
+	Phone        *string `json:"phone"`
+	AddressLine1 *string `json:"address_line1"`
+	AddressLine2 *string `json:"address_line2"`
+	City         *string `json:"city"`
+	State        *string `json:"state"`
+	PostalCode   *string `json:"postal_code"`
+	Country      *string `json:"country"`
+}
+
+func (p UpdateMyAccountParams) HasChanges() bool {
+	return p.Name != nil || p.Website != nil || p.Timezone != nil ||
+		p.ContactEmail != nil || p.Phone != nil ||
+		p.AddressLine1 != nil || p.AddressLine2 != nil ||
+		p.City != nil || p.State != nil || p.PostalCode != nil || p.Country != nil
 }
 
 type CreateBuyerParams struct {

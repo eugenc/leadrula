@@ -11,7 +11,7 @@ import { useAuthStore } from "@/store/authStore";
 const titles: Record<string, string> = {
   board: "Pipeline",
   leads: "Leads",
-  log: "Log",
+  log: "Logs",
   review: "Review",
   pipelines: "Pipelines",
   fields: "Custom Fields",

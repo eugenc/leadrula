@@ -139,9 +139,7 @@ func (s *Service) Me(ctx context.Context, p *auth.Principal) (map[string]any, er
 			"role": userRole, "is_active": u.IsActive, "prefs": rawJSON(u.Prefs),
 			"avatar_url": avatarURLFromPrefs(u.Prefs),
 		},
-		"account": map[string]any{
-			"id": a.PublicID, "handler_id": a.HandlerID, "type": a.Type, "name": a.Name, "timezone": a.Timezone,
-		},
+		"account": accountMeFields(a),
 	}
 	if p.Impersonator != nil {
 		res["impersonating"] = true
@@ -159,40 +157,49 @@ func (s *Service) Me(ctx context.Context, p *auth.Principal) (map[string]any, er
 	return res, nil
 }
 
-func (s *Service) UpdateMyAccount(ctx context.Context, p *auth.Principal, timezone string) (*Account, error) {
+func (s *Service) UpdateMyAccount(ctx context.Context, p *auth.Principal, params UpdateMyAccountParams) (*Account, error) {
 	if !p.IsAdmin() {
 		return nil, httpx.Forbidden("admin role required")
 	}
 	if p.AccountType != "buyer" && p.AccountType != "publisher" {
 		return nil, httpx.Validation("account type not supported")
 	}
-	tz := strings.TrimSpace(timezone)
-	if tz == "" {
-		return nil, httpx.Validation("timezone is required")
+	if !params.HasChanges() {
+		return nil, httpx.Validation("no fields to update")
 	}
-	if _, ok := allowedTimezones[tz]; !ok {
-		return nil, httpx.Validation("invalid timezone")
+	if params.Timezone != nil && strings.TrimSpace(*params.Timezone) == "" {
+		return nil, httpx.Validation("timezone is required")
 	}
 
 	switch p.AccountType {
 	case "buyer":
-		a, err := s.repo.UpdateBuyer(ctx, p.AccountID, UpdateBuyerParams{Timezone: &tz})
-		if err != nil {
-			if err == ErrNotFound {
-				return nil, httpx.NotFound("account not found")
-			}
-			return nil, err
-		}
-		return a, nil
+		return s.UpdateBuyer(ctx, p.AccountID, UpdateBuyerParams{
+			Name:         params.Name,
+			Website:      params.Website,
+			Timezone:     params.Timezone,
+			ContactEmail: params.ContactEmail,
+			Phone:        params.Phone,
+			AddressLine1: params.AddressLine1,
+			AddressLine2: params.AddressLine2,
+			City:         params.City,
+			State:        params.State,
+			PostalCode:   params.PostalCode,
+			Country:      params.Country,
+		})
 	case "publisher":
-		a, err := s.repo.UpdatePublisher(ctx, p.AccountPublicID, UpdatePublisherParams{Timezone: &tz})
-		if err != nil {
-			if err == ErrNotFound {
-				return nil, httpx.NotFound("account not found")
-			}
-			return nil, err
-		}
-		return a, nil
+		return s.UpdatePublisher(ctx, p.AccountPublicID, UpdatePublisherParams{
+			Name:         params.Name,
+			Website:      params.Website,
+			Timezone:     params.Timezone,
+			ContactEmail: params.ContactEmail,
+			Phone:        params.Phone,
+			AddressLine1: params.AddressLine1,
+			AddressLine2: params.AddressLine2,
+			City:         params.City,
+			State:        params.State,
+			PostalCode:   params.PostalCode,
+			Country:      params.Country,
+		})
 	default:
 		return nil, httpx.Validation("account type not supported")
 	}
@@ -438,6 +445,12 @@ func (s *Service) UpdateBuyer(ctx context.Context, id int64, p UpdateBuyerParams
 		}
 		p.BuyerKind = &kind
 	}
+	if err := normalizeBusinessProfile(
+		&p.ContactEmail, &p.Phone, &p.AddressLine1, &p.AddressLine2,
+		&p.City, &p.State, &p.PostalCode, &p.Country,
+	); err != nil {
+		return nil, err
+	}
 
 	a, err := s.repo.UpdateBuyer(ctx, id, p)
 	if err != nil {
@@ -466,6 +479,16 @@ func (s *Service) UpdatePublisher(ctx context.Context, publicID string, p Update
 			return nil, httpx.Validation("invalid timezone")
 		}
 		p.Timezone = &tz
+	}
+	if p.Website != nil {
+		website := strings.TrimSpace(*p.Website)
+		p.Website = &website
+	}
+	if err := normalizeBusinessProfile(
+		&p.ContactEmail, &p.Phone, &p.AddressLine1, &p.AddressLine2,
+		&p.City, &p.State, &p.PostalCode, &p.Country,
+	); err != nil {
+		return nil, err
 	}
 
 	a, err := s.repo.UpdatePublisher(ctx, publicID, p)
@@ -506,6 +529,12 @@ func (s *Service) UpdateBuyerByPublicID(ctx context.Context, publicID string, p 
 			return nil, httpx.Validation("invalid buyer_kind")
 		}
 		p.BuyerKind = &kind
+	}
+	if err := normalizeBusinessProfile(
+		&p.ContactEmail, &p.Phone, &p.AddressLine1, &p.AddressLine2,
+		&p.City, &p.State, &p.PostalCode, &p.Country,
+	); err != nil {
+		return nil, err
 	}
 
 	a, err := s.repo.UpdateBuyerByPublicID(ctx, publicID, p)

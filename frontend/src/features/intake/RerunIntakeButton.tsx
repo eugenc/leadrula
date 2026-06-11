@@ -29,7 +29,7 @@ export function RerunIntakeButton({
         })
       }
     >
-      Run
+      Map
     </Button>
   );
 }

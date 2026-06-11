@@ -90,7 +90,7 @@ func (s *Service) ListCompensationsForBuyer(ctx context.Context, buyerID, contra
 	}
 	rows, err := s.pool.Query(ctx,
 		`SELECT `+compensationCols+` FROM contract_compensations
-		 WHERE contract_id = $1 ORDER BY position, id`, contractID)
+		 WHERE contract_id = $1 AND participation_id IS NULL ORDER BY position, id`, contractID)
 	if err != nil {
 		return nil, err
 	}
@@ -284,15 +284,9 @@ func validateCompensationParams(p CompensationParams) error {
 		if p.RevPercent == nil || *p.RevPercent < 0 || *p.RevPercent > 100 {
 			return httpx.Validation("rev_percent between 0 and 100 is required for rev_share")
 		}
-		if trigger == "buyer_stage" && p.TriggerStageID == nil {
-			return httpx.Validation("trigger_stage_id is required for buyer_stage trigger")
-		}
 	case "profit_share":
 		if p.ProfitPercent == nil || *p.ProfitPercent < 0 || *p.ProfitPercent > 100 {
 			return httpx.Validation("profit_percent between 0 and 100 is required for profit_share")
-		}
-		if trigger == "buyer_stage" && p.TriggerStageID == nil {
-			return httpx.Validation("trigger_stage_id is required for buyer_stage trigger")
 		}
 	}
 	return validatePayoutParams(p.PayoutFrequency, p.PayoutWeekday, p.PayoutMonthDay)

@@ -7,7 +7,6 @@ import { format } from "date-fns";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import type { QueueItem } from "@/types";
-import { RerunIntakeButton } from "@/features/intake/RerunIntakeButton";
 import { QueueItemDrawer, RouteDialog } from "./intakeShared";
 
 export function IntakeReviewTab() {
@@ -47,7 +46,6 @@ export function IntakeReviewTab() {
               <TD>{format(new Date(q.created_at), "MMM d, h:mma")}</TD>
               <TD>
                 <div className="flex justify-end gap-2">
-                  <RerunIntakeButton item={q} />
                   {(q.unmapped_keys?.length ?? 0) > 0 && (
                     <Button size="sm" variant="secondary" onClick={() => setDrawerItem(q)}>
                       Map

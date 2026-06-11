@@ -30,7 +30,7 @@ export function buildContractPayload(args: {
     description: args.form.description,
     rate_per_lead: rate,
     ...deliveryBody,
-    lead_criteria: args.leadCriteria,
+    lead_criteria: { ...args.leadCriteria, field_map: [] },
   };
   if (args.form.buyer_id) body.buyer_id = args.form.buyer_id;
   if (args.form.lead_type) body.lead_type = args.form.lead_type;

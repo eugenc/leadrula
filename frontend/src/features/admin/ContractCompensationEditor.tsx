@@ -31,7 +31,6 @@ import {
   useAddContractCompensation,
   useDeleteContractCompensation,
   useUpdateContractCompensation,
-  useBuyerStages,
 } from "@/features/admin/hooks";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
@@ -116,8 +115,6 @@ function CompensationFields({
   draft: Draft;
   setDraft: (d: Draft) => void;
 }) {
-  const { data: buyerStages } = useBuyerStages(contract.buyer_id ?? null, contract.buyer_pipeline_id ?? null);
-
   function set<K extends keyof Draft>(k: K, v: Draft[K]) {
     setDraft({ ...draft, [k]: v });
   }
@@ -187,17 +184,9 @@ function CompensationFields({
             </Select>
           </div>
           {draft.trigger === "buyer_stage" && (
-            <div>
-              <Label>Trigger stage (buyer)</Label>
-              <Select value={draft.trigger_stage_id} onChange={(e) => set("trigger_stage_id", Number(e.target.value))}>
-                <option value={0}>Select…</option>
-                {(buyerStages ?? []).map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
+            <p className="text-xs text-gray-500">
+              Buyer will choose the trigger stage on their pipeline after the contract is active.
+            </p>
           )}
         </>
       )}

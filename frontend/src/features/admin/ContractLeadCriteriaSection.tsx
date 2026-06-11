@@ -112,60 +112,6 @@ export function ContractLeadCriteriaSection({
       </div>
 
       <div>
-        <div className="mb-2 text-sm font-semibold text-gray-700">Field mapping</div>
-        {(value.field_map ?? []).map((e, i) => (
-          <div key={i} className="relative mb-2 rounded border border-gray-100 p-2 pr-10">
-            <IconButton
-              variant="danger"
-              className="absolute right-1 top-1"
-              aria-label="Remove field mapping"
-              onClick={() => onChange({ ...value, field_map: (value.field_map ?? []).filter((_, j) => j !== i) })}
-            >
-              <Trash2 className="h-4 w-4" />
-            </IconButton>
-            <div className="grid grid-cols-2 gap-2">
-              <BuiltinCustomFieldSelect
-                label="From (publisher)"
-                value={fieldKey(e.src_type, e.src_builtin, e.src_custom_field_id)}
-                onChange={(k) => {
-                  const parsed = parseFieldKey(k);
-                  const next = [...(value.field_map ?? [])];
-                  next[i] = { ...next[i], src_type: parsed.field_type, src_builtin: parsed.builtin_field, src_custom_field_id: parsed.custom_field_id };
-                  onChange({ ...value, field_map: next });
-                }}
-                customFields={fields}
-                onAddCustomField={() => {}}
-              />
-              <BuiltinCustomFieldSelect
-                label="To (buyer)"
-                value={fieldKey(e.dst_type, e.dst_builtin, e.dst_custom_field_id)}
-                onChange={(k) => {
-                  const parsed = parseFieldKey(k);
-                  const next = [...(value.field_map ?? [])];
-                  next[i] = { ...next[i], dst_type: parsed.field_type, dst_builtin: parsed.builtin_field, dst_custom_field_id: parsed.custom_field_id };
-                  onChange({ ...value, field_map: next });
-                }}
-                customFields={fields}
-                onAddCustomField={() => {}}
-              />
-            </div>
-          </div>
-        ))}
-        <Button
-          variant="secondary"
-          className="text-xs"
-          onClick={() =>
-            onChange({
-              ...value,
-              field_map: [...(value.field_map ?? []), { src_type: "builtin", dst_type: "builtin" }],
-            })
-          }
-        >
-          Add field mapping
-        </Button>
-      </div>
-
-      <div>
         <div className="mb-2 text-sm font-semibold text-gray-700">Filter rules</div>
         {(value.filter_rules ?? []).map((r, i) => (
           <div key={i} className="relative mb-2 rounded border border-gray-100 p-2 pr-10">

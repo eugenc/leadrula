@@ -33,6 +33,15 @@ export interface Me {
     type: AccountType;
     name: string;
     timezone: string;
+    website: string;
+    contact_email: string;
+    phone: string;
+    address_line1: string;
+    address_line2: string;
+    city: string;
+    state: string;
+    postal_code: string;
+    country: string;
   };
   impersonating?: boolean;
   buyer_account_name?: string;
@@ -288,6 +297,29 @@ export interface ContractLeadCriteria {
     value: string;
   }[];
   quality_rules: { buyer_stage_id: number; on_fail: string }[];
+}
+
+export interface ContractFieldMapEntry {
+  id?: number;
+  src_type: string;
+  src_builtin?: string;
+  src_custom_field_id?: number | null;
+  dst_type: string;
+  dst_builtin?: string;
+  dst_custom_field_id?: number | null;
+}
+
+export interface ContractAvailableField {
+  field_type: string;
+  builtin_field?: string;
+  custom_field_id?: number | null;
+  label: string;
+  key: string;
+}
+
+export interface ContractFieldMapOptions {
+  available_fields: ContractAvailableField[];
+  buyer_fields: CustomField[];
 }
 
 export interface ContractCompensation {

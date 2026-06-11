@@ -17,45 +17,59 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+func strPtr(s string) *string { return &s }
+
 func TestUpdateMyAccount_validation(t *testing.T) {
 	svc := NewService(nil, nil, nil, nil)
 	ctx := context.Background()
 
 	tests := []struct {
-		name     string
-		p        *auth.Principal
-		timezone string
+		name   string
+		p      *auth.Principal
+		params UpdateMyAccountParams
 		wantCode string
 	}{
 		{
 			name:     "non-admin",
 			p:        &auth.Principal{Role: "user", AccountType: "buyer"},
-			timezone: "America/New_York",
+			params:   UpdateMyAccountParams{Timezone: strPtr("America/New_York")},
 			wantCode: httpx.CodeForbidden,
 		},
 		{
 			name:     "platform account",
 			p:        &auth.Principal{Role: "admin", AccountType: "platform"},
-			timezone: "America/New_York",
+			params:   UpdateMyAccountParams{Timezone: strPtr("America/New_York")},
 			wantCode: httpx.CodeValidation,
 		},
 		{
 			name:     "invalid timezone",
 			p:        &auth.Principal{Role: "admin", AccountType: "buyer", AccountID: 1},
-			timezone: "Invalid/Zone",
+			params:   UpdateMyAccountParams{Timezone: strPtr("Invalid/Zone")},
 			wantCode: httpx.CodeValidation,
 		},
 		{
 			name:     "empty timezone",
 			p:        &auth.Principal{Role: "admin", AccountType: "publisher", AccountPublicID: "pub-id"},
-			timezone: "  ",
+			params:   UpdateMyAccountParams{Timezone: strPtr("  ")},
+			wantCode: httpx.CodeValidation,
+		},
+		{
+			name:     "empty patch",
+			p:        &auth.Principal{Role: "admin", AccountType: "buyer", AccountID: 1},
+			params:   UpdateMyAccountParams{},
+			wantCode: httpx.CodeValidation,
+		},
+		{
+			name:     "invalid contact email",
+			p:        &auth.Principal{Role: "admin", AccountType: "buyer", AccountID: 1},
+			params:   UpdateMyAccountParams{ContactEmail: strPtr("not-an-email")},
 			wantCode: httpx.CodeValidation,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := svc.UpdateMyAccount(ctx, tc.p, tc.timezone)
+			_, err := svc.UpdateMyAccount(ctx, tc.p, tc.params)
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -116,7 +130,7 @@ func TestPatchMyAccount_handler(t *testing.T) {
 	patchReq := httptest.NewRequest(
 		http.MethodPatch,
 		"/auth/me/account",
-		strings.NewReader(`{"timezone":"America/Los_Angeles"}`),
+		strings.NewReader(`{"timezone":"America/Los_Angeles","website":"https://example.com","phone":"555-0100"}`),
 	)
 	patchReq.Header.Set("Content-Type", "application/json")
 	patchReq = patchReq.WithContext(auth.WithPrincipal(patchReq.Context(), &auth.Principal{
@@ -135,6 +149,8 @@ func TestPatchMyAccount_handler(t *testing.T) {
 		Data struct {
 			Account struct {
 				Timezone string `json:"timezone"`
+				Website  string `json:"website"`
+				Phone    string `json:"phone"`
 			} `json:"account"`
 		} `json:"data"`
 	}
@@ -143,6 +159,12 @@ func TestPatchMyAccount_handler(t *testing.T) {
 	}
 	if patchResp.Data.Account.Timezone != "America/Los_Angeles" {
 		t.Fatalf("timezone %q, want America/Los_Angeles", patchResp.Data.Account.Timezone)
+	}
+	if patchResp.Data.Account.Website != "https://example.com" {
+		t.Fatalf("website %q, want https://example.com", patchResp.Data.Account.Website)
+	}
+	if patchResp.Data.Account.Phone != "555-0100" {
+		t.Fatalf("phone %q, want 555-0100", patchResp.Data.Account.Phone)
 	}
 }
 

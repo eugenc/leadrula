@@ -16,9 +16,11 @@ import { useIntegrationConnections } from "@/features/integrations/hooks";
 import { useStages } from "@/features/leads/hooks";
 import { PUBLISHER_DELIVERY_MODES } from "@/features/admin/contractOffer";
 import { formatParticipationStatus } from "@/features/admin/contractOffer";
+import { BuyerContractFieldMapSection } from "@/features/admin/BuyerContractFieldMapSection";
+import { BuyerTriggerStageFields } from "@/features/admin/BuyerTriggerStageFields";
 import type { ContractParticipation } from "@/types";
 
-const STEPS = ["Review", "Delivery", "Integrations"] as const;
+const STEPS = ["Review", "Delivery", "Field mapping", "Integrations"] as const;
 
 export function BuyerParticipationAcceptDrawer({
   participation,
@@ -46,12 +48,13 @@ function DrawerContent({
   const decline = useDeclineParticipation();
   const counter = useCounterParticipation();
   const [step, setStep] = useState(0);
+  const [mappingComplete, setMappingComplete] = useState(false);
   const [counterRate, setCounterRate] = useState("");
   const allowed = participation.allowed_delivery_modes ?? ["leads", "leads_pipeline"];
   const modeOptions = PUBLISHER_DELIVERY_MODES.filter((m) => allowed.includes(m.value));
   const [delivery, setDelivery] = useState<string>(modeOptions[0]?.value ?? "leads");
-  const [pipelineId, setPipelineId] = useState(0);
-  const [stageId, setStageId] = useState(0);
+  const [pipelineId, setPipelineId] = useState(participation.buyer_pipeline_id ?? 0);
+  const [stageId, setStageId] = useState(participation.buyer_target_stage_id ?? 0);
   const [webhookId, setWebhookId] = useState(0);
   const [integrationId, setIntegrationId] = useState(0);
 
@@ -60,6 +63,8 @@ function DrawerContent({
   const { data: connections } = useIntegrationConnections();
 
   const actionable = participation.status === "pending" || participation.status === "counter_pending";
+  const deliveryValid =
+    delivery !== "leads_pipeline" || (pipelineId > 0 && stageId > 0);
 
   function submitAccept() {
     const body: Record<string, unknown> = { delivery };
@@ -81,6 +86,33 @@ function DrawerContent({
     );
   }
 
+  if (!actionable) {
+    return (
+      <>
+        <DrawerHeader
+          title={participation.contract_name ?? "Contract"}
+          subtitle={`${participation.publisher_name ?? "Publisher"} · ${formatParticipationStatus(participation.status)}`}
+          onClose={onClose}
+        />
+        <DrawerBody className="space-y-6">
+          <BuyerContractFieldMapSection
+            participationId={participation.id}
+            onCompleteChange={setMappingComplete}
+          />
+          <BuyerTriggerStageFields
+            participationId={participation.id}
+            buyerPipelineId={participation.buyer_pipeline_id ?? pipelineId}
+          />
+        </DrawerBody>
+        <DrawerFooter className="flex justify-end">
+          <Button variant="secondary" onClick={onClose}>
+            Close
+          </Button>
+        </DrawerFooter>
+      </>
+    );
+  }
+
   return (
     <>
       <DrawerHeader
@@ -89,7 +121,7 @@ function DrawerContent({
         onClose={onClose}
       />
       <DrawerBody>
-        <div className="mb-4 flex gap-2 text-xs font-semibold text-gray-400">
+        <div className="mb-4 flex flex-wrap gap-2 text-xs font-semibold text-gray-400">
           {STEPS.map((s, i) => (
             <span key={s} className={i === step ? "text-jade-700" : ""}>
               {i + 1}. {s}
@@ -199,15 +231,25 @@ function DrawerContent({
                 <Label>Outbound webhook ID</Label>
                 <Select value={webhookId} onChange={(e) => setWebhookId(Number(e.target.value))}>
                   <option value={0}>Select…</option>
-                  {/* Webhook picker — user configures webhooks separately; ID entry via select placeholder */}
                 </Select>
                 <p className="mt-1 text-xs text-gray-400">Configure an outbound webhook under Integrations → Webhooks first.</p>
               </div>
             )}
+            <BuyerTriggerStageFields
+              participationId={participation.id}
+              buyerPipelineId={pipelineId || participation.buyer_pipeline_id}
+            />
           </div>
         )}
 
         {step === 2 && (
+          <BuyerContractFieldMapSection
+            participationId={participation.id}
+            onCompleteChange={setMappingComplete}
+          />
+        )}
+
+        {step === 3 && (
           <div className="space-y-3">
             <SectionLabel>CRM forward (optional)</SectionLabel>
             <p className="text-xs text-gray-400">Leads still land in inbox or pipeline first, then forward to your CRM.</p>
@@ -229,37 +271,36 @@ function DrawerContent({
       </DrawerBody>
 
       <DrawerFooter className="flex justify-end gap-2">
-        {actionable && (
-          <Button
-            variant="secondary"
-            disabled={decline.isPending}
-            onClick={() =>
-              decline.mutate(participation.id, {
-                onSuccess: () => {
-                  toast.success("Declined");
-                  onClose();
-                },
-                onError: (e) => toast.error(errorMessage(e)),
-              })
-            }
-          >
-            Decline
-          </Button>
-        )}
+        <Button
+          variant="secondary"
+          disabled={decline.isPending}
+          onClick={() =>
+            decline.mutate(participation.id, {
+              onSuccess: () => {
+                toast.success("Declined");
+                onClose();
+              },
+              onError: (e) => toast.error(errorMessage(e)),
+            })
+          }
+        >
+          Decline
+        </Button>
         {step > 0 && (
           <Button variant="secondary" onClick={() => setStep((s) => s - 1)}>
             Back
           </Button>
         )}
         {step < STEPS.length - 1 ? (
-          <Button onClick={() => setStep((s) => s + 1)}>Next</Button>
-        ) : actionable ? (
-          <Button disabled={accept.isPending} onClick={submitAccept}>
-            Accept contract
+          <Button
+            disabled={step === 1 && !deliveryValid}
+            onClick={() => setStep((s) => s + 1)}
+          >
+            Next
           </Button>
         ) : (
-          <Button variant="secondary" onClick={onClose}>
-            Close
+          <Button disabled={accept.isPending || !mappingComplete} onClick={submitAccept}>
+            Accept contract
           </Button>
         )}
       </DrawerFooter>

@@ -26,7 +26,6 @@ import {
   queueItemsToRows,
   webhookDeliveriesToRows,
 } from "./inboundLog";
-import { RerunIntakeButton } from "./RerunIntakeButton";
 import { QueueItemDrawer, RouteDialog } from "@/pages/publisher/intakeShared";
 import { useRejectQueue } from "@/features/admin/hooks";
 import { toast } from "@/store/toastStore";
@@ -155,7 +154,6 @@ export function IntakeLogSection({
                   {!readOnly && (
                     <TD>
                       <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-                        <RerunIntakeButton item={q} />
                         {(q.unmapped_keys?.length ?? 0) > 0 && (
                           <Button size="sm" variant="secondary" onClick={() => setDrawerItem(q)}>
                             Map

@@ -35,7 +35,7 @@ export function BuyerStripeBilling() {
   }
 
   return (
-    <div className="mb-6 grid gap-4 lg:grid-cols-2">
+    <div className="grid gap-4 lg:grid-cols-2">
       <PaymentMethodsCard defaultPublishableKey={publishableKey} isDirect={isDirect} />
       <TopupCard defaultPublishableKey={publishableKey} isDirect={isDirect} />
     </div>

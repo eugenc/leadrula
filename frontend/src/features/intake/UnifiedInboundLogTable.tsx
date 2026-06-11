@@ -8,7 +8,6 @@ import { format } from "date-fns";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import type { QueueItem } from "@/types";
-import { RerunIntakeButton } from "./RerunIntakeButton";
 import { QueueItemDrawer, RouteDialog } from "@/pages/publisher/intakeShared";
 import {
   LogPagination,
@@ -107,7 +106,6 @@ export function UnifiedInboundLogTable({
                   <TD>
                     {!readOnly && (
                       <div className="flex shrink-0 justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-                        <RerunIntakeButton item={q} />
                         {unmapped > 0 && (
                           <Button size="sm" variant="secondary" className="shrink-0 whitespace-nowrap" onClick={() => setDrawerItem(q)}>
                             Map

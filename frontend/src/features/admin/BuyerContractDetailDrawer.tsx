@@ -18,6 +18,8 @@ import { formatContractLeadType } from "@/features/admin/contractLeadType";
 import { COMPENSATION_KINDS, formatCompTrigger } from "@/features/admin/contractCompensation";
 import { useContractCompensations } from "@/features/admin/hooks";
 import { ContractReturnRulesEditor } from "@/features/admin/ContractReturnRulesEditor";
+import { BuyerContractFieldMapSection } from "@/features/admin/BuyerContractFieldMapSection";
+import { BuyerTriggerStageFields } from "@/features/admin/BuyerTriggerStageFields";
 import type { Contract } from "@/types";
 
 export function BuyerContractDetailDrawer({
@@ -128,6 +130,18 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
               </div>
             ))
           )}
+        </div>
+
+        <div className="mb-4">
+          <SectionLabel className="mb-2">Field mapping</SectionLabel>
+          <BuyerContractFieldMapSection contractId={contract.id} />
+        </div>
+
+        <div className="mb-4">
+          <BuyerTriggerStageFields
+            contractId={contract.id}
+            buyerPipelineId={contract.buyer_pipeline_id}
+          />
         </div>
 
         <div className="pt-2">

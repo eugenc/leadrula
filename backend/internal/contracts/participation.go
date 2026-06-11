@@ -345,6 +345,9 @@ func (s *Service) AcceptParticipation(ctx context.Context, buyerID, participatio
 		buyerPipelineID = 0
 		buyerStageID = 0
 	}
+	if err := s.ValidateParticipationFieldMapping(ctx, part.ContractID, participationID); err != nil {
+		return nil, err
+	}
 	var webhookID *int64
 	if delivery == "webhook" {
 		if p.OutboundWebhookID == 0 {

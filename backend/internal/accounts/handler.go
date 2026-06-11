@@ -174,22 +174,17 @@ func (h *Handler) patchPrefs(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) patchMyAccount(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	var body struct {
-		Timezone string `json:"timezone"`
-	}
+	var body UpdateMyAccountParams
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	acct, err := h.svc.UpdateMyAccount(r.Context(), p, body.Timezone)
+	acct, err := h.svc.UpdateMyAccount(r.Context(), p, body)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{
-		"account": map[string]any{
-			"id": acct.PublicID, "handler_id": acct.HandlerID, "type": acct.Type,
-			"name": acct.Name, "timezone": acct.Timezone,
-		},
+		"account": accountMeFields(acct),
 	})
 }
 
