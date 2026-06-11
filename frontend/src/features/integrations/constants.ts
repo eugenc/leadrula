@@ -3,6 +3,7 @@ export const FEATURED_SYSTEM_INTEGRATIONS = [
   "ghl",
   "hubspot",
   "salesforce",
+  "sunbase",
 ] as const;
 
 export type FeaturedIntegrationSlug = (typeof FEATURED_SYSTEM_INTEGRATIONS)[number];
@@ -17,6 +18,7 @@ export const INTEGRATION_CATEGORY: Record<string, IntegrationCategory> = {
   hubspot: "crm",
   zoho_crm: "crm",
   salesforce: "crm",
+  sunbase: "crm",
   google_calendar: "crm",
   stripe: "payment",
 };
@@ -28,8 +30,16 @@ export const INTEGRATION_LOGOS: Record<string, string> = {
   zoho_crm: "/integrations/zoho_crm.png",
   salesforce: "/integrations/salesforce.png",
   pipedrive: "/integrations/pipedrive.png",
+  sunbase: "/integrations/sunbase.png",
   google_calendar: "/integrations/google_calendar.png",
 };
+
+export function integrationLogoClassName(slug: string): string {
+  if (slug === "sunbase") {
+    return "h-[30px] w-[30px] shrink-0 rounded-md border border-gray-100 bg-white object-contain p-0.5";
+  }
+  return "h-[30px] w-[30px] shrink-0 rounded-md object-cover";
+}
 
 export function integrationLogoUrl(slug: string): string | undefined {
   return INTEGRATION_LOGOS[slug];

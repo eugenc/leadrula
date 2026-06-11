@@ -28,6 +28,7 @@ import { BuiltinCustomFieldSelect } from "@/features/admin/BuiltinCustomFieldSel
 import { useCreateField } from "@/features/admin/hooks";
 import { slugFieldKey } from "@/features/admin/customFieldConstants";
 import { buildPayloadSuggestions, MAP_BUILTIN_FIELDS } from "@/features/leads/csvMapping";
+import { SUNBASE_URL, sunbaseFieldMap } from "@/features/integrations/sunbaseConstants";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
@@ -149,22 +150,6 @@ const OUTBOUND_META_FIELDS = [
   { value: "pipeline.pipeline_name", label: "Pipeline name" },
 ];
 
-const SUNBASE_URL = "https://server4.sunbasedata.com/sunbase/portal/api/lead_post.jsp";
-
-const SUNBASE_FIELD_MAP: OutboundFieldMapEntry[] = [
-  { dest_key: "schema_name", source_type: "static", static_value: "YOUR_SCHEMA" },
-  { dest_key: "last_name", source_type: "builtin", builtin_field: "last_name" },
-  { dest_key: "first_name", source_type: "builtin", builtin_field: "first_name" },
-  { dest_key: "address1", source_type: "builtin", builtin_field: "address" },
-  { dest_key: "city", source_type: "builtin", builtin_field: "city" },
-  { dest_key: "state", source_type: "builtin", builtin_field: "state" },
-  { dest_key: "zip_code", source_type: "builtin", builtin_field: "zip" },
-  { dest_key: "email", source_type: "builtin", builtin_field: "email" },
-  { dest_key: "phone", source_type: "builtin", builtin_field: "phone" },
-  { dest_key: "lead_source", source_type: "builtin", builtin_field: "source" },
-  { dest_key: "lead_other", source_type: "builtin", builtin_field: "external_id" },
-];
-
 function outboundHelperText(format: OutboundFormat, method: OutboundMethod): string {
   if (format === "json" && method === "POST") return "Send a JSON body on POST";
   if (format === "json" && method === "GET") return "Template keys become query parameters on the URL";
@@ -179,9 +164,17 @@ function slugify(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
+function copyText(text: string, label: string) {
+  navigator.clipboard.writeText(text).then(
+    () => toast.success(label),
+    () => toast.error("Could not copy to clipboard")
+  );
+}
+
 function InboundEndpointRows({
   slug,
   secret,
+  secretPrefix,
   secretRequired,
   showSecret,
   onToggleSecret,
@@ -191,6 +184,7 @@ function InboundEndpointRows({
 }: {
   slug: string;
   secret: string | null;
+  secretPrefix?: string;
   secretRequired: boolean;
   showSecret: boolean;
   onToggleSecret: () => void;
@@ -205,32 +199,47 @@ function InboundEndpointRows({
         <span className="select-all break-all flex-1">POST {endpoint}</span>
         <IconButton
           aria-label="Copy endpoint"
-          onClick={() => { navigator.clipboard.writeText(`POST ${endpoint}`); toast.success("Endpoint copied"); }}
+          onClick={() => copyText(`POST ${endpoint}`, "Endpoint copied")}
         >
           <Copy className="h-3.5 w-3.5" />
         </IconButton>
       </div>
       {!secretRequired ? (
         <p className="text-xs text-amber-700">No secret required. Anyone with this URL can POST payloads.</p>
-      ) : (
+      ) : secret ? (
         <div className="flex items-center gap-2 text-xs text-gray-700">
           <span className="font-medium">Secret:</span>
           <span className="font-mono select-all">
-            {secret && showSecret ? secret : "••••••••••••••••"}
+            {showSecret ? secret : "••••••••••••••••"}
           </span>
           <IconButton
             aria-label={showSecret ? "Hide secret" : "Show secret"}
-            disabled={!secret}
             onClick={onToggleSecret}
           >
             {showSecret ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
           </IconButton>
-          <IconButton aria-label="Copy secret" disabled={!secret} onClick={onCopySecret}>
+          <IconButton aria-label="Copy secret" onClick={onCopySecret}>
             <Copy className="h-3.5 w-3.5" />
           </IconButton>
           <IconButton aria-label="Rotate secret" disabled={rotatePending} onClick={onRotate}>
             <KeyRound className="h-3.5 w-3.5" />
           </IconButton>
+        </div>
+      ) : (
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-xs text-gray-700">
+            <span className="font-medium">Secret:</span>
+            <span className="font-mono">••••••••••••••••</span>
+            {secretPrefix && (
+              <span className="font-mono text-gray-500">({secretPrefix}…)</span>
+            )}
+            <IconButton aria-label="Rotate secret" disabled={rotatePending} onClick={onRotate}>
+              <KeyRound className="h-3.5 w-3.5" />
+            </IconButton>
+          </div>
+          <p className="text-xs text-gray-500">
+            Full secret is only available after creation or rotation.
+          </p>
         </div>
       )}
     </div>
@@ -257,6 +266,7 @@ export function WebhooksPage() {
   const [drawerWebhook, setDrawerWebhook] = useState<Webhook | null | undefined>(undefined);
   const [detailFor, setDetailFor] = useState<Webhook | null>(null);
   const [detailSecret, setDetailSecret] = useState<string | null>(null);
+  const [secretByWebhookId, setSecretByWebhookId] = useState<Record<number, string>>({});
   const [mappingContext, setMappingContext] = useState<MappingContext>(null);
 
   const { data: webhooks, isLoading } = useWebhooks();
@@ -347,6 +357,7 @@ export function WebhooksPage() {
           if (secret) {
             navigator.clipboard.writeText(secret);
             toast.success("Secret copied to clipboard");
+            setSecretByWebhookId((prev) => ({ ...prev, [wb.id]: secret }));
             setDetailSecret(secret);
           } else {
             setDetailSecret(null);
@@ -357,8 +368,15 @@ export function WebhooksPage() {
       <WebhookDetailDrawer
         webhook={detailFor}
         open={!!detailFor}
-        initialSecret={detailSecret}
+        initialSecret={
+          detailFor
+            ? detailSecret ?? secretByWebhookId[detailFor.id] ?? null
+            : null
+        }
         onClose={() => { setDetailFor(null); setDetailSecret(null); }}
+        onSecretCached={(webhookId, secret) =>
+          setSecretByWebhookId((prev) => ({ ...prev, [webhookId]: secret }))
+        }
         onMapFields={(ctx) => {
           if (!detailFor) return;
           setMappingContext(ctx);
@@ -595,7 +613,7 @@ function WebhookDrawer({
                     setOutboundURL(SUNBASE_URL);
                     setOutboundFormat("url");
                     setOutboundMethod("POST");
-                    setFieldMap(SUNBASE_FIELD_MAP.map((e) => ({ ...e })));
+                    setFieldMap(sunbaseFieldMap("YOUR_SCHEMA").map((e) => ({ ...e })));
                   }}
                 >
                   Apply SunbaseData preset
@@ -741,12 +759,14 @@ function WebhookDetailDrawer({
   initialSecret,
   onClose,
   onMapFields,
+  onSecretCached,
 }: {
   webhook: Webhook | null;
   open: boolean;
   initialSecret?: string | null;
   onClose: () => void;
   onMapFields: (ctx: MappingContext) => void;
+  onSecretCached: (webhookId: number, secret: string) => void;
 }) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [secret, setSecret] = useState<string | null>(initialSecret ?? null);
@@ -768,9 +788,9 @@ function WebhookDetailDrawer({
     rotate.mutate(webhook!.id, {
       onSuccess: (res) => {
         setSecret(res.secret);
-        setShowSecret(false);
-        navigator.clipboard.writeText(res.secret);
-        toast.success("New secret copied to clipboard");
+        setShowSecret(true);
+        onSecretCached(webhook!.id, res.secret);
+        toast.success("Secret rotated");
       },
       onError: (e) => toast.error(errorMessage(e)),
     });
@@ -783,10 +803,11 @@ function WebhookDetailDrawer({
           <InboundEndpointRows
             slug={webhook.slug}
             secret={secret}
+            secretPrefix={webhook.secret_prefix}
             secretRequired={webhook.inbound_secret_required}
             showSecret={showSecret}
             onToggleSecret={() => setShowSecret((v) => !v)}
-            onCopySecret={() => { navigator.clipboard.writeText(secret!); toast.success("Secret copied"); }}
+            onCopySecret={() => copyText(secret!, "Secret copied")}
             onRotate={handleRotate}
             rotatePending={rotate.isPending}
           />

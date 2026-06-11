@@ -9,7 +9,7 @@ export const IconButton = forwardRef<
     ref={ref}
     type="button"
     className={cn(
-      "inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors",
+      "inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors disabled:opacity-40 disabled:pointer-events-none",
       variant === "ghost" && "text-gray-400 hover:bg-gray-100 hover:text-gray-700",
       variant === "danger" && "text-gray-400 hover:bg-gray-100 hover:text-danger",
       className

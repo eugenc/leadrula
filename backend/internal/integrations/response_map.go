@@ -38,13 +38,30 @@ func (s *Service) applyResponseMap(ctx context.Context, triggerID, leadID int64,
 		log.Printf("response_map: load trigger %d: %v", triggerID, err)
 		return
 	}
+	s.applyResponseEntries(ctx, accountID, leadID, rawMap, respRaw, "trigger", triggerID)
+}
+
+// applyConnectionResponseMap reads outbound_response_map from integration_connections.config.
+func (s *Service) applyConnectionResponseMap(ctx context.Context, connID, leadID int64, respRaw []byte) {
+	var rawMap json.RawMessage
+	var accountID int64
+	if err := s.pool.QueryRow(ctx,
+		`SELECT config->'outbound_response_map', account_id FROM integration_connections WHERE id = $1`,
+		connID).Scan(&rawMap, &accountID); err != nil {
+		log.Printf("response_map: load connection %d: %v", connID, err)
+		return
+	}
+	s.applyResponseEntries(ctx, accountID, leadID, rawMap, respRaw, "connection", connID)
+}
+
+func (s *Service) applyResponseEntries(ctx context.Context, accountID, leadID int64, rawMap json.RawMessage, respRaw []byte, source string, sourceID int64) {
 	if len(rawMap) == 0 || string(rawMap) == "null" || string(rawMap) == "[]" {
 		return
 	}
 
 	var entries []responseMapEntry
 	if err := json.Unmarshal(rawMap, &entries); err != nil {
-		log.Printf("response_map: parse trigger %d: %v", triggerID, err)
+		log.Printf("response_map: parse %s %d: %v", source, sourceID, err)
 		return
 	}
 	if len(entries) == 0 {
@@ -53,7 +70,7 @@ func (s *Service) applyResponseMap(ctx context.Context, triggerID, leadID int64,
 
 	var respObj map[string]any
 	if err := json.Unmarshal(respRaw, &respObj); err != nil {
-		log.Printf("response_map: parse response for trigger %d: %v", triggerID, err)
+		log.Printf("response_map: parse response for %s %d: %v", source, sourceID, err)
 		return
 	}
 
@@ -65,13 +82,13 @@ func (s *Service) applyResponseMap(ctx context.Context, triggerID, leadID int64,
 		switch e.TargetType {
 		case "builtin":
 			if e.BuiltinField == nil || !validBuiltinFields[*e.BuiltinField] {
-				log.Printf("response_map: trigger %d unknown builtin field %v", triggerID, e.BuiltinField)
+				log.Printf("response_map: %s %d unknown builtin field %v", source, sourceID, e.BuiltinField)
 				continue
 			}
 			if *e.BuiltinField == "tags" {
 				repo := leads.NewRepository(s.pool)
 				if err := leads.ApplyMappedTags(ctx, s.pool, repo, accountID, leadID, val); err != nil {
-					log.Printf("response_map: trigger %d write tags: %v", triggerID, err)
+					log.Printf("response_map: %s %d write tags: %v", source, sourceID, err)
 				}
 				continue
 			}
@@ -83,7 +100,7 @@ func (s *Service) applyResponseMap(ctx context.Context, triggerID, leadID int64,
 				if _, err := s.pool.Exec(ctx,
 					fmt.Sprintf(`UPDATE leads SET %s = $3 WHERE id = $1 AND owner_account_id = $2`, *e.BuiltinField),
 					leadID, accountID, *amount); err != nil {
-					log.Printf("response_map: trigger %d write money builtin %s: %v", triggerID, *e.BuiltinField, err)
+					log.Printf("response_map: %s %d write money builtin %s: %v", source, sourceID, *e.BuiltinField, err)
 				}
 				continue
 			}
@@ -93,7 +110,7 @@ func (s *Service) applyResponseMap(ctx context.Context, triggerID, leadID int64,
 			}
 			sql := fmt.Sprintf(`UPDATE leads SET %s = $3 WHERE id = $1 AND owner_account_id = $2`, *e.BuiltinField)
 			if _, err := s.pool.Exec(ctx, sql, leadID, accountID, str); err != nil {
-				log.Printf("response_map: trigger %d write builtin %s: %v", triggerID, *e.BuiltinField, err)
+				log.Printf("response_map: %s %d write builtin %s: %v", source, sourceID, *e.BuiltinField, err)
 			}
 		case "custom":
 			if e.CustomFieldID == nil {
@@ -104,7 +121,7 @@ func (s *Service) applyResponseMap(ctx context.Context, triggerID, leadID int64,
 				`INSERT INTO lead_custom_values(lead_id, custom_field_id, value) VALUES ($1,$2,$3)
 				 ON CONFLICT (lead_id, custom_field_id) DO UPDATE SET value = EXCLUDED.value`,
 				leadID, *e.CustomFieldID, valJSON); err != nil {
-				log.Printf("response_map: trigger %d write custom %d: %v", triggerID, *e.CustomFieldID, err)
+				log.Printf("response_map: %s %d write custom %d: %v", source, sourceID, *e.CustomFieldID, err)
 			}
 		}
 	}

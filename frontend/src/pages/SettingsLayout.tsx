@@ -20,8 +20,8 @@ function tabsForAccount(accountType: string, prefix: string): Tab[] {
   }
   return [
     { to: `${prefix}/settings`, label: "Profile", end: true },
-    { to: `${prefix}/settings/notifications`, label: "Notifications", end: false },
     { to: `${prefix}/settings/business`, label: "Business", end: false, adminOnly: true },
+    { to: `${prefix}/settings/notifications`, label: "Notifications", end: false },
     { to: `${prefix}/settings/users`, label: "Users", end: false, adminOnly: true },
     { to: `${prefix}/settings/api`, label: "API Keys", end: false, adminOnly: true },
   ];
@@ -46,7 +46,7 @@ export function SettingsLayout() {
             className={({ isActive }) =>
               cn(
                 "-mb-px border-b-2 px-4 py-2 text-base font-semibold transition-colors",
-                isActive ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400"
+                isActive ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400 hover:text-gray-600"
               )
             }
           >

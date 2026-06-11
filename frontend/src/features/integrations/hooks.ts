@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { get, ns, post, del } from "@/lib/api";
+import { get, ns, post, del, patch } from "@/lib/api";
 import type {
   IntegrationConnection,
   IntegrationProvider,
   RouteIntegration,
+  SunbaseConnectionDetail,
 } from "@/types";
 
 export function useOAuthConnect() {
@@ -50,6 +51,41 @@ export function useCreateIntegrationConnection() {
       config?: Record<string, unknown>;
     }) => post<IntegrationConnection>(`${ns()}/integrations/connections`, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["integration-connections"] }),
+  });
+}
+
+export function useTestIntegrationConnection() {
+  return useMutation({
+    mutationFn: (body: {
+      provider_slug: string;
+      credentials: Record<string, unknown>;
+      config?: Record<string, unknown>;
+    }) =>
+      post<{ ok: boolean; message?: string }>(`${ns()}/integrations/connections/test`, body),
+  });
+}
+
+export function useUpdateIntegrationConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      credentials,
+      config,
+    }: {
+      id: number;
+      credentials?: Record<string, unknown>;
+      config?: Record<string, unknown>;
+    }) => patch<IntegrationConnection>(`${ns()}/integrations/connections/${id}`, { credentials, config }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["integration-connections"] }),
+  });
+}
+
+export function useSunbaseConnectionDetail(id: number | null) {
+  return useQuery({
+    queryKey: ["sunbase-connection", id],
+    queryFn: () => get<SunbaseConnectionDetail>(`${ns()}/integrations/connections/${id}/sunbase`),
+    enabled: id != null,
   });
 }
 

@@ -207,7 +207,7 @@ func main() {
 		apikeysH.RegisterRoutes(p)
 		notifH.RegisterRoutes(p)
 		if integrationsSvc != nil {
-			integrations.NewHandler(integrationsSvc, "publisher", cfg.AppBaseURL).RegisterRoutes(p)
+			integrations.NewHandler(integrationsSvc, webhooksSvc, "publisher", cfg.AppBaseURL, cfg.APIBaseURL).RegisterRoutes(p)
 		}
 		webhooksH.RegisterRoutes(p)
 		dashboardH.RegisterRoutes(p)
@@ -232,7 +232,7 @@ func main() {
 		apikeysH.RegisterRoutes(b)
 		notifH.RegisterRoutes(b)
 		if integrationsSvc != nil {
-			integrations.NewHandler(integrationsSvc, "buyer", cfg.AppBaseURL).RegisterRoutes(b)
+			integrations.NewHandler(integrationsSvc, webhooksSvc, "buyer", cfg.AppBaseURL, cfg.APIBaseURL).RegisterRoutes(b)
 		}
 		webhooksH.RegisterRoutes(b)
 		dashboardH.RegisterRoutes(b)

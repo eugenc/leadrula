@@ -9,6 +9,7 @@ import {
   INTEGRATIONS_PAGE_SIZE,
   STRIPE_INTEGRATION,
   integrationLogoUrl,
+  integrationLogoClassName,
   isHiddenIntegrationSlug,
   type IntegrationCategory,
   type IntegrationFilter,
@@ -76,7 +77,7 @@ function IntegrationCatalogCard({
             <img
               src={logo}
               alt=""
-              className="h-[30px] w-[30px] shrink-0 rounded-md object-cover"
+              className={integrationLogoClassName(slug)}
             />
           ) : (
             <div className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-md bg-gray-100 text-xs font-semibold text-gray-500">

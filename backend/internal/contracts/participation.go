@@ -419,7 +419,7 @@ func validateBuyerCRMConnection(ctx context.Context, q database.Querier, buyerID
 		return httpx.Validation("integration connection is not active")
 	}
 	crmProviders := map[string]bool{
-		"pipedrive": true, "ghl": true, "hubspot": true, "zoho_crm": true, "salesforce": true,
+		"pipedrive": true, "ghl": true, "hubspot": true, "zoho_crm": true, "salesforce": true, "sunbase": true,
 	}
 	if !crmProviders[provider] {
 		return httpx.Validation("connection must be a CRM integration")

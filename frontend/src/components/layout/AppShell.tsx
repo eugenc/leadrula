@@ -38,7 +38,9 @@ export function AppShell() {
   const loc = useLocation();
   const seg = loc.pathname.split("/").filter(Boolean);
   const last = seg[seg.length - 1];
-  const title = titles[last] ?? "Dashboard";
+  const title = seg.includes("settings")
+    ? (titles.settings ?? "Settings")
+    : (titles[last] ?? "Dashboard");
   const { data: me } = useMe();
   const syncUserProfile = useAuthStore((s) => s.syncUserProfile);
   const syncFromMe = useAuthStore((s) => s.syncFromMe);

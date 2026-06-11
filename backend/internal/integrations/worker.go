@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/integrations/providers"
+	"github.com/echayko/leadrula/backend/internal/leads"
 )
 
 func (s *Service) RunWorker(ctx context.Context) {
@@ -133,9 +134,16 @@ func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, p
 	s.logAttempt(ctx, jobID, attempts, "success", 200, payload, respRaw, duration, "")
 	s.markSuccess(ctx, jobID, extID)
 	_, _ = s.pool.Exec(ctx, `UPDATE integration_connections SET last_used_at = now(), last_error = NULL WHERE id = $1`, connID)
-	// Apply response field mapping if this was an outbound webhook trigger delivery.
-	if triggerID != nil && leadID != 0 && len(respRaw) > 0 {
-		s.applyResponseMap(ctx, *triggerID, leadID, respRaw)
+	if leadID != 0 && len(respRaw) > 0 {
+		if triggerID != nil {
+			s.applyResponseMap(ctx, *triggerID, leadID, respRaw)
+		} else if providerSlug == "sunbase" {
+			s.applyConnectionResponseMap(ctx, connID, leadID, respRaw)
+		}
+	}
+	if leadID != 0 && extID != "" {
+		repo := leads.NewRepository(s.pool)
+		_ = repo.SetExternalID(ctx, s.pool, leadID, extID)
 	}
 }
 

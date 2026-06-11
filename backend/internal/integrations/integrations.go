@@ -53,6 +53,7 @@ func NewService(pool *pgxpool.Pool, encKey []byte, oauth OAuthConfig) *Service {
 			"hubspot":    &providers.HubSpotProvider{},
 			"zoho_crm":   &providers.ZohoCRMProvider{},
 			"salesforce": &providers.SalesforceProvider{},
+			"sunbase":    &providers.SunbaseProvider{},
 		},
 	}
 }
@@ -63,7 +64,7 @@ func (s *Service) ListProviders(ctx context.Context) ([]map[string]any, error) {
 		 FROM integration_providers WHERE is_active
 		 ORDER BY CASE slug
 		   WHEN 'pipedrive' THEN 1 WHEN 'ghl' THEN 2
-		   WHEN 'hubspot' THEN 3 WHEN 'salesforce' THEN 4
+		   WHEN 'hubspot' THEN 3 WHEN 'salesforce' THEN 4 WHEN 'sunbase' THEN 5
 		   ELSE 99 END, name`)
 	if err != nil {
 		return nil, err

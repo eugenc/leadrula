@@ -835,6 +835,15 @@ export interface IntegrationProvider {
   config_schema: Record<string, { type: string; label: string; required?: boolean; enum?: string[] }>;
 }
 
+export interface SunbaseInboundWebhook {
+  id: number;
+  slug: string;
+  endpoint: string;
+  secret?: string | null;
+  secret_required: boolean;
+  setup_hint: string;
+}
+
 export interface IntegrationConnection {
   id: number;
   public_id: string;
@@ -846,6 +855,18 @@ export interface IntegrationConnection {
   last_error?: string | null;
   last_used_at?: string | null;
   created_at: string;
+  inbound_webhook?: SunbaseInboundWebhook;
+}
+
+export interface SunbaseConnectionDetail {
+  connection: IntegrationConnection;
+  inbound_webhook?: SunbaseInboundWebhook;
+  webhook_ids?: {
+    outbound_post: number;
+    outbound_get: number;
+    inbound: number;
+    inbound_webhook_slug?: string;
+  };
 }
 
 export interface RouteIntegration {
