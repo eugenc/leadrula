@@ -2,8 +2,10 @@ package contracts
 
 import (
 	"context"
+	"errors"
 
 	"github.com/echayko/leadrula/backend/pkg/httpx"
+	"github.com/jackc/pgx/v5"
 )
 
 func (s *Service) ListCompensationsForParticipationBuyer(ctx context.Context, buyerID, participationID int64) ([]Compensation, error) {
@@ -91,7 +93,16 @@ func (s *Service) UpdateParticipationCompensationTriggerStage(ctx context.Contex
 			`SELECT COALESCE(buyer_pipeline_id, 0) FROM contracts WHERE id = $1`, part.ContractID).Scan(&pipelineID)
 	}
 	if pipelineID == 0 {
-		return nil, httpx.Validation("buyer pipeline is required before setting trigger stage")
+		if err := s.pool.QueryRow(ctx,
+			`SELECT ps.pipeline_id FROM pipeline_stages ps
+			 JOIN pipelines p ON p.id = ps.pipeline_id
+			 WHERE ps.id = $1 AND p.account_id = $2`,
+			stageID, buyerID).Scan(&pipelineID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, httpx.Validation("buyer pipeline is required before setting trigger stage")
+			}
+			return nil, err
+		}
 	}
 	if err := validateBuyerCompTriggerStage(ctx, s.pool, stageID, pipelineID); err != nil {
 		return nil, err

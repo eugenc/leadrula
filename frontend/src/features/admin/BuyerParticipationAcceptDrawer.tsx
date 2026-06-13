@@ -249,6 +249,7 @@ function DrawerContent({
             <BuyerTriggerStageFields
               participationId={participation.id}
               buyerPipelineId={pipelineId || participation.buyer_pipeline_id}
+              persistChanges={false}
             />
           </div>
         )}

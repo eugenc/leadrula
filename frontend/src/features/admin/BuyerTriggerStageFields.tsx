@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { Label, Select } from "@/components/ui/input";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import {
@@ -19,13 +19,16 @@ function TriggerRow({
   wonStage,
   onSave,
   pending,
+  readOnly,
 }: {
   comp: ContractCompensation;
   wonStage: Stage | undefined;
   onSave: (stageId: number) => void;
   pending: boolean;
+  readOnly: boolean;
 }) {
   const selected = wonStage && comp.trigger_stage_id === wonStage.id;
+  const preview = readOnly && wonStage;
 
   return (
     <div className="rounded border border-gray-100 px-3 py-2 text-sm">
@@ -36,6 +39,8 @@ function TriggerRow({
       <Label>Trigger stage</Label>
       {!wonStage ? (
         <p className="text-xs text-amber-700">Add a Won stage to your pipeline to enable payout.</p>
+      ) : preview ? (
+        <p className="text-sm text-gray-700">{wonStage.name}</p>
       ) : (
         <Select
           value={selected ? wonStage.id : 0}
@@ -57,10 +62,13 @@ export function BuyerTriggerStageFields({
   contractId,
   participationId,
   buyerPipelineId,
+  persistChanges = true,
 }: {
   contractId?: number;
   participationId?: number;
   buyerPipelineId?: number | null;
+  /** When false, show Won from selected pipeline without PATCH (accept wizard before save). */
+  persistChanges?: boolean;
 }) {
   const isParticipation = participationId != null;
   const { data: contractComps } = useContractCompensations(!isParticipation ? contractId ?? null : null, true);
@@ -88,10 +96,6 @@ export function BuyerTriggerStageFields({
       ),
     [comps]
   );
-  const unsetTriggerKey = triggerComps
-    .filter((c) => c.trigger_stage_id !== wonStage?.id)
-    .map((c) => c.id)
-    .join(",");
 
   const pending = updateContract.isPending || updateParticipation.isPending;
 
@@ -103,33 +107,6 @@ export function BuyerTriggerStageFields({
       updateContract.mutate({ contractId, compId, triggerStageId: stageId }, { onError });
     }
   }
-
-  useEffect(() => {
-    if (!wonStage || pending || !unsetTriggerKey) return;
-    const onError = (e: unknown) => toast.error(errorMessage(e));
-    for (const c of triggerComps) {
-      if (c.trigger_stage_id === wonStage.id) continue;
-      if (isParticipation && participationId) {
-        updateParticipation.mutate(
-          { participationId, compId: c.id, triggerStageId: wonStage.id },
-          { onError }
-        );
-      } else if (contractId) {
-        updateContract.mutate({ contractId, compId: c.id, triggerStageId: wonStage.id }, { onError });
-      }
-    }
-  }, [
-    buyerPipelineId,
-    wonStage,
-    pending,
-    unsetTriggerKey,
-    isParticipation,
-    participationId,
-    contractId,
-    updateContract,
-    updateParticipation,
-    triggerComps,
-  ]);
 
   if (triggerComps.length === 0) return null;
 
@@ -143,6 +120,7 @@ export function BuyerTriggerStageFields({
           comp={c}
           wonStage={wonStage}
           pending={pending}
+          readOnly={!persistChanges}
           onSave={(stageId) => save(c.id, stageId)}
         />
       ))}
