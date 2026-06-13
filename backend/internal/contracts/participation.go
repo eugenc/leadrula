@@ -549,6 +549,11 @@ func (s *Service) AcceptParticipation(ctx context.Context, buyerID, participatio
 	if err := s.ValidateParticipationFieldMapping(ctx, part.ContractID, participationID); err != nil {
 		return nil, err
 	}
+	if validated.delivery == "leads_pipeline" {
+		if err := applyBuyerStageTriggersToWon(ctx, s.pool, part.ContractID, participationID, validated.buyerPipelineID); err != nil {
+			return nil, err
+		}
+	}
 	updated, err := scanParticipation(s.pool.QueryRow(ctx,
 		`UPDATE contract_participations SET
 		   status = 'active', delivery = $2,
@@ -593,6 +598,11 @@ func (s *Service) UpdateParticipationDelivery(ctx context.Context, buyerID, part
 	validated, err := s.validateParticipationDelivery(ctx, buyerID, part.ContractID, participationID, p, true)
 	if err != nil {
 		return nil, err
+	}
+	if validated.delivery == "leads_pipeline" {
+		if err := applyBuyerStageTriggersToWon(ctx, s.pool, part.ContractID, participationID, validated.buyerPipelineID); err != nil {
+			return nil, err
+		}
 	}
 	return scanParticipation(s.pool.QueryRow(ctx,
 		`UPDATE contract_participations SET
@@ -671,6 +681,56 @@ func validateBuyerTargetStage(ctx context.Context, q database.Querier, stageID, 
 		return httpx.Validation("destination stage must be standard or action")
 	}
 	return nil
+}
+
+func validateBuyerCompTriggerStage(ctx context.Context, q database.Querier, stageID, pipelineID int64) error {
+	var stageType string
+	err := q.QueryRow(ctx,
+		`SELECT stage_type FROM pipeline_stages WHERE id = $1 AND pipeline_id = $2`,
+		stageID, pipelineID).Scan(&stageType)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return httpx.Validation("invalid pipeline stage")
+		}
+		return err
+	}
+	if stageType != "won" {
+		return httpx.Validation("rev/profit share trigger stage must be Won")
+	}
+	return nil
+}
+
+func applyBuyerStageTriggersToWon(ctx context.Context, q database.Querier, contractID, participationID, pipelineID int64) error {
+	if pipelineID == 0 {
+		return nil
+	}
+	var wonStageID int64
+	err := q.QueryRow(ctx,
+		`SELECT id FROM pipeline_stages WHERE pipeline_id = $1 AND stage_type = 'won' ORDER BY position LIMIT 1`,
+		pipelineID).Scan(&wonStageID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			var n int
+			if err := q.QueryRow(ctx,
+				`SELECT COUNT(*) FROM contract_compensations
+				 WHERE contract_id = $1 AND participation_id = $2
+				   AND trigger = 'buyer_stage' AND kind IN ('rev_share', 'profit_share')`,
+				contractID, participationID).Scan(&n); err != nil {
+				return err
+			}
+			if n > 0 {
+				return httpx.Validation("pipeline must have a Won stage for rev/profit share payout")
+			}
+			return nil
+		}
+		return err
+	}
+	_, err = q.Exec(ctx,
+		`UPDATE contract_compensations SET trigger_stage_id = $1
+		 WHERE contract_id = $2 AND participation_id = $3
+		   AND trigger = 'buyer_stage' AND kind IN ('rev_share', 'profit_share')`,
+		wonStageID, contractID, participationID)
+	return err
 }
 
 func validateBuyerCRMConnection(ctx context.Context, q database.Querier, buyerID, connID int64) error {

@@ -51,7 +51,7 @@ func (s *Service) UpdateBuyerCompensationTriggerStage(ctx context.Context, buyer
 		`SELECT COALESCE(buyer_pipeline_id, 0) FROM contracts WHERE id = $1`, contractID).Scan(&pipelineID); err != nil {
 		return nil, err
 	}
-	if err := validateBuyerTargetStage(ctx, s.pool, stageID, pipelineID); err != nil {
+	if err := validateBuyerCompTriggerStage(ctx, s.pool, stageID, pipelineID); err != nil {
 		return nil, err
 	}
 	return scanCompensation(s.pool.QueryRow(ctx,
@@ -93,7 +93,7 @@ func (s *Service) UpdateParticipationCompensationTriggerStage(ctx context.Contex
 	if pipelineID == 0 {
 		return nil, httpx.Validation("buyer pipeline is required before setting trigger stage")
 	}
-	if err := validateBuyerTargetStage(ctx, s.pool, stageID, pipelineID); err != nil {
+	if err := validateBuyerCompTriggerStage(ctx, s.pool, stageID, pipelineID); err != nil {
 		return nil, err
 	}
 	return scanCompensation(s.pool.QueryRow(ctx,

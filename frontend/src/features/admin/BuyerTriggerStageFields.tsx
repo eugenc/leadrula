@@ -1,3 +1,4 @@
+import { useEffect, useMemo } from "react";
 import { Label, Select } from "@/components/ui/input";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import {
@@ -11,19 +12,21 @@ import { useStages } from "@/features/leads/hooks";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import { COMPENSATION_KINDS, formatCompTrigger } from "@/features/admin/contractCompensation";
-import type { ContractCompensation } from "@/types";
+import type { ContractCompensation, Stage } from "@/types";
 
 function TriggerRow({
   comp,
-  stages,
+  wonStage,
   onSave,
   pending,
 }: {
   comp: ContractCompensation;
-  stages: { id: number; name: string }[];
+  wonStage: Stage | undefined;
   onSave: (stageId: number) => void;
   pending: boolean;
 }) {
+  const selected = wonStage && comp.trigger_stage_id === wonStage.id;
+
   return (
     <div className="rounded border border-gray-100 px-3 py-2 text-sm">
       <div className="font-semibold text-gray-800">
@@ -31,21 +34,21 @@ function TriggerRow({
       </div>
       <div className="mb-2 text-gray-500">{formatCompTrigger(comp.trigger)}</div>
       <Label>Trigger stage</Label>
-      <Select
-        value={comp.trigger_stage_id ?? 0}
-        onChange={(e) => {
-          const id = Number(e.target.value);
-          if (id) onSave(id);
-        }}
-        disabled={pending}
-      >
-        <option value={0}>{comp.trigger_stage_id ? "Change…" : "Select…"}</option>
-        {stages.map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.name}
-          </option>
-        ))}
-      </Select>
+      {!wonStage ? (
+        <p className="text-xs text-amber-700">Add a Won stage to your pipeline to enable payout.</p>
+      ) : (
+        <Select
+          value={selected ? wonStage.id : 0}
+          onChange={(e) => {
+            const id = Number(e.target.value);
+            if (id) onSave(id);
+          }}
+          disabled={pending || selected}
+        >
+          <option value={0}>{selected ? wonStage.name : "Select…"}</option>
+          <option value={wonStage.id}>{wonStage.name}</option>
+        </Select>
+      )}
     </div>
   );
 }
@@ -71,16 +74,26 @@ export function BuyerTriggerStageFields({
     true
   );
 
-  const comps = (isParticipation ? partComps : contractComps) ?? [];
-  const stageRows = (buyerStages ?? publisherStages ?? []).filter(
-    (s) => !("stage_type" in s) || s.stage_type === "standard" || s.stage_type === "action"
+  const comps = useMemo(
+    () => (isParticipation ? partComps : contractComps) ?? [],
+    [isParticipation, partComps, contractComps]
   );
+  const allStages = buyerStages ?? publisherStages ?? [];
+  const wonStage = allStages.find((s) => s.stage_type === "won");
 
-  const triggerComps = comps.filter(
-    (c) => (c.kind === "rev_share" || c.kind === "profit_share") && c.trigger === "buyer_stage"
+  const triggerComps = useMemo(
+    () =>
+      comps.filter(
+        (c) => (c.kind === "rev_share" || c.kind === "profit_share") && c.trigger === "buyer_stage"
+      ),
+    [comps]
   );
+  const unsetTriggerKey = triggerComps
+    .filter((c) => c.trigger_stage_id !== wonStage?.id)
+    .map((c) => c.id)
+    .join(",");
 
-  if (triggerComps.length === 0) return null;
+  const pending = updateContract.isPending || updateParticipation.isPending;
 
   function save(compId: number, stageId: number) {
     const onError = (e: unknown) => toast.error(errorMessage(e));
@@ -91,16 +104,45 @@ export function BuyerTriggerStageFields({
     }
   }
 
+  useEffect(() => {
+    if (!wonStage || pending || !unsetTriggerKey) return;
+    const onError = (e: unknown) => toast.error(errorMessage(e));
+    for (const c of triggerComps) {
+      if (c.trigger_stage_id === wonStage.id) continue;
+      if (isParticipation && participationId) {
+        updateParticipation.mutate(
+          { participationId, compId: c.id, triggerStageId: wonStage.id },
+          { onError }
+        );
+      } else if (contractId) {
+        updateContract.mutate({ contractId, compId: c.id, triggerStageId: wonStage.id }, { onError });
+      }
+    }
+  }, [
+    buyerPipelineId,
+    wonStage,
+    pending,
+    unsetTriggerKey,
+    isParticipation,
+    participationId,
+    contractId,
+    updateContract,
+    updateParticipation,
+    triggerComps,
+  ]);
+
+  if (triggerComps.length === 0) return null;
+
   return (
     <div className="space-y-2">
       <SectionLabel>Rev / profit share triggers</SectionLabel>
-      <p className="text-xs text-gray-400">Choose which pipeline stage triggers payout (optional).</p>
+      <p className="text-xs text-gray-400">Payout triggers when a lead reaches Won on your pipeline.</p>
       {triggerComps.map((c) => (
         <TriggerRow
           key={c.id}
           comp={c}
-          stages={stageRows}
-          pending={updateContract.isPending || updateParticipation.isPending}
+          wonStage={wonStage}
+          pending={pending}
           onSave={(stageId) => save(c.id, stageId)}
         />
       ))}
