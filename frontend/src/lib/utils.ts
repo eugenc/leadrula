@@ -43,6 +43,8 @@ export function resolveBuyerTxnCategory(t: { type: string }): string {
       return "Refund";
     case "manual_invoice":
       return "Invoice";
+    case "compensation_payout":
+      return "Compensation payout";
     default:
       return formatTxnType(t.type);
   }
@@ -61,6 +63,7 @@ export function resolveTxnCategory(t: {
     if (t.type === "dispute_credit") return "Refund";
   }
   if (t.type === "manual_invoice") return "Invoice";
+  if (t.type === "compensation_payout") return "Compensation payout";
   if (t.side === "sale" || t.type === "debit") return "Sale";
   return formatTxnType(t.type);
 }

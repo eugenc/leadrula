@@ -60,8 +60,20 @@ export function leadCriteriaSectionComplete(criteria: ContractLeadCriteria): boo
   return hasName && hasPhoneOrEmail;
 }
 
-export function returnRulesSectionComplete(): boolean {
-  return true;
+export function returnRulesRequired(delivery: ContractDeliveryDraft, openOffer: boolean): boolean {
+  if (openOffer) return false;
+  if (delivery.delivery !== "leads_pipeline") return false;
+  return !!delivery.counterparty_pipeline_id;
+}
+
+export function returnRulesSectionComplete(
+  delivery: ContractDeliveryDraft,
+  openOffer: boolean,
+  rulesCount?: number
+): boolean {
+  if (!returnRulesRequired(delivery, openOffer)) return true;
+  if (rulesCount === undefined) return true;
+  return rulesCount > 0;
 }
 
 export function openOfferDeliveryComplete(offer: ContractOfferDraft, delivery: ContractDeliveryDraft): boolean {
@@ -76,6 +88,7 @@ export function allRequiredSectionsComplete(args: {
   delivery: ContractDeliveryDraft;
   leadCriteria: ContractLeadCriteria;
   offer?: ContractOfferDraft;
+  returnRulesCount?: number;
 }): boolean {
   if (isOpenSellOffer(args.form)) {
     return (
@@ -87,7 +100,8 @@ export function allRequiredSectionsComplete(args: {
     detailsSectionComplete(args.form) &&
     compensationSectionComplete(args.compensations) &&
     deliverySectionComplete(args.delivery) &&
-    leadCriteriaSectionComplete(args.leadCriteria)
+    leadCriteriaSectionComplete(args.leadCriteria) &&
+    returnRulesSectionComplete(args.delivery, false, args.returnRulesCount)
   );
 }
 
@@ -99,6 +113,7 @@ export function sectionComplete(
     delivery: ContractDeliveryDraft;
     leadCriteria: ContractLeadCriteria;
     offer?: ContractOfferDraft;
+    returnRulesCount?: number;
   }
 ): boolean {
   const openOffer = isOpenSellOffer(args.form);
@@ -119,7 +134,7 @@ export function sectionComplete(
     case "criteria":
       return leadCriteriaSectionComplete(args.leadCriteria);
     case "returns":
-      return returnRulesSectionComplete();
+      return returnRulesSectionComplete(args.delivery, openOffer, args.returnRulesCount);
     case "buyers":
       return true;
     case "fieldmap":

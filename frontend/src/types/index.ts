@@ -627,6 +627,9 @@ export interface CompensationPayoutRow {
   cleared: number;
   next_period_end?: string | null;
   latest_transfer_status?: string | null;
+  invoice_id?: number | null;
+  invoice_status?: string | null;
+  invoice_public_id?: string | null;
 }
 
 export type TxnCategory = "Sale" | "Purchase" | "Topup" | "Credit" | "Refund" | "Invoice";
@@ -640,7 +643,7 @@ export interface Transaction {
   buyer_name?: string | null;
   publisher_name?: string | null;
   contract_id: number | null;
-  type: "debit" | "credit" | "dispute_credit" | "manual_invoice" | "topup";
+  type: "debit" | "credit" | "dispute_credit" | "manual_invoice" | "compensation_payout" | "topup";
   side?: "sale" | "purchase" | "prepay";
   category?: TxnCategory;
   counterparty_name?: string | null;
@@ -665,7 +668,7 @@ export interface Dispute {
 }
 
 export type InvoiceStatus = "open" | "paid" | "void";
-export type InvoiceKind = "starting_balance" | "prepay_request";
+export type InvoiceKind = "starting_balance" | "prepay_request" | "compensation_payout";
 export type InvoicePaymentMethod =
   | "stripe"
   | "bank_transfer"

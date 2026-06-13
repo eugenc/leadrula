@@ -712,10 +712,17 @@ func (r *Repository) GetStage(ctx context.Context, q database.Querier, stageID i
 	return si, err
 }
 
-func (r *Repository) UpdateStage(ctx context.Context, q database.Querier, leadID, stageID int64) error {
+func (r *Repository) UpdateStage(ctx context.Context, q database.Querier, leadID, pipelineID, stageID int64) error {
 	_, err := q.Exec(ctx,
-		`UPDATE leads SET stage_id=$2, position=COALESCE((SELECT MAX(position)+1 FROM leads WHERE stage_id=$2),0)
-		 WHERE id=$1`, leadID, stageID)
+		`UPDATE leads SET pipeline_id=$2, stage_id=$3,
+		   position = COALESCE((SELECT MAX(position)+1 FROM leads WHERE stage_id=$3), 0)
+		 WHERE id=$1`, leadID, pipelineID, stageID)
+	return err
+}
+
+func (r *Repository) ClearFromPipeline(ctx context.Context, q database.Querier, leadID int64) error {
+	_, err := q.Exec(ctx,
+		`UPDATE leads SET pipeline_id = NULL, stage_id = NULL, position = 0 WHERE id = $1`, leadID)
 	return err
 }
 

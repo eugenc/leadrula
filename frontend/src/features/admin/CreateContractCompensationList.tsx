@@ -270,6 +270,11 @@ function CompensationCard({
           }}
           onChange={(p) => onChange({ ...draft, ...p })}
         />
+        {(draft.kind === "rev_share" || draft.kind === "profit_share") && (
+          <p className="text-xs text-gray-500">
+            Payouts are settled via invoice. Cleared amounts auto-generate invoices for the buyer.
+          </p>
+        )}
       </div>
     </div>
   );

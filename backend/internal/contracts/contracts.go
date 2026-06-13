@@ -71,11 +71,12 @@ type routeSyncer interface {
 }
 
 type Service struct {
-	pool            *pgxpool.Pool
-	payoutTransfers PayoutTransferExecutor
-	notif           *notifications.Service
-	accounts        adminUserIDs
-	routes          routeSyncer
+	pool                     *pgxpool.Pool
+	payoutTransfers          PayoutTransferExecutor
+	compensationPayoutInvoicer CompensationPayoutInvoicer
+	notif                    *notifications.Service
+	accounts                 adminUserIDs
+	routes                   routeSyncer
 }
 
 type adminUserIDs interface {
@@ -85,6 +86,10 @@ type adminUserIDs interface {
 func NewService(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
 
 func (s *Service) SetPayoutExecutor(e PayoutTransferExecutor) { s.payoutTransfers = e }
+
+func (s *Service) SetCompensationPayoutInvoicer(i CompensationPayoutInvoicer) {
+	s.compensationPayoutInvoicer = i
+}
 
 func (s *Service) SetNotifier(n *notifications.Service, accounts adminUserIDs) {
 	s.notif = n
@@ -316,6 +321,11 @@ func (s *Service) UpdateDelivery(ctx context.Context, publisherID, contractID in
 	} else if sourceStageID == 0 || buyerPipelineID == 0 || returnStageID == 0 {
 		return nil, httpx.Validation("source_stage_id, buyer_pipeline_id, and return_stage_id are required for pipeline delivery")
 	}
+	if !openOffer && delivery == "leads_pipeline" {
+		if err := validateContractReturnRoutesRequired(ctx, s.pool, contractID, buyerPipelineID, true); err != nil {
+			return nil, err
+		}
+	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -456,6 +466,67 @@ func (s *Service) CountParticipationReturnRules(ctx context.Context, participati
 	err := s.pool.QueryRow(ctx,
 		`SELECT COUNT(*) FROM contract_return_rules WHERE participation_id = $1`, participationID).Scan(&n)
 	return n, err
+}
+
+func countContractReturnRules(ctx context.Context, q database.Querier, contractID int64) (int, error) {
+	var n int
+	err := q.QueryRow(ctx,
+		`SELECT COUNT(*) FROM contract_return_rules WHERE contract_id = $1 AND participation_id IS NULL`,
+		contractID).Scan(&n)
+	return n, err
+}
+
+func (s *Service) CountContractReturnRules(ctx context.Context, contractID int64) (int, error) {
+	return countContractReturnRules(ctx, s.pool, contractID)
+}
+
+func validateContractReturnRoutesRequired(ctx context.Context, q database.Querier, contractID int64, buyerPipelineID int64, pipelineDelivery bool) error {
+	if !pipelineDelivery || buyerPipelineID == 0 {
+		return nil
+	}
+	var returnStageID *int64
+	if err := q.QueryRow(ctx,
+		`SELECT return_stage_id FROM contracts WHERE id = $1 AND deleted_at IS NULL`,
+		contractID).Scan(&returnStageID); err != nil {
+		return err
+	}
+	if returnStageID == nil || *returnStageID == 0 {
+		return httpx.Validation("publisher return destination is not configured on contract")
+	}
+	n, err := countContractReturnRules(ctx, q, contractID)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return httpx.Validation("at least one return route is required for pipeline delivery")
+	}
+	return nil
+}
+
+func contractRequiresReturnRoutes(ctx context.Context, q database.Querier, contractID int64) (bool, error) {
+	var buyerPipelineID, returnStageID *int64
+	err := q.QueryRow(ctx,
+		`SELECT buyer_pipeline_id, return_stage_id FROM contracts WHERE id = $1 AND deleted_at IS NULL`,
+		contractID).Scan(&buyerPipelineID, &returnStageID)
+	if err != nil {
+		return false, err
+	}
+	if buyerPipelineID == nil || *buyerPipelineID == 0 {
+		return false, nil
+	}
+	if returnStageID == nil || *returnStageID == 0 {
+		return false, nil
+	}
+	var delivery string
+	err = q.QueryRow(ctx,
+		`SELECT COALESCE(
+		   (SELECT delivery FROM contract_compensations WHERE contract_id = $1 ORDER BY position, id LIMIT 1),
+		   'leads_pipeline'
+		 )`, contractID).Scan(&delivery)
+	if err != nil {
+		return false, err
+	}
+	return delivery == "leads_pipeline", nil
 }
 
 func (s *Service) validateReturnRuleStages(ctx context.Context, contractID, buyerStageID, returnStageID int64) error {
@@ -678,7 +749,32 @@ func (s *Service) UpdateParticipationReturnRule(ctx context.Context, participati
 }
 
 func (s *Service) DeleteReturnRule(ctx context.Context, ruleID int64) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM contract_return_rules WHERE id = $1`, ruleID)
+	var contractID int64
+	var participationID *int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT contract_id, participation_id FROM contract_return_rules WHERE id = $1`, ruleID).Scan(&contractID, &participationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return httpx.NotFound("return rule not found")
+	}
+	if err != nil {
+		return err
+	}
+	if participationID == nil {
+		required, err := contractRequiresReturnRoutes(ctx, s.pool, contractID)
+		if err != nil {
+			return err
+		}
+		if required {
+			n, err := countContractReturnRules(ctx, s.pool, contractID)
+			if err != nil {
+				return err
+			}
+			if n <= 1 {
+				return httpx.Validation("cannot remove the last return route while pipeline delivery is configured")
+			}
+		}
+	}
+	_, err = s.pool.Exec(ctx, `DELETE FROM contract_return_rules WHERE id = $1`, ruleID)
 	return err
 }
 
@@ -777,20 +873,30 @@ type ReturnInfo struct {
 
 // FindReturnRule checks whether entering newStageID triggers a return for the lead's contract.
 func FindReturnRule(ctx context.Context, q database.Querier, contractID, buyerAccountID, newStageID int64) (*ReturnInfo, error) {
-	ri := &ReturnInfo{}
+	var sourcePipelineID *int64
+	var returnStageID, publisherID int64
 	err := q.QueryRow(ctx,
-		`SELECT c.source_pipeline_id, rr.return_stage_id, c.publisher_id
+		`SELECT COALESCE(p.source_pipeline_id, c.source_pipeline_id), rr.return_stage_id, c.publisher_id
 		 FROM contract_return_rules rr
 		 JOIN contracts c ON c.id = rr.contract_id
 		 LEFT JOIN contract_participations p ON p.id = rr.participation_id
 		 WHERE rr.contract_id = $1 AND rr.buyer_stage_id = $3
-		   AND (rr.participation_id IS NULL OR p.buyer_id = $2)`,
-		contractID, buyerAccountID, newStageID).Scan(&ri.SourcePipelineID, &ri.ReturnStageID, &ri.PublisherID)
+		   AND (rr.participation_id IS NULL OR p.buyer_id = $2)
+		 ORDER BY CASE WHEN rr.participation_id IS NULL THEN 1 ELSE 0 END, rr.id
+		 LIMIT 1`,
+		contractID, buyerAccountID, newStageID).Scan(&sourcePipelineID, &returnStageID, &publisherID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	return ri, nil
+	if sourcePipelineID == nil || *sourcePipelineID == 0 {
+		return nil, httpx.BusinessRule("publisher pipeline is not configured on contract")
+	}
+	return &ReturnInfo{
+		SourcePipelineID: *sourcePipelineID,
+		ReturnStageID:    returnStageID,
+		PublisherID:      publisherID,
+	}, nil
 }

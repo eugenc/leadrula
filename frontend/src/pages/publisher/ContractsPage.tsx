@@ -52,7 +52,7 @@ import {
 } from "@/features/admin/contractCompensation";
 import { ContractPublisherPipelineSection } from "@/features/admin/ContractPublisherPipelineSection";
 import { ContractFormTabs } from "@/features/admin/ContractFormTabs";
-import { allRequiredSectionsComplete } from "@/features/admin/contractSectionCompleteness";
+import { allRequiredSectionsComplete, returnRulesRequired } from "@/features/admin/contractSectionCompleteness";
 import { buildContractPayload } from "@/features/admin/contractDraftPayload";
 import {
   emptyContractOffer,
@@ -250,6 +250,8 @@ function CreateContractDrawer({
 
   const canSaveDraft = !!form.name.trim();
   const openOffer = isOpenSellOffer(form);
+  const mustSaveDraftForReturnRoutes =
+    !openOffer && returnRulesRequired(deliveryDraft, false) && form.buyer_id > 0;
   const canCreate = allRequiredSectionsComplete({
     form,
     compensations,
@@ -312,7 +314,10 @@ function CreateContractDrawer({
           >
             Save draft
           </Button>
-          <Button disabled={!canCreate || create.isPending} onClick={() => runCreate("active", onClose)}>
+          <Button
+            disabled={!canCreate || create.isPending || mustSaveDraftForReturnRoutes}
+            onClick={() => runCreate("active", onClose)}
+          >
             Create
           </Button>
         </>
@@ -438,7 +443,7 @@ function CreateContractDrawer({
           ),
           returns: (
             <p className="text-sm text-gray-500">
-              Return rules can be configured after the contract is saved.
+              Save as draft first, then add return routes in the contract drawer before activating pipeline delivery.
             </p>
           ),
         }}

@@ -12,6 +12,7 @@ export const MANUAL_PAYMENT_METHODS = [
 export const INVOICE_KIND_LABELS: Record<string, string> = {
   starting_balance: "Starting balance",
   prepay_request: "Prepay request",
+  compensation_payout: "Compensation payout",
 };
 
 export const INVOICE_PAYMENT_LABELS: Record<string, string> = {

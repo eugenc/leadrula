@@ -11,7 +11,7 @@ import { cn, formatMoney } from "@/lib/utils";
 import { useUIStore } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
-import { errorMessage } from "@/lib/api";
+import { errorMessage, apiError } from "@/lib/api";
 import {
   useLead,
   useNotes,
@@ -22,9 +22,14 @@ import {
   useUsers,
   useCustomFields,
   useDeleteLead,
+  useChangeStage,
+  usePipelines,
+  useStages,
 } from "./hooks";
 import { DeleteLeadConfirmDialog } from "./DeleteLeadConfirmDialog";
-import type { Lead } from "@/types";
+import { StagePromptModal, type PromptResult } from "./StagePromptModal";
+import { stageNeedsPrompt } from "@/features/pipelines/stageTypes";
+import type { Lead, Stage } from "@/types";
 import { formatStatus, leadSourceLabel } from "./leadsListColumns";
 import { LeadTagsEditor } from "./LeadTagsEditor";
 import { effectiveFieldFormat } from "@/features/admin/customFieldConstants";
@@ -297,14 +302,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
                   <Label>Buyer</Label>
                   <div className="mt-1 text-sm text-gray-700">{lead.buyer_name ?? "—"}</div>
                 </div>
-                <div>
-                  <Label>Pipeline</Label>
-                  <div className="mt-1 text-sm text-gray-700">{lead.pipeline_name ?? "—"}</div>
-                </div>
-                <div>
-                  <Label>Pipeline Stage</Label>
-                  <div className="mt-1 text-sm text-gray-700">{lead.stage_name ?? "—"}</div>
-                </div>
+                <LeadPipelineFields lead={lead} />
               </div>
             </div>
             <LeadTagsEditor leadId={lead.id} tags={lead.tags ?? []} />
@@ -371,6 +369,151 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
         onConfirm={handleDeleteLead}
       />
     </div>
+  );
+}
+
+function LeadPipelineFields({ lead }: { lead: Lead }) {
+  const user = useAuthStore((s) => s.user);
+  const canEditPipeline =
+    user?.role === "admin" ||
+    (user?.role === "user" && lead.assigned_user_id === Number(user.id));
+
+  const changeStage = useChangeStage();
+  const { data: pipelines } = usePipelines();
+  const [pipelineId, setPipelineId] = useState(lead.pipeline_id ?? 0);
+  const [stageId, setStageId] = useState(lead.stage_id ?? 0);
+  const { data: stages } = useStages(pipelineId || undefined);
+  const [prompt, setPrompt] = useState<{ stage: Stage } | null>(null);
+
+  useEffect(() => {
+    setPipelineId(lead.pipeline_id ?? 0);
+    setStageId(lead.stage_id ?? 0);
+  }, [lead.id, lead.pipeline_id, lead.stage_id]);
+
+  function revertFromLead() {
+    setPipelineId(lead.pipeline_id ?? 0);
+    setStageId(lead.stage_id ?? 0);
+  }
+
+  function commitStage(stage: Stage, extra?: PromptResult) {
+    changeStage.mutate(
+      { leadId: lead.id, payload: { stage_id: stage.id, ...extra } },
+      {
+        onSuccess: () => toast.success("Saved"),
+        onError: (err) => {
+          const e = apiError(err);
+          if (e.code === "business_rule" && stageNeedsPrompt(stage.stage_type)) {
+            setPrompt({ stage });
+          } else {
+            toast.error(errorMessage(err));
+            revertFromLead();
+          }
+        },
+      }
+    );
+  }
+
+  function onPipelineChange(nextPipelineId: number) {
+    if (nextPipelineId === (lead.pipeline_id ?? 0)) {
+      revertFromLead();
+      return;
+    }
+    setPipelineId(nextPipelineId);
+    if (nextPipelineId === 0) {
+      if (!lead.stage_id && !lead.pipeline_id) return;
+      changeStage.mutate(
+        { leadId: lead.id, payload: { clear: true } },
+        {
+          onSuccess: () => {
+            setStageId(0);
+            toast.success("Saved");
+          },
+          onError: (err) => {
+            toast.error(errorMessage(err));
+            revertFromLead();
+          },
+        }
+      );
+      return;
+    }
+    setStageId(0);
+  }
+
+  function onStageChange(nextStageId: number) {
+    if (nextStageId === 0) return;
+    if (nextStageId === (lead.stage_id ?? 0) && pipelineId === (lead.pipeline_id ?? 0)) return;
+    const stage = stages?.find((s) => s.id === nextStageId);
+    if (!stage) return;
+    setStageId(nextStageId);
+    if (stageNeedsPrompt(stage.stage_type)) {
+      setPrompt({ stage });
+      return;
+    }
+    commitStage(stage);
+  }
+
+  if (!canEditPipeline) {
+    return (
+      <>
+        <div>
+          <Label>Pipeline</Label>
+          <div className="mt-1 text-sm text-gray-700">{lead.pipeline_name ?? "—"}</div>
+        </div>
+        <div>
+          <Label>Pipeline Stage</Label>
+          <div className="mt-1 text-sm text-gray-700">{lead.stage_name ?? "—"}</div>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div>
+        <Label>Pipeline</Label>
+        <Select
+          value={pipelineId}
+          onChange={(e) => onPipelineChange(Number(e.target.value))}
+          disabled={changeStage.isPending}
+        >
+          <option value={0}>None</option>
+          {(pipelines ?? []).map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </Select>
+      </div>
+      {pipelineId > 0 && (
+        <div>
+          <Label>Pipeline Stage</Label>
+          <Select
+            value={stageId}
+            onChange={(e) => onStageChange(Number(e.target.value))}
+            disabled={changeStage.isPending}
+          >
+            <option value={0}>Select stage…</option>
+            {(stages ?? []).map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
+      <StagePromptModal
+        open={!!prompt}
+        stage={prompt?.stage ?? null}
+        onCancel={() => {
+          setPrompt(null);
+          revertFromLead();
+        }}
+        onConfirm={(r) => {
+          if (prompt) commitStage(prompt.stage, r);
+          setPrompt(null);
+        }}
+      />
+    </>
   );
 }
 

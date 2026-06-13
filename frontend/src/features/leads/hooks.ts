@@ -97,11 +97,13 @@ export function useLead(id: number | null) {
   });
 }
 
-export interface StageChangePayload {
-  stage_id: number;
-  action_at?: string | null;
-  disqualification_reason_id?: number | null;
-}
+export type StageChangePayload =
+  | { clear: true }
+  | {
+      stage_id: number;
+      action_at?: string | null;
+      disqualification_reason_id?: number | null;
+    };
 
 export function useChangeStage() {
   const qc = useQueryClient();
@@ -117,6 +119,7 @@ export function useChangeStage() {
         };
       });
       qc.setQueryData(["lead", leadId], updated);
+      qc.invalidateQueries({ queryKey: ["stage-history", leadId] });
     },
   });
 }

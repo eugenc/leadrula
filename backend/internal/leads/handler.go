@@ -323,6 +323,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) changeStage(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
+		Clear        bool       `json:"clear"`
 		StageID      int64      `json:"stage_id"`
 		ActionAt     *time.Time `json:"action_at"`
 		DisqReasonID *int64     `json:"disqualification_reason_id"`
@@ -330,7 +331,17 @@ func (h *Handler) changeStage(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	l, auditChanges, err := h.svc.ChangeStage(r.Context(), p, id(r), body.StageID, body.ActionAt, body.DisqReasonID)
+	leadID := id(r)
+	if body.Clear {
+		l, err := h.svc.ClearFromPipeline(r.Context(), p, leadID)
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		httpx.JSON(w, http.StatusOK, l)
+		return
+	}
+	l, auditChanges, err := h.svc.ChangeStage(r.Context(), p, leadID, body.StageID, body.ActionAt, body.DisqReasonID)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return

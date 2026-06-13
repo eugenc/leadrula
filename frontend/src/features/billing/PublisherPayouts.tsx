@@ -4,6 +4,7 @@ import { Card, Badge, Spinner, StatCard, EmptyState } from "@/components/ui/misc
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { formatMoney } from "@/lib/utils";
 import { PAYOUT_FREQUENCIES, PAYOUT_WEEKDAYS } from "@/features/admin/contractCompensation";
+import type { CompensationPayoutRow } from "@/types";
 
 function payoutScheduleLabel(row: {
   payout_frequency?: string | null;
@@ -22,11 +23,21 @@ function payoutScheduleLabel(row: {
   return freq;
 }
 
-function transferStatusLabel(buyerKind: string, status?: string | null): string {
-  if (buyerKind === "direct") {
-    return status === "skipped" || !status ? "N/A (direct)" : status;
+function isSharePayout(kind: string): boolean {
+  return kind === "rev_share" || kind === "profit_share";
+}
+
+function payoutStatusLabel(row: CompensationPayoutRow): string {
+  if (isSharePayout(row.kind)) {
+    if (row.invoice_status === "paid") return "Paid via invoice";
+    if (row.invoice_status === "open") return "Invoice open";
+    if (row.cleared > 0) return "Invoice pending";
+    return "—";
   }
-  switch (status) {
+  if (row.buyer_kind === "direct") {
+    return row.latest_transfer_status === "skipped" || !row.latest_transfer_status ? "N/A (direct)" : row.latest_transfer_status;
+  }
+  switch (row.latest_transfer_status) {
     case "sent":
       return "Paid out";
     case "pending":
@@ -40,12 +51,16 @@ function transferStatusLabel(buyerKind: string, status?: string | null): string 
   }
 }
 
-function transferStatusVariant(
-  buyerKind: string,
-  status?: string | null
+function payoutStatusVariant(
+  row: CompensationPayoutRow
 ): "default" | "distributed" | "pending" | "overdue" {
-  if (buyerKind === "direct") return "default";
-  switch (status) {
+  if (isSharePayout(row.kind)) {
+    if (row.invoice_status === "paid") return "distributed";
+    if (row.invoice_status === "open") return "pending";
+    return "default";
+  }
+  if (row.buyer_kind === "direct") return "default";
+  switch (row.latest_transfer_status) {
     case "sent":
       return "distributed";
     case "failed":
@@ -119,9 +134,12 @@ export function PublisherPayouts() {
                   <TD>{formatMoney(r.hold)}</TD>
                   <TD>{formatMoney(r.cleared)}</TD>
                   <TD>
-                    <Badge variant={transferStatusVariant(r.buyer_kind, r.latest_transfer_status)}>
-                      {transferStatusLabel(r.buyer_kind, r.latest_transfer_status)}
+                    <Badge variant={payoutStatusVariant(r)}>
+                      {payoutStatusLabel(r)}
                     </Badge>
+                    {isSharePayout(r.kind) && r.invoice_public_id && (
+                      <div className="mt-1 text-xs text-gray-400">{r.invoice_public_id.slice(0, 8)}…</div>
+                    )}
                   </TD>
                   <TD className="text-gray-600">
                     {r.next_period_end

@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	InvoiceKindStartingBalance = "starting_balance"
-	InvoiceKindPrepayRequest   = "prepay_request"
+	InvoiceKindStartingBalance     = "starting_balance"
+	InvoiceKindPrepayRequest       = "prepay_request"
+	InvoiceKindCompensationPayout  = "compensation_payout"
 )
 
 var manualPaymentMethods = map[string]bool{
@@ -440,15 +441,18 @@ func (s *Service) VoidInvoice(ctx context.Context, publisherID, invoiceID int64)
 	}
 	defer tx.Rollback(ctx)
 
-	var status string
+	var status, kind string
 	err = tx.QueryRow(ctx,
-		`SELECT status::text FROM invoices WHERE id = $1 AND publisher_id = $2 FOR UPDATE`,
-		invoiceID, publisherID).Scan(&status)
+		`SELECT status::text, kind FROM invoices WHERE id = $1 AND publisher_id = $2 FOR UPDATE`,
+		invoiceID, publisherID).Scan(&status, &kind)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("invoice not found")
 	}
 	if err != nil {
 		return nil, err
+	}
+	if kind == InvoiceKindCompensationPayout {
+		return nil, httpx.BusinessRule("compensation payout invoices cannot be voided")
 	}
 	if status != "open" {
 		return nil, httpx.BusinessRule("invoice is not open")
@@ -470,11 +474,11 @@ func (s *Service) settleInvoiceTx(
 ) error {
 	var invID, buyerID int64
 	var invAmount float64
-	var status, desc string
+	var status, desc, kind string
 	err := tx.QueryRow(ctx,
-		`SELECT id, buyer_id, amount::float8, status::text, description
+		`SELECT id, buyer_id, amount::float8, status::text, description, kind
 		 FROM invoices WHERE public_id = $1 FOR UPDATE`,
-		invoicePublicID).Scan(&invID, &buyerID, &invAmount, &status, &desc)
+		invoicePublicID).Scan(&invID, &buyerID, &invAmount, &status, &desc, &kind)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return httpx.NotFound("invoice not found")
 	}
@@ -487,8 +491,17 @@ func (s *Service) settleInvoiceTx(
 	if amount > 0 && invAmount != amount {
 		return httpx.BusinessRule("payment amount does not match invoice")
 	}
-	creditAmount := invAmount
+	if kind == InvoiceKindCompensationPayout {
+		return s.settleCompensationPayoutInvoiceTx(ctx, tx, invID, buyerID, invAmount, desc, paymentMethod, paymentNote, paidBy, stripePI, stripeCharge)
+	}
+	return s.settlePrepayInvoiceTx(ctx, tx, invID, buyerID, invAmount, desc, paymentMethod, paymentNote, paidBy, stripePI, stripeCharge)
+}
 
+func (s *Service) settlePrepayInvoiceTx(
+	ctx context.Context, tx pgx.Tx,
+	invID, buyerID int64, invAmount float64, desc, paymentMethod string,
+	paymentNote *string, paidBy *int64, stripePI, stripeCharge *string,
+) error {
 	if err := EnsureBalance(ctx, tx, buyerID); err != nil {
 		return err
 	}
@@ -498,7 +511,7 @@ func (s *Service) settleInvoiceTx(
 		buyerID).Scan(&balance); err != nil {
 		return err
 	}
-	newBal := balance + creditAmount
+	newBal := balance + invAmount
 	if _, err := tx.Exec(ctx,
 		`UPDATE buyer_balances SET balance = $2 WHERE buyer_id = $1`, buyerID, newBal); err != nil {
 		return err
@@ -506,18 +519,19 @@ func (s *Service) settleInvoiceTx(
 
 	txnDesc := fmt.Sprintf("prepay invoice — %s", desc)
 	var txnID int64
+	var err error
 	if stripePI != nil && *stripePI != "" {
 		err = tx.QueryRow(ctx,
 			`INSERT INTO transactions
 			   (buyer_id, type, amount, balance_after, description, stripe_payment_intent_id, stripe_charge_id)
 			 VALUES ($1, 'manual_invoice', $2, $3, $4, $5, $6)
 			 RETURNING id`,
-			buyerID, creditAmount, newBal, txnDesc, *stripePI, stripeCharge).Scan(&txnID)
+			buyerID, invAmount, newBal, txnDesc, *stripePI, stripeCharge).Scan(&txnID)
 	} else {
 		err = tx.QueryRow(ctx,
 			`INSERT INTO transactions(buyer_id, type, amount, balance_after, description)
 			 VALUES ($1, 'manual_invoice', $2, $3, $4) RETURNING id`,
-			buyerID, creditAmount, newBal, txnDesc).Scan(&txnID)
+			buyerID, invAmount, newBal, txnDesc).Scan(&txnID)
 	}
 	if err != nil {
 		return err
@@ -534,10 +548,66 @@ func (s *Service) settleInvoiceTx(
 		   credit_txn_id = $6
 		 WHERE id = $1`,
 		invID, paymentMethod, paymentNote, paidBy, stripePI, txnID)
+	return err
+}
+
+func (s *Service) settleCompensationPayoutInvoiceTx(
+	ctx context.Context, tx pgx.Tx,
+	invID, buyerID int64, invAmount float64, desc, paymentMethod string,
+	paymentNote *string, paidBy *int64, stripePI, stripeCharge *string,
+) error {
+	var clearID int64
+	err := tx.QueryRow(ctx,
+		`SELECT compensation_payout_clear_id FROM invoices WHERE id = $1`,
+		invID).Scan(&clearID)
+	if errors.Is(err, pgx.ErrNoRows) || clearID == 0 {
+		return httpx.BusinessRule("compensation payout invoice is not linked to a payout clear")
+	}
 	if err != nil {
 		return err
 	}
-	return nil
+
+	if err := EnsureBalance(ctx, tx, buyerID); err != nil {
+		return err
+	}
+	var balance float64
+	if err := tx.QueryRow(ctx,
+		`SELECT balance::float8 FROM buyer_balances WHERE buyer_id = $1`,
+		buyerID).Scan(&balance); err != nil {
+		return err
+	}
+
+	txnDesc := fmt.Sprintf("compensation payout — %s", desc)
+	var txnID int64
+	if stripePI != nil && *stripePI != "" {
+		err = tx.QueryRow(ctx,
+			`INSERT INTO transactions
+			   (buyer_id, type, amount, balance_after, description, stripe_payment_intent_id, stripe_charge_id)
+			 VALUES ($1, 'compensation_payout', $2, $3, $4, $5, $6)
+			 RETURNING id`,
+			buyerID, invAmount, balance, txnDesc, *stripePI, stripeCharge).Scan(&txnID)
+	} else {
+		err = tx.QueryRow(ctx,
+			`INSERT INTO transactions(buyer_id, type, amount, balance_after, description)
+			 VALUES ($1, 'compensation_payout', $2, $3, $4) RETURNING id`,
+			buyerID, invAmount, balance, txnDesc).Scan(&txnID)
+	}
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(ctx,
+		`UPDATE invoices SET
+		   status = 'paid',
+		   payment_method = $2::invoice_payment_method,
+		   payment_note = $3,
+		   paid_at = now(),
+		   paid_by = $4,
+		   stripe_payment_intent_id = COALESCE($5, stripe_payment_intent_id),
+		   credit_txn_id = $6
+		 WHERE id = $1`,
+		invID, paymentMethod, paymentNote, paidBy, stripePI, txnID)
+	return err
 }
 
 // CreatePrepayInvoice is the publisher-facing entry for ad-hoc prepay requests.
@@ -548,4 +618,89 @@ func (s *Service) CreatePrepayInvoice(ctx context.Context, publisherID, buyerID 
 // CreateStartingBalanceInvoice opens the initial prepay invoice for a new direct buyer.
 func (s *Service) CreateStartingBalanceInvoice(ctx context.Context, publisherID, buyerID int64, amount float64) (*Invoice, error) {
 	return s.CreateInvoice(ctx, publisherID, buyerID, amount, "Starting balance", InvoiceKindStartingBalance)
+}
+
+// CreateCompensationPayoutInvoice opens an invoice for a cleared rev/profit share period.
+func (s *Service) CreateCompensationPayoutInvoice(ctx context.Context, clearID int64) error {
+	var existingInvoiceID *int64
+	var amount float64
+	var periodStart, periodEnd time.Time
+	var kind, contractName string
+	var publisherID, buyerID int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT pc.invoice_id, pc.amount::float8, pc.period_start, pc.period_end,
+		        cc.kind, c.name, c.publisher_id, c.buyer_id
+		 FROM compensation_payout_clears pc
+		 JOIN contract_compensations cc ON cc.id = pc.compensation_id
+		 JOIN contracts c ON c.id = cc.contract_id
+		 WHERE pc.id = $1`,
+		clearID).Scan(&existingInvoiceID, &amount, &periodStart, &periodEnd, &kind, &contractName, &publisherID, &buyerID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return httpx.NotFound("payout clear not found")
+	}
+	if err != nil {
+		return err
+	}
+	if kind != "rev_share" && kind != "profit_share" {
+		return nil
+	}
+	if existingInvoiceID != nil && *existingInvoiceID > 0 {
+		return nil
+	}
+	if amount <= 0 {
+		return nil
+	}
+
+	kindLabel := "Rev share"
+	if kind == "profit_share" {
+		kindLabel = "Profit share"
+	}
+	desc := fmt.Sprintf("%s payout — %s — %s to %s",
+		kindLabel, contractName,
+		periodStart.Format("Jan 2, 2006"),
+		periodEnd.Add(-time.Second).Format("Jan 2, 2006"))
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var invID int64
+	var publicID string
+	err = tx.QueryRow(ctx,
+		`INSERT INTO invoices(publisher_id, buyer_id, amount, description, kind, compensation_payout_clear_id)
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 RETURNING id, public_id`,
+		publisherID, buyerID, amount, desc, InvoiceKindCompensationPayout, clearID).Scan(&invID, &publicID)
+	if err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE compensation_payout_clears
+		 SET invoice_id = $2, stripe_transfer_status = 'skipped'
+		 WHERE id = $1`,
+		clearID, invID); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	inv := &Invoice{
+		ID:          invID,
+		PublicID:    publicID,
+		PublisherID: publisherID,
+		BuyerID:     buyerID,
+		Amount:      amount,
+		Description: desc,
+		Kind:        InvoiceKindCompensationPayout,
+		Status:      "open",
+	}
+	if err := s.notifyInvoiceCreated(ctx, buyerID, inv); err != nil {
+		log.Printf("compensation payout invoice notify failed buyer=%d invoice=%d: %v", buyerID, invID, err)
+	}
+	return nil
 }

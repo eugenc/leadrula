@@ -187,7 +187,7 @@ const publisherTxnScope = `
     c.publisher_id = $1
     OR (t.buyer_id = $1 AND c.publisher_id IS NOT NULL AND c.publisher_id <> $1)
     OR (
-      t.type IN ('credit', 'topup', 'dispute_credit', 'manual_invoice')
+      t.type IN ('credit', 'topup', 'dispute_credit', 'manual_invoice', 'compensation_payout')
       AND EXISTS (
         SELECT 1 FROM partnerships p
         WHERE p.publisher_id = $1 AND p.buyer_id = t.buyer_id AND p.status = 'active'
@@ -204,7 +204,7 @@ const txnSideExpr = `
       ) THEN 'prepay'
     WHEN c.publisher_id = $1 THEN 'sale'
     WHEN t.buyer_id = $1 THEN 'purchase'
-    WHEN t.type = 'manual_invoice'
+    WHEN t.type IN ('manual_invoice', 'compensation_payout')
       AND EXISTS (
         SELECT 1 FROM partnerships p
         WHERE p.publisher_id = $1 AND p.buyer_id = t.buyer_id AND p.status = 'active'
@@ -218,6 +218,7 @@ const txnCategoryExpr = `
     WHEN ` + txnSideExpr + ` = 'prepay' AND t.type = 'credit' THEN 'Credit'
     WHEN ` + txnSideExpr + ` = 'prepay' AND t.type = 'dispute_credit' THEN 'Refund'
     WHEN ` + txnSideExpr + ` = 'sale' AND t.type = 'manual_invoice' THEN 'Invoice'
+    WHEN ` + txnSideExpr + ` = 'sale' AND t.type = 'compensation_payout' THEN 'Compensation payout'
     WHEN ` + txnSideExpr + ` = 'sale' THEN 'Sale'
     WHEN ` + txnSideExpr + ` = 'purchase' THEN 'Purchase'
     ELSE ''

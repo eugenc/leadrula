@@ -226,6 +226,13 @@ func (s *Service) ActivateDraft(ctx context.Context, publisherID, contractID int
 	if err := validateActivationParams(p); err != nil {
 		return nil, err
 	}
+	delivery := strings.TrimSpace(p.Delivery)
+	if delivery == "" {
+		delivery = "leads_pipeline"
+	}
+	if err := validateContractReturnRoutesRequired(ctx, s.pool, contractID, p.BuyerPipelineID, delivery == "leads_pipeline"); err != nil {
+		return nil, err
+	}
 
 	ct, err := counterpartyType(ctx, s.pool, p.BuyerID)
 	if err != nil {

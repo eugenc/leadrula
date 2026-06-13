@@ -109,6 +109,11 @@ type PayoutTransferExecutor interface {
 	ExecuteMarketplacePayoutTransfers(ctx context.Context, publisherID int64) error
 }
 
+// CompensationPayoutInvoicer creates invoices for cleared rev/profit share periods.
+type CompensationPayoutInvoicer interface {
+	CreateCompensationPayoutInvoice(ctx context.Context, clearID int64) error
+}
+
 type PayoutSummary struct {
 	Hold              float64 `json:"hold"`
 	Cleared           float64 `json:"cleared"`
@@ -131,6 +136,9 @@ type CompensationPayoutRow struct {
 	Cleared               float64 `json:"cleared"`
 	NextPeriodEnd         *string `json:"next_period_end,omitempty"`
 	LatestTransferStatus  *string `json:"latest_transfer_status,omitempty"`
+	InvoiceID             *int64  `json:"invoice_id,omitempty"`
+	InvoiceStatus         *string `json:"invoice_status,omitempty"`
+	InvoicePublicID       *string `json:"invoice_public_id,omitempty"`
 }
 
 func (s *Service) runPayoutTransfers(ctx context.Context, publisherID int64) {
@@ -207,6 +215,21 @@ func (s *Service) PayoutByCompensation(ctx context.Context, publisherID int64) (
 		         FROM compensation_payout_clears pc
 		         WHERE pc.compensation_id = cc.id
 		         ORDER BY pc.period_end DESC
+		         LIMIT 1),
+		        (SELECT i.id FROM compensation_payout_clears pc
+		         JOIN invoices i ON i.id = pc.invoice_id
+		         WHERE pc.compensation_id = cc.id
+		         ORDER BY pc.period_end DESC
+		         LIMIT 1),
+		        (SELECT i.status::text FROM compensation_payout_clears pc
+		         JOIN invoices i ON i.id = pc.invoice_id
+		         WHERE pc.compensation_id = cc.id
+		         ORDER BY pc.period_end DESC
+		         LIMIT 1),
+		        (SELECT i.public_id::text FROM compensation_payout_clears pc
+		         JOIN invoices i ON i.id = pc.invoice_id
+		         WHERE pc.compensation_id = cc.id
+		         ORDER BY pc.period_end DESC
 		         LIMIT 1)
 		 FROM contract_compensations cc
 		 JOIN contracts c ON c.id = cc.contract_id
@@ -229,6 +252,7 @@ func (s *Service) PayoutByCompensation(ctx context.Context, publisherID int64) (
 			&row.CompensationID, &row.ContractID, &row.ContractName, &row.Kind, &row.BuyerKind,
 			&row.PayoutFrequency, &row.PayoutWeekday, &row.PayoutMonthDay,
 			&earned, &cleared, &tz, &transferStatus,
+			&row.InvoiceID, &row.InvoiceStatus, &row.InvoicePublicID,
 		); err != nil {
 			return nil, err
 		}
@@ -266,15 +290,22 @@ func (s *Service) EnsurePublisherPayoutClears(ctx context.Context, publisherID i
 		if err := rows.Scan(&compID, &freq, &weekday, &monthDay, &tz); err != nil {
 			return err
 		}
-		if err := ensurePayoutClears(ctx, s.pool, compID, freq, weekday, monthDay, loadLocation(tz)); err != nil {
+		if err := ensurePayoutClears(ctx, s.pool, s.compensationPayoutInvoicer, compID, freq, weekday, monthDay, loadLocation(tz)); err != nil {
 			return err
 		}
 	}
 	return rows.Err()
 }
 
-func ensurePayoutClears(ctx context.Context, q database.Querier, compID int64, freq string, weekday, monthDay *int, loc *time.Location) error {
+func ensurePayoutClears(ctx context.Context, q database.Querier, invoicer CompensationPayoutInvoicer, compID int64, freq string, weekday, monthDay *int, loc *time.Location) error {
 	now := time.Now()
+	var compKind string
+	if err := q.QueryRow(ctx,
+		`SELECT kind FROM contract_compensations WHERE id = $1`, compID).Scan(&compKind); err != nil {
+		return err
+	}
+	sharePayout := compKind == "rev_share" || compKind == "profit_share"
+
 	var lastEnd *time.Time
 	err := q.QueryRow(ctx,
 		`SELECT period_end FROM compensation_payout_clears
@@ -319,12 +350,33 @@ func ensurePayoutClears(ctx context.Context, q database.Querier, compID int64, f
 			return err
 		}
 		if net > 0 {
-			if _, err := q.Exec(ctx,
+			var clearID int64
+			err := q.QueryRow(ctx,
 				`INSERT INTO compensation_payout_clears(compensation_id, period_start, period_end, amount)
 				 VALUES ($1,$2,$3,$4)
-				 ON CONFLICT (compensation_id, period_start, period_end) DO NOTHING`,
-				compID, start.UTC(), end.UTC(), net); err != nil {
-				return err
+				 ON CONFLICT (compensation_id, period_start, period_end) DO NOTHING
+				 RETURNING id`,
+				compID, start.UTC(), end.UTC(), net).Scan(&clearID)
+			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					// conflict — load existing clear for invoicing
+					if sharePayout && invoicer != nil {
+						if err := q.QueryRow(ctx,
+							`SELECT id FROM compensation_payout_clears
+							 WHERE compensation_id = $1 AND period_start = $2 AND period_end = $3`,
+							compID, start.UTC(), end.UTC()).Scan(&clearID); err == nil {
+							if ierr := invoicer.CreateCompensationPayoutInvoice(ctx, clearID); ierr != nil {
+								log.Printf("contracts: compensation payout invoice clear %d: %v", clearID, ierr)
+							}
+						}
+					}
+				} else {
+					return err
+				}
+			} else if sharePayout && invoicer != nil {
+				if err := invoicer.CreateCompensationPayoutInvoice(ctx, clearID); err != nil {
+					log.Printf("contracts: compensation payout invoice clear %d: %v", clearID, err)
+				}
 			}
 		}
 		cursor = end

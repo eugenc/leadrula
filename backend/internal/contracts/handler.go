@@ -666,23 +666,7 @@ func (h *Handler) buyerAddRule(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, err)
 		return
 	}
-	var body struct {
-		BuyerStageID  int64 `json:"buyer_stage_id"`
-		ReturnStageID int64 `json:"return_stage_id"`
-	}
-	if !httpx.DecodeJSON(w, r, &body) {
-		return
-	}
-	if body.BuyerStageID == 0 || body.ReturnStageID == 0 {
-		httpx.WriteError(w, httpx.Validation("buyer_stage_id and return_stage_id are required"))
-		return
-	}
-	rr, err := h.svc.AddReturnRule(r.Context(), cid, body.BuyerStageID, body.ReturnStageID)
-	if err != nil {
-		httpx.WriteError(w, err)
-		return
-	}
-	httpx.JSON(w, http.StatusCreated, rr)
+	httpx.WriteError(w, httpx.Forbidden("return routes on this contract are configured by the publisher"))
 }
 
 func (h *Handler) buyerUpdateRule(w http.ResponseWriter, r *http.Request) {
@@ -698,23 +682,7 @@ func (h *Handler) buyerUpdateRule(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, httpx.NotFound("return rule not found"))
 		return
 	}
-	var body struct {
-		BuyerStageID  int64 `json:"buyer_stage_id"`
-		ReturnStageID int64 `json:"return_stage_id"`
-	}
-	if !httpx.DecodeJSON(w, r, &body) {
-		return
-	}
-	if body.BuyerStageID == 0 || body.ReturnStageID == 0 {
-		httpx.WriteError(w, httpx.Validation("buyer_stage_id and return_stage_id are required"))
-		return
-	}
-	rr, err := h.svc.UpdateReturnRule(r.Context(), ruleID, body.BuyerStageID, body.ReturnStageID)
-	if err != nil {
-		httpx.WriteError(w, err)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, rr)
+	httpx.WriteError(w, httpx.Forbidden("return routes on this contract are configured by the publisher"))
 }
 
 func (h *Handler) buyerDeleteRule(w http.ResponseWriter, r *http.Request) {
@@ -730,11 +698,7 @@ func (h *Handler) buyerDeleteRule(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, httpx.NotFound("return rule not found"))
 		return
 	}
-	if err := h.svc.DeleteReturnRule(r.Context(), ruleID); err != nil {
-		httpx.WriteError(w, err)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+	httpx.WriteError(w, httpx.Forbidden("return routes on this contract are configured by the publisher"))
 }
 
 func (h *Handler) buyerPublisherStages(w http.ResponseWriter, r *http.Request) {

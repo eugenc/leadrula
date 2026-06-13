@@ -104,7 +104,7 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 	}
 
 	fromStage := lead.StageID
-	if err := s.repo.UpdateStage(ctx, tx, leadID, newStageID); err != nil {
+	if err := s.repo.UpdateStage(ctx, tx, leadID, stage.PipelineID, newStageID); err != nil {
 		return nil, nil, err
 	}
 	if stage.StageType == pipelines.StageTypeWon {
@@ -207,6 +207,8 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 				return nil, nil, err
 			}
 			pendingEmails = append(pendingEmails, emails...)
+			updated = returned
+			finalStageID = returned.StageID
 		}
 	}
 
@@ -231,6 +233,43 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		PrevStageID: fromStage,
 	})
 	return updated, auditChanges, nil
+}
+
+// ClearFromPipeline removes a lead from its pipeline without triggering stage rules or return flows.
+func (s *Service) ClearFromPipeline(ctx context.Context, p *auth.Principal, leadID int64) (*Lead, error) {
+	lead, err := s.repo.Get(ctx, p, leadID)
+	if err != nil {
+		return nil, err
+	}
+	if err := assertCanEdit(p, lead); err != nil {
+		return nil, err
+	}
+	if lead.PipelineID == nil && lead.StageID == nil {
+		return lead, nil
+	}
+
+	tx, err := s.repo.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	if err := s.repo.ClearFromPipeline(ctx, tx, leadID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	updated, err := s.repo.Get(ctx, p, leadID)
+	if err != nil {
+		return nil, err
+	}
+	s.fireOutbound(ctx, p.AccountID, "lead.update", updated, PipelineContext{
+		PipelineID: updated.PipelineID,
+		StageID:    updated.StageID,
+	})
+	return updated, nil
 }
 
 // ChangeStageByWebhook moves a lead without user permission checks (inbound webhook).

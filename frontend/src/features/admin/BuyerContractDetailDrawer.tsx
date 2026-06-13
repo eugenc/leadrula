@@ -2,24 +2,17 @@ import { Sheet, DrawerHeader, DrawerBody } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { toast } from "@/store/toastStore";
-import { errorMessage } from "@/lib/api";
 import { formatMoney } from "@/lib/utils";
-import {
-  useReturnRules,
-  useAddReturnRule,
-  useUpdateReturnRule,
-  useDeleteReturnRule,
-} from "@/features/admin/hooks";
+import { useReturnRules } from "@/features/admin/hooks";
 import { useStages } from "@/features/leads/hooks";
 import { ContractStatusBadge } from "@/features/admin/contractStatus";
 import { formatCapPeriod, formatContractCap } from "@/features/admin/contractCap";
 import { formatContractLeadType } from "@/features/admin/contractLeadType";
 import { COMPENSATION_KINDS, formatCompTrigger } from "@/features/admin/contractCompensation";
 import { useContractCompensations } from "@/features/admin/hooks";
-import { ContractReturnRulesEditor } from "@/features/admin/ContractReturnRulesEditor";
 import { BuyerContractFieldMapSection } from "@/features/admin/BuyerContractFieldMapSection";
 import { BuyerTriggerStageFields } from "@/features/admin/BuyerTriggerStageFields";
-import type { Contract } from "@/types";
+import type { Contract, ReturnRule, Stage } from "@/types";
 
 export function BuyerContractDetailDrawer({
   contract,
@@ -35,13 +28,14 @@ export function BuyerContractDetailDrawer({
   );
 }
 
+function stageName(stages: Stage[], stageId: number): string {
+  return stages.find((s) => s.id === stageId)?.name ?? `Stage #${stageId}`;
+}
+
 function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () => void }) {
   const { data: buyerStages, isLoading: buyerStagesLoading } = useStages(contract.buyer_pipeline_id ?? undefined);
   const { data: rules, isLoading: rulesLoading } = useReturnRules(contract.id, true);
   const { data: compensations, isLoading: compsLoading } = useContractCompensations(contract.id, true);
-  const addRule = useAddReturnRule(true);
-  const updateRule = useUpdateReturnRule(true);
-  const removeRule = useDeleteReturnRule(true);
 
   const loading = buyerStagesLoading || rulesLoading;
 
@@ -141,35 +135,35 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
 
         <div className="pt-2">
           <SectionLabel className="mb-2">Return Routes</SectionLabel>
-          <ContractReturnRulesEditor
-            side="buyer"
-            buyerStages={buyerStages ?? []}
-            publisherStages={[]}
-            rules={rules ?? []}
-            defaultReturnStageId={contract.return_stage_id ?? 0}
-            loading={loading}
-            description="When a lead enters the stage on your pipeline, it is automatically returned to the publisher (no charge to you on return)."
-            onAdd={(buyerStageId, returnStageId) =>
-              addRule.mutate(
-                { contractId: contract.id, buyerStageId, returnStageId },
-                { onError: (e) => toast.error(errorMessage(e)) }
-              )
-            }
-            onUpdate={(ruleId, buyerStageId, returnStageId) =>
-              updateRule.mutate(
-                { contractId: contract.id, ruleId, buyerStageId, returnStageId },
-                { onError: (e) => toast.error(errorMessage(e)) }
-              )
-            }
-            onDelete={(ruleId) =>
-              removeRule.mutate(
-                { contractId: contract.id, ruleId },
-                { onError: (e) => toast.error(errorMessage(e)) }
-              )
-            }
-          />
+          <p className="mb-3 text-xs text-gray-400">
+            Return routes are configured by the publisher. When a lead enters a listed stage on your pipeline, it is
+            returned to the publisher automatically.
+          </p>
+          {loading ? (
+            <p className="text-sm text-gray-400">Loading…</p>
+          ) : (rules ?? []).length === 0 ? (
+            <p className="text-sm text-gray-500">No return routes configured yet.</p>
+          ) : (
+            <ReturnRulesReadOnlyList rules={rules ?? []} buyerStages={buyerStages ?? []} />
+          )}
         </div>
       </DrawerBody>
     </div>
+  );
+}
+
+function ReturnRulesReadOnlyList({ rules, buyerStages }: { rules: ReturnRule[]; buyerStages: Stage[] }) {
+  return (
+    <ul className="space-y-2">
+      {rules.map((rule) => (
+        <li
+          key={rule.id}
+          className="rounded-md border border-gray-100 px-3 py-2 text-sm text-gray-700"
+        >
+          <span className="font-medium">{stageName(buyerStages, rule.buyer_stage_id)}</span>
+          <span className="text-gray-400"> → returned to publisher</span>
+        </li>
+      ))}
+    </ul>
   );
 }

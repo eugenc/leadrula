@@ -68,7 +68,7 @@ func (s *Service) ListCompensations(ctx context.Context, publisherID, contractID
 	}
 	rows, err := s.pool.Query(ctx,
 		`SELECT `+compensationCols+` FROM contract_compensations
-		 WHERE contract_id = $1 ORDER BY position, id`, contractID)
+		 WHERE contract_id = $1 AND participation_id IS NULL ORDER BY position, id`, contractID)
 	if err != nil {
 		return nil, err
 	}

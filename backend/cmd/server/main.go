@@ -104,6 +104,7 @@ func main() {
 
 	contractsSvc := contracts.NewService(pool)
 	contractsSvc.SetPayoutExecutor(billingSvc)
+	contractsSvc.SetCompensationPayoutInvoicer(billingSvc)
 	contractsSvc.SetNotifier(notifSvc, accountsRepo)
 
 	routingSvc := routing.NewService(pool)

@@ -18,6 +18,7 @@ import {
   useLinkPublisherPartnership,
   useUpdateContractOffer,
   useContractDetail,
+  useReturnRules,
 } from "@/features/admin/hooks";
 import { ContractOfferSection } from "@/features/admin/ContractOfferSection";
 import { ContractParticipationsSection } from "@/features/admin/ContractParticipationsSection";
@@ -57,6 +58,7 @@ import {
   isOpenSellOffer,
 } from "@/features/admin/contractSectionCompleteness";
 import { buildContractPayload } from "@/features/admin/contractDraftPayload";
+import { PublisherContractReturnRoutesSection } from "@/features/admin/PublisherContractReturnRoutesSection";
 import type { Contract } from "@/types";
 
 export function ContractDetailDrawer({
@@ -228,6 +230,8 @@ function DraftDrawerContent({
   const counterpartyIsPublisher = (partnerPublishers ?? []).some((p) => p.id === form.buyer_id);
   const isBuy = form.contract_type === "buy";
   const openOffer = isOpenSellOffer(form);
+  const { data: returnRules } = useReturnRules(openOffer ? null : contract.id, false);
+  const returnRulesCount = openOffer ? undefined : (returnRules?.length ?? 0);
   const canSaveDraft = !!form.name.trim();
   const canActivate = allRequiredSectionsComplete({
     form,
@@ -235,6 +239,7 @@ function DraftDrawerContent({
     delivery: deliveryDraft,
     leadCriteria,
     offer: offerDraft,
+    returnRulesCount,
   });
 
   function payload(status: "draft" | "active") {
@@ -326,6 +331,7 @@ function DraftDrawerContent({
           delivery={deliveryDraft}
           leadCriteria={leadCriteria}
           offer={offerDraft}
+          returnRulesCount={returnRulesCount}
           panels={{
             details: (
               <div className="space-y-3">
@@ -442,14 +448,12 @@ function DraftDrawerContent({
                 onChange={setLeadCriteria}
               />
             ),
-            returns: openOffer ? (
-              <p className="text-sm text-gray-500">
-                Return destination is configured under Delivery. Buyers pick return start stages when they accept.
-              </p>
-            ) : (
-              <p className="text-sm text-gray-500">
-                Return destination is configured under Delivery. Buyers configure return start stages on their contract.
-              </p>
+            returns: (
+              <PublisherContractReturnRoutesSection
+                contractId={contract.id}
+                delivery={deliveryDraft}
+                openOffer={openOffer}
+              />
             ),
           }}
         />
@@ -482,6 +486,8 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
   const saveDelivery = useSaveContractDelivery();
   const saveOffer = useUpdateContractOffer();
   const { data: compensations, isLoading: compsLoading } = useContractCompensations(contract.id);
+  const { data: returnRules } = useReturnRules(isOpenOffer ? null : contract.id, false);
+  const returnRulesCount = isOpenOffer ? undefined : (returnRules?.length ?? 0);
 
   const [name, setName] = useState(contract.name);
   const [leadType, setLeadType] = useState(contract.lead_type ?? "");
@@ -626,6 +632,11 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
     );
   }
 
+  const deliveryBlockedByReturnRoutes =
+    !isOpenOffer &&
+    deliveryDraft.delivery === "leads_pipeline" &&
+    (returnRulesCount ?? 0) === 0;
+
   const primaryRate =
     compensations?.find((c) => c.kind === "flat_rate")?.flat_amount ?? contract.rate_per_lead;
 
@@ -672,6 +683,7 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
           compensations={[emptyCompensationDraft()]}
           delivery={deliveryDraft}
           leadCriteria={leadCriteria}
+          returnRulesCount={returnRulesCount}
           panels={{
             details: (
               <div className="flex flex-col gap-2.5">
@@ -764,7 +776,12 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
                 <Button
                   className="mt-3"
                   variant="secondary"
-                  disabled={deliveryUnchanged || !deliveryDraftValid(deliveryDraft) || saveDelivery.isPending}
+                  disabled={
+                    deliveryUnchanged ||
+                    !deliveryDraftValid(deliveryDraft) ||
+                    deliveryBlockedByReturnRoutes ||
+                    saveDelivery.isPending
+                  }
                   onClick={() =>
                     saveDelivery.mutate(
                       { contractId: contract.id, body: deliveryDraftToBody(deliveryDraft) },
@@ -777,6 +794,11 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
                 >
                   Save delivery
                 </Button>
+                {deliveryBlockedByReturnRoutes && (
+                  <p className="mt-2 text-xs text-amber-700">
+                    Add at least one return route on the Return routes tab before saving pipeline delivery.
+                  </p>
+                )}
               </>
             ),
             ...(isOpenOffer
@@ -811,14 +833,12 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
                 </Button>
               </>
             ),
-            returns: isOpenOffer ? (
-              <p className="text-sm text-gray-500">
-                Return destination is configured under Delivery. Buyers pick return start stages when they accept.
-              </p>
-            ) : (
-              <p className="text-sm text-gray-500">
-                Return destination is configured under Delivery. Buyers configure return start stages on their contract.
-              </p>
+            returns: (
+              <PublisherContractReturnRoutesSection
+                contractId={contract.id}
+                delivery={deliveryDraft}
+                openOffer={isOpenOffer}
+              />
             ),
           }}
           extraTabs={isOpenOffer ? [{ id: "buyers", label: "Buyers" }] : undefined}

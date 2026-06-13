@@ -24,6 +24,7 @@ export function ContractFormTabs({
   delivery,
   leadCriteria,
   offer,
+  returnRulesCount,
   panels,
   showCheckmarks = true,
   extraTabs,
@@ -35,6 +36,7 @@ export function ContractFormTabs({
   delivery: ContractDeliveryDraft;
   leadCriteria: ContractLeadCriteria;
   offer?: ContractOfferDraft;
+  returnRulesCount?: number;
   panels: Partial<Record<ContractTabId, React.ReactNode>>;
   showCheckmarks?: boolean;
   extraTabs?: { id: ContractTabId; label: string; optional?: boolean }[];
@@ -42,7 +44,7 @@ export function ContractFormTabs({
   initialTab?: ContractTabId;
 }) {
   const [tab, setTab] = useState<ContractTabId>(initialTab);
-  const ctx = { form, compensations, delivery, leadCriteria, offer };
+  const ctx = { form, compensations, delivery, leadCriteria, offer, returnRulesCount };
 
   useEffect(() => {
     if (resetKey !== undefined) {
