@@ -736,7 +736,9 @@ func applyBuyerStageTriggersToWon(ctx context.Context, q database.Querier, contr
 func validateBuyerCRMConnection(ctx context.Context, q database.Querier, buyerID, connID int64) error {
 	var status, provider string
 	err := q.QueryRow(ctx,
-		`SELECT ic.status, ic.provider FROM integration_connections ic
+		`SELECT ic.status, p.slug
+		 FROM integration_connections ic
+		 JOIN integration_providers p ON p.id = ic.provider_id
 		 WHERE ic.id = $1 AND ic.account_id = $2`, connID, buyerID).Scan(&status, &provider)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
