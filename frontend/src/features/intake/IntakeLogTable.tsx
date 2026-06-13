@@ -455,6 +455,7 @@ export function IntakeLogTable({
         readOnly={readOnly}
         mappingSource={source}
         canReplayWebhooks={canReplayWebhooks}
+        integrationLogMode={logType === "integrations"}
         onPageChange={setPage}
         onLimitChange={setLimit}
         onWebhookReplayed={refetchWebhooks}

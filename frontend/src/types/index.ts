@@ -524,6 +524,8 @@ export interface WebhookDelivery {
   webhook_id: number;
   webhook_name?: string;
   webhook_slug?: string;
+  connection_name?: string;
+  provider_slug?: string;
   event_id?: number | null;
   lead_id?: number | null;
   lead_public_id?: string | null;
@@ -607,6 +609,29 @@ export interface InboundLogListResponse {
   total: number;
   page: number;
   limit: number;
+}
+
+export interface IntegrationDeliveryAttemptLog {
+  attempt_number: number;
+  status: string;
+  http_status?: number | null;
+  request_body?: Record<string, unknown> | null;
+  response_body?: string;
+  duration_ms?: number | null;
+  error?: string | null;
+  created_at: string;
+}
+
+export interface IntegrationDeliveryDetail {
+  id: number;
+  status: string;
+  connection_name: string;
+  provider_slug: string;
+  lead_public_id?: string;
+  external_id?: string;
+  payload: Record<string, unknown>;
+  last_error?: string | null;
+  attempts: IntegrationDeliveryAttemptLog[];
 }
 
 export interface PayoutSummary {

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { get } from "@/lib/api";
-import type { InboundLogListResponse } from "@/types";
+import type { InboundLogListResponse, IntegrationDeliveryDetail } from "@/types";
 
 export interface InboundLogFilters {
   type?: "all" | "source" | "webhook" | "integration";
@@ -42,5 +42,14 @@ export function useInboundLog(
     queryFn: () => get<InboundLogListResponse>(`${path}?${q}`),
     enabled,
     refetchInterval: enabled ? 5000 : false,
+  });
+}
+
+export function useIntegrationDelivery(id: number | null, source: "publisher" | "buyer" = "publisher") {
+  const base = source === "buyer" ? "/buyer" : "/publisher";
+  return useQuery({
+    queryKey: ["integration-delivery", source, id],
+    queryFn: () => get<IntegrationDeliveryDetail>(`${base}/integration-deliveries/${id}`),
+    enabled: !!id,
   });
 }

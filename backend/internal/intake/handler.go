@@ -81,6 +81,7 @@ func (h *Handler) AuthenticateSource(next http.Handler) http.Handler {
 // RegisterQueueRoutes mounts the publisher admin intake queue routes.
 func (h *Handler) RegisterQueueRoutes(r chi.Router) {
 	r.Get("/inbound-log", h.listInboundLog)
+	r.Get("/integration-deliveries/{id}", h.getIntegrationDelivery)
 	r.Get("/intake-queue", h.listQueue)
 	r.With(auth.RequireRole("admin")).Post("/intake-queue/{id}/route", h.route)
 	r.With(auth.RequireRole("admin")).Post("/intake-queue/{id}/reject", h.reject)
@@ -92,6 +93,7 @@ func (h *Handler) RegisterQueueRoutes(r chi.Router) {
 func (h *Handler) RegisterBuyerRoutes(r chi.Router) {
 	r.With(auth.RequireRole("admin")).Get("/routing-log", h.listRoutingLog)
 	r.With(auth.RequireRole("admin")).Get("/inbound-log", h.listInboundLog)
+	r.With(auth.RequireRole("admin")).Get("/integration-deliveries/{id}", h.getIntegrationDelivery)
 	r.With(auth.RequireRole("admin")).Post("/routing-log/{id}/map-field", h.mapBuyerRoutingLogField)
 }
 
@@ -145,6 +147,16 @@ func (h *Handler) action(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) getIntegrationDelivery(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	detail, err := h.svc.GetIntegrationDelivery(r.Context(), p.AccountID, idp(r))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, detail)
 }
 
 func (h *Handler) listInboundLog(w http.ResponseWriter, r *http.Request) {

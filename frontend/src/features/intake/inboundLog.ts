@@ -54,6 +54,8 @@ function inboundItemToWebhookDelivery(item: InboundLogItem): WebhookDelivery {
     webhook_id: item.webhook_id ?? 0,
     webhook_name: item.origin || undefined,
     webhook_slug: item.origin_slug || undefined,
+    connection_name: item.connection_name || undefined,
+    provider_slug: item.provider_slug || undefined,
     lead_id: item.lead_id,
     lead_public_id: item.lead_label || null,
     status: item.status as WebhookDelivery["status"],

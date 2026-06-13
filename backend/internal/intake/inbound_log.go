@@ -184,27 +184,76 @@ func (s *Service) listInboundLogIntegrations(ctx context.Context, accountID int6
 
 	var total int64
 	if err := s.pool.QueryRow(ctx,
-		`SELECT COUNT(*)
-		 FROM integration_delivery_queue q
-		 JOIN integration_connections c ON c.id = q.connection_id
-		 WHERE c.account_id = $1
-		   AND q.webhook_trigger_id IS NULL
-		   AND ($2 = '' OR q.status = $2::delivery_status)`,
+		`SELECT
+		   (SELECT COUNT(*)
+		    FROM integration_delivery_queue q
+		    JOIN integration_connections c ON c.id = q.connection_id
+		    WHERE c.account_id = $1
+		      AND q.webhook_trigger_id IS NULL
+		      AND ($2 = '' OR q.status = $2::delivery_status))
+		 + (SELECT COUNT(*)
+		    FROM webhook_deliveries d
+		    JOIN webhooks w ON w.id = d.webhook_id
+		    JOIN integration_connections c ON c.id = w.integration_connection_id
+		    WHERE c.account_id = $1
+		      AND ($2 = '' OR d.status = $2::webhook_delivery_status))`,
 		accountID, status).Scan(&total); err != nil {
 		return nil, err
 	}
 
 	rows, err := s.pool.Query(ctx,
-		`SELECT q.id, q.lead_id, c.name, p.slug, q.status::text, q.attempts,
-		        q.last_error, l.public_id::text, q.created_at
-		 FROM integration_delivery_queue q
-		 JOIN integration_connections c ON c.id = q.connection_id
-		 JOIN integration_providers p ON p.id = c.provider_id
-		 LEFT JOIN leads l ON l.id = q.lead_id
-		 WHERE c.account_id = $1
-		   AND q.webhook_trigger_id IS NULL
-		   AND ($2 = '' OR q.status = $2::delivery_status)
-		 ORDER BY q.created_at DESC
+		`SELECT kind, direction, id, created_at, origin, origin_slug, lead_label, lead_id, status,
+		        webhook_id, error_message, provider_slug, connection_name, attempts
+		 FROM (
+		   SELECT
+		     'integration'::text AS kind,
+		     'outbound'::text AS direction,
+		     q.id,
+		     q.created_at,
+		     c.name AS origin,
+		     p.slug AS origin_slug,
+		     COALESCE(l.public_id::text, '') AS lead_label,
+		     q.lead_id,
+		     q.status::text AS status,
+		     0::bigint AS webhook_id,
+		     q.last_error AS error_message,
+		     p.slug AS provider_slug,
+		     c.name AS connection_name,
+		     q.attempts
+		   FROM integration_delivery_queue q
+		   JOIN integration_connections c ON c.id = q.connection_id
+		   JOIN integration_providers p ON p.id = c.provider_id
+		   LEFT JOIN leads l ON l.id = q.lead_id
+		   WHERE c.account_id = $1
+		     AND q.webhook_trigger_id IS NULL
+		     AND ($2 = '' OR q.status = $2::delivery_status)
+
+		   UNION ALL
+
+		   SELECT
+		     'webhook'::text AS kind,
+		     'inbound'::text AS direction,
+		     d.id,
+		     d.created_at,
+		     c.name AS origin,
+		     p.slug AS origin_slug,
+		     COALESCE(l.public_id::text, '') AS lead_label,
+		     d.lead_id,
+		     d.status::text AS status,
+		     d.webhook_id,
+		     d.error_message,
+		     p.slug AS provider_slug,
+		     c.name AS connection_name,
+		     0::int AS attempts
+		   FROM webhook_deliveries d
+		   JOIN webhooks w ON w.id = d.webhook_id
+		   JOIN integration_connections c ON c.id = w.integration_connection_id
+		   JOIN integration_providers p ON p.id = c.provider_id
+		   LEFT JOIN leads l ON l.id = d.lead_id
+		   WHERE c.account_id = $1
+		     AND ($2 = '' OR d.status = $2::webhook_delivery_status)
+		 ) combined
+		 ORDER BY created_at DESC
 		 LIMIT $3 OFFSET $4`,
 		accountID, status, limit, offset)
 	if err != nil {
@@ -215,19 +264,12 @@ func (s *Service) listInboundLogIntegrations(ctx context.Context, accountID int6
 	var items []InboundLogItem
 	for rows.Next() {
 		var it InboundLogItem
-		var leadPublicID *string
 		if err := rows.Scan(
-			&it.ID, &it.LeadID, &it.ConnectionName, &it.ProviderSlug,
-			&it.Status, &it.Attempts, &it.ErrorMessage, &leadPublicID, &it.CreatedAt,
+			&it.Kind, &it.Direction, &it.ID, &it.CreatedAt, &it.Origin, &it.OriginSlug,
+			&it.LeadLabel, &it.LeadID, &it.Status, &it.WebhookID, &it.ErrorMessage,
+			&it.ProviderSlug, &it.ConnectionName, &it.Attempts,
 		); err != nil {
 			return nil, err
-		}
-		it.Kind = "integration"
-		it.Direction = "outbound"
-		it.Origin = it.ConnectionName
-		it.OriginSlug = it.ProviderSlug
-		if leadPublicID != nil {
-			it.LeadLabel = *leadPublicID
 		}
 		items = append(items, it)
 	}
