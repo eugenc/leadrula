@@ -325,6 +325,7 @@ func (s *Service) ActivateDraft(ctx context.Context, publisherID, contractID int
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	s.syncContractRoute(ctx, publisherID, c.ID)
 	return s.Get(ctx, publisherID, c.ID)
 }
 

@@ -47,11 +47,12 @@ type Contract struct {
 }
 
 type ReturnRule struct {
-	ID             int64     `json:"id"`
-	ContractID     int64     `json:"contract_id"`
-	BuyerStageID   int64     `json:"buyer_stage_id"`
-	ReturnStageID  int64     `json:"return_stage_id"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID              int64     `json:"id"`
+	ContractID      int64     `json:"contract_id"`
+	ParticipationID *int64    `json:"participation_id,omitempty"`
+	BuyerStageID    int64     `json:"buyer_stage_id"`
+	ReturnStageID   int64     `json:"return_stage_id"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // PublisherStage is a pipeline stage exposed to buyers for return-rule To Stage picks.
@@ -65,11 +66,16 @@ type PublisherStage struct {
 	StageType  string `json:"stage_type"`
 }
 
+type routeSyncer interface {
+	SyncContractDistributionRoute(ctx context.Context, publisherID, contractID int64) error
+}
+
 type Service struct {
 	pool            *pgxpool.Pool
 	payoutTransfers PayoutTransferExecutor
 	notif           *notifications.Service
 	accounts        adminUserIDs
+	routes          routeSyncer
 }
 
 type adminUserIDs interface {
@@ -83,6 +89,15 @@ func (s *Service) SetPayoutExecutor(e PayoutTransferExecutor) { s.payoutTransfer
 func (s *Service) SetNotifier(n *notifications.Service, accounts adminUserIDs) {
 	s.notif = n
 	s.accounts = accounts
+}
+
+func (s *Service) SetRouteSyncer(r routeSyncer) { s.routes = r }
+
+func (s *Service) syncContractRoute(ctx context.Context, publisherID, contractID int64) {
+	if s.routes == nil {
+		return
+	}
+	_ = s.routes.SyncContractDistributionRoute(ctx, publisherID, contractID)
 }
 
 func (s *Service) Pool() *pgxpool.Pool { return s.pool }
@@ -272,9 +287,11 @@ type DeliveryUpdateParams struct {
 }
 
 func (s *Service) UpdateDelivery(ctx context.Context, publisherID, contractID int64, p DeliveryUpdateParams) (*Contract, error) {
-	if _, err := s.Get(ctx, publisherID, contractID); err != nil {
+	c, err := s.Get(ctx, publisherID, contractID)
+	if err != nil {
 		return nil, err
 	}
+	openOffer := c.BuyerID == nil
 	delivery := strings.TrimSpace(p.Delivery)
 	if delivery == "" {
 		delivery = "leads_pipeline"
@@ -291,6 +308,11 @@ func (s *Service) UpdateDelivery(ctx context.Context, publisherID, contractID in
 		sourceStageID = 0
 		buyerPipelineID = 0
 		returnStageID = 0
+	} else if openOffer {
+		if sourcePipelineID == 0 || sourceStageID == 0 || returnStageID == 0 {
+			return nil, httpx.Validation("source_pipeline_id, source_stage_id, and return_stage_id are required for pipeline delivery")
+		}
+		buyerPipelineID = 0
 	} else if sourceStageID == 0 || buyerPipelineID == 0 || returnStageID == 0 {
 		return nil, httpx.Validation("source_stage_id, buyer_pipeline_id, and return_stage_id are required for pipeline delivery")
 	}
@@ -301,7 +323,7 @@ func (s *Service) UpdateDelivery(ctx context.Context, publisherID, contractID in
 	}
 	defer tx.Rollback(ctx)
 
-	c, err := scanContract(tx.QueryRow(ctx,
+	c, err = scanContract(tx.QueryRow(ctx,
 		`UPDATE contracts SET
 		   source_pipeline_id = $3,
 		   source_stage_id = $4,
@@ -343,6 +365,7 @@ func (s *Service) UpdateDelivery(ctx context.Context, publisherID, contractID in
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	s.syncContractRoute(ctx, publisherID, contractID)
 	return c, nil
 }
 
@@ -388,20 +411,39 @@ func (s *Service) Delete(ctx context.Context, publisherID, id int64) error {
 	return nil
 }
 
-// ── Return rules ──────────────────────────────────────────────────
+// ── Return routes ─────────────────────────────────────────────────
 
 func (s *Service) ListReturnRules(ctx context.Context, contractID int64) ([]ReturnRule, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, contract_id, buyer_stage_id, return_stage_id, created_at FROM contract_return_rules
-		 WHERE contract_id = $1 ORDER BY id`, contractID)
+		`SELECT id, contract_id, participation_id, buyer_stage_id, return_stage_id, created_at
+		 FROM contract_return_rules
+		 WHERE contract_id = $1 AND participation_id IS NULL
+		 ORDER BY id`, contractID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	return scanReturnRules(rows)
+}
+
+func (s *Service) ListParticipationReturnRules(ctx context.Context, participationID int64) ([]ReturnRule, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, contract_id, participation_id, buyer_stage_id, return_stage_id, created_at
+		 FROM contract_return_rules
+		 WHERE participation_id = $1
+		 ORDER BY id`, participationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanReturnRules(rows)
+}
+
+func scanReturnRules(rows pgx.Rows) ([]ReturnRule, error) {
 	var out []ReturnRule
 	for rows.Next() {
 		var rr ReturnRule
-		if err := rows.Scan(&rr.ID, &rr.ContractID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt); err != nil {
+		if err := rows.Scan(&rr.ID, &rr.ContractID, &rr.ParticipationID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, rr)
@@ -409,35 +451,102 @@ func (s *Service) ListReturnRules(ctx context.Context, contractID int64) ([]Retu
 	return out, rows.Err()
 }
 
-func (s *Service) validateReturnRuleStages(ctx context.Context, contractID, buyerStageID, returnStageID int64) error {
-	var buyerPipelineID, sourcePipelineID int64
+func (s *Service) CountParticipationReturnRules(ctx context.Context, participationID int64) (int, error) {
+	var n int
 	err := s.pool.QueryRow(ctx,
-		`SELECT buyer_pipeline_id, source_pipeline_id FROM contracts WHERE id = $1 AND deleted_at IS NULL`,
-		contractID).Scan(&buyerPipelineID, &sourcePipelineID)
+		`SELECT COUNT(*) FROM contract_return_rules WHERE participation_id = $1`, participationID).Scan(&n)
+	return n, err
+}
+
+func (s *Service) validateReturnRuleStages(ctx context.Context, contractID, buyerStageID, returnStageID int64) error {
+	var buyerPipelineID, sourcePipelineID, contractReturnStageID *int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT buyer_pipeline_id, source_pipeline_id, return_stage_id FROM contracts WHERE id = $1 AND deleted_at IS NULL`,
+		contractID).Scan(&buyerPipelineID, &sourcePipelineID, &contractReturnStageID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return httpx.NotFound("contract not found")
 	}
 	if err != nil {
 		return err
 	}
+	if buyerPipelineID == nil || *buyerPipelineID == 0 {
+		return httpx.Validation("contract buyer pipeline is not configured")
+	}
 	var ok bool
 	if err := s.pool.QueryRow(ctx,
 		`SELECT EXISTS(SELECT 1 FROM pipeline_stages WHERE id = $1 AND pipeline_id = $2)`,
-		buyerStageID, buyerPipelineID).Scan(&ok); err != nil {
+		buyerStageID, *buyerPipelineID).Scan(&ok); err != nil {
 		return err
 	}
 	if !ok {
 		return httpx.Validation("buyer stage not in contract buyer pipeline")
 	}
+	if sourcePipelineID == nil || *sourcePipelineID == 0 {
+		return httpx.Validation("contract publisher pipeline is not configured")
+	}
+	if contractReturnStageID != nil && *contractReturnStageID != 0 && returnStageID != *contractReturnStageID {
+		return httpx.Validation("return stage must match contract return destination")
+	}
 	if err := s.pool.QueryRow(ctx,
 		`SELECT EXISTS(SELECT 1 FROM pipeline_stages WHERE id = $1 AND pipeline_id = $2)`,
-		returnStageID, sourcePipelineID).Scan(&ok); err != nil {
+		returnStageID, *sourcePipelineID).Scan(&ok); err != nil {
 		return err
 	}
 	if !ok {
 		return httpx.Validation("return stage not in contract publisher pipeline")
 	}
 	return nil
+}
+
+func (s *Service) validateParticipationReturnRuleStages(ctx context.Context, participationID, buyerStageID, buyerPipelineOverride int64) (int64, int64, error) {
+	var contractID int64
+	var storedBuyerPipelineID *int64
+	var returnStageID, sourcePipelineID *int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT p.contract_id, p.buyer_pipeline_id, c.return_stage_id, c.source_pipeline_id
+		 FROM contract_participations p
+		 JOIN contracts c ON c.id = p.contract_id
+		 WHERE p.id = $1`, participationID).Scan(&contractID, &storedBuyerPipelineID, &returnStageID, &sourcePipelineID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, 0, httpx.NotFound("participation not found")
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	buyerPipelineID := int64(0)
+	if storedBuyerPipelineID != nil {
+		buyerPipelineID = *storedBuyerPipelineID
+	}
+	if buyerPipelineID == 0 && buyerPipelineOverride > 0 {
+		buyerPipelineID = buyerPipelineOverride
+	}
+	if buyerPipelineID == 0 {
+		return 0, 0, httpx.Validation("buyer pipeline is not configured on participation")
+	}
+	if returnStageID == nil || *returnStageID == 0 {
+		return 0, 0, httpx.Validation("publisher return destination is not configured on contract")
+	}
+	if sourcePipelineID == nil || *sourcePipelineID == 0 {
+		return 0, 0, httpx.Validation("publisher pipeline is not configured on contract")
+	}
+	var ok bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM pipeline_stages WHERE id = $1 AND pipeline_id = $2)`,
+		buyerStageID, buyerPipelineID).Scan(&ok); err != nil {
+		return 0, 0, err
+	}
+	if !ok {
+		return 0, 0, httpx.Validation("buyer stage not in participation buyer pipeline")
+	}
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM pipeline_stages WHERE id = $1 AND pipeline_id = $2)`,
+		*returnStageID, *sourcePipelineID).Scan(&ok); err != nil {
+		return 0, 0, err
+	}
+	if !ok {
+		return 0, 0, httpx.Validation("return stage not in contract publisher pipeline")
+	}
+	return contractID, *returnStageID, nil
 }
 
 func (s *Service) AddReturnRule(ctx context.Context, contractID, buyerStageID, returnStageID int64) (*ReturnRule, error) {
@@ -447,13 +556,48 @@ func (s *Service) AddReturnRule(ctx context.Context, contractID, buyerStageID, r
 	rr := &ReturnRule{}
 	err := s.pool.QueryRow(ctx,
 		`INSERT INTO contract_return_rules(contract_id, buyer_stage_id, return_stage_id) VALUES ($1,$2,$3)
-		 ON CONFLICT (contract_id, buyer_stage_id) DO UPDATE SET return_stage_id = EXCLUDED.return_stage_id
-		 RETURNING id, contract_id, buyer_stage_id, return_stage_id, created_at`,
+		 ON CONFLICT (contract_id, buyer_stage_id) WHERE participation_id IS NULL
+		 DO UPDATE SET return_stage_id = EXCLUDED.return_stage_id
+		 RETURNING id, contract_id, participation_id, buyer_stage_id, return_stage_id, created_at`,
 		contractID, buyerStageID, returnStageID).Scan(
-		&rr.ID, &rr.ContractID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt)
+		&rr.ID, &rr.ContractID, &rr.ParticipationID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt)
 	if err != nil {
 		if database.IsUniqueViolation(err) {
-			return nil, httpx.Conflict("return rule already exists for this buyer stage")
+			return nil, httpx.Conflict("return route already exists for this buyer stage")
+		}
+		return nil, err
+	}
+	return rr, nil
+}
+
+func (s *Service) AddParticipationReturnRule(ctx context.Context, participationID, buyerStageID, buyerPipelineOverride int64) (*ReturnRule, error) {
+	var status string
+	if err := s.pool.QueryRow(ctx,
+		`SELECT status::text FROM contract_participations WHERE id = $1`, participationID).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, httpx.NotFound("participation not found")
+		}
+		return nil, err
+	}
+	if !participationMutable(status) {
+		return nil, httpx.Validation("participation cannot be edited")
+	}
+	contractID, returnStageID, err := s.validateParticipationReturnRuleStages(ctx, participationID, buyerStageID, buyerPipelineOverride)
+	if err != nil {
+		return nil, err
+	}
+	rr := &ReturnRule{}
+	err = s.pool.QueryRow(ctx,
+		`INSERT INTO contract_return_rules(contract_id, participation_id, buyer_stage_id, return_stage_id)
+		 VALUES ($1,$2,$3,$4)
+		 ON CONFLICT (participation_id, buyer_stage_id) WHERE participation_id IS NOT NULL
+		 DO UPDATE SET return_stage_id = EXCLUDED.return_stage_id
+		 RETURNING id, contract_id, participation_id, buyer_stage_id, return_stage_id, created_at`,
+		contractID, participationID, buyerStageID, returnStageID).Scan(
+		&rr.ID, &rr.ContractID, &rr.ParticipationID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt)
+	if err != nil {
+		if database.IsUniqueViolation(err) {
+			return nil, httpx.Conflict("return route already exists for this buyer stage")
 		}
 		return nil, err
 	}
@@ -477,12 +621,56 @@ func (s *Service) UpdateReturnRule(ctx context.Context, ruleID, buyerStageID, re
 	err = s.pool.QueryRow(ctx,
 		`UPDATE contract_return_rules SET buyer_stage_id = $2, return_stage_id = $3
 		 WHERE id = $1
-		 RETURNING id, contract_id, buyer_stage_id, return_stage_id, created_at`,
+		 RETURNING id, contract_id, participation_id, buyer_stage_id, return_stage_id, created_at`,
 		ruleID, buyerStageID, returnStageID).Scan(
-		&rr.ID, &rr.ContractID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt)
+		&rr.ID, &rr.ContractID, &rr.ParticipationID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt)
 	if err != nil {
 		if database.IsUniqueViolation(err) {
-			return nil, httpx.Conflict("return rule already exists for this buyer stage")
+			return nil, httpx.Conflict("return route already exists for this buyer stage")
+		}
+		return nil, err
+	}
+	return rr, nil
+}
+
+func (s *Service) UpdateParticipationReturnRule(ctx context.Context, participationID, ruleID, buyerStageID, buyerPipelineOverride int64) (*ReturnRule, error) {
+	var status string
+	if err := s.pool.QueryRow(ctx,
+		`SELECT status::text FROM contract_participations WHERE id = $1`, participationID).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, httpx.NotFound("participation not found")
+		}
+		return nil, err
+	}
+	if !participationMutable(status) {
+		return nil, httpx.Validation("participation cannot be edited")
+	}
+	var ruleParticipationID int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT participation_id FROM contract_return_rules WHERE id = $1`, ruleID).Scan(&ruleParticipationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, httpx.NotFound("return route not found")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if ruleParticipationID != participationID {
+		return nil, httpx.NotFound("return route not found")
+	}
+	contractID, returnStageID, err := s.validateParticipationReturnRuleStages(ctx, participationID, buyerStageID, buyerPipelineOverride)
+	if err != nil {
+		return nil, err
+	}
+	rr := &ReturnRule{}
+	err = s.pool.QueryRow(ctx,
+		`UPDATE contract_return_rules SET buyer_stage_id = $2, return_stage_id = $3, contract_id = $4
+		 WHERE id = $1
+		 RETURNING id, contract_id, participation_id, buyer_stage_id, return_stage_id, created_at`,
+		ruleID, buyerStageID, returnStageID, contractID).Scan(
+		&rr.ID, &rr.ContractID, &rr.ParticipationID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt)
+	if err != nil {
+		if database.IsUniqueViolation(err) {
+			return nil, httpx.Conflict("return route already exists for this buyer stage")
 		}
 		return nil, err
 	}
@@ -533,13 +721,14 @@ func (s *Service) ReturnRuleContractID(ctx context.Context, ruleID int64) (int64
 	return contractID, err
 }
 
-// ReturnRuleBelongsToBuyer checks whether a return rule belongs to one of the buyer's contracts.
+// ReturnRuleBelongsToBuyer checks whether a return route belongs to one of the buyer's contracts or participations.
 func (s *Service) ReturnRuleBelongsToBuyer(ctx context.Context, buyerID, ruleID int64) (int64, error) {
 	var contractID int64
 	err := s.pool.QueryRow(ctx,
 		`SELECT rr.contract_id FROM contract_return_rules rr
-		 JOIN contracts c ON c.id = rr.contract_id
-		 WHERE rr.id = $1 AND c.buyer_id = $2 AND c.deleted_at IS NULL`,
+		 LEFT JOIN contracts c ON c.id = rr.contract_id AND c.buyer_id = $2 AND c.deleted_at IS NULL
+		 LEFT JOIN contract_participations p ON p.id = rr.participation_id AND p.buyer_id = $2
+		 WHERE rr.id = $1 AND (c.id IS NOT NULL OR p.id IS NOT NULL)`,
 		ruleID, buyerID).Scan(&contractID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, httpx.NotFound("return rule not found")
@@ -586,16 +775,17 @@ type ReturnInfo struct {
 	PublisherID      int64
 }
 
-// FindReturnRule checks whether entering newStageID triggers a return for the
-// lead's contract; returns the publisher landing info if so, else nil.
-func FindReturnRule(ctx context.Context, q database.Querier, contractID, newStageID int64) (*ReturnInfo, error) {
+// FindReturnRule checks whether entering newStageID triggers a return for the lead's contract.
+func FindReturnRule(ctx context.Context, q database.Querier, contractID, buyerAccountID, newStageID int64) (*ReturnInfo, error) {
 	ri := &ReturnInfo{}
 	err := q.QueryRow(ctx,
 		`SELECT c.source_pipeline_id, rr.return_stage_id, c.publisher_id
 		 FROM contract_return_rules rr
 		 JOIN contracts c ON c.id = rr.contract_id
-		 WHERE rr.contract_id = $1 AND rr.buyer_stage_id = $2`,
-		contractID, newStageID).Scan(&ri.SourcePipelineID, &ri.ReturnStageID, &ri.PublisherID)
+		 LEFT JOIN contract_participations p ON p.id = rr.participation_id
+		 WHERE rr.contract_id = $1 AND rr.buyer_stage_id = $3
+		   AND (rr.participation_id IS NULL OR p.buyer_id = $2)`,
+		contractID, buyerAccountID, newStageID).Scan(&ri.SourcePipelineID, &ri.ReturnStageID, &ri.PublisherID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil

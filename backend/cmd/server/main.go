@@ -105,6 +105,9 @@ func main() {
 	contractsSvc := contracts.NewService(pool)
 	contractsSvc.SetPayoutExecutor(billingSvc)
 	contractsSvc.SetNotifier(notifSvc, accountsRepo)
+
+	routingSvc := routing.NewService(pool)
+	contractsSvc.SetRouteSyncer(routingSvc)
 	contractsH := contracts.NewHandler(contractsSvc)
 
 	var integrationsSvc *integrations.Service
@@ -136,7 +139,6 @@ func main() {
 	dashboardSvc := dashboard.NewService(dashboardRepo)
 	dashboardH := dashboard.NewHandler(dashboardSvc)
 
-	routingSvc := routing.NewService(pool)
 	routingH := routing.NewHandler(routingSvc)
 
 	calSvc := calendar.NewService(pool)

@@ -13,10 +13,18 @@ import {
   useBuyers,
 } from "@/features/admin/hooks";
 import { formatParticipationStatus } from "@/features/admin/contractOffer";
+import { usePipelines, useStages } from "@/features/leads/hooks";
 import type { Contract, ContractParticipation } from "@/types";
+
+function stageName(stages: { id: number; name: string }[] | undefined, id?: number | null) {
+  if (!id) return "—";
+  return stages?.find((s) => s.id === id)?.name ?? `#${id}`;
+}
 
 export function ContractParticipationsSection({ contract }: { contract: Contract }) {
   const { data: buyers } = useBuyers();
+  const { data: pubPipelines } = usePipelines();
+  const { data: pubStages } = useStages(contract.source_pipeline_id ?? undefined);
   const add = useAddContractParticipation();
   const invite = useContractInvite();
   const acceptCounter = useAcceptCounter();
@@ -25,6 +33,7 @@ export function ContractParticipationsSection({ contract }: { contract: Contract
   const [handlerId, setHandlerId] = useState("");
 
   const parts = contract.participations ?? [];
+  const pubPipelineName = pubPipelines?.find((p) => p.id === contract.source_pipeline_id)?.name;
 
   function addBuyer() {
     const body: Record<string, unknown> = {};
@@ -62,6 +71,19 @@ export function ContractParticipationsSection({ contract }: { contract: Contract
       <SectionLabel>Buyers</SectionLabel>
       <p className="text-xs text-gray-400">Add buyers to this open contract. Each buyer accepts with their own delivery and compensation.</p>
 
+      {(contract.source_pipeline_id || contract.return_stage_id) && (
+        <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+          <p>
+            <span className="font-semibold">Distribute from:</span>{" "}
+            {pubPipelineName ?? "—"} / {stageName(pubStages, contract.source_stage_id)}
+          </p>
+          <p>
+            <span className="font-semibold">Return destination:</span>{" "}
+            {stageName(pubStages, contract.return_stage_id)}
+          </p>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3">
         <div>
           <Label>Buyer</Label>
@@ -95,6 +117,7 @@ export function ContractParticipationsSection({ contract }: { contract: Contract
               <TH>Buyer</TH>
               <TH>Status</TH>
               <TH>Delivery</TH>
+              <TH>Distribution</TH>
               <TH />
             </tr>
           </THead>
@@ -136,11 +159,23 @@ function ParticipationRow({
   onRejectCounter: () => void;
   counterLoading: boolean;
 }) {
+  const { data: pipelines } = usePipelines();
+  const { data: stages } = useStages(part.buyer_pipeline_id ?? undefined);
+  const pipelineName = pipelines?.find((p) => p.id === part.buyer_pipeline_id)?.name;
+
+  const distribution =
+    part.delivery === "leads_pipeline" && part.buyer_pipeline_id
+      ? `${pipelineName ?? "Pipeline"} → ${stageName(stages, part.buyer_target_stage_id)}`
+      : part.delivery === "leads"
+        ? "Lead inbox"
+        : part.delivery || "—";
+
   return (
     <TR>
       <TD className="font-semibold">{part.buyer_name || `#${part.buyer_id}`}</TD>
       <TD>{formatParticipationStatus(part.status)}</TD>
       <TD>{part.delivery || "—"}</TD>
+      <TD className="text-sm text-gray-600">{part.status === "active" ? distribution : "—"}</TD>
       <TD>
         {part.status === "counter_pending" && (
           <div className="flex justify-end gap-2">

@@ -66,6 +66,9 @@ func (s *Service) UpdateParticipationCompensationTriggerStage(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
+	if !participationMutable(part.Status) {
+		return nil, httpx.Validation("participation cannot be edited")
+	}
 	if stageID == 0 {
 		return nil, httpx.Validation("trigger_stage_id is required")
 	}

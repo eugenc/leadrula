@@ -56,6 +56,10 @@ export function formatParticipationStatus(status: string): string {
       return "Counter-offer";
     case "superseded":
       return "Superseded";
+    case "paused":
+      return "Paused";
+    case "withdrawn":
+      return "Withdrawn";
     default:
       return status;
   }

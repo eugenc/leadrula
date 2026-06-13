@@ -437,7 +437,10 @@ export function useUpdateContractOffer() {
   return useMutation({
     mutationFn: ({ contractId, body }: { contractId: number; body: Record<string, unknown> }) =>
       patch(`/publisher/contracts/${contractId}/offer`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["contracts"] }),
+    onSuccess: (_data, { contractId }) => {
+      qc.invalidateQueries({ queryKey: ["contracts"] });
+      qc.invalidateQueries({ queryKey: ["contract-detail", contractId] });
+    },
   });
 }
 
@@ -476,6 +479,28 @@ export function useCounterParticipation() {
     mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
       post(`/buyer/participations/${id}/counter`, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["buyer-participations"] }),
+  });
+}
+
+export function useUpdateParticipationDelivery() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
+      patch<ContractParticipation>(`/buyer/participations/${id}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["buyer-participations"] });
+    },
+  });
+}
+
+export function useUpdateParticipationStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status }: { id: number; status: string }) =>
+      patch<ContractParticipation>(`/buyer/participations/${id}/status`, { status }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["buyer-participations"] });
+    },
   });
 }
 
@@ -628,6 +653,73 @@ export function useDeleteReturnRule(buyer = false) {
           : `/publisher/return-rules/${ruleId}`
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["return-rules"] }),
+  });
+}
+
+export function useParticipationReturnRoutes(participationId: number | null) {
+  return useQuery({
+    queryKey: ["participation-return-routes", participationId],
+    queryFn: () => get<ReturnRule[]>(`/buyer/participations/${participationId}/return-routes`),
+    enabled: !!participationId,
+  });
+}
+
+export function useParticipationPublisherStages(participationId: number | null) {
+  return useQuery({
+    queryKey: ["participation-publisher-stages", participationId],
+    queryFn: () => get<import("@/types").Stage[]>(`/buyer/participations/${participationId}/publisher-stages`),
+    enabled: !!participationId,
+  });
+}
+
+export function useAddParticipationReturnRoute() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      participationId,
+      buyerStageId,
+      buyerPipelineId,
+    }: {
+      participationId: number;
+      buyerStageId: number;
+      buyerPipelineId?: number;
+    }) =>
+      post(`/buyer/participations/${participationId}/return-routes`, {
+        buyer_stage_id: buyerStageId,
+        ...(buyerPipelineId ? { buyer_pipeline_id: buyerPipelineId } : {}),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["participation-return-routes"] }),
+  });
+}
+
+export function useUpdateParticipationReturnRoute() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      participationId,
+      ruleId,
+      buyerStageId,
+      buyerPipelineId,
+    }: {
+      participationId: number;
+      ruleId: number;
+      buyerStageId: number;
+      buyerPipelineId?: number;
+    }) =>
+      patch(`/buyer/participations/${participationId}/return-routes/${ruleId}`, {
+        buyer_stage_id: buyerStageId,
+        ...(buyerPipelineId ? { buyer_pipeline_id: buyerPipelineId } : {}),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["participation-return-routes"] }),
+  });
+}
+
+export function useDeleteParticipationReturnRoute() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ participationId, ruleId }: { participationId: number; ruleId: number }) =>
+      del(`/buyer/participations/${participationId}/return-routes/${ruleId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["participation-return-routes"] }),
   });
 }
 

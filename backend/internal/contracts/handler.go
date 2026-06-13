@@ -54,6 +54,8 @@ func (h *Handler) RegisterBuyer(r chi.Router) {
 	r.With(auth.RequireRole("admin")).Post("/participations/{id}/accept", h.buyerAcceptParticipation)
 	r.With(auth.RequireRole("admin")).Post("/participations/{id}/decline", h.buyerDeclineParticipation)
 	r.With(auth.RequireRole("admin")).Post("/participations/{id}/counter", h.buyerCounterParticipation)
+	r.With(auth.RequireRole("admin")).Patch("/participations/{id}", h.buyerUpdateParticipationDelivery)
+	r.With(auth.RequireRole("admin")).Patch("/participations/{id}/status", h.buyerUpdateParticipationStatus)
 	r.With(auth.RequireRole("admin")).Post("/contract-invites/{token}/attach", h.buyerAttachInvite)
 	r.Get("/contracts/{id}/publisher-stages", h.buyerPublisherStages)
 	r.Get("/contracts/{id}/return-rules", h.buyerListRules)
@@ -72,6 +74,11 @@ func (h *Handler) RegisterBuyer(r chi.Router) {
 	r.With(auth.RequireRole("admin")).Delete("/contracts/{id}/field-map/{mapId}", h.buyerDeleteContractFieldMap)
 	r.With(auth.RequireRole("admin")).Post("/participations/{id}/field-map", h.buyerAddParticipationFieldMap)
 	r.With(auth.RequireRole("admin")).Delete("/participations/{id}/field-map/{mapId}", h.buyerDeleteParticipationFieldMap)
+	r.Get("/participations/{id}/return-routes", h.buyerListParticipationReturnRoutes)
+	r.Get("/participations/{id}/publisher-stages", h.buyerListParticipationPublisherStages)
+	r.With(auth.RequireRole("admin")).Post("/participations/{id}/return-routes", h.buyerAddParticipationReturnRoute)
+	r.With(auth.RequireRole("admin")).Patch("/participations/{id}/return-routes/{ruleId}", h.buyerUpdateParticipationReturnRoute)
+	r.With(auth.RequireRole("admin")).Delete("/participations/{id}/return-routes/{ruleId}", h.buyerDeleteParticipationReturnRoute)
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {

@@ -2,7 +2,7 @@ import {
   compensationDraftToBody,
   type CompensationDraft,
 } from "@/features/admin/CreateContractCompensationList";
-import { deliveryDraftToBody, type ContractDeliveryDraft } from "@/features/admin/contractCompensation";
+import { deliveryDraftToBody, openOfferPipelineRequired, type ContractDeliveryDraft } from "@/features/admin/contractCompensation";
 import { normalizeContractOffer, type ContractOfferDraft } from "@/features/admin/contractOffer";
 import type { ContractLeadCriteria } from "@/types";
 
@@ -38,6 +38,11 @@ export function buildContractPayload(args: {
     const offer = normalizeContractOffer(args.offer);
     body.allowed_delivery_modes = offer.allowed_delivery_modes;
     body.distribution_strategy = offer.distribution_strategy;
+    if (openOfferPipelineRequired(offer.allowed_delivery_modes)) {
+      body.source_pipeline_id = args.delivery.source_pipeline_id;
+      body.source_stage_id = args.delivery.source_stage_id;
+      body.return_stage_id = args.delivery.return_stage_id;
+    }
   }
   if (first) {
     body.cap_period = first.cap_period ?? "one_time";

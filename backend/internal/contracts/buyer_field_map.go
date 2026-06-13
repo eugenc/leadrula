@@ -91,6 +91,9 @@ func (s *Service) AddFieldMapForParticipationBuyer(ctx context.Context, buyerID,
 	if err != nil {
 		return nil, err
 	}
+	if !participationMutable(part.Status) {
+		return nil, httpx.Validation("participation cannot be edited")
+	}
 	return s.addFieldMapEntry(ctx, part.ContractID, &participationID, buyerID, p)
 }
 
@@ -109,6 +112,9 @@ func (s *Service) DeleteFieldMapForParticipationBuyer(ctx context.Context, buyer
 	part, err := s.GetParticipationForBuyer(ctx, buyerID, participationID)
 	if err != nil {
 		return err
+	}
+	if !participationMutable(part.Status) {
+		return httpx.Validation("participation cannot be edited")
 	}
 	return s.deleteFieldMapEntry(ctx, part.ContractID, &participationID, mapID)
 }
@@ -519,7 +525,7 @@ func participationIDForBuyerContractQuerier(ctx context.Context, q database.Quer
 	var id int64
 	err := q.QueryRow(ctx,
 		`SELECT id FROM contract_participations
-		 WHERE contract_id = $1 AND buyer_id = $2 AND status = 'active'
+		 WHERE contract_id = $1 AND buyer_id = $2 AND status IN ('active', 'paused')
 		 ORDER BY id LIMIT 1`, contractID, buyerID).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

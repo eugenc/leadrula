@@ -182,7 +182,7 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 
 	// return rule?
 	if lead.ContractID != nil {
-		ri, err := contracts.FindReturnRule(ctx, tx, *lead.ContractID, *finalStageID)
+		ri, err := contracts.FindReturnRule(ctx, tx, *lead.ContractID, lead.OwnerAccountID, *finalStageID)
 		if err != nil {
 			return nil, nil, err
 		}

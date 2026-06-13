@@ -10,6 +10,25 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+func pipelineDeliveryAllowed(modes []string) bool {
+	for _, m := range modes {
+		if m == "leads_pipeline" {
+			return true
+		}
+	}
+	return false
+}
+
+func validateOfferPipelineConfig(modes []string, sourcePipelineID, sourceStageID, returnStageID int64) error {
+	if !pipelineDeliveryAllowed(modes) {
+		return nil
+	}
+	if sourcePipelineID == 0 || sourceStageID == 0 || returnStageID == 0 {
+		return httpx.Validation("source_pipeline_id, source_stage_id, and return_stage_id are required when pipeline delivery is allowed")
+	}
+	return nil
+}
+
 func validateOfferParams(p CreateParams) error {
 	if strings.TrimSpace(p.Name) == "" {
 		return httpx.Validation("name is required")
@@ -39,7 +58,7 @@ func validateOfferParams(p CreateParams) error {
 			return err
 		}
 	}
-	return nil
+	return validateOfferPipelineConfig(p.AllowedDeliveryModes, p.SourcePipelineID, p.SourceStageID, p.ReturnStageID)
 }
 
 func (s *Service) enrichOffer(ctx context.Context, c *Contract) error {
@@ -96,6 +115,7 @@ func (s *Service) CreateActiveOffer(ctx context.Context, publisherID int64, p Cr
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	s.syncContractRoute(ctx, publisherID, c.ID)
 	return s.Get(ctx, publisherID, c.ID)
 }
 
@@ -114,11 +134,14 @@ func (s *Service) insertActiveOffer(ctx context.Context, tx pgx.Tx, publisherID 
 			`INSERT INTO contracts(
 			    publisher_id, name, description, lead_type, contract_type,
 			    cap_period, cap_total, cap_max_daily, handler_id, status,
-			    allowed_delivery_modes, distribution_strategy)
-			 VALUES ($1,$2,$3,NULLIF($4,''),$5,$6,$7,$8,$9,'active',$10,$11)
+			    allowed_delivery_modes, distribution_strategy,
+			    source_pipeline_id, source_stage_id, return_stage_id)
+			 VALUES ($1,$2,$3,NULLIF($4,''),$5,$6,$7,$8,$9,'active',$10,$11,
+			    NULLIF($12,0), NULLIF($13,0), NULLIF($14,0))
 			 RETURNING `+contractCols,
 			publisherID, p.Name, p.Description, p.LeadType, p.ContractType,
-			capPeriod, p.CapTotal, p.CapMaxDaily, hid, p.AllowedDeliveryModes, strategy))
+			capPeriod, p.CapTotal, p.CapMaxDaily, hid, p.AllowedDeliveryModes, strategy,
+			p.SourcePipelineID, p.SourceStageID, p.ReturnStageID))
 		if err == nil {
 			return c, nil
 		}
@@ -133,6 +156,9 @@ func (s *Service) insertActiveOffer(ctx context.Context, tx pgx.Tx, publisherID 
 type OfferUpdateParams struct {
 	AllowedDeliveryModes *[]string
 	DistributionStrategy *string
+	SourcePipelineID     *int64
+	SourceStageID        *int64
+	ReturnStageID        *int64
 }
 
 func (s *Service) UpdateOffer(ctx context.Context, publisherID, contractID int64, p OfferUpdateParams) (*Contract, error) {
@@ -157,13 +183,36 @@ func (s *Service) UpdateOffer(ctx context.Context, publisherID, contractID int64
 			return nil, httpx.Validation("invalid distribution strategy")
 		}
 	}
+	sourcePipelineID := derefInt64(c.SourcePipelineID)
+	sourceStageID := derefInt64(c.SourceStageID)
+	returnStageID := derefInt64(c.ReturnStageID)
+	if p.SourcePipelineID != nil {
+		sourcePipelineID = *p.SourcePipelineID
+	}
+	if p.SourceStageID != nil {
+		sourceStageID = *p.SourceStageID
+	}
+	if p.ReturnStageID != nil {
+		returnStageID = *p.ReturnStageID
+	}
+	if err := validateOfferPipelineConfig(modes, sourcePipelineID, sourceStageID, returnStageID); err != nil {
+		return nil, err
+	}
 	_, err = s.pool.Exec(ctx,
-		`UPDATE contracts SET allowed_delivery_modes = $3, distribution_strategy = $4, updated_at = now()
+		`UPDATE contracts SET
+		   allowed_delivery_modes = $3,
+		   distribution_strategy = $4,
+		   source_pipeline_id = NULLIF($5,0),
+		   source_stage_id = NULLIF($6,0),
+		   return_stage_id = NULLIF($7,0),
+		   updated_at = now()
 		 WHERE id = $1 AND publisher_id = $2`,
-		contractID, publisherID, modes, strategy)
+		contractID, publisherID, modes, strategy,
+		sourcePipelineID, sourceStageID, returnStageID)
 	if err != nil {
 		return nil, err
 	}
+	s.syncContractRoute(ctx, publisherID, contractID)
 	return s.Get(ctx, publisherID, contractID)
 }
 
@@ -209,11 +258,14 @@ func (s *Service) ActivateOfferDraft(ctx context.Context, publisherID, contractI
 		   name = $3, description = $4, lead_type = $5, contract_type = $6,
 		   cap_period = $7, cap_total = $8, cap_max_daily = $9,
 		   allowed_delivery_modes = $10, distribution_strategy = $11,
+		   source_pipeline_id = NULLIF($12,0), source_stage_id = NULLIF($13,0),
+		   return_stage_id = NULLIF($14,0),
 		   status = 'active', buyer_id = NULL
 		 WHERE id = $1 AND publisher_id = $2 AND deleted_at IS NULL AND status = 'draft'
 		 RETURNING `+contractCols,
 		contractID, publisherID, p.Name, p.Description, p.LeadType, p.ContractType,
-		capPeriod, p.CapTotal, p.CapMaxDaily, p.AllowedDeliveryModes, p.DistributionStrategy))
+		capPeriod, p.CapTotal, p.CapMaxDaily, p.AllowedDeliveryModes, p.DistributionStrategy,
+		p.SourcePipelineID, p.SourceStageID, p.ReturnStageID))
 	if err != nil {
 		return nil, err
 	}
@@ -230,6 +282,7 @@ func (s *Service) ActivateOfferDraft(ctx context.Context, publisherID, contractI
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	s.syncContractRoute(ctx, publisherID, contractID)
 	_ = c
 	return s.Get(ctx, publisherID, contractID)
 }

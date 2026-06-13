@@ -7,11 +7,6 @@ import { errorMessage } from "@/lib/api";
 import { formatMoney } from "@/lib/utils";
 import {
   useUpdateContract,
-  useReturnRules,
-  useAddReturnRule,
-  useUpdateReturnRule,
-  useDeleteReturnRule,
-  useBuyerStages,
   useBuyers,
   usePartnerPublishers,
   useContractCompensations,
@@ -31,7 +26,6 @@ import {
   ContractLeadCriteriaSection,
   emptyLeadCriteria,
 } from "@/features/admin/ContractLeadCriteriaSection";
-import { useStages } from "@/features/leads/hooks";
 import { CONTRACT_STATUSES, ContractStatusBadge } from "@/features/admin/contractStatus";
 import { CONTRACT_LEAD_TYPES, isContractLeadType } from "@/features/admin/contractLeadType";
 import {
@@ -42,6 +36,7 @@ import {
 } from "@/features/admin/contractType";
 import { ContractCompensationEditor } from "@/features/admin/ContractCompensationEditor";
 import { ContractDeliverySection } from "@/features/admin/ContractDeliverySection";
+import { ContractPublisherPipelineSection } from "@/features/admin/ContractPublisherPipelineSection";
 import {
   CreateContractCompensationList,
   compensationDraftFromComp,
@@ -52,9 +47,10 @@ import {
   deliveryDraftFromContract,
   deliveryDraftToBody,
   deliveryDraftValid,
+  openOfferPipelineRequired,
   type ContractDeliveryDraft,
 } from "@/features/admin/contractCompensation";
-import { ContractReturnRulesEditor } from "@/features/admin/ContractReturnRulesEditor";
+import { openOfferDeliveryComplete } from "@/features/admin/contractSectionCompleteness";
 import { ContractFormTabs } from "@/features/admin/ContractFormTabs";
 import {
   allRequiredSectionsComplete,
@@ -143,15 +139,6 @@ function DraftDrawerContent({
     isLoading: leadCriteriaLoading,
     isFetching: leadCriteriaFetching,
   } = useContractLeadCriteria(contract.id);
-  const { data: rules, isLoading: rulesLoading } = useReturnRules(contract.id);
-  const { data: sourceStages } = useStages(contract.source_pipeline_id ?? undefined);
-  const { data: buyerStages, isLoading: stagesLoading } = useBuyerStages(
-    contract.buyer_id ?? null,
-    contract.buyer_pipeline_id ?? null
-  );
-  const addRule = useAddReturnRule(false);
-  const updateRule = useUpdateReturnRule(false);
-  const removeRule = useDeleteReturnRule(false);
 
   const [form, setForm] = useState({
     contract_type: (contract.contract_type ?? "sell") as "buy" | "sell",
@@ -432,7 +419,12 @@ function DraftDrawerContent({
               />
             ),
             delivery: openOffer ? (
-              <ContractOfferSection value={offerDraft} onChange={setOfferDraft} />
+              <div className="space-y-4">
+                <ContractOfferSection value={offerDraft} onChange={setOfferDraft} />
+                {openOfferPipelineRequired(offerDraft.allowed_delivery_modes) && (
+                  <ContractPublisherPipelineSection value={deliveryDraft} onChange={setDeliveryDraft} />
+                )}
+              </div>
             ) : (
               <ContractDeliverySection
                 buyerId={form.buyer_id}
@@ -450,32 +442,14 @@ function DraftDrawerContent({
                 onChange={setLeadCriteria}
               />
             ),
-            returns: (
-              <ContractReturnRulesEditor
-                buyerStages={buyerStages ?? []}
-                publisherStages={sourceStages ?? []}
-                rules={rules ?? []}
-                defaultReturnStageId={contract.return_stage_id ?? 0}
-                loading={stagesLoading || rulesLoading}
-                onAdd={(buyerStageId, returnStageId) =>
-                  addRule.mutate(
-                    { contractId: contract.id, buyerStageId, returnStageId },
-                    { onError: (e) => toast.error(errorMessage(e)) }
-                  )
-                }
-                onUpdate={(ruleId, buyerStageId, returnStageId) =>
-                  updateRule.mutate(
-                    { contractId: contract.id, ruleId, buyerStageId, returnStageId },
-                    { onError: (e) => toast.error(errorMessage(e)) }
-                  )
-                }
-                onDelete={(ruleId) =>
-                  removeRule.mutate(
-                    { contractId: contract.id, ruleId },
-                    { onError: (e) => toast.error(errorMessage(e)) }
-                  )
-                }
-              />
+            returns: openOffer ? (
+              <p className="text-sm text-gray-500">
+                Return destination is configured under Delivery. Buyers pick return start stages when they accept.
+              </p>
+            ) : (
+              <p className="text-sm text-gray-500">
+                Return destination is configured under Delivery. Buyers configure return start stages on their contract.
+              </p>
             ),
           }}
         />
@@ -508,15 +482,6 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
   const saveDelivery = useSaveContractDelivery();
   const saveOffer = useUpdateContractOffer();
   const { data: compensations, isLoading: compsLoading } = useContractCompensations(contract.id);
-  const { data: sourceStages } = useStages(contract.source_pipeline_id ?? undefined);
-  const { data: buyerStages, isLoading: stagesLoading } = useBuyerStages(
-    contract.buyer_id ?? null,
-    contract.buyer_pipeline_id ?? null
-  );
-  const { data: rules, isLoading: rulesLoading } = useReturnRules(contract.id);
-  const addRule = useAddReturnRule(false);
-  const updateRule = useUpdateReturnRule(false);
-  const removeRule = useDeleteReturnRule(false);
 
   const [name, setName] = useState(contract.name);
   const [leadType, setLeadType] = useState(contract.lead_type ?? "");
@@ -541,17 +506,33 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
     setLeadType(contract.lead_type ?? "");
     setDescription(contract.description ?? "");
     setStatus(contract.status);
-    const compDelivery = compensations?.[0]?.delivery;
-    setDeliveryDraft(deliveryDraftFromContract(contract, compDelivery));
+  }, [contract.id, contract.name, contract.lead_type, contract.description, contract.status]);
+
+  const serverDeliveryKey = [
+    contract.id,
+    contract.source_pipeline_id ?? 0,
+    contract.source_stage_id ?? 0,
+    contract.return_stage_id ?? 0,
+    contract.buyer_pipeline_id ?? 0,
+    JSON.stringify(contract.allowed_delivery_modes ?? []),
+    contract.distribution_strategy ?? "",
+  ].join("|");
+
+  useEffect(() => {
+    setDeliveryDraft(deliveryDraftFromContract(contract));
     setOfferDraft(offerFromContractModes(contract.allowed_delivery_modes, contract.distribution_strategy));
-  }, [contract, compensations]);
+  }, [serverDeliveryKey]);
 
   const savedOffer = offerFromContractModes(contract.allowed_delivery_modes, contract.distribution_strategy);
+  const savedDelivery = deliveryDraftFromContract(contract, compensations?.[0]?.delivery);
   const offerUnchanged =
     JSON.stringify(offerDraft.allowed_delivery_modes) === JSON.stringify(savedOffer.allowed_delivery_modes) &&
-    offerDraft.distribution_strategy === savedOffer.distribution_strategy;
+    offerDraft.distribution_strategy === savedOffer.distribution_strategy &&
+    (!openOfferPipelineRequired(offerDraft.allowed_delivery_modes) ||
+      (deliveryDraft.source_pipeline_id === savedDelivery.source_pipeline_id &&
+        deliveryDraft.source_stage_id === savedDelivery.source_stage_id &&
+        deliveryDraft.return_stage_id === savedDelivery.return_stage_id));
 
-  const savedDelivery = deliveryDraftFromContract(contract, compensations?.[0]?.delivery);
   const deliveryUnchanged =
     deliveryDraft.delivery === savedDelivery.delivery &&
     deliveryDraft.source_pipeline_id === savedDelivery.source_pipeline_id &&
@@ -565,7 +546,35 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
     description === (contract.description ?? "") &&
     status === contract.status;
   const invalid = !name.trim() || !isContractLeadType(leadType);
+  const offerDirty = !offerUnchanged;
+  const offerSaveable =
+    isOpenOffer && offerDirty && openOfferDeliveryComplete(offerDraft, deliveryDraft);
+  const offerBlocked = isOpenOffer && offerDirty && !openOfferDeliveryComplete(offerDraft, deliveryDraft);
+  const footerDirty = !unchanged || offerSaveable;
   const activeStatuses = CONTRACT_STATUSES.filter((s) => s.value !== "draft");
+
+  function offerSaveBody() {
+    return {
+      allowed_delivery_modes: offerDraft.allowed_delivery_modes,
+      distribution_strategy: offerDraft.distribution_strategy,
+      source_pipeline_id: deliveryDraft.source_pipeline_id || null,
+      source_stage_id: deliveryDraft.source_stage_id || null,
+      return_stage_id: deliveryDraft.return_stage_id || null,
+    };
+  }
+
+  function saveOfferSettings(onSuccess?: () => void) {
+    saveOffer.mutate(
+      { contractId: contract.id, body: offerSaveBody() },
+      {
+        onSuccess: () => {
+          toast.success("Offer settings saved");
+          onSuccess?.();
+        },
+        onError: (e) => toast.error(errorMessage(e)),
+      }
+    );
+  }
 
   function saveDetails() {
     const body: Record<string, unknown> = {};
@@ -574,15 +583,34 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
     if (leadType !== (contract.lead_type ?? "")) body.lead_type = leadType;
     if (description !== (contract.description ?? "")) body.description = description;
     if (status !== contract.status) body.status = status;
-    if (Object.keys(body).length === 0) return;
+    const hasDetails = Object.keys(body).length > 0;
 
-    update.mutate(
-      { id: contract.id, body },
-      {
-        onSuccess: () => toast.success("Contract saved"),
-        onError: (e) => toast.error(errorMessage(e)),
-      }
-    );
+    if (offerSaveable && hasDetails) {
+      update.mutate(
+        { id: contract.id, body },
+        {
+          onSuccess: () => {
+            toast.success("Contract saved");
+            saveOfferSettings();
+          },
+          onError: (e) => toast.error(errorMessage(e)),
+        }
+      );
+      return;
+    }
+    if (hasDetails) {
+      update.mutate(
+        { id: contract.id, body },
+        {
+          onSuccess: () => toast.success("Contract saved"),
+          onError: (e) => toast.error(errorMessage(e)),
+        }
+      );
+      return;
+    }
+    if (offerSaveable) {
+      saveOfferSettings();
+    }
   }
 
   function setContractStatus(next: string, successMessage: string) {
@@ -706,25 +734,21 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
             delivery: isOpenOffer ? (
               <>
                 <ContractOfferSection value={offerDraft} onChange={setOfferDraft} />
+                {openOfferPipelineRequired(offerDraft.allowed_delivery_modes) && (
+                  <div className="mt-4">
+                    <ContractPublisherPipelineSection value={deliveryDraft} onChange={setDeliveryDraft} />
+                    {offerBlocked && (
+                      <p className="mt-2 text-xs text-gray-500">
+                        Select source pipeline, distribute stage, and return stage to save.
+                      </p>
+                    )}
+                  </div>
+                )}
                 <Button
                   className="mt-3"
                   variant="secondary"
-                  disabled={offerUnchanged || saveOffer.isPending}
-                  onClick={() =>
-                    saveOffer.mutate(
-                      {
-                        contractId: contract.id,
-                        body: {
-                          allowed_delivery_modes: offerDraft.allowed_delivery_modes,
-                          distribution_strategy: offerDraft.distribution_strategy,
-                        },
-                      },
-                      {
-                        onSuccess: () => toast.success("Offer settings saved"),
-                        onError: (e) => toast.error(errorMessage(e)),
-                      }
-                    )
-                  }
+                  disabled={offerUnchanged || offerBlocked || saveOffer.isPending}
+                  onClick={() => saveOfferSettings()}
                 >
                   Save offer settings
                 </Button>
@@ -787,32 +811,14 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
                 </Button>
               </>
             ),
-            returns: (
-              <ContractReturnRulesEditor
-                buyerStages={buyerStages ?? []}
-                publisherStages={sourceStages ?? []}
-                rules={rules ?? []}
-                defaultReturnStageId={contract.return_stage_id ?? 0}
-                loading={stagesLoading || rulesLoading}
-                onAdd={(buyerStageId, returnStageId) =>
-                  addRule.mutate(
-                    { contractId: contract.id, buyerStageId, returnStageId },
-                    { onError: (e) => toast.error(errorMessage(e)) }
-                  )
-                }
-                onUpdate={(ruleId, buyerStageId, returnStageId) =>
-                  updateRule.mutate(
-                    { contractId: contract.id, ruleId, buyerStageId, returnStageId },
-                    { onError: (e) => toast.error(errorMessage(e)) }
-                  )
-                }
-                onDelete={(ruleId) =>
-                  removeRule.mutate(
-                    { contractId: contract.id, ruleId },
-                    { onError: (e) => toast.error(errorMessage(e)) }
-                  )
-                }
-              />
+            returns: isOpenOffer ? (
+              <p className="text-sm text-gray-500">
+                Return destination is configured under Delivery. Buyers pick return start stages when they accept.
+              </p>
+            ) : (
+              <p className="text-sm text-gray-500">
+                Return destination is configured under Delivery. Buyers configure return start stages on their contract.
+              </p>
             ),
           }}
           extraTabs={isOpenOffer ? [{ id: "buyers", label: "Buyers" }] : undefined}
@@ -842,7 +848,7 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
         )}
         <Button
           className="min-w-[10.5rem]"
-          disabled={unchanged || invalid || update.isPending}
+          disabled={!footerDirty || offerBlocked || invalid || update.isPending || saveOffer.isPending}
           onClick={saveDetails}
         >
           Save details

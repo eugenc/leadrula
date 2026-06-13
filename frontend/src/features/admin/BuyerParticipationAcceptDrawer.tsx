@@ -11,17 +11,25 @@ import {
   useAcceptParticipation,
   useDeclineParticipation,
   useCounterParticipation,
+  useParticipationReturnRoutes,
+  useAddParticipationReturnRoute,
+  useUpdateParticipationReturnRoute,
+  useDeleteParticipationReturnRoute,
 } from "@/features/admin/hooks";
 import { Input } from "@/components/ui/input";
 import { useIntegrationConnections } from "@/features/integrations/hooks";
-import { usePipelines, useStages } from "@/features/leads/hooks";
-import { PUBLISHER_DELIVERY_MODES } from "@/features/admin/contractOffer";
-import { formatParticipationStatus } from "@/features/admin/contractOffer";
+import { useStages } from "@/features/leads/hooks";
+import { PUBLISHER_DELIVERY_MODES, formatParticipationStatus } from "@/features/admin/contractOffer";
 import { BuyerContractFieldMapSection } from "@/features/admin/BuyerContractFieldMapSection";
 import { BuyerTriggerStageFields } from "@/features/admin/BuyerTriggerStageFields";
+import { ContractReturnRulesEditor } from "@/features/admin/ContractReturnRulesEditor";
+import {
+  BuyerParticipationDeliveryFields,
+  participationDeliveryValid,
+} from "@/features/admin/BuyerParticipationDeliveryFields";
 import type { ContractParticipation } from "@/types";
 
-const STEPS = ["Review", "Delivery", "Field mapping", "Integrations"] as const;
+const STEPS = ["Review", "Delivery", "Return routes", "Field mapping", "Integrations"] as const;
 
 export function BuyerParticipationAcceptDrawer({
   participation,
@@ -31,6 +39,7 @@ export function BuyerParticipationAcceptDrawer({
   onClose: () => void;
 }) {
   if (!participation) return null;
+  if (participation.status !== "pending" && participation.status !== "counter_pending") return null;
   return (
     <Sheet open onClose={onClose} width={640}>
       <DrawerContent participation={participation} onClose={onClose} />
@@ -60,25 +69,37 @@ function DrawerContent({
   const [webhookId, setWebhookId] = useState(0);
   const [integrationId, setIntegrationId] = useState(0);
 
-  const { data: pipelines } = usePipelines();
-  const { data: stages } = useStages(pipelineId || undefined);
+  const pipelineDelivery = delivery === "leads_pipeline";
+  const { data: stages, isLoading: buyerStagesLoading } = useStages(pipelineId || undefined);
+  const { data: returnRoutes, isLoading: routesLoading } = useParticipationReturnRoutes(
+    pipelineDelivery ? participation.id : null
+  );
+  const returnRoutesLoading = routesLoading || buyerStagesLoading;
+  const addRoute = useAddParticipationReturnRoute();
+  const updateRoute = useUpdateParticipationReturnRoute();
+  const removeRoute = useDeleteParticipationReturnRoute();
   const { data: connections } = useIntegrationConnections();
 
-  const actionable = participation.status === "pending" || participation.status === "counter_pending";
-  const deliveryValid =
-    delivery !== "leads_pipeline" || (pipelineId > 0 && stageId > 0);
+  const deliveryValid = participationDeliveryValid(delivery, pipelineId, stageId, webhookId);
+  const returnRoutesValid = !pipelineDelivery || (returnRoutes?.length ?? 0) > 0;
+  const publisherReturnStageId = participation.return_stage_id ?? 0;
+  const publisherPipelineConfigured =
+    (participation.source_pipeline_id ?? 0) > 0 && publisherReturnStageId > 0;
+  const buyerPipelineSelected = pipelineId > 0;
 
   function stepComplete(i: number): boolean {
     if (i === 0) return step > 0;
     if (i === 1) return step > 1;
-    if (i === 2) return mappingComplete;
-    if (i === 3) return step === 3;
+    if (i === 2) return pipelineDelivery ? returnRoutesValid && step > 2 : step > 1;
+    if (i === 3) return mappingComplete;
+    if (i === 4) return step === 4;
     return false;
   }
 
   function canGoToStep(target: number): boolean {
     if (target <= step) return true;
-    if (target >= 2 && !deliveryValid) return false;
+    if (target >= 1 && !deliveryValid && target > 1) return false;
+    if (pipelineDelivery && target >= 3 && !returnRoutesValid) return false;
     return true;
   }
 
@@ -87,9 +108,25 @@ function DrawerContent({
     setStep(target);
   }
 
+  function nextStep() {
+    if (step === 1 && !pipelineDelivery) {
+      setStep(3);
+      return;
+    }
+    setStep((s) => s + 1);
+  }
+
+  function prevStep() {
+    if (step === 3 && !pipelineDelivery) {
+      setStep(1);
+      return;
+    }
+    setStep((s) => s - 1);
+  }
+
   function submitAccept() {
     const body: Record<string, unknown> = { delivery };
-    if (delivery === "leads_pipeline") {
+    if (pipelineDelivery) {
       body.buyer_pipeline_id = pipelineId;
       body.buyer_target_stage_id = stageId;
     }
@@ -107,33 +144,6 @@ function DrawerContent({
     );
   }
 
-  if (!actionable) {
-    return (
-      <>
-        <DrawerHeader
-          title={participation.contract_name ?? "Contract"}
-          subtitle={`${participation.publisher_name ?? "Publisher"} · ${formatParticipationStatus(participation.status)}`}
-          onClose={onClose}
-        />
-        <DrawerBody className="space-y-6">
-          <BuyerContractFieldMapSection
-            participationId={participation.id}
-            onCompleteChange={setMappingComplete}
-          />
-          <BuyerTriggerStageFields
-            participationId={participation.id}
-            buyerPipelineId={participation.buyer_pipeline_id ?? pipelineId}
-          />
-        </DrawerBody>
-        <DrawerFooter className="flex justify-end">
-          <Button variant="secondary" onClick={onClose}>
-            Close
-          </Button>
-        </DrawerFooter>
-      </>
-    );
-  }
-
   return (
     <>
       <DrawerHeader
@@ -143,18 +153,19 @@ function DrawerContent({
       />
       <DrawerBody>
         <div className="mb-4 flex flex-wrap border-b border-gray-100">
-          {STEPS.map((s, i) => {
-            const done = stepComplete(i);
+          {STEPS.filter((s) => !(s === "Return routes" && !pipelineDelivery)).map((s) => {
+            const stepIndex = STEPS.indexOf(s);
+            const done = stepComplete(stepIndex);
             return (
               <button
                 key={s}
                 type="button"
-                onClick={() => goToStep(i)}
-                disabled={!canGoToStep(i)}
+                onClick={() => goToStep(stepIndex)}
+                disabled={!canGoToStep(stepIndex)}
                 className={cn(
                   "-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-semibold transition-colors",
-                  step === i ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400",
-                  !canGoToStep(i) && "cursor-not-allowed opacity-50"
+                  step === stepIndex ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400",
+                  !canGoToStep(stepIndex) && "cursor-not-allowed opacity-50"
                 )}
               >
                 {done && <Check className="h-3.5 w-3.5 text-jade-600" />}
@@ -222,54 +233,19 @@ function DrawerContent({
 
         {step === 1 && (
           <div className="space-y-3">
-            <SectionLabel>Publisher delivery</SectionLabel>
-            <div>
-              <Label>Delivery mode</Label>
-              <Select value={delivery} onChange={(e) => setDelivery(e.target.value)}>
-                {modeOptions.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            {delivery === "leads_pipeline" && (
-              <>
-                <div>
-                  <Label>Pipeline</Label>
-                  <Select value={pipelineId} onChange={(e) => setPipelineId(Number(e.target.value))}>
-                    <option value={0}>Select…</option>
-                    {(pipelines ?? []).map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-                <div>
-                  <Label>Destination stage</Label>
-                  <Select value={stageId} onChange={(e) => setStageId(Number(e.target.value))}>
-                    <option value={0}>Select…</option>
-                    {(stages ?? [])
-                      .filter((s) => s.stage_type === "standard" || s.stage_type === "action")
-                      .map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
-                        </option>
-                      ))}
-                  </Select>
-                </div>
-              </>
-            )}
-            {delivery === "webhook" && (
-              <div>
-                <Label>Outbound webhook ID</Label>
-                <Select value={webhookId} onChange={(e) => setWebhookId(Number(e.target.value))}>
-                  <option value={0}>Select…</option>
-                </Select>
-                <p className="mt-1 text-xs text-gray-400">Configure an outbound webhook under Integrations → Webhooks first.</p>
-              </div>
-            )}
+            <BuyerParticipationDeliveryFields
+              allowedModes={allowed}
+              delivery={delivery}
+              onDeliveryChange={setDelivery}
+              pipelineId={pipelineId}
+              onPipelineIdChange={setPipelineId}
+              stageId={stageId}
+              onStageIdChange={setStageId}
+              webhookId={webhookId}
+              onWebhookIdChange={setWebhookId}
+              integrationId={integrationId}
+              onIntegrationIdChange={setIntegrationId}
+            />
             <BuyerTriggerStageFields
               participationId={participation.id}
               buyerPipelineId={pipelineId || participation.buyer_pipeline_id}
@@ -277,14 +253,72 @@ function DrawerContent({
           </div>
         )}
 
-        {step === 2 && (
+        {step === 2 && pipelineDelivery && (
+          <div className="space-y-3">
+            <SectionLabel>Return routes</SectionLabel>
+            <p className="text-xs text-gray-400">
+              Pick which stages on your pipeline send leads back to the publisher. Return destination is set by the
+              publisher on the contract offer.
+            </p>
+            {!returnRoutesLoading && !buyerPipelineSelected && (
+              <p className="text-sm text-gray-500">
+                Go back to Delivery and select your destination pipeline and stage.
+              </p>
+            )}
+            {!returnRoutesLoading && buyerPipelineSelected && !publisherPipelineConfigured && (
+              <p className="text-sm text-gray-500">
+                The publisher has not configured a return destination on this offer yet. They must set the publisher
+                pipeline and return stage on the contract before you can add return routes.
+              </p>
+            )}
+            {(returnRoutesLoading || (buyerPipelineSelected && publisherPipelineConfigured)) && (
+              <ContractReturnRulesEditor
+                side="buyer"
+                buyerStages={stages ?? []}
+                publisherStages={[]}
+                rules={returnRoutes ?? []}
+                defaultReturnStageId={publisherReturnStageId}
+                loading={returnRoutesLoading}
+                onAdd={(buyerStageId) =>
+                  addRoute.mutate(
+                    {
+                      participationId: participation.id,
+                      buyerStageId,
+                      buyerPipelineId: pipelineId || undefined,
+                    },
+                    { onError: (e) => toast.error(errorMessage(e)) }
+                  )
+                }
+                onUpdate={(ruleId, buyerStageId) =>
+                  updateRoute.mutate(
+                    {
+                      participationId: participation.id,
+                      ruleId,
+                      buyerStageId,
+                      buyerPipelineId: pipelineId || undefined,
+                    },
+                    { onError: (e) => toast.error(errorMessage(e)) }
+                  )
+                }
+                onDelete={(ruleId) =>
+                  removeRoute.mutate(
+                    { participationId: participation.id, ruleId },
+                    { onError: (e) => toast.error(errorMessage(e)) }
+                  )
+                }
+              />
+            )}
+          </div>
+        )}
+
+        {step === 3 && (
           <BuyerContractFieldMapSection
             participationId={participation.id}
             onCompleteChange={setMappingComplete}
           />
         )}
 
-        {step === 3 && (
+        {step === 4 && (
           <div className="space-y-3">
             <SectionLabel>CRM forward (optional)</SectionLabel>
             <p className="text-xs text-gray-400">Leads still land in inbox or pipeline first, then forward to your CRM.</p>
@@ -333,19 +367,31 @@ function DrawerContent({
           </Button>
         )}
         {step > 0 && (
-          <Button variant="secondary" onClick={() => setStep((s) => s - 1)}>
+          <Button variant="secondary" onClick={prevStep}>
             Back
           </Button>
         )}
-        {step < STEPS.length - 1 ? (
+        {step < 4 ? (
           <Button
-            disabled={(step === 1 && !deliveryValid) || (step === 2 && !mappingComplete)}
-            onClick={() => setStep((s) => s + 1)}
+            disabled={
+              (step === 1 && !deliveryValid) ||
+              (step === 2 && pipelineDelivery && !returnRoutesValid) ||
+              (step === 3 && !mappingComplete)
+            }
+            onClick={nextStep}
           >
             Next
           </Button>
         ) : (
-          <Button disabled={accept.isPending || !mappingComplete} onClick={submitAccept}>
+          <Button
+            disabled={
+              accept.isPending ||
+              !mappingComplete ||
+              !deliveryValid ||
+              (pipelineDelivery && !returnRoutesValid)
+            }
+            onClick={submitAccept}
+          >
             Accept contract
           </Button>
         )}

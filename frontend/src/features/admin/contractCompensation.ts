@@ -118,6 +118,14 @@ export function deliveryDraftValid(d: ContractDeliveryDraft): boolean {
   return !!d.source_stage_id && !!d.counterparty_pipeline_id && !!d.return_stage_id;
 }
 
+export function publisherPipelineDraftValid(d: ContractDeliveryDraft): boolean {
+  return !!d.source_pipeline_id && !!d.source_stage_id && !!d.return_stage_id;
+}
+
+export function openOfferPipelineRequired(allowedModes: string[]): boolean {
+  return allowedModes.includes("leads_pipeline");
+}
+
 export function pipelineDraftWithoutLeads<T extends PipelineDraftFields & { delivery: string }>(draft: T): T {
   if (draft.delivery !== "leads") return draft;
   return {

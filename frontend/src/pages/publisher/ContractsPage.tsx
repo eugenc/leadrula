@@ -47,8 +47,10 @@ import {
 import { ContractDeliverySection } from "@/features/admin/ContractDeliverySection";
 import {
   emptyContractDelivery,
+  openOfferPipelineRequired,
   type ContractDeliveryDraft,
 } from "@/features/admin/contractCompensation";
+import { ContractPublisherPipelineSection } from "@/features/admin/ContractPublisherPipelineSection";
 import { ContractFormTabs } from "@/features/admin/ContractFormTabs";
 import { allRequiredSectionsComplete } from "@/features/admin/contractSectionCompleteness";
 import { buildContractPayload } from "@/features/admin/contractDraftPayload";
@@ -411,7 +413,12 @@ function CreateContractDrawer({
             />
           ),
           delivery: openOffer ? (
-            <ContractOfferSection value={offerDraft} onChange={setOfferDraft} />
+            <div className="space-y-4">
+              <ContractOfferSection value={offerDraft} onChange={setOfferDraft} />
+              {openOfferPipelineRequired(offerDraft.allowed_delivery_modes) && (
+                <ContractPublisherPipelineSection value={deliveryDraft} onChange={setDeliveryDraft} />
+              )}
+            </div>
           ) : (
             <ContractDeliverySection
               buyerId={form.buyer_id}

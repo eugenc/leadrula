@@ -265,6 +265,9 @@ export interface ContractParticipation {
   delivery?: string;
   buyer_pipeline_id?: number | null;
   buyer_target_stage_id?: number | null;
+  source_pipeline_id?: number | null;
+  source_stage_id?: number | null;
+  return_stage_id?: number | null;
   integration_connection_id?: number | null;
   outbound_webhook_id?: number | null;
   counter_proposal?: unknown;
@@ -272,6 +275,12 @@ export interface ContractParticipation {
   publisher_name?: string;
   lead_type?: string;
   allowed_delivery_modes?: string[];
+  contract_handler_id?: string;
+  contract_status?: string;
+  contract_description?: string;
+  cap_period?: string;
+  cap_total?: number | null;
+  cap_max_daily?: number | null;
   created_at?: string;
   updated_at?: string;
 }

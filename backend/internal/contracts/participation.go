@@ -32,6 +32,12 @@ type Participation struct {
 	PublisherName           string          `json:"publisher_name,omitempty"`
 	LeadType                string          `json:"lead_type,omitempty"`
 	AllowedDeliveryModes    []string        `json:"allowed_delivery_modes,omitempty"`
+	ContractHandlerID       string          `json:"contract_handler_id,omitempty"`
+	ContractStatus          string          `json:"contract_status,omitempty"`
+	ContractDescription     string          `json:"contract_description,omitempty"`
+	CapPeriod               string          `json:"cap_period,omitempty"`
+	CapTotal                *int            `json:"cap_total,omitempty"`
+	CapMaxDaily             *int            `json:"cap_max_daily,omitempty"`
 	CreatedAt               time.Time       `json:"created_at"`
 	UpdatedAt               time.Time       `json:"updated_at"`
 }
@@ -170,7 +176,15 @@ func (s *Service) listParticipationsByContract(ctx context.Context, contractID i
 
 func (s *Service) ListParticipationsForBuyer(ctx context.Context, buyerID int64) ([]Participation, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT `+participationCols+`, c.name, pub.name, COALESCE(c.lead_type,''), c.allowed_delivery_modes
+		`SELECT p.id, p.contract_id, p.buyer_id, p.status::text, COALESCE(p.delivery,''),
+			p.buyer_pipeline_id, p.buyer_target_stage_id,
+			COALESCE(p.source_pipeline_id, c.source_pipeline_id),
+			COALESCE(p.source_stage_id, c.source_stage_id),
+			COALESCE(p.return_stage_id, c.return_stage_id),
+			p.integration_connection_id, p.outbound_webhook_id,
+			p.counter_proposal, p.superseded_by_contract_id, p.created_at, p.updated_at,
+			c.name, pub.name, COALESCE(c.lead_type,''), c.allowed_delivery_modes,
+			c.handler_id, c.status, COALESCE(c.description,''), c.cap_period, c.cap_total, c.cap_max_daily
 		 FROM contract_participations p
 		 JOIN contracts c ON c.id = p.contract_id
 		 JOIN accounts pub ON pub.id = c.publisher_id
@@ -188,7 +202,9 @@ func (s *Service) ListParticipationsForBuyer(ctx context.Context, buyerID int64)
 		var contractName, publisherName, leadType string
 		var allowed []string
 		if err := scanParticipationFields(p, &delivery, &counter, rows,
-			&contractName, &publisherName, &leadType, &allowed); err != nil {
+			&contractName, &publisherName, &leadType, &allowed,
+			&p.ContractHandlerID, &p.ContractStatus, &p.ContractDescription,
+			&p.CapPeriod, &p.CapTotal, &p.CapMaxDaily); err != nil {
 			return nil, err
 		}
 		p.Delivery = delivery
@@ -210,11 +226,30 @@ func (s *Service) GetParticipation(ctx context.Context, participationID int64) (
 }
 
 func (s *Service) GetParticipationForBuyer(ctx context.Context, buyerID, participationID int64) (*Participation, error) {
-	p, err := scanParticipation(s.pool.QueryRow(ctx,
-		`SELECT `+participationCols+` FROM contract_participations p
-		 WHERE p.id = $1 AND p.buyer_id = $2`, participationID, buyerID))
+	p := &Participation{}
+	var delivery string
+	var counter []byte
+	err := scanParticipationFields(p, &delivery, &counter,
+		s.pool.QueryRow(ctx,
+			`SELECT p.id, p.contract_id, p.buyer_id, p.status::text, COALESCE(p.delivery,''),
+				p.buyer_pipeline_id, p.buyer_target_stage_id,
+				COALESCE(p.source_pipeline_id, c.source_pipeline_id),
+				COALESCE(p.source_stage_id, c.source_stage_id),
+				COALESCE(p.return_stage_id, c.return_stage_id),
+				p.integration_connection_id, p.outbound_webhook_id,
+				p.counter_proposal, p.superseded_by_contract_id, p.created_at, p.updated_at
+			 FROM contract_participations p
+			 JOIN contracts c ON c.id = p.contract_id
+			 WHERE p.id = $1 AND p.buyer_id = $2`, participationID, buyerID))
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, httpx.NotFound("participation not found")
+		}
 		return nil, err
+	}
+	p.Delivery = delivery
+	if len(counter) > 0 {
+		p.CounterProposal = counter
 	}
 	return p, nil
 }
@@ -257,8 +292,10 @@ func (s *Service) AddParticipation(ctx context.Context, publisherID, contractID 
 	defer tx.Rollback(ctx)
 
 	part, err := scanParticipation(tx.QueryRow(ctx,
-		`INSERT INTO contract_participations(contract_id, buyer_id, status)
-		 VALUES ($1,$2,'pending')
+		`INSERT INTO contract_participations(
+		   contract_id, buyer_id, status, source_pipeline_id, source_stage_id, return_stage_id)
+		 SELECT $1, $2, 'pending', c.source_pipeline_id, c.source_stage_id, c.return_stage_id
+		 FROM contracts c WHERE c.id = $1
 		 RETURNING `+participationReturningCols,
 		contractID, p.BuyerID))
 	if err != nil {
@@ -306,19 +343,26 @@ type AcceptParticipationParams struct {
 	OutboundWebhookID       int64  `json:"outbound_webhook_id"`
 }
 
-func (s *Service) AcceptParticipation(ctx context.Context, buyerID, participationID int64, p AcceptParticipationParams) (*Participation, error) {
-	part, err := s.GetParticipationForBuyer(ctx, buyerID, participationID)
-	if err != nil {
-		return nil, err
-	}
-	if part.Status != "pending" && part.Status != "counter_pending" {
-		return nil, httpx.Validation("participation is not awaiting acceptance")
-	}
+func participationMutable(status string) bool {
+	return status == "pending" || status == "counter_pending" || status == "active" || status == "paused"
+}
+
+func participationManageable(status string) bool {
+	return status == "active" || status == "paused"
+}
+
+type validatedParticipationDelivery struct {
+	delivery        string
+	buyerPipelineID int64
+	buyerStageID    int64
+	webhookID       *int64
+	connID          *int64
+}
+
+func (s *Service) validateParticipationDelivery(ctx context.Context, buyerID, contractID, participationID int64, p AcceptParticipationParams, requireReturnRoutes bool) (*validatedParticipationDelivery, error) {
 	var allowed []string
-	var leadType string
 	if err := s.pool.QueryRow(ctx,
-		`SELECT allowed_delivery_modes, COALESCE(lead_type,'') FROM contracts WHERE id = $1`,
-		part.ContractID).Scan(&allowed, &leadType); err != nil {
+		`SELECT allowed_delivery_modes FROM contracts WHERE id = $1`, contractID).Scan(&allowed); err != nil {
 		return nil, err
 	}
 	delivery := strings.TrimSpace(p.Delivery)
@@ -347,12 +391,26 @@ func (s *Service) AcceptParticipation(ctx context.Context, buyerID, participatio
 		if err := validateBuyerTargetStage(ctx, s.pool, buyerStageID, buyerPipelineID); err != nil {
 			return nil, err
 		}
+		var returnStageID *int64
+		if err := s.pool.QueryRow(ctx,
+			`SELECT return_stage_id FROM contracts WHERE id = $1`, contractID).Scan(&returnStageID); err != nil {
+			return nil, err
+		}
+		if returnStageID == nil || *returnStageID == 0 {
+			return nil, httpx.Validation("publisher return destination is not configured on contract")
+		}
+		if requireReturnRoutes {
+			n, err := s.CountParticipationReturnRules(ctx, participationID)
+			if err != nil {
+				return nil, err
+			}
+			if n == 0 {
+				return nil, httpx.Validation("at least one return route is required for pipeline delivery")
+			}
+		}
 	} else {
 		buyerPipelineID = 0
 		buyerStageID = 0
-	}
-	if err := s.ValidateParticipationFieldMapping(ctx, part.ContractID, participationID); err != nil {
-		return nil, err
 	}
 	var webhookID *int64
 	if delivery == "webhook" {
@@ -368,6 +426,30 @@ func (s *Service) AcceptParticipation(ctx context.Context, buyerID, participatio
 		}
 		connID = &p.IntegrationConnectionID
 	}
+	return &validatedParticipationDelivery{
+		delivery:        delivery,
+		buyerPipelineID: buyerPipelineID,
+		buyerStageID:    buyerStageID,
+		webhookID:       webhookID,
+		connID:          connID,
+	}, nil
+}
+
+func (s *Service) AcceptParticipation(ctx context.Context, buyerID, participationID int64, p AcceptParticipationParams) (*Participation, error) {
+	part, err := s.GetParticipationForBuyer(ctx, buyerID, participationID)
+	if err != nil {
+		return nil, err
+	}
+	if part.Status != "pending" && part.Status != "counter_pending" {
+		return nil, httpx.Validation("participation is not awaiting acceptance")
+	}
+	validated, err := s.validateParticipationDelivery(ctx, buyerID, part.ContractID, participationID, p, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.ValidateParticipationFieldMapping(ctx, part.ContractID, participationID); err != nil {
+		return nil, err
+	}
 	updated, err := scanParticipation(s.pool.QueryRow(ctx,
 		`UPDATE contract_participations SET
 		   status = 'active', delivery = $2,
@@ -376,7 +458,7 @@ func (s *Service) AcceptParticipation(ctx context.Context, buyerID, participatio
 		   counter_proposal = NULL, updated_at = now(), buyer_responded_at = now()
 		 WHERE id = $1
 		 RETURNING `+participationReturningCols,
-		participationID, delivery, buyerPipelineID, buyerStageID, webhookID, connID))
+		participationID, validated.delivery, validated.buyerPipelineID, validated.buyerStageID, validated.webhookID, validated.connID))
 	if err != nil {
 		return nil, err
 	}
@@ -389,6 +471,88 @@ func (s *Service) AcceptParticipation(ctx context.Context, buyerID, participatio
 		"participation_id": participationID,
 		"contract_name":    contractName,
 		"buyer_id":         buyerID,
+	})
+	return updated, nil
+}
+
+func (s *Service) UpdateParticipationDelivery(ctx context.Context, buyerID, participationID int64, p AcceptParticipationParams) (*Participation, error) {
+	part, err := s.GetParticipationForBuyer(ctx, buyerID, participationID)
+	if err != nil {
+		return nil, err
+	}
+	if !participationManageable(part.Status) {
+		return nil, httpx.Validation("participation is not active")
+	}
+	var contractStatus string
+	if err := s.pool.QueryRow(ctx,
+		`SELECT status FROM contracts WHERE id = $1 AND deleted_at IS NULL`, part.ContractID).Scan(&contractStatus); err != nil {
+		return nil, err
+	}
+	if contractStatus != "active" {
+		return nil, httpx.BusinessRule("publisher contract is not active")
+	}
+	validated, err := s.validateParticipationDelivery(ctx, buyerID, part.ContractID, participationID, p, true)
+	if err != nil {
+		return nil, err
+	}
+	return scanParticipation(s.pool.QueryRow(ctx,
+		`UPDATE contract_participations SET
+		   delivery = $2,
+		   buyer_pipeline_id = NULLIF($3,0), buyer_target_stage_id = NULLIF($4,0),
+		   outbound_webhook_id = $5, integration_connection_id = $6,
+		   updated_at = now()
+		 WHERE id = $1
+		 RETURNING `+participationReturningCols,
+		participationID, validated.delivery, validated.buyerPipelineID, validated.buyerStageID, validated.webhookID, validated.connID))
+}
+
+func (s *Service) UpdateParticipationStatus(ctx context.Context, buyerID, participationID int64, status string) (*Participation, error) {
+	part, err := s.GetParticipationForBuyer(ctx, buyerID, participationID)
+	if err != nil {
+		return nil, err
+	}
+	status = strings.TrimSpace(status)
+	switch status {
+	case "paused":
+		if part.Status != "active" {
+			return nil, httpx.Validation("only active participations can be paused")
+		}
+	case "active":
+		if part.Status != "paused" {
+			return nil, httpx.Validation("only paused participations can be resumed")
+		}
+	case "withdrawn":
+		if !participationManageable(part.Status) {
+			return nil, httpx.Validation("participation cannot be withdrawn")
+		}
+	default:
+		return nil, httpx.Validation("invalid participation status")
+	}
+	updated, err := scanParticipation(s.pool.QueryRow(ctx,
+		`UPDATE contract_participations SET status = $2::participation_status, updated_at = now()
+		 WHERE id = $1 RETURNING `+participationReturningCols, participationID, status))
+	if err != nil {
+		return nil, err
+	}
+	var pubID int64
+	var contractName string
+	_ = s.pool.QueryRow(ctx,
+		`SELECT publisher_id, name FROM contracts WHERE id = $1`, part.ContractID).Scan(&pubID, &contractName)
+	eventType := "contract_participation_status_changed"
+	switch status {
+	case "paused":
+		eventType = "contract_participation_paused"
+	case "active":
+		eventType = "contract_participation_resumed"
+	case "withdrawn":
+		eventType = "contract_participation_withdrawn"
+	}
+	s.notifyParticipation(ctx, s.pool, pubID, eventType, map[string]any{
+		"contract_id":      part.ContractID,
+		"participation_id": participationID,
+		"contract_name":    contractName,
+		"buyer_id":         buyerID,
+		"status":           status,
 	})
 	return updated, nil
 }

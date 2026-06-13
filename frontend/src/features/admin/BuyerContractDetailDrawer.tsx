@@ -9,7 +9,6 @@ import {
   useAddReturnRule,
   useUpdateReturnRule,
   useDeleteReturnRule,
-  useContractPublisherStages,
 } from "@/features/admin/hooks";
 import { useStages } from "@/features/leads/hooks";
 import { ContractStatusBadge } from "@/features/admin/contractStatus";
@@ -38,17 +37,13 @@ export function BuyerContractDetailDrawer({
 
 function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () => void }) {
   const { data: buyerStages, isLoading: buyerStagesLoading } = useStages(contract.buyer_pipeline_id ?? undefined);
-  const { data: publisherStages, isLoading: pubStagesLoading } = useContractPublisherStages(
-    contract.id,
-    true
-  );
   const { data: rules, isLoading: rulesLoading } = useReturnRules(contract.id, true);
   const { data: compensations, isLoading: compsLoading } = useContractCompensations(contract.id, true);
   const addRule = useAddReturnRule(true);
   const updateRule = useUpdateReturnRule(true);
   const removeRule = useDeleteReturnRule(true);
 
-  const loading = buyerStagesLoading || pubStagesLoading || rulesLoading;
+  const loading = buyerStagesLoading || rulesLoading;
 
   return (
     <div className="flex h-full flex-col">
@@ -145,14 +140,15 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
         </div>
 
         <div className="pt-2">
-          <SectionLabel className="mb-2">Return Rules</SectionLabel>
+          <SectionLabel className="mb-2">Return Routes</SectionLabel>
           <ContractReturnRulesEditor
+            side="buyer"
             buyerStages={buyerStages ?? []}
-            publisherStages={publisherStages ?? []}
+            publisherStages={[]}
             rules={rules ?? []}
             defaultReturnStageId={contract.return_stage_id ?? 0}
             loading={loading}
-            description="When a lead enters the From Stage on your pipeline, it is automatically returned to the publisher (no charge to you on return)."
+            description="When a lead enters the stage on your pipeline, it is automatically returned to the publisher (no charge to you on return)."
             onAdd={(buyerStageId, returnStageId) =>
               addRule.mutate(
                 { contractId: contract.id, buyerStageId, returnStageId },

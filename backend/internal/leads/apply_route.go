@@ -228,6 +228,9 @@ func enqueueParticipationIntegration(ctx context.Context, deps RouteApplyDeps, t
 	if deps.Integrations == nil {
 		return nil
 	}
+	if err := LoadCustomValues(ctx, deps.Repo.Pool(), lead); err != nil {
+		return err
+	}
 	payloadJSON, err := BuildDeliveryPayload(lead)
 	if err != nil {
 		return err
