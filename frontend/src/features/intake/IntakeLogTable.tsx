@@ -179,15 +179,18 @@ export function IntakeLogSection({
         </>
       )}
 
-      {!readOnly && routing && <RouteDialog item={routing} onClose={() => setRouting(null)} />}
+      {!readOnly && routing && source === "publisher" && (
+        <RouteDialog item={routing} onClose={() => setRouting(null)} />
+      )}
       {drawerItem && (
         <QueueItemDrawer
           item={drawerItem}
           readOnly={readOnly}
+          mappingSource={source}
           onClose={() => setDrawerItem(null)}
           onUpdated={readOnly ? undefined : setDrawerItem}
           onRoute={
-            readOnly
+            readOnly || source === "buyer"
               ? undefined
               : () => {
                   setRouting(drawerItem);
@@ -195,7 +198,7 @@ export function IntakeLogSection({
                 }
           }
           onReject={
-            readOnly
+            readOnly || source === "buyer"
               ? undefined
               : () => {
                   reject.mutate(drawerItem.id, {
@@ -268,11 +271,11 @@ export function IntakeLogTable({
   const showIntakeData = logType === "intake" || (logType === "all" && source === "buyer");
   const showWebhookData = logType === "webhooks" || (logType === "all" && source === "buyer");
   const showInboundData =
-    (logType === "all" || logType === "integrations") && source === "publisher";
+    logType === "integrations" || (logType === "all" && source === "publisher");
 
   const intakeQuery = useRoutingLog(source, intakeFilters);
   const webhookQuery = useAccountWebhookDeliveries(webhookFilters);
-  const inboundQuery = useInboundLog(inboundFilters, showInboundData);
+  const inboundQuery = useInboundLog(inboundFilters, showInboundData, source);
 
   const buyerAllIntakeQuery = useRoutingLog("buyer", { status: "all", page, limit });
   const buyerAllWebhookQuery = useAccountWebhookDeliveries({ page, limit });
@@ -372,10 +375,7 @@ export function IntakeLogTable({
           ? "No intake history yet."
           : emptyTitle;
 
-  const typeFilters =
-    source === "publisher"
-      ? LOG_TYPE_FILTERS
-      : LOG_TYPE_FILTERS.filter((f) => f.value !== "integrations");
+  const typeFilters = LOG_TYPE_FILTERS;
 
   return (
     <>
@@ -453,6 +453,7 @@ export function IntakeLogTable({
         emptyTitle={emptyMessage}
         hasFilters={hasFilters}
         readOnly={readOnly}
+        mappingSource={source}
         canReplayWebhooks={canReplayWebhooks}
         onPageChange={setPage}
         onLimitChange={setLimit}

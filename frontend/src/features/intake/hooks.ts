@@ -32,12 +32,14 @@ function inboundLogQueryString(filters: InboundLogFilters): string {
 
 export function useInboundLog(
   filters: InboundLogFilters = { type: "all", page: 1, limit: 25 },
-  enabled = true
+  enabled = true,
+  source: "publisher" | "buyer" = "publisher"
 ) {
   const q = inboundLogQueryString(filters);
+  const path = source === "buyer" ? "/buyer/inbound-log" : "/publisher/inbound-log";
   return useQuery({
-    queryKey: ["inbound-log", filters],
-    queryFn: () => get<InboundLogListResponse>(`/publisher/inbound-log?${q}`),
+    queryKey: ["inbound-log", source, filters],
+    queryFn: () => get<InboundLogListResponse>(`${path}?${q}`),
     enabled,
     refetchInterval: enabled ? 5000 : false,
   });

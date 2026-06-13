@@ -151,7 +151,7 @@ export default function App() {
                 <Route path="api" element={<Navigate to="/b/settings/api" replace />} />
                 <Route path="api-docs" element={<ApiDocsPage />} />
                 <Route path="webhooks" element={<WebhooksPage />} />
-                <Route path="integrations/deliveries" element={<Navigate to="/b/logs" replace />} />
+                <Route path="integrations/deliveries" element={<Navigate to="/b/logs?type=integrations" replace />} />
                 <Route path="integrations" element={<IntegrationsLayout />}>
                   <Route index element={<IntegrationsConnectionsTab />} />
                 </Route>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   useMapQueueField,
+  useMapBuyerRoutingLogField,
   useRouteQueue,
   useBuyers,
   useSources,
@@ -136,6 +137,7 @@ export function QueueItemDrawer({
   item,
   onClose,
   readOnly = false,
+  mappingSource = "publisher",
   onUpdated,
   onRoute,
   onReject,
@@ -143,13 +145,16 @@ export function QueueItemDrawer({
   item: QueueItem;
   onClose: () => void;
   readOnly?: boolean;
+  mappingSource?: "publisher" | "buyer";
   onUpdated?: (item: QueueItem) => void;
   onRoute?: () => void;
   onReject?: () => void;
 }) {
   const { data: sources } = useSources();
   const { data: customFields } = useCustomFields();
-  const mapField = useMapQueueField();
+  const mapPublisherField = useMapQueueField();
+  const mapBuyerField = useMapBuyerRoutingLogField();
+  const mapField = mappingSource === "buyer" ? mapBuyerField : mapPublisherField;
   const createField = useCreateField();
   const [targets, setTargets] = useState<Record<string, string>>({});
   const [createFieldKey, setCreateFieldKey] = useState<string | null>(null);
@@ -175,6 +180,7 @@ export function QueueItemDrawer({
   }
 
   const sourceRegistered = !!(item.source && (sources ?? []).some((s) => s.slug === item.source));
+  const canIgnore = mappingSource === "buyer" || sourceRegistered;
   const unmapped = item.unmapped_keys ?? [];
 
   const suggestions = useMemo(
@@ -245,7 +251,7 @@ export function QueueItemDrawer({
     );
   }
 
-  const pending = item.status === "pending_review";
+  const pending = item.status === "pending_review" && mappingSource === "publisher";
 
   return (
     <>
@@ -275,11 +281,14 @@ export function QueueItemDrawer({
             </pre>
           </div>
 
-          {!sourceRegistered && item.source && (
+          {!sourceRegistered && item.source && mappingSource === "publisher" && (
             <p className="text-sm text-gray-500">Mapping applies to this lead only — no registered source for this slug.</p>
           )}
-          {!item.source && (
+          {!item.source && mappingSource === "publisher" && (
             <p className="text-sm text-gray-500">Mapping applies to this lead only — no source slug on this entry.</p>
+          )}
+          {mappingSource === "buyer" && item.source && (
+            <p className="text-sm text-gray-500">Saved mappings apply to future leads from this source.</p>
           )}
 
           {unmapped.length > 0 ? (
@@ -310,7 +319,7 @@ export function QueueItemDrawer({
                     <Button size="sm" disabled={savingKey === key} onClick={() => saveMapping(key)}>
                       Save
                     </Button>
-                    {sourceRegistered && (
+                    {canIgnore && (
                       <Button
                         size="sm"
                         variant="secondary"

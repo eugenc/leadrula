@@ -27,6 +27,7 @@ interface UnifiedInboundLogTableProps {
   emptyTitle: string;
   hasFilters: boolean;
   readOnly?: boolean;
+  mappingSource?: "publisher" | "buyer";
   canReplayWebhooks?: boolean;
   onPageChange: (page: number) => void;
   onLimitChange: (limit: number) => void;
@@ -42,6 +43,7 @@ export function UnifiedInboundLogTable({
   emptyTitle,
   hasFilters,
   readOnly = false,
+  mappingSource = "publisher",
   canReplayWebhooks = false,
   onPageChange,
   onLimitChange,
@@ -220,15 +222,18 @@ export function UnifiedInboundLogTable({
         onLimitChange={onLimitChange}
       />
 
-      {!readOnly && routing && <RouteDialog item={routing} onClose={() => setRouting(null)} />}
+      {!readOnly && routing && mappingSource === "publisher" && (
+        <RouteDialog item={routing} onClose={() => setRouting(null)} />
+      )}
       {drawerItem && (
         <QueueItemDrawer
           item={drawerItem}
           readOnly={readOnly}
+          mappingSource={mappingSource}
           onClose={() => setDrawerItem(null)}
           onUpdated={readOnly ? undefined : setDrawerItem}
           onRoute={
-            readOnly
+            readOnly || mappingSource === "buyer"
               ? undefined
               : () => {
                   setRouting(drawerItem);
@@ -236,7 +241,7 @@ export function UnifiedInboundLogTable({
                 }
           }
           onReject={
-            readOnly
+            readOnly || mappingSource === "buyer"
               ? undefined
               : () => {
                   reject.mutate(drawerItem.id, {

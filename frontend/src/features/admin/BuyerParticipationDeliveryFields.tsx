@@ -99,7 +99,8 @@ export function BuyerParticipationDeliveryFields({
         <div className="pt-2">
           <SectionLabel>CRM forward (optional)</SectionLabel>
           <p className="mb-2 text-xs text-gray-400">
-            Leads still land in inbox or pipeline first, then forward to your CRM.
+            Leads still land in inbox or pipeline first, then forward to your CRM. Delivery attempts appear under{" "}
+            <span className="font-medium text-gray-500">Logs → Integrations</span>, not Webhooks.
           </p>
           <div>
             <Label>Integration</Label>

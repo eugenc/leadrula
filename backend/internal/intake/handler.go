@@ -88,9 +88,11 @@ func (h *Handler) RegisterQueueRoutes(r chi.Router) {
 	r.With(auth.RequireRole("admin")).Post("/intake-queue/{id}/rerun", h.rerun)
 }
 
-// RegisterBuyerRoutes mounts buyer read-only contract routing log routes.
+// RegisterBuyerRoutes mounts buyer contract routing log routes.
 func (h *Handler) RegisterBuyerRoutes(r chi.Router) {
 	r.With(auth.RequireRole("admin")).Get("/routing-log", h.listRoutingLog)
+	r.With(auth.RequireRole("admin")).Get("/inbound-log", h.listInboundLog)
+	r.With(auth.RequireRole("admin")).Post("/routing-log/{id}/map-field", h.mapBuyerRoutingLogField)
 }
 
 func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
@@ -244,6 +246,25 @@ func (h *Handler) mapField(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	item, err := h.svc.MapField(r.Context(), p.AccountID, idp(r), body.SourceKey, body.TargetType, body.BuiltinField, body.CustomFieldID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, item)
+}
+
+func (h *Handler) mapBuyerRoutingLogField(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		SourceKey     string  `json:"source_key"`
+		TargetType    string  `json:"target_type"`
+		BuiltinField  *string `json:"builtin_field"`
+		CustomFieldID *int64  `json:"custom_field_id"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	item, err := h.svc.MapInboundFieldForBuyer(r.Context(), p.AccountID, idp(r), body.SourceKey, body.TargetType, body.BuiltinField, body.CustomFieldID)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return

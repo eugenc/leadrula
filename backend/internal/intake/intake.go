@@ -501,12 +501,12 @@ func (s *Service) ListRoutingLogForBuyer(ctx context.Context, buyerID int64, p L
 	for rows.Next() {
 		var it QueueItem
 		var leadStatus string
-		var ownerID, publisherID int64
-		if err := rows.Scan(&it.ID, &it.LeadID, &it.FirstName, &it.LastName, &it.Phone, &it.Source, &it.RawPayload, &leadStatus, &ownerID, &publisherID, &it.CreatedAt); err != nil {
+		var ownerID int64
+		if err := rows.Scan(&it.ID, &it.LeadID, &it.FirstName, &it.LastName, &it.Phone, &it.Source, &it.RawPayload, &leadStatus, &ownerID, new(int64), &it.CreatedAt); err != nil {
 			return nil, err
 		}
 		it.Status = buyerLogStatus(buyerID, leadStatus, ownerID)
-		if err := s.enrichQueueItem(ctx, publisherID, &it); err != nil {
+		if err := s.enrichQueueItemForBuyer(ctx, buyerID, &it); err != nil {
 			return nil, err
 		}
 		items = append(items, it)

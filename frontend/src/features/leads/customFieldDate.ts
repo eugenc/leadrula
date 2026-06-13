@@ -28,9 +28,9 @@ function toDateFnsPattern(token: string): string {
   return DATE_FNS_PATTERNS[token] ?? token;
 }
 
-export function inputModeForFormat(type: string, formatToken: string): "date" | "datetime-local" | "text" {
-  if (type === "date" && formatToken === "yyyy-MM-DD") return "date";
-  if (type === "datetime" && formatToken === "yyyy-MM-DDTHH:mm") return "datetime-local";
+export function inputModeForFormat(type: string, _formatToken: string): "date" | "datetime-local" | "text" {
+  if (type === "date") return "date";
+  if (type === "datetime") return "datetime-local";
   return "text";
 }
 

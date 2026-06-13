@@ -1215,6 +1215,17 @@ export function useMapQueueField() {
     },
   });
 }
+export function useMapBuyerRoutingLogField() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
+      post<QueueItem>(`/buyer/routing-log/${id}/map-field`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["buyer-routing-log"] });
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    },
+  });
+}
 export function useRouteQueue() {
   const inv = useInvalidate(["intake-queue", "leads"]);
   return useMutation({

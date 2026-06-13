@@ -384,6 +384,7 @@ export function jwtEndpointGroups(ns: "/publisher" | "/buyer"): DocGroup[] {
         endpoints: [
           { method: "GET", path: nsPath(ns, "/routes"), auth: "JWT", description: "List inbound routes (read-only)." },
           { method: "GET", path: nsPath(ns, "/routing-log"), auth: "JWT admin", description: "Contract routing log." },
+          { method: "GET", path: nsPath(ns, "/inbound-log"), auth: "JWT admin", description: "Webhooks and CRM integration delivery log." },
         ],
       },
       {
