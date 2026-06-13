@@ -154,6 +154,57 @@ func TestDeleteReturnRule_blocksLastContractRule(t *testing.T) {
 	}
 }
 
+func TestAddBuyerContractReturnRule_resolvesPublisherReturnStage(t *testing.T) {
+	pool := connectContractsTestDB(t)
+	ctx := context.Background()
+	svc := NewService(pool)
+
+	var buyerID, contractID, buyerPipelineID, buyerStageID, returnStageID int64
+	err := pool.QueryRow(ctx,
+		`SELECT c.buyer_id, c.id, c.buyer_pipeline_id, c.return_stage_id,
+		        (SELECT ps.id FROM pipeline_stages ps WHERE ps.pipeline_id = c.buyer_pipeline_id ORDER BY ps.position, ps.id LIMIT 1)
+		 FROM contracts c
+		 WHERE c.buyer_id IS NOT NULL AND c.buyer_pipeline_id IS NOT NULL AND c.return_stage_id IS NOT NULL
+		   AND c.deleted_at IS NULL AND c.contract_type = 'sell'
+		 LIMIT 1`).Scan(&buyerID, &contractID, &buyerPipelineID, &returnStageID, &buyerStageID)
+	if err != nil {
+		t.Skip("no direct buyer contract in database")
+	}
+	if buyerStageID == 0 {
+		t.Skip("contract buyer pipeline has no stages")
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM contract_return_rules WHERE contract_id = $1 AND participation_id IS NULL AND buyer_stage_id = $2`,
+		contractID, buyerStageID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	rr, err := svc.AddBuyerContractReturnRule(ctx, buyerID, contractID, buyerStageID, buyerPipelineID)
+	if err != nil {
+		t.Fatalf("AddBuyerContractReturnRule: %v", err)
+	}
+	if rr.ReturnStageID != returnStageID {
+		t.Fatalf("return_stage_id = %d, want %d", rr.ReturnStageID, returnStageID)
+	}
+	if rr.ParticipationID != nil {
+		t.Fatalf("expected contract-level rule, got participation_id %v", rr.ParticipationID)
+	}
+
+	if err := svc.DeleteBuyerContractReturnRule(ctx, buyerID, contractID, rr.ID); err != nil {
+		t.Fatalf("DeleteBuyerContractReturnRule: %v", err)
+	}
+}
+
 func TestActivateOfferDraft_allowsMissingContractReturnRoutes(t *testing.T) {
 	pool := connectContractsTestDB(t)
 	ctx := context.Background()

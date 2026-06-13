@@ -506,6 +506,17 @@ export function useUpdateParticipationDelivery() {
   });
 }
 
+export function useUpdateBuyerContractDelivery() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ contractId, body }: { contractId: number; body: Record<string, unknown> }) =>
+      patch<import("@/types").Contract>(`/buyer/contracts/${contractId}/delivery`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["buyer-contracts"] });
+    },
+  });
+}
+
 export function useUpdateParticipationStatus() {
   const qc = useQueryClient();
   return useMutation({
@@ -619,16 +630,23 @@ export function useAddReturnRule(buyer = false) {
       contractId,
       buyerStageId,
       returnStageId,
+      buyerPipelineId,
     }: {
       contractId: number;
       buyerStageId: number;
       returnStageId: number;
+      buyerPipelineId?: number;
     }) =>
       post(
         buyer
           ? `/buyer/contracts/${contractId}/return-rules`
           : `/publisher/contracts/${contractId}/return-rules`,
-        { buyer_stage_id: buyerStageId, return_stage_id: returnStageId }
+        buyer
+          ? {
+              buyer_stage_id: buyerStageId,
+              ...(buyerPipelineId ? { buyer_pipeline_id: buyerPipelineId } : {}),
+            }
+          : { buyer_stage_id: buyerStageId, return_stage_id: returnStageId }
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["return-rules"] }),
   });
@@ -641,17 +659,24 @@ export function useUpdateReturnRule(buyer = false) {
       ruleId,
       buyerStageId,
       returnStageId,
+      buyerPipelineId,
     }: {
       contractId: number;
       ruleId: number;
       buyerStageId: number;
       returnStageId: number;
+      buyerPipelineId?: number;
     }) =>
       patch(
         buyer
           ? `/buyer/contracts/${contractId}/return-rules/${ruleId}`
           : `/publisher/return-rules/${ruleId}`,
-        { buyer_stage_id: buyerStageId, return_stage_id: returnStageId }
+        buyer
+          ? {
+              buyer_stage_id: buyerStageId,
+              ...(buyerPipelineId ? { buyer_pipeline_id: buyerPipelineId } : {}),
+            }
+          : { buyer_stage_id: buyerStageId, return_stage_id: returnStageId }
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["return-rules"] }),
   });

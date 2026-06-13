@@ -37,9 +37,13 @@ type Contract struct {
 	CapMaxDaily      *int      `json:"cap_max_daily,omitempty"`
 	ContractType     string    `json:"contract_type"`
 	MirrorContractID *int64    `json:"mirror_contract_id,omitempty"`
-	LeadCount              int       `json:"lead_count"`
-	AllowedDeliveryModes   []string  `json:"allowed_delivery_modes,omitempty"`
-	DistributionStrategy   string    `json:"distribution_strategy,omitempty"`
+	LeadCount                 int       `json:"lead_count"`
+	Delivery                  string    `json:"delivery,omitempty"`
+	BuyerTargetStageID        *int64    `json:"buyer_target_stage_id,omitempty"`
+	IntegrationConnectionID   *int64    `json:"integration_connection_id,omitempty"`
+	OutboundWebhookID         *int64    `json:"outbound_webhook_id,omitempty"`
+	AllowedDeliveryModes      []string  `json:"allowed_delivery_modes,omitempty"`
+	DistributionStrategy      string    `json:"distribution_strategy,omitempty"`
 	ParentContractID       *int64    `json:"parent_contract_id,omitempty"`
 	InviteToken            string    `json:"invite_token,omitempty"`
 	Participations         []Participation `json:"participations,omitempty"`
@@ -183,14 +187,49 @@ func (s *Service) Get(ctx context.Context, publisherID, id int64) (*Contract, er
 	return c, nil
 }
 
+const buyerContractCompLateral = `LEFT JOIN LATERAL (
+	SELECT delivery, counterparty_stage_id
+	FROM contract_compensations
+	WHERE contract_id = c.id AND participation_id IS NULL
+	ORDER BY position, id LIMIT 1
+) cc ON true`
+
+func scanBuyerContract(row pgx.Row, withPublisher bool) (*Contract, error) {
+	c := &Contract{}
+	var delivery string
+	scan := []any{
+		&c.ID, &c.PublicID, &c.HandlerID, &c.PublisherID, &c.BuyerID, &c.Name,
+		&c.Description, &c.LeadType,
+		&c.SourcePipelineID, &c.SourceStageID, &c.BuyerPipelineID, &c.ReturnStageID,
+		&c.RatePerLead, &c.Status, &c.CapPeriod, &c.CapTotal, &c.CapMaxDaily,
+		&c.CreatedAt, &c.ContractType, &c.MirrorContractID, &c.AllowedDeliveryModes,
+		&delivery, &c.BuyerTargetStageID,
+	}
+	if withPublisher {
+		scan = append(scan, &c.PublisherName, &c.LeadCount)
+	}
+	if err := row.Scan(scan...); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, httpx.NotFound("contract not found")
+		}
+		return nil, err
+	}
+	c.Delivery = delivery
+	return c, nil
+}
+
 func (s *Service) ListForBuyer(ctx context.Context, buyerID int64) ([]Contract, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT c.id, c.public_id, c.handler_id, c.publisher_id, c.buyer_id, c.name,
 		        COALESCE(c.description, ''), COALESCE(c.lead_type, ''),
 		        c.source_pipeline_id, c.source_stage_id, c.buyer_pipeline_id, c.return_stage_id,
 		        c.rate_per_lead::float8, c.status, c.cap_period, c.cap_total, c.cap_max_daily,
-		        c.created_at, c.contract_type, c.mirror_contract_id, a.name, `+contractLeadCountSubquery+`
-		 FROM contracts c JOIN accounts a ON a.id = c.publisher_id
+		        c.created_at, c.contract_type, c.mirror_contract_id, c.allowed_delivery_modes,
+		        COALESCE(cc.delivery, ''), cc.counterparty_stage_id,
+		        a.name, `+contractLeadCountSubquery+`
+		 FROM contracts c
+		 JOIN accounts a ON a.id = c.publisher_id
+		 `+buyerContractCompLateral+`
 		 WHERE c.buyer_id = $1 AND c.deleted_at IS NULL AND c.contract_type = 'sell'
 		 ORDER BY c.created_at DESC`, buyerID)
 	if err != nil {
@@ -199,23 +238,27 @@ func (s *Service) ListForBuyer(ctx context.Context, buyerID int64) ([]Contract, 
 	defer rows.Close()
 	var out []Contract
 	for rows.Next() {
-		var c Contract
-		if err := rows.Scan(&c.ID, &c.PublicID, &c.HandlerID, &c.PublisherID, &c.BuyerID, &c.Name,
-			&c.Description, &c.LeadType,
-			&c.SourcePipelineID, &c.SourceStageID, &c.BuyerPipelineID, &c.ReturnStageID,
-			&c.RatePerLead, &c.Status, &c.CapPeriod, &c.CapTotal, &c.CapMaxDaily,
-			&c.CreatedAt, &c.ContractType, &c.MirrorContractID, &c.PublisherName, &c.LeadCount); err != nil {
+		c, err := scanBuyerContract(rows, true)
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, c)
+		out = append(out, *c)
 	}
 	return out, rows.Err()
 }
 
 func (s *Service) GetForBuyerContract(ctx context.Context, buyerID, contractID int64) (*Contract, error) {
-	return scanContract(s.pool.QueryRow(ctx,
-		`SELECT `+contractCols+` FROM contracts WHERE id = $1 AND buyer_id = $2 AND deleted_at IS NULL AND contract_type = 'sell'`,
-		contractID, buyerID))
+	return scanBuyerContract(s.pool.QueryRow(ctx,
+		`SELECT c.id, c.public_id, c.handler_id, c.publisher_id, c.buyer_id, c.name,
+		        COALESCE(c.description, ''), COALESCE(c.lead_type, ''),
+		        c.source_pipeline_id, c.source_stage_id, c.buyer_pipeline_id, c.return_stage_id,
+		        c.rate_per_lead::float8, c.status, c.cap_period, c.cap_total, c.cap_max_daily,
+		        c.created_at, c.contract_type, c.mirror_contract_id, c.allowed_delivery_modes,
+		        COALESCE(cc.delivery, ''), cc.counterparty_stage_id
+		 FROM contracts c
+		 `+buyerContractCompLateral+`
+		 WHERE c.id = $1 AND c.buyer_id = $2 AND c.deleted_at IS NULL AND c.contract_type = 'sell'`,
+		contractID, buyerID), false)
 }
 
 type CreateParams struct {
@@ -776,6 +819,239 @@ func (s *Service) DeleteReturnRule(ctx context.Context, ruleID int64) error {
 	}
 	_, err = s.pool.Exec(ctx, `DELETE FROM contract_return_rules WHERE id = $1`, ruleID)
 	return err
+}
+
+func (s *Service) validateBuyerContractReturnRuleStages(ctx context.Context, contractID, buyerStageID, buyerPipelineOverride int64) (int64, error) {
+	var storedBuyerPipelineID, returnStageID, sourcePipelineID *int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT buyer_pipeline_id, return_stage_id, source_pipeline_id FROM contracts WHERE id = $1 AND deleted_at IS NULL`,
+		contractID).Scan(&storedBuyerPipelineID, &returnStageID, &sourcePipelineID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, httpx.NotFound("contract not found")
+	}
+	if err != nil {
+		return 0, err
+	}
+	buyerPipelineID := int64(0)
+	if storedBuyerPipelineID != nil {
+		buyerPipelineID = *storedBuyerPipelineID
+	}
+	if buyerPipelineID == 0 && buyerPipelineOverride > 0 {
+		buyerPipelineID = buyerPipelineOverride
+	}
+	if buyerPipelineID == 0 {
+		return 0, httpx.Validation("buyer pipeline is not configured on contract")
+	}
+	if returnStageID == nil || *returnStageID == 0 {
+		return 0, httpx.Validation("publisher return destination is not configured on contract")
+	}
+	if sourcePipelineID == nil || *sourcePipelineID == 0 {
+		return 0, httpx.Validation("publisher pipeline is not configured on contract")
+	}
+	var ok bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM pipeline_stages WHERE id = $1 AND pipeline_id = $2)`,
+		buyerStageID, buyerPipelineID).Scan(&ok); err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, httpx.Validation("buyer stage not in contract buyer pipeline")
+	}
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM pipeline_stages WHERE id = $1 AND pipeline_id = $2)`,
+		*returnStageID, *sourcePipelineID).Scan(&ok); err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, httpx.Validation("return stage not in contract publisher pipeline")
+	}
+	return *returnStageID, nil
+}
+
+func (s *Service) AddBuyerContractReturnRule(ctx context.Context, buyerID, contractID, buyerStageID, buyerPipelineOverride int64) (*ReturnRule, error) {
+	if _, err := s.GetForBuyerContract(ctx, buyerID, contractID); err != nil {
+		return nil, err
+	}
+	returnStageID, err := s.validateBuyerContractReturnRuleStages(ctx, contractID, buyerStageID, buyerPipelineOverride)
+	if err != nil {
+		return nil, err
+	}
+	return s.AddReturnRule(ctx, contractID, buyerStageID, returnStageID)
+}
+
+func (s *Service) UpdateBuyerContractReturnRule(ctx context.Context, buyerID, contractID, ruleID, buyerStageID, buyerPipelineOverride int64) (*ReturnRule, error) {
+	if _, err := s.GetForBuyerContract(ctx, buyerID, contractID); err != nil {
+		return nil, err
+	}
+	var ruleContractID int64
+	var participationID *int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT contract_id, participation_id FROM contract_return_rules WHERE id = $1`, ruleID).Scan(&ruleContractID, &participationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, httpx.NotFound("return route not found")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if ruleContractID != contractID || participationID != nil {
+		return nil, httpx.NotFound("return route not found")
+	}
+	returnStageID, err := s.validateBuyerContractReturnRuleStages(ctx, contractID, buyerStageID, buyerPipelineOverride)
+	if err != nil {
+		return nil, err
+	}
+	rr := &ReturnRule{}
+	err = s.pool.QueryRow(ctx,
+		`UPDATE contract_return_rules SET buyer_stage_id = $2, return_stage_id = $3
+		 WHERE id = $1 AND participation_id IS NULL
+		 RETURNING id, contract_id, participation_id, buyer_stage_id, return_stage_id, created_at`,
+		ruleID, buyerStageID, returnStageID).Scan(
+		&rr.ID, &rr.ContractID, &rr.ParticipationID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt)
+	if err != nil {
+		if database.IsUniqueViolation(err) {
+			return nil, httpx.Conflict("return route already exists for this buyer stage")
+		}
+		return nil, err
+	}
+	return rr, nil
+}
+
+func (s *Service) DeleteBuyerContractReturnRule(ctx context.Context, buyerID, contractID, ruleID int64) error {
+	if _, err := s.GetForBuyerContract(ctx, buyerID, contractID); err != nil {
+		return err
+	}
+	var ruleContractID int64
+	var participationID *int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT contract_id, participation_id FROM contract_return_rules WHERE id = $1`, ruleID).Scan(&ruleContractID, &participationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return httpx.NotFound("return route not found")
+	}
+	if err != nil {
+		return err
+	}
+	if ruleContractID != contractID || participationID != nil {
+		return httpx.NotFound("return route not found")
+	}
+	return s.DeleteReturnRule(ctx, ruleID)
+}
+
+func (s *Service) validateBuyerContractDelivery(ctx context.Context, buyerID, contractID int64, p AcceptParticipationParams, requireReturnRoutes bool) (*validatedParticipationDelivery, error) {
+	c, err := s.GetForBuyerContract(ctx, buyerID, contractID)
+	if err != nil {
+		return nil, err
+	}
+	if c.Status != "active" {
+		return nil, httpx.BusinessRule("publisher contract is not active")
+	}
+	var allowed []string
+	if len(c.AllowedDeliveryModes) > 0 {
+		allowed = c.AllowedDeliveryModes
+	} else {
+		allowed = []string{"leads", "leads_pipeline"}
+	}
+	delivery := strings.TrimSpace(p.Delivery)
+	if delivery == "" {
+		return nil, httpx.Validation("delivery is required")
+	}
+	ok := false
+	for _, m := range allowed {
+		if m == delivery {
+			ok = true
+			break
+		}
+	}
+	if !ok {
+		return nil, httpx.Validation("delivery mode not allowed on this contract")
+	}
+	if !allowedPublisherDelivery[delivery] {
+		return nil, httpx.Validation("invalid delivery mode")
+	}
+	if delivery == "webhook" {
+		return nil, httpx.Validation("webhook delivery is not available on direct contracts")
+	}
+	if p.IntegrationConnectionID != 0 {
+		return nil, httpx.Validation("crm integration is not available on direct contracts")
+	}
+	buyerPipelineID := p.BuyerPipelineID
+	buyerStageID := p.BuyerTargetStageID
+	if delivery == "leads_pipeline" {
+		if buyerPipelineID == 0 {
+			if c.BuyerPipelineID != nil {
+				buyerPipelineID = *c.BuyerPipelineID
+			}
+		}
+		if buyerPipelineID == 0 || buyerStageID == 0 {
+			return nil, httpx.Validation("buyer_pipeline_id and buyer_target_stage_id are required for pipeline delivery")
+		}
+		if err := validateBuyerTargetStage(ctx, s.pool, buyerStageID, buyerPipelineID); err != nil {
+			return nil, err
+		}
+		if c.ReturnStageID == nil || *c.ReturnStageID == 0 {
+			return nil, httpx.Validation("publisher return destination is not configured on contract")
+		}
+		if requireReturnRoutes {
+			n, err := countContractReturnRules(ctx, s.pool, contractID)
+			if err != nil {
+				return nil, err
+			}
+			if n == 0 {
+				return nil, httpx.Validation("at least one return route is required for pipeline delivery")
+			}
+		}
+	} else {
+		buyerPipelineID = 0
+		buyerStageID = 0
+	}
+	return &validatedParticipationDelivery{
+		delivery:        delivery,
+		buyerPipelineID: buyerPipelineID,
+		buyerStageID:    buyerStageID,
+	}, nil
+}
+
+func (s *Service) UpdateBuyerContractDelivery(ctx context.Context, buyerID, contractID int64, p AcceptParticipationParams) (*Contract, error) {
+	validated, err := s.validateBuyerContractDelivery(ctx, buyerID, contractID, p, true)
+	if err != nil {
+		return nil, err
+	}
+	if validated.delivery == "leads_pipeline" {
+		if err := applyBuyerStageTriggersToWon(ctx, s.pool, contractID, 0, validated.buyerPipelineID); err != nil {
+			return nil, err
+		}
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx,
+		`UPDATE contracts SET buyer_pipeline_id = NULLIF($2,0) WHERE id = $1`,
+		contractID, validated.buyerPipelineID); err != nil {
+		return nil, err
+	}
+	res, err := tx.Exec(ctx,
+		`UPDATE contract_compensations SET
+		   delivery = $2,
+		   counterparty_pipeline_id = NULLIF($3,0),
+		   counterparty_stage_id = NULLIF($4,0)
+		 WHERE contract_id = $1 AND participation_id IS NULL
+		   AND id = (
+		     SELECT id FROM contract_compensations
+		     WHERE contract_id = $1 AND participation_id IS NULL
+		     ORDER BY position, id LIMIT 1
+		   )`,
+		contractID, validated.delivery, validated.buyerPipelineID, validated.buyerStageID)
+	if err != nil {
+		return nil, err
+	}
+	if res.RowsAffected() == 0 {
+		return nil, httpx.Validation("contract compensation is not configured")
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.GetForBuyerContract(ctx, buyerID, contractID)
 }
 
 func (s *Service) PublisherReturnStages(ctx context.Context, contractID int64) ([]PublisherStage, error) {

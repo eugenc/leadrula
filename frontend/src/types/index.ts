@@ -249,6 +249,10 @@ export interface Contract {
   cap_total?: number | null;
   cap_max_daily?: number | null;
   lead_count?: number;
+  delivery?: string;
+  buyer_target_stage_id?: number | null;
+  integration_connection_id?: number | null;
+  outbound_webhook_id?: number | null;
   allowed_delivery_modes?: string[];
   distribution_strategy?: string;
   parent_contract_id?: number | null;

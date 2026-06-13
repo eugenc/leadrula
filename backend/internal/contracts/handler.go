@@ -66,6 +66,7 @@ func (h *Handler) RegisterBuyer(r chi.Router) {
 	r.Get("/participations/{id}/compensations", h.buyerListParticipationCompensations)
 	r.Get("/participations/{id}/field-map", h.buyerListParticipationFieldMap)
 	r.Get("/participations/{id}/field-map/options", h.buyerParticipationFieldMapOptions)
+	r.With(auth.RequireRole("admin")).Patch("/contracts/{id}/delivery", h.buyerUpdateContractDelivery)
 	r.With(auth.RequireRole("admin")).Post("/contracts/{id}/return-rules", h.buyerAddRule)
 	r.With(auth.RequireRole("admin")).Patch("/contracts/{id}/return-rules/{ruleId}", h.buyerUpdateRule)
 	r.With(auth.RequireRole("admin")).Delete("/contracts/{id}/return-rules/{ruleId}", h.buyerDeleteRule)
@@ -659,46 +660,74 @@ func (h *Handler) buyerListRules(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, rules)
 }
 
-func (h *Handler) buyerAddRule(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) buyerUpdateContractDelivery(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	cid := idp(r, "id")
-	if _, err := h.svc.GetForBuyerContract(r.Context(), p.AccountID, cid); err != nil {
+	var body AcceptParticipationParams
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	c, err := h.svc.UpdateBuyerContractDelivery(r.Context(), p.AccountID, idp(r, "id"), body)
+	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
-	httpx.WriteError(w, httpx.Forbidden("return routes on this contract are configured by the publisher"))
+	httpx.JSON(w, http.StatusOK, c)
+}
+
+func (h *Handler) buyerAddRule(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	cid := idp(r, "id")
+	var body struct {
+		BuyerStageID    int64 `json:"buyer_stage_id"`
+		BuyerPipelineID int64 `json:"buyer_pipeline_id"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	if body.BuyerStageID == 0 {
+		httpx.WriteError(w, httpx.Validation("buyer_stage_id is required"))
+		return
+	}
+	rr, err := h.svc.AddBuyerContractReturnRule(r.Context(), p.AccountID, cid, body.BuyerStageID, body.BuyerPipelineID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, rr)
 }
 
 func (h *Handler) buyerUpdateRule(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	cid := idp(r, "id")
 	ruleID := idp(r, "ruleId")
-	ruleContractID, err := h.svc.ReturnRuleBelongsToBuyer(r.Context(), p.AccountID, ruleID)
+	var body struct {
+		BuyerStageID    int64 `json:"buyer_stage_id"`
+		BuyerPipelineID int64 `json:"buyer_pipeline_id"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	if body.BuyerStageID == 0 {
+		httpx.WriteError(w, httpx.Validation("buyer_stage_id is required"))
+		return
+	}
+	rr, err := h.svc.UpdateBuyerContractReturnRule(r.Context(), p.AccountID, cid, ruleID, body.BuyerStageID, body.BuyerPipelineID)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
-	if ruleContractID != cid {
-		httpx.WriteError(w, httpx.NotFound("return rule not found"))
-		return
-	}
-	httpx.WriteError(w, httpx.Forbidden("return routes on this contract are configured by the publisher"))
+	httpx.JSON(w, http.StatusOK, rr)
 }
 
 func (h *Handler) buyerDeleteRule(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	cid := idp(r, "id")
 	ruleID := idp(r, "ruleId")
-	ruleContractID, err := h.svc.ReturnRuleBelongsToBuyer(r.Context(), p.AccountID, ruleID)
-	if err != nil {
+	if err := h.svc.DeleteBuyerContractReturnRule(r.Context(), p.AccountID, cid, ruleID); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
-	if ruleContractID != cid {
-		httpx.WriteError(w, httpx.NotFound("return rule not found"))
-		return
-	}
-	httpx.WriteError(w, httpx.Forbidden("return routes on this contract are configured by the publisher"))
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) buyerPublisherStages(w http.ResponseWriter, r *http.Request) {

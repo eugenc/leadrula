@@ -711,11 +711,20 @@ func applyBuyerStageTriggersToWon(ctx context.Context, q database.Querier, contr
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			var n int
-			if err := q.QueryRow(ctx,
-				`SELECT COUNT(*) FROM contract_compensations
-				 WHERE contract_id = $1 AND participation_id = $2
-				   AND trigger = 'buyer_stage' AND kind IN ('rev_share', 'profit_share')`,
-				contractID, participationID).Scan(&n); err != nil {
+			if participationID == 0 {
+				err = q.QueryRow(ctx,
+					`SELECT COUNT(*) FROM contract_compensations
+					 WHERE contract_id = $1 AND participation_id IS NULL
+					   AND trigger = 'buyer_stage' AND kind IN ('rev_share', 'profit_share')`,
+					contractID).Scan(&n)
+			} else {
+				err = q.QueryRow(ctx,
+					`SELECT COUNT(*) FROM contract_compensations
+					 WHERE contract_id = $1 AND participation_id = $2
+					   AND trigger = 'buyer_stage' AND kind IN ('rev_share', 'profit_share')`,
+					contractID, participationID).Scan(&n)
+			}
+			if err != nil {
 				return err
 			}
 			if n > 0 {
@@ -725,11 +734,19 @@ func applyBuyerStageTriggersToWon(ctx context.Context, q database.Querier, contr
 		}
 		return err
 	}
-	_, err = q.Exec(ctx,
-		`UPDATE contract_compensations SET trigger_stage_id = $1
-		 WHERE contract_id = $2 AND participation_id = $3
-		   AND trigger = 'buyer_stage' AND kind IN ('rev_share', 'profit_share')`,
-		wonStageID, contractID, participationID)
+	if participationID == 0 {
+		_, err = q.Exec(ctx,
+			`UPDATE contract_compensations SET trigger_stage_id = $1
+			 WHERE contract_id = $2 AND participation_id IS NULL
+			   AND trigger = 'buyer_stage' AND kind IN ('rev_share', 'profit_share')`,
+			wonStageID, contractID)
+	} else {
+		_, err = q.Exec(ctx,
+			`UPDATE contract_compensations SET trigger_stage_id = $1
+			 WHERE contract_id = $2 AND participation_id = $3
+			   AND trigger = 'buyer_stage' AND kind IN ('rev_share', 'profit_share')`,
+			wonStageID, contractID, participationID)
+	}
 	return err
 }
 
