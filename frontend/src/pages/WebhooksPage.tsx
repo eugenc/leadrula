@@ -41,7 +41,7 @@ import { Dropdown, DropdownItem, DropdownSearch } from "@/components/ui/dropdown
 import { format } from "date-fns";
 import { ArrowRightLeft, Copy, Eye, EyeOff, KeyRound, Pencil, Plus, Trash2, Zap } from "lucide-react";
 import { toast } from "@/store/toastStore";
-import { errorMessage } from "@/lib/api";
+import { errorMessage, apiBaseURL } from "@/lib/api";
 import type { Webhook, WebhookEvent, WebhookOutboundTrigger, OutboundTriggerEvent, OutboundFormat, OutboundMethod, OutboundFieldMapEntry, ResponseMapEntry, InboundCondition, WebhookDelivery } from "@/types";
 import { canReplayDelivery, webhookDeliveryStatusLabel } from "@/features/intake/logShared";
 
@@ -79,6 +79,16 @@ function conditionSummary(conditions: InboundCondition[], logic: string): string
   if (!conditions?.length) return "Always";
   const joiner = logic === "or" ? " OR " : " AND ";
   return conditions.map(formatCondition).join(joiner);
+}
+
+function isManagedWebhook(w: Webhook) {
+  return w.integration_connection_id != null && w.integration_connection_id > 0;
+}
+
+function managedByLabel(slug?: string | null) {
+  if (slug === "sunbase") return "SunBase";
+  if (slug) return slug;
+  return "Integration";
 }
 
 function InboundConditionRow({
@@ -131,7 +141,6 @@ function InboundConditionRow({
   );
 }
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 const BUILTINS = [
   ...MAP_BUILTIN_FIELDS,
   "external_id",
@@ -189,10 +198,10 @@ function InboundEndpointRows({
   showSecret: boolean;
   onToggleSecret: () => void;
   onCopySecret: () => void;
-  onRotate: () => void;
+  onRotate?: () => void;
   rotatePending?: boolean;
 }) {
-  const endpoint = `${API_URL}/api/v1/webhooks/${slug}`;
+  const endpoint = `${apiBaseURL}/api/v1/webhooks/${slug}`;
   return (
     <div className="space-y-2 text-sm">
       <div className="flex items-center gap-1.5 font-mono text-xs text-gray-700">
@@ -221,9 +230,11 @@ function InboundEndpointRows({
           <IconButton aria-label="Copy secret" onClick={onCopySecret}>
             <Copy className="h-3.5 w-3.5" />
           </IconButton>
-          <IconButton aria-label="Rotate secret" disabled={rotatePending} onClick={onRotate}>
-            <KeyRound className="h-3.5 w-3.5" />
-          </IconButton>
+          {onRotate && (
+            <IconButton aria-label="Rotate secret" disabled={rotatePending} onClick={onRotate}>
+              <KeyRound className="h-3.5 w-3.5" />
+            </IconButton>
+          )}
         </div>
       ) : (
         <div className="space-y-1">
@@ -233,9 +244,11 @@ function InboundEndpointRows({
             {secretPrefix && (
               <span className="font-mono text-gray-500">({secretPrefix}…)</span>
             )}
-            <IconButton aria-label="Rotate secret" disabled={rotatePending} onClick={onRotate}>
-              <KeyRound className="h-3.5 w-3.5" />
-            </IconButton>
+            {onRotate && (
+              <IconButton aria-label="Rotate secret" disabled={rotatePending} onClick={onRotate}>
+                <KeyRound className="h-3.5 w-3.5" />
+              </IconButton>
+            )}
           </div>
           <p className="text-xs text-gray-500">
             Full secret is only available after creation or rotation.
@@ -302,9 +315,20 @@ export function WebhooksPage() {
               </tr>
             </THead>
             <TBody>
-              {(webhooks ?? []).map((w) => (
+              {(webhooks ?? []).map((w) => {
+                const managed = isManagedWebhook(w);
+                return (
                 <TR key={w.id} onClick={() => setDetailFor(w)}>
-                  <TD className="font-semibold">{w.name}</TD>
+                  <TD className="font-semibold">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span>{w.name}</span>
+                      {managed && (
+                        <Badge variant="default">
+                          Managed by {managedByLabel(w.integration_provider_slug)}
+                        </Badge>
+                      )}
+                    </div>
+                  </TD>
                   <TD className="font-mono text-xs">{w.slug}</TD>
                   <TD>
                     <div className="flex gap-1">
@@ -313,34 +337,41 @@ export function WebhooksPage() {
                     </div>
                   </TD>
                   <TD className="font-mono text-xs text-gray-500">
-                    {w.inbound_enabled ? `POST ${API_URL}/api/v1/webhooks/${w.slug}` : "—"}
+                    {w.inbound_enabled ? `POST ${apiBaseURL}/api/v1/webhooks/${w.slug}` : "—"}
                   </TD>
                   <TD>
-                    <div onClick={(e) => e.stopPropagation()}>
-                      <Switch
-                        checked={w.is_active}
-                        onChange={(v) => update.mutate({ id: w.id, body: { is_active: v } })}
-                      />
-                    </div>
+                    {managed ? (
+                      <span className="text-xs text-gray-400">Always on</span>
+                    ) : (
+                      <div onClick={(e) => e.stopPropagation()}>
+                        <Switch
+                          checked={w.is_active}
+                          onChange={(v) => update.mutate({ id: w.id, body: { is_active: v } })}
+                        />
+                      </div>
+                    )}
                   </TD>
                   <TD>
                     <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-                      <IconButton aria-label="Edit" onClick={() => setDrawerWebhook(w)}>
+                      <IconButton aria-label={managed ? "View" : "Edit"} onClick={() => setDrawerWebhook(w)}>
                         <Pencil className="h-4 w-4" />
                       </IconButton>
                       <IconButton aria-label="Configure" onClick={() => setDetailFor(w)}>
                         <ArrowRightLeft className="h-4 w-4" />
                       </IconButton>
-                      <IconButton
-                        variant="danger"
-                        onClick={() => remove.mutate(w.id, { onError: (e) => toast.error(errorMessage(e)) })}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </IconButton>
+                      {!managed && (
+                        <IconButton
+                          variant="danger"
+                          onClick={() => remove.mutate(w.id, { onError: (e) => toast.error(errorMessage(e)) })}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </IconButton>
+                      )}
                     </div>
                   </TD>
                 </TR>
-              ))}
+                );
+              })}
             </TBody>
           </Table>
         )}
@@ -406,6 +437,7 @@ function WebhookDrawer({
 }) {
   if (!open) return null;
   const editing = webhook !== null;
+  const managed = editing && isManagedWebhook(webhook!);
   const create = useCreateWebhook();
   const update = useUpdateWebhook();
   const [actionDrawer, setActionDrawer] = useState<WebhookEvent | null | undefined>(undefined);
@@ -511,23 +543,32 @@ function WebhookDrawer({
       open
       onClose={onClose}
       title={editing ? webhook!.name : "New Webhook"}
-      subtitle={editing ? "Edit webhook" : "Create inbound webhook endpoint"}
+      subtitle={managed ? "Managed integration webhook" : editing ? "Edit webhook" : "Create inbound webhook endpoint"}
       width={720}
       footer={
-        <>
-          <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button disabled={!valid || saving} onClick={submit}>{editing ? "Save" : "Create"}</Button>
-        </>
+        managed ? (
+          <Button variant="secondary" onClick={onClose}>Close</Button>
+        ) : (
+          <>
+            <Button variant="secondary" onClick={onClose}>Cancel</Button>
+            <Button disabled={!valid || saving} onClick={submit}>{editing ? "Save" : "Create"}</Button>
+          </>
+        )
       }
     >
       <div className="space-y-3">
+        {managed && (
+          <p className="rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Managed by {managedByLabel(webhook!.integration_provider_slug)} — edit settings in Integrations, or disconnect to remove.
+          </p>
+        )}
         <div>
           <Label>Name</Label>
-          <Input value={name} onChange={(e) => { setName(e.target.value); if (!editing && !slugTouched) setSlug(slugify(e.target.value)); }} />
+          <Input disabled={managed} value={name} onChange={(e) => { setName(e.target.value); if (!editing && !slugTouched) setSlug(slugify(e.target.value)); }} />
         </div>
         <div>
           <Label>Slug</Label>
-          <Input value={slug} onChange={(e) => { setSlugTouched(true); setSlug(e.target.value); }} />
+          <Input disabled={managed} value={slug} onChange={(e) => { setSlugTouched(true); setSlug(e.target.value); }} />
         </div>
         <div className="space-y-3">
           <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Direction</p>
@@ -536,7 +577,7 @@ function WebhookDrawer({
               <Label>Inbound</Label>
               <p className="text-xs text-gray-500">Accept POST callbacks from providers</p>
             </div>
-            <Switch checked={inboundEnabled} onChange={setInboundEnabled} />
+            <Switch disabled={managed} checked={inboundEnabled} onChange={setInboundEnabled} />
           </div>
           {inboundEnabled && (
             <div className="flex items-center justify-between pl-2 border-l-2 border-gray-100">
@@ -544,7 +585,7 @@ function WebhookDrawer({
                 <Label>Require secret</Label>
                 <p className="text-xs text-gray-500">Bearer token on inbound POST requests</p>
               </div>
-              <Switch checked={inboundSecretRequired} onChange={setInboundSecretRequired} />
+              <Switch disabled={managed} checked={inboundSecretRequired} onChange={setInboundSecretRequired} />
             </div>
           )}
           {inboundEnabled && !inboundSecretRequired && (
@@ -555,7 +596,7 @@ function WebhookDrawer({
               <Label>Outbound</Label>
               <p className="text-xs text-gray-500">{outboundEnabled ? outboundHelperText(outboundFormat, outboundMethod) : "Send HTTP GET or POST on lead/pipeline events"}</p>
             </div>
-            <Switch checked={outboundEnabled} onChange={setOutboundEnabled} />
+            <Switch disabled={managed} checked={outboundEnabled} onChange={setOutboundEnabled} />
           </div>
           {outboundEnabled && (
             <div className="flex items-center justify-between pl-2 border-l-2 border-gray-100">
@@ -563,7 +604,7 @@ function WebhookDrawer({
                 <Label>Sign requests</Label>
                 <p className="text-xs text-gray-500">X-Leadrula-Signature HMAC header</p>
               </div>
-              <Switch checked={outboundSignEnabled} onChange={setOutboundSignEnabled} />
+              <Switch disabled={managed} checked={outboundSignEnabled} onChange={setOutboundSignEnabled} />
             </div>
           )}
           {outboundEnabled && !outboundSignEnabled && (
@@ -574,6 +615,7 @@ function WebhookDrawer({
               <div>
                 <Label>Outbound URL</Label>
                 <Input
+                  disabled={managed}
                   value={outboundURL}
                   onChange={(e) => setOutboundURL(e.target.value)}
                   placeholder="https://example.com/webhook"
@@ -583,11 +625,11 @@ function WebhookDrawer({
                 <Label>Outbound format</Label>
                 <div className="mt-1 flex gap-4">
                   <label className="flex items-center gap-1.5 text-sm">
-                    <input type="radio" name="outbound-format" checked={outboundFormat === "json"} onChange={() => setOutboundFormat("json")} />
+                    <input type="radio" disabled={managed} name="outbound-format" checked={outboundFormat === "json"} onChange={() => setOutboundFormat("json")} />
                     JSON body
                   </label>
                   <label className="flex items-center gap-1.5 text-sm">
-                    <input type="radio" name="outbound-format" checked={outboundFormat === "url"} onChange={() => setOutboundFormat("url")} />
+                    <input type="radio" disabled={managed} name="outbound-format" checked={outboundFormat === "url"} onChange={() => setOutboundFormat("url")} />
                     URL parameters
                   </label>
                 </div>
@@ -596,16 +638,16 @@ function WebhookDrawer({
                 <Label>HTTP method</Label>
                 <div className="mt-1 flex gap-4">
                   <label className="flex items-center gap-1.5 text-sm">
-                    <input type="radio" name="outbound-method" checked={outboundMethod === "GET"} onChange={() => setOutboundMethod("GET")} />
+                    <input type="radio" disabled={managed} name="outbound-method" checked={outboundMethod === "GET"} onChange={() => setOutboundMethod("GET")} />
                     GET
                   </label>
                   <label className="flex items-center gap-1.5 text-sm">
-                    <input type="radio" name="outbound-method" checked={outboundMethod === "POST"} onChange={() => setOutboundMethod("POST")} />
+                    <input type="radio" disabled={managed} name="outbound-method" checked={outboundMethod === "POST"} onChange={() => setOutboundMethod("POST")} />
                     POST
                   </label>
                 </div>
               </div>
-              {outboundFormat === "url" && (
+              {outboundFormat === "url" && !managed && (
                 <Button
                   size="sm"
                   variant="secondary"
@@ -626,9 +668,9 @@ function WebhookDrawer({
           <>
             <div className="flex items-center justify-between">
               <Label>Active</Label>
-              <Switch checked={isActive} onChange={setIsActive} />
+              <Switch disabled={managed} checked={isActive} onChange={setIsActive} />
             </div>
-            {outboundEnabled && webhook!.outbound_url && outboundSignEnabled && (
+            {outboundEnabled && webhook!.outbound_url && outboundSignEnabled && !managed && (
               <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-800">
                 <p className="font-medium">Outbound HMAC secret</p>
                 <p className="text-xs text-blue-600 mt-1">Used to sign outbound requests (X-Leadrula-Signature header)</p>
@@ -654,7 +696,9 @@ function WebhookDrawer({
               <div className="space-y-3 border-t border-gray-100 pt-3">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Inbound actions</p>
-                  <Button size="sm" onClick={() => setActionDrawer(null)}><Plus className="h-3.5 w-3.5" /> Add action</Button>
+                  {!managed && (
+                    <Button size="sm" onClick={() => setActionDrawer(null)}><Plus className="h-3.5 w-3.5" /> Add action</Button>
+                  )}
                 </div>
                 {(actions ?? []).length === 0 ? (
                   <p className="text-sm text-gray-500">No actions configured.</p>
@@ -667,12 +711,14 @@ function WebhookDrawer({
                           <TD className="text-xs text-gray-600">{conditionSummary(a.conditions ?? [], a.condition_logic)}</TD>
                           <TD><Badge>{a.action}</Badge></TD>
                           <TD>
-                            <div className="flex justify-end gap-1">
-                              <IconButton aria-label="Edit action" onClick={() => setActionDrawer(a)}><Pencil className="h-4 w-4" /></IconButton>
-                              <IconButton variant="danger" onClick={() => deleteAction.mutate({ webhookId: webhook!.id, eventId: a.id }, { onError: (e) => toast.error(errorMessage(e)) })}>
-                                <Trash2 className="h-4 w-4" />
-                              </IconButton>
-                            </div>
+                            {!managed && (
+                              <div className="flex justify-end gap-1">
+                                <IconButton aria-label="Edit action" onClick={() => setActionDrawer(a)}><Pencil className="h-4 w-4" /></IconButton>
+                                <IconButton variant="danger" onClick={() => deleteAction.mutate({ webhookId: webhook!.id, eventId: a.id }, { onError: (e) => toast.error(errorMessage(e)) })}>
+                                  <Trash2 className="h-4 w-4" />
+                                </IconButton>
+                              </div>
+                            )}
                           </TD>
                         </TR>
                       ))}
@@ -684,15 +730,17 @@ function WebhookDrawer({
             {outboundEnabled && (
               <div className="space-y-4 border-t border-gray-100 pt-3">
                 {outboundFormat === "json" ? (
-                  <OutboundPayloadTemplateEditor value={payloadTemplate} onChange={setPayloadTemplate} />
+                  <OutboundPayloadTemplateEditor readOnly={managed} value={payloadTemplate} onChange={setPayloadTemplate} />
                 ) : (
-                  <OutboundFieldMapping entries={fieldMap} onChange={setFieldMap} />
+                  <OutboundFieldMapping readOnly={managed} entries={fieldMap} onChange={setFieldMap} />
                 )}
-                <OutboundResponseMapping entries={responseMap} onChange={setResponseMap} />
+                <OutboundResponseMapping readOnly={managed} entries={responseMap} onChange={setResponseMap} />
                 <div className="space-y-3 border-t border-gray-100 pt-3">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Outbound triggers</p>
-                  <Button size="sm" onClick={() => setTriggerDrawer(null)}><Plus className="h-3.5 w-3.5" /> Add trigger</Button>
+                  {!managed && (
+                    <Button size="sm" onClick={() => setTriggerDrawer(null)}><Plus className="h-3.5 w-3.5" /> Add trigger</Button>
+                  )}
                 </div>
                 {(triggers ?? []).length === 0 ? (
                   <p className="text-sm text-gray-500">No outbound triggers configured.</p>
@@ -705,12 +753,14 @@ function WebhookDrawer({
                           <TD><Badge>{t.trigger_event}</Badge></TD>
                           <TD>{t.is_active ? "✓" : "—"}</TD>
                           <TD>
-                            <div className="flex justify-end gap-1">
-                              <IconButton aria-label="Edit" onClick={() => setTriggerDrawer(t)}><Zap className="h-4 w-4" /></IconButton>
-                              <IconButton variant="danger" onClick={() => deleteTrigger.mutate({ webhookId: webhook!.id, triggerId: t.id }, { onError: (e) => toast.error(errorMessage(e)) })}>
-                                <Trash2 className="h-4 w-4" />
-                              </IconButton>
-                            </div>
+                            {!managed && (
+                              <div className="flex justify-end gap-1">
+                                <IconButton aria-label="Edit" onClick={() => setTriggerDrawer(t)}><Zap className="h-4 w-4" /></IconButton>
+                                <IconButton variant="danger" onClick={() => deleteTrigger.mutate({ webhookId: webhook!.id, triggerId: t.id }, { onError: (e) => toast.error(errorMessage(e)) })}>
+                                  <Trash2 className="h-4 w-4" />
+                                </IconButton>
+                              </div>
+                            )}
                           </TD>
                         </TR>
                       ))}
@@ -784,6 +834,8 @@ function WebhookDetailDrawer({
 
   if (!open || !webhook) return null;
 
+  const managed = isManagedWebhook(webhook);
+
   function handleRotate() {
     rotate.mutate(webhook!.id, {
       onSuccess: (res) => {
@@ -799,6 +851,11 @@ function WebhookDetailDrawer({
   return (
     <FormDrawer open onClose={onClose} title={webhook.name} subtitle={`Webhook · ${webhook.slug}`} width={720}>
       <div className="space-y-4">
+        {managed && (
+          <p className="rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Managed by {managedByLabel(webhook.integration_provider_slug)} — edit settings in Integrations, or disconnect to remove.
+          </p>
+        )}
         {webhook.inbound_enabled && (
           <InboundEndpointRows
             slug={webhook.slug}
@@ -808,7 +865,7 @@ function WebhookDetailDrawer({
             showSecret={showSecret}
             onToggleSecret={() => setShowSecret((v) => !v)}
             onCopySecret={() => copyText(secret!, "Secret copied")}
-            onRotate={handleRotate}
+            onRotate={managed ? undefined : handleRotate}
             rotatePending={rotate.isPending}
           />
         )}
@@ -834,13 +891,15 @@ function WebhookDetailDrawer({
                           <Button size="sm" variant="secondary" onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>
                             {expandedId === d.id ? "Hide" : "View"}
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => onMapFields({ deliveryId: d.id })}
-                          >
-                            Actions
-                          </Button>
+                          {!managed && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => onMapFields({ deliveryId: d.id })}
+                            >
+                              Actions
+                            </Button>
+                          )}
                           {canReplayDelivery(d) && (
                             <Button
                               size="sm"
@@ -1273,9 +1332,11 @@ type TemplateVariable = {
 function OutboundPayloadTemplateEditor({
   value,
   onChange,
+  readOnly = false,
 }: {
   value: string;
   onChange: (v: string) => void;
+  readOnly?: boolean;
 }) {
   const { data: customFields = [] } = useCustomFields();
   const [templateCursor, setTemplateCursor] = useState<HTMLTextAreaElement | null>(null);
@@ -1337,6 +1398,7 @@ function OutboundPayloadTemplateEditor({
       <div className="mb-2 flex items-center justify-between">
         <Label>JSON payload template</Label>
         <div className="flex items-center gap-3">
+          {!readOnly && (
           <Dropdown
             open={variablesOpen}
             onClose={() => {
@@ -1383,6 +1445,7 @@ function OutboundPayloadTemplateEditor({
               </>
             )}
           </Dropdown>
+          )}
           <p className="text-xs text-gray-500">Use {"{{field}}"} placeholders</p>
         </div>
       </div>
@@ -1390,6 +1453,7 @@ function OutboundPayloadTemplateEditor({
         ref={(el) => setTemplateCursor(el)}
         rows={12}
         value={value}
+        readOnly={readOnly}
         onChange={(e) => onChange(e.target.value)}
         onSelect={(e) => saveSelection(e.currentTarget)}
         onBlur={(e) => saveSelection(e.currentTarget)}
@@ -1404,9 +1468,11 @@ function OutboundPayloadTemplateEditor({
 function OutboundFieldMapping({
   entries,
   onChange,
+  readOnly = false,
 }: {
   entries: OutboundFieldMapEntry[];
   onChange: (entries: OutboundFieldMapEntry[]) => void;
+  readOnly?: boolean;
 }) {
   const { data: customFields = [] } = useCustomFields();
 
@@ -1428,7 +1494,9 @@ function OutboundFieldMapping({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <Label>URL parameter mapping</Label>
-        <Button size="sm" variant="secondary" onClick={addRow}><Plus className="h-3.5 w-3.5" /> Add param</Button>
+        {!readOnly && (
+          <Button size="sm" variant="secondary" onClick={addRow}><Plus className="h-3.5 w-3.5" /> Add param</Button>
+        )}
       </div>
       <p className="text-xs text-gray-500">Map external query parameter names to lead fields or static values.</p>
       {entries.length === 0 ? (
@@ -1441,6 +1509,7 @@ function OutboundFieldMapping({
               <TR key={idx}>
                 <TD>
                   <Input
+                    disabled={readOnly}
                     value={e.dest_key}
                     onChange={(ev) => updateRow(idx, { dest_key: ev.target.value })}
                     placeholder="last_name"
@@ -1449,6 +1518,7 @@ function OutboundFieldMapping({
                 </TD>
                 <TD>
                   <select
+                    disabled={readOnly}
                     className="rounded border border-gray-200 px-2 py-1 text-xs"
                     value={e.source_type}
                     onChange={(ev) => {
@@ -1469,6 +1539,7 @@ function OutboundFieldMapping({
                 <TD>
                   {e.source_type === "builtin" && (
                     <select
+                      disabled={readOnly}
                       className="w-full rounded border border-gray-200 px-2 py-1 text-xs"
                       value={e.builtin_field ?? "last_name"}
                       onChange={(ev) => updateRow(idx, { builtin_field: ev.target.value })}
@@ -1478,6 +1549,7 @@ function OutboundFieldMapping({
                   )}
                   {e.source_type === "custom" && (
                     <select
+                      disabled={readOnly}
                       className="w-full rounded border border-gray-200 px-2 py-1 text-xs"
                       value={e.custom_field_id ?? ""}
                       onChange={(ev) => updateRow(idx, { custom_field_id: Number(ev.target.value) })}
@@ -1490,6 +1562,7 @@ function OutboundFieldMapping({
                   )}
                   {e.source_type === "static" && (
                     <Input
+                      disabled={readOnly}
                       value={e.static_value ?? ""}
                       onChange={(ev) => updateRow(idx, { static_value: ev.target.value })}
                       placeholder="YourSchema"
@@ -1498,6 +1571,7 @@ function OutboundFieldMapping({
                   )}
                   {e.source_type === "meta" && (
                     <select
+                      disabled={readOnly}
                       className="w-full rounded border border-gray-200 px-2 py-1 text-xs"
                       value={e.meta_field ?? "event"}
                       onChange={(ev) => updateRow(idx, { meta_field: ev.target.value })}
@@ -1507,9 +1581,11 @@ function OutboundFieldMapping({
                   )}
                 </TD>
                 <TD>
-                  <IconButton variant="danger" aria-label="Remove" onClick={() => removeRow(idx)}>
-                    <Trash2 className="h-4 w-4" />
-                  </IconButton>
+                  {!readOnly && (
+                    <IconButton variant="danger" aria-label="Remove" onClick={() => removeRow(idx)}>
+                      <Trash2 className="h-4 w-4" />
+                    </IconButton>
+                  )}
                 </TD>
               </TR>
             ))}
@@ -1523,9 +1599,11 @@ function OutboundFieldMapping({
 function OutboundResponseMapping({
   entries,
   onChange,
+  readOnly = false,
 }: {
   entries: ResponseMapEntry[];
   onChange: (entries: ResponseMapEntry[]) => void;
+  readOnly?: boolean;
 }) {
   const { data: customFields = [] } = useCustomFields();
 
@@ -1568,13 +1646,15 @@ function OutboundResponseMapping({
     <div>
       <div className="mb-2 flex items-center justify-between">
         <Label>Response mapping</Label>
-        <button
-          type="button"
-          onClick={addRow}
-          className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
-        >
-          <Plus className="h-3 w-3" /> Add field
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={addRow}
+            className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
+          >
+            <Plus className="h-3 w-3" /> Add field
+          </button>
+        )}
       </div>
       {entries.length === 0 ? (
         <p className="text-xs text-gray-400">
@@ -1590,11 +1670,13 @@ function OutboundResponseMapping({
                 type="text"
                 placeholder="data.id"
                 value={entry.response_key}
+                readOnly={readOnly}
                 onChange={(e) => updateRow(idx, "response_key", e.target.value)}
                 className="w-32 rounded border border-gray-200 px-2 py-1 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-jade-500"
               />
               <span className="text-xs text-gray-400">→</span>
               <select
+                disabled={readOnly}
                 value={targetValue(entry)}
                 onChange={(e) => updateRow(idx, "target", e.target.value)}
                 className="flex-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-jade-500"
@@ -1614,13 +1696,15 @@ function OutboundResponseMapping({
                   </optgroup>
                 )}
               </select>
-              <button
-                type="button"
-                onClick={() => removeRow(idx)}
-                className="text-gray-400 hover:text-red-500"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              {!readOnly && (
+                <button
+                  type="button"
+                  onClick={() => removeRow(idx)}
+                  className="text-gray-400 hover:text-red-500"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
           ))}
         </div>

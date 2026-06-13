@@ -25,10 +25,12 @@ export function ImpersonationBanner() {
     <div className="flex shrink-0 items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950 dark:text-amber-100">
       <span>
         Acting as <strong>{impersonation.buyerAccountName}</strong>
+        {" "}
+        — viewing leads and pipelines from your contracts only
         {publisherUser ? (
           <>
             {" "}
-            — Publisher admin <strong>{publisherUser.full_name}</strong>
+            (Publisher admin <strong>{publisherUser.full_name}</strong>)
           </>
         ) : null}
       </span>

@@ -78,7 +78,7 @@ func main() {
 	apikeysSvc := apikeys.NewService(pool)
 	apikeysH := apikeys.NewHandler(apikeysSvc)
 
-	pipelinesSvc := pipelines.NewService(pool)
+	pipelinesSvc := pipelines.NewService(pool, collabRepo)
 	pipelinesH := pipelines.NewHandler(pipelinesSvc)
 
 	cfSvc := customfields.NewService(pool)
@@ -148,6 +148,7 @@ func main() {
 	webhooksSvc := webhooks.NewService(pool, leadsRepo, leadsSvc, encKey, integrationsSvc)
 	webhooksH := webhooks.NewHandler(webhooksSvc)
 	leadsSvc.SetWebhookFirer(webhooksSvc)
+	integrationsSvc.SetLeadService(leadsSvc)
 
 	oversightH := oversight.NewHandler(accountsRepo, accountsSvc, leadsRepo, pipelinesSvc, billingSvc, calSvc, collabSvc, partnersSvc, partnersSvc)
 
@@ -161,6 +162,7 @@ func main() {
 	r.Group(func(pub chi.Router) {
 		pub.Use(apikeysSvc.RequireAPIKey)
 		intakeH.RegisterPublicRoutes(pub)
+		leadsH.RegisterPublicRoutes(pub, apikeysSvc)
 	})
 
 	// source ingest (per-source API-key auth)

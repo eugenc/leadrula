@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import {
   useApiKeys,
   useCreateApiKey,
@@ -26,6 +27,8 @@ function copyText(text: string, label: string) {
 }
 
 export function ApiKeysPage() {
+  const { pathname } = useLocation();
+  const prefix = pathname.startsWith("/p/") ? "/p" : "/b";
   const { data: keys, isLoading } = useApiKeys();
   const create = useCreateApiKey();
 
@@ -91,6 +94,12 @@ export function ApiKeysPage() {
           </Button>
         }
       />
+
+      <p className="mb-4 text-sm text-gray-500">
+        <Link to={`${prefix}/api-docs`} className="text-jade-600 hover:underline">
+          View API documentation →
+        </Link>
+      </p>
 
       <PageBody className="px-0 pt-0 pb-0">
         {isLoading ? (

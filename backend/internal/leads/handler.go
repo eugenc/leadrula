@@ -207,7 +207,7 @@ func (h *Handler) bulk(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	n, err := h.svc.repo.Delete(r.Context(), p.AccountID, []int64{id(r)})
+	n, err := h.svc.repo.Delete(r.Context(), p, []int64{id(r)})
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -221,7 +221,7 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	l, err := h.svc.repo.Get(r.Context(), p, id(r))
+	l, err := h.svc.repo.GetByRef(r.Context(), p, chi.URLParam(r, "id"))
 	if err != nil {
 		httpx.WriteError(w, err)
 		return

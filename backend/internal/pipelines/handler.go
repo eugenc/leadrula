@@ -43,7 +43,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	items, err := h.svc.List(r.Context(), p.AccountID)
+	items, err := h.svc.List(r.Context(), p)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -59,7 +59,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	pl, err := h.svc.Create(r.Context(), p.AccountID, body.Name)
+	pl, err := h.svc.Create(r.Context(), p, body.Name)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -77,7 +77,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	pl, err := h.svc.Update(r.Context(), p.AccountID, id, body.Name, body.Position)
+	pl, err := h.svc.Update(r.Context(), p, id, body.Name, body.Position)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -87,7 +87,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	if err := h.svc.Delete(r.Context(), p.AccountID, idParam(r, "id")); err != nil {
+	if err := h.svc.Delete(r.Context(), p, idParam(r, "id")); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
@@ -96,7 +96,7 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listStages(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	items, err := h.svc.ListStages(r.Context(), p.AccountID, idParam(r, "id"))
+	items, err := h.svc.ListStages(r.Context(), p, idParam(r, "id"))
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -114,7 +114,7 @@ func (h *Handler) createStage(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	st, err := h.svc.CreateStage(r.Context(), p.AccountID, idParam(r, "id"), body.Name, body.Color, body.StageType)
+	st, err := h.svc.CreateStage(r.Context(), p, idParam(r, "id"), body.Name, body.Color, body.StageType)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -132,7 +132,7 @@ func (h *Handler) updateStage(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	st, err := h.svc.UpdateStage(r.Context(), p.AccountID, idParam(r, "id"), body.Name, body.Color, body.StageType)
+	st, err := h.svc.UpdateStage(r.Context(), p, idParam(r, "id"), body.Name, body.Color, body.StageType)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -142,7 +142,7 @@ func (h *Handler) updateStage(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) deleteStage(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	if err := h.svc.DeleteStage(r.Context(), p.AccountID, idParam(r, "id")); err != nil {
+	if err := h.svc.DeleteStage(r.Context(), p, idParam(r, "id")); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
@@ -157,7 +157,7 @@ func (h *Handler) reorder(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	if err := h.svc.Reorder(r.Context(), p.AccountID, idParam(r, "id"), body.OrderedStageIDs); err != nil {
+	if err := h.svc.Reorder(r.Context(), p, idParam(r, "id"), body.OrderedStageIDs); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
@@ -171,7 +171,7 @@ func idParam(r *http.Request, name string) int64 {
 
 func (h *Handler) listRules(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	items, err := h.svc.ListRules(r.Context(), p.AccountID, idParam(r, "id"))
+	items, err := h.svc.ListRules(r.Context(), p, idParam(r, "id"))
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -189,7 +189,7 @@ func (h *Handler) createRule(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	rule, err := h.svc.CreateRule(r.Context(), p.AccountID, idParam(r, "id"), body.ConditionLogic, body.Conditions, body.Actions)
+	rule, err := h.svc.CreateRule(r.Context(), p, idParam(r, "id"), body.ConditionLogic, body.Conditions, body.Actions)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -214,7 +214,7 @@ func (h *Handler) updateRule(w http.ResponseWriter, r *http.Request) {
 	if body.Actions != nil {
 		acts = body.Actions
 	}
-	rule, err := h.svc.UpdateRule(r.Context(), p.AccountID, idParam(r, "id"), body.ConditionLogic, conds, acts)
+	rule, err := h.svc.UpdateRule(r.Context(), p, idParam(r, "id"), body.ConditionLogic, conds, acts)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -224,7 +224,7 @@ func (h *Handler) updateRule(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) deleteRule(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	if err := h.svc.DeleteRule(r.Context(), p.AccountID, idParam(r, "id")); err != nil {
+	if err := h.svc.DeleteRule(r.Context(), p, idParam(r, "id")); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
@@ -239,7 +239,7 @@ func (h *Handler) reorderRules(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	if err := h.svc.ReorderRules(r.Context(), p.AccountID, idParam(r, "id"), body.OrderedRuleIDs); err != nil {
+	if err := h.svc.ReorderRules(r.Context(), p, idParam(r, "id"), body.OrderedRuleIDs); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
@@ -248,7 +248,7 @@ func (h *Handler) reorderRules(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listStageReasons(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	items, err := h.svc.ListStageReasons(r.Context(), p.AccountID, idParam(r, "id"))
+	items, err := h.svc.ListStageReasons(r.Context(), p, idParam(r, "id"))
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -258,7 +258,7 @@ func (h *Handler) listStageReasons(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listPipelineReasons(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	items, err := h.svc.ListPipelineReasons(r.Context(), p.AccountID, idParam(r, "id"))
+	items, err := h.svc.ListPipelineReasons(r.Context(), p, idParam(r, "id"))
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -274,7 +274,7 @@ func (h *Handler) createStageReason(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	d, err := h.svc.CreateStageReason(r.Context(), p.AccountID, idParam(r, "id"), body.Label)
+	d, err := h.svc.CreateStageReason(r.Context(), p, idParam(r, "id"), body.Label)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -292,7 +292,7 @@ func (h *Handler) updateStageReason(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	d, err := h.svc.UpdateStageReason(r.Context(), p.AccountID, idParam(r, "id"), body.Label, body.Position, body.IsActive)
+	d, err := h.svc.UpdateStageReason(r.Context(), p, idParam(r, "id"), body.Label, body.Position, body.IsActive)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -302,7 +302,7 @@ func (h *Handler) updateStageReason(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) deleteStageReason(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	if err := h.svc.DeleteStageReason(r.Context(), p.AccountID, idParam(r, "id")); err != nil {
+	if err := h.svc.DeleteStageReason(r.Context(), p, idParam(r, "id")); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}

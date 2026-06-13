@@ -294,7 +294,7 @@ func (h *Handler) buyerLeads(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) buyerPipelines(w http.ResponseWriter, r *http.Request) {
-	items, err := h.pipelines.List(r.Context(), id(r))
+	items, err := h.pipelines.ListForAccount(r.Context(), id(r))
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -305,7 +305,7 @@ func (h *Handler) buyerPipelines(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) buyerStages(w http.ResponseWriter, r *http.Request) {
 	buyerID := id(r)
 	pid, _ := strconv.ParseInt(chi.URLParam(r, "pid"), 10, 64)
-	items, err := h.pipelines.ListStages(r.Context(), buyerID, pid)
+	items, err := h.pipelines.ListStagesForAccount(r.Context(), buyerID, pid)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -314,7 +314,7 @@ func (h *Handler) buyerStages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) buyerCalendar(w http.ResponseWriter, r *http.Request) {
-	items, err := h.calendar.List(r.Context(), id(r), 0, nil, nil)
+	items, err := h.calendar.ListForAccount(r.Context(), id(r), 0, nil, nil)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return

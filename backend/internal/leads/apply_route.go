@@ -45,28 +45,69 @@ type RouteApplyDeps struct {
 	Integrations  IntegrationEnqueuer
 }
 
-// ApplyRoute moves a lead according to route destination and delivery.
-func ApplyRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, publisherID, leadID int64) ([]notifications.EmailJob, error) {
-	if route.Destination == "publisher" {
-		return applyPublisherRoute(ctx, q, deps.Repo, route, publisherID, leadID)
+// ApplyRoute moves a lead according to route destination.
+func ApplyRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, leadID int64) ([]notifications.EmailJob, error) {
+	switch route.Destination {
+	case "pipeline":
+		return applyPipelineRoute(ctx, q, deps.Repo, route, route.OwnerAccountID(), leadID)
+	case "contract":
+		return applyContractRoute(ctx, q, deps, route, leadID)
+	case "webhook":
+		if err := applyWebhookDestRoute(ctx, q, deps, route, leadID); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	case "integration":
+		return nil, nil
+	default:
+		return nil, httpx.BusinessRule("unsupported route destination")
 	}
-	return applyBuyerRoute(ctx, q, deps, route, leadID)
 }
 
-func applyPublisherRoute(ctx context.Context, q database.Querier, repo *Repository, route *routing.Route, publisherID, leadID int64) ([]notifications.EmailJob, error) {
+func applyPipelineRoute(ctx context.Context, q database.Querier, repo *Repository, route *routing.Route, ownerAccountID, leadID int64) ([]notifications.EmailJob, error) {
 	if route.Delivery == "leads" {
 		return nil, repo.SetStatus(ctx, q, leadID, "review")
 	}
 	if route.TargetPipelineID == nil || route.TargetStageID == nil {
-		return nil, httpx.BusinessRule("route missing publisher pipeline target")
+		return nil, httpx.BusinessRule("route missing pipeline target")
 	}
-	if err := repo.PlaceInPipeline(ctx, q, leadID, publisherID, *route.TargetPipelineID, *route.TargetStageID, nil); err != nil {
+	if err := repo.PlaceInPipeline(ctx, q, leadID, ownerAccountID, *route.TargetPipelineID, *route.TargetStageID, nil); err != nil {
 		return nil, err
 	}
 	return nil, repo.SetStatus(ctx, q, leadID, "review")
 }
 
-func applyBuyerRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, leadID int64) ([]notifications.EmailJob, error) {
+func applyWebhookDestRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, leadID int64) error {
+	if deps.Integrations == nil || route.DestWebhookID == nil {
+		return nil
+	}
+	lead, err := deps.Repo.GetByID(ctx, q, leadID)
+	if err != nil {
+		return err
+	}
+	if err := LoadCustomValues(ctx, q, lead); err != nil {
+		return err
+	}
+	payloadJSON, err := BuildDeliveryPayload(lead)
+	if err != nil {
+		return err
+	}
+	return deps.Integrations.EnqueueParticipationWebhook(ctx, *route.DestWebhookID, leadID, payloadJSON)
+}
+
+// TryApplyMatchedRoute applies a matched route and returns whether integrations should enqueue.
+func TryApplyMatchedRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, leadID int64) (enqueueIntegrations bool, emails []notifications.EmailJob, err error) {
+	if route == nil {
+		return false, nil, nil
+	}
+	emails, err = ApplyRoute(ctx, q, deps, route, leadID)
+	if err != nil {
+		return false, nil, err
+	}
+	return true, emails, nil
+}
+
+func applyContractRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, leadID int64) ([]notifications.EmailJob, error) {
 	if route.ContractID == nil {
 		return nil, httpx.BusinessRule("route missing contract")
 	}

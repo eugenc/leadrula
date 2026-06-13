@@ -1,22 +1,33 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { ArrowRightLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownSearch } from "@/components/ui/dropdown";
 import { useSwitchable, useSwitchAccount } from "@/features/auth/switchHooks";
+import { useImpersonateBuyer } from "@/features/admin/hooks";
 import { useAuthStore } from "@/store/authStore";
 import { useMe } from "@/features/leads/hooks";
+import { errorMessage } from "@/lib/api";
+import { toast } from "@/store/toastStore";
+import type { CurrentUser } from "@/types";
 
 export function AccountSwitcher() {
   const user = useAuthStore((s) => s.user);
+  const impersonation = useAuthStore((s) => s.impersonation);
+  const startImpersonation = useAuthStore((s) => s.startImpersonation);
   const { data: me } = useMe();
   const { data: switchable } = useSwitchable();
   const switchAccount = useSwitchAccount();
+  const impersonate = useImpersonateBuyer();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
   const count = me?.switchable_count ?? switchable?.length ?? 0;
+  if (impersonation) return null;
   if (count === 0 && user?.account_type !== "platform") return null;
 
+  const pending = switchAccount.isPending || impersonate.isPending;
   const q = query.trim().toLowerCase();
   const filtered = (switchable ?? []).filter(
     (a) =>
@@ -28,6 +39,22 @@ export function AccountSwitcher() {
   function close() {
     setQuery("");
     setOpen(false);
+  }
+
+  function selectAccount(account: (typeof filtered)[number]) {
+    close();
+    if (account.access_via === "impersonate") {
+      impersonate.mutate(account.id, {
+        onSuccess: (res) => {
+          const u = res.user as unknown as CurrentUser & { buyer_account_name?: string };
+          startImpersonation(res.access, u, u.buyer_account_name ?? account.name);
+          navigate("/b");
+        },
+        onError: (e) => toast.error(errorMessage(e)),
+      });
+      return;
+    }
+    switchAccount.mutate(account.id);
   }
 
   return (
@@ -53,15 +80,13 @@ export function AccountSwitcher() {
                 key={a.id}
                 type="button"
                 className="block w-full px-3 py-2 text-left text-sm hover:bg-gray-100"
-                disabled={switchAccount.isPending}
-                onClick={() => {
-                  close();
-                  switchAccount.mutate(a.id);
-                }}
+                disabled={pending}
+                onClick={() => selectAccount(a)}
               >
                 <span className="font-medium text-gray-800">{a.name}</span>
                 <span className="block text-xs text-gray-400">
                   {a.handler_id} · {a.type}
+                  {a.access_via === "impersonate" ? " · Collaboration" : ""}
                 </span>
               </button>
             ))

@@ -13,6 +13,8 @@ function normalizeBaseURL(raw: string): string {
 
 const baseURL = normalizeBaseURL(import.meta.env.VITE_API_URL || "http://localhost:8080");
 
+export const apiBaseURL = baseURL;
+
 export const api = axios.create({ baseURL });
 
 api.interceptors.request.use((cfg) => {

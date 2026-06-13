@@ -26,7 +26,7 @@ export { LOG_FILTERS, PAGE_SIZES, statusBadge, type LogFilter } from "@/features
 export const BUILTINS = MAP_BUILTIN_FIELDS;
 
 function routeLabel(rt: Route): string {
-  if (rt.destination === "buyer") {
+  if (rt.destination === "contract") {
     const buyer = rt.buyer_name ?? rt.contract_name ?? "Buyer";
     const stage = rt.target_stage_name ? ` → ${rt.target_stage_name}` : "";
     return `${buyer} (buyer pipeline${stage})`;

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/internal/database"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/jackc/pgx/v5"
@@ -42,8 +43,8 @@ var validLeadStatuses = map[string]bool{
 	"review": true, "distributed": true, "returned": true, "closed": true,
 }
 
-func (s *Service) ListRules(ctx context.Context, accountID, stageID int64) ([]StageRule, error) {
-	if err := s.assertStageOwned(ctx, accountID, stageID); err != nil {
+func (s *Service) ListRules(ctx context.Context, p *auth.Principal, stageID int64) ([]StageRule, error) {
+	if err := s.requireStage(ctx, p, stageID); err != nil {
 		return nil, err
 	}
 	rows, err := s.pool.Query(ctx,
@@ -65,14 +66,14 @@ func (s *Service) ListRules(ctx context.Context, accountID, stageID int64) ([]St
 	return rules, nil
 }
 
-func (s *Service) CreateRule(ctx context.Context, accountID, stageID int64, logic string, conditions, actions json.RawMessage) (*StageRule, error) {
-	if err := s.assertStageOwned(ctx, accountID, stageID); err != nil {
+func (s *Service) CreateRule(ctx context.Context, p *auth.Principal, stageID int64, logic string, conditions, actions json.RawMessage) (*StageRule, error) {
+	if err := s.requireStage(ctx, p, stageID); err != nil {
 		return nil, err
 	}
 	if err := validateRulePayload(logic, conditions, actions); err != nil {
 		return nil, err
 	}
-	if err := s.validateRuleRefs(ctx, accountID, stageID, actions); err != nil {
+	if err := s.validateRuleRefs(ctx, p, stageID, actions); err != nil {
 		return nil, err
 	}
 	if logic == "" {
@@ -92,12 +93,12 @@ func (s *Service) CreateRule(ctx context.Context, accountID, stageID int64, logi
 	return rule, normalizeStageRuleJSON(rule)
 }
 
-func (s *Service) UpdateRule(ctx context.Context, accountID, ruleID int64, logic *string, conditions, actions json.RawMessage) (*StageRule, error) {
+func (s *Service) UpdateRule(ctx context.Context, p *auth.Principal, ruleID int64, logic *string, conditions, actions json.RawMessage) (*StageRule, error) {
 	stageID, err := s.ruleStageID(ctx, ruleID)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.assertStageOwned(ctx, accountID, stageID); err != nil {
+	if err := s.requireStage(ctx, p, stageID); err != nil {
 		return nil, err
 	}
 	if logic != nil || conditions != nil || actions != nil {
@@ -120,7 +121,7 @@ func (s *Service) UpdateRule(ctx context.Context, accountID, ruleID int64, logic
 		if err := validateRulePayload(useLogic, useConds, useActs); err != nil {
 			return nil, err
 		}
-		if err := s.validateRuleRefs(ctx, accountID, stageID, useActs); err != nil {
+		if err := s.validateRuleRefs(ctx, p, stageID, useActs); err != nil {
 			return nil, err
 		}
 	}
@@ -144,12 +145,12 @@ func (s *Service) UpdateRule(ctx context.Context, accountID, ruleID int64, logic
 	return rule, normalizeStageRuleJSON(rule)
 }
 
-func (s *Service) DeleteRule(ctx context.Context, accountID, ruleID int64) error {
+func (s *Service) DeleteRule(ctx context.Context, p *auth.Principal, ruleID int64) error {
 	stageID, err := s.ruleStageID(ctx, ruleID)
 	if err != nil {
 		return err
 	}
-	if err := s.assertStageOwned(ctx, accountID, stageID); err != nil {
+	if err := s.requireStage(ctx, p, stageID); err != nil {
 		return err
 	}
 	ct, err := s.pool.Exec(ctx, `DELETE FROM stage_rules WHERE id = $1`, ruleID)
@@ -162,8 +163,8 @@ func (s *Service) DeleteRule(ctx context.Context, accountID, ruleID int64) error
 	return nil
 }
 
-func (s *Service) ReorderRules(ctx context.Context, accountID, stageID int64, orderedRuleIDs []int64) error {
-	if err := s.assertStageOwned(ctx, accountID, stageID); err != nil {
+func (s *Service) ReorderRules(ctx context.Context, p *auth.Principal, stageID int64, orderedRuleIDs []int64) error {
+	if err := s.requireStage(ctx, p, stageID); err != nil {
 		return err
 	}
 	tx, err := s.pool.Begin(ctx)
@@ -427,7 +428,7 @@ func validateRulePayload(logic string, conditions, actions json.RawMessage) erro
 	return nil
 }
 
-func (s *Service) validateRuleRefs(ctx context.Context, accountID, stageID int64, actions json.RawMessage) error {
+func (s *Service) validateRuleRefs(ctx context.Context, p *auth.Principal, stageID int64, actions json.RawMessage) error {
 	acts, err := normalizeActions(actions)
 	if err != nil {
 		return err
@@ -439,12 +440,12 @@ func (s *Service) validateRuleRefs(ctx context.Context, accountID, stageID int64
 			if !ok {
 				return httpx.Validation("stage_id required")
 			}
-			if err := s.assertStageOwned(ctx, accountID, sid); err != nil {
+			if err := s.requireStage(ctx, p, sid); err != nil {
 				return err
 			}
 		case a.Domain == "user" && a.Field == "assigned_user_id" && !isNullRaw(a.Value):
 			if uid, ok := rawToInt(a.Value); ok && uid != 0 {
-				inAcc, err := userInAccount(ctx, s.pool, accountID, uid)
+				inAcc, err := userInAccount(ctx, s.pool, p.AccountID, uid)
 				if err != nil {
 					return err
 				}
@@ -474,7 +475,7 @@ func (s *Service) validateRuleRefs(ctx context.Context, accountID, stageID int64
 			key := strings.TrimPrefix(a.Field, "custom:")
 			var ok bool
 			if err := s.pool.QueryRow(ctx,
-				`SELECT EXISTS(SELECT 1 FROM custom_fields WHERE field_key=$1 AND account_id=$2)`, key, accountID).Scan(&ok); err != nil {
+				`SELECT EXISTS(SELECT 1 FROM custom_fields WHERE field_key=$1 AND account_id=$2)`, key, p.AccountID).Scan(&ok); err != nil {
 				return err
 			}
 			if !ok {

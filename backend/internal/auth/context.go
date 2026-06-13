@@ -17,6 +17,15 @@ type Principal struct {
 func (p *Principal) IsAdmin() bool    { return p.Role == "admin" }
 func (p *Principal) IsFollower() bool { return p.Role == "follower" }
 
+// CollaborationPublisherID returns the impersonating publisher account id when the
+// principal is a publisher acting on a buyer account via collaboration.
+func (p *Principal) CollaborationPublisherID() (int64, bool) {
+	if p == nil || p.Impersonator == nil || p.Impersonator.AccountType != "publisher" {
+		return 0, false
+	}
+	return p.Impersonator.AccountID, true
+}
+
 type ctxKey int
 
 const principalKey ctxKey = iota
@@ -36,6 +45,39 @@ func FromContext(ctx context.Context) *Principal {
 type APIKeyAccount struct {
 	AccountID   int64
 	AccountType string
+	Scopes      []string
+}
+
+// CanReadLeads returns true when the key may call lead read endpoints.
+func (a *APIKeyAccount) CanReadLeads() bool {
+	if a == nil {
+		return false
+	}
+	if len(a.Scopes) == 0 {
+		return true
+	}
+	for _, s := range a.Scopes {
+		if s == "leads:read" || s == "leads:write" {
+			return true
+		}
+	}
+	return false
+}
+
+// CanWriteLeads returns true when the key may call lead write endpoints.
+func (a *APIKeyAccount) CanWriteLeads() bool {
+	if a == nil {
+		return false
+	}
+	if len(a.Scopes) == 0 {
+		return true
+	}
+	for _, s := range a.Scopes {
+		if s == "leads:write" {
+			return true
+		}
+	}
+	return false
 }
 
 const apiKeyAccountKey ctxKey = 1

@@ -21,16 +21,37 @@ import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import { Spinner } from "@/components/ui/misc";
 import { Trash2 } from "lucide-react";
-import type { ContractFieldMapEntry, ContractFieldMapOptions } from "@/types";
+import type {
+  ContractAvailableField,
+  ContractFieldMapEntry,
+  ContractFieldMapOptions,
+} from "@/types";
+
+function entrySourceKey(e: ContractFieldMapEntry): string | null {
+  if (e.src_type === "custom" && e.src_custom_field_id != null) {
+    return `cf:${e.src_custom_field_id}`;
+  }
+  if (e.src_type === "builtin" && e.src_builtin) {
+    return e.src_builtin;
+  }
+  return null;
+}
+
+function mappedSourceKeys(entries: ContractFieldMapEntry[] | undefined): Set<string> {
+  const keys = new Set<string>();
+  for (const e of entries ?? []) {
+    const k = entrySourceKey(e);
+    if (k) keys.add(k);
+  }
+  return keys;
+}
 
 function entryMatchesAvailable(
   e: ContractFieldMapEntry,
   af: ContractFieldMapOptions["available_fields"][number]
 ): boolean {
-  if (af.field_type === "custom") {
-    return e.src_type === "custom" && e.src_custom_field_id === af.custom_field_id;
-  }
-  return e.src_type === "builtin" && e.src_builtin === af.builtin_field;
+  const k = entrySourceKey(e);
+  return k != null && k === af.key;
 }
 
 export function fieldMappingComplete(
@@ -39,8 +60,8 @@ export function fieldMappingComplete(
 ): boolean {
   const available = options?.available_fields ?? [];
   if (available.length === 0) return true;
-  const mapped = entries ?? [];
-  return available.every((af) => mapped.some((e) => entryMatchesAvailable(e, af)));
+  const mapped = mappedSourceKeys(entries);
+  return available.every((af) => mapped.has(af.key));
 }
 
 function fieldBody(prefix: "src" | "dst", val: string) {
@@ -54,12 +75,20 @@ function srcBodyFromAvailable(af: ContractFieldMapOptions["available_fields"][nu
   if (af.field_type === "custom" && af.custom_field_id) {
     return { src_type: "custom", src_custom_field_id: af.custom_field_id };
   }
-  return { src_type: "builtin", src_builtin: af.builtin_field ?? "" };
+  return { src_type: "builtin", src_builtin: af.builtin_field ?? af.key };
+}
+
+function availableFieldLabel(af: ContractAvailableField): string {
+  if (af.field_type === "custom") {
+    return `${af.label} (custom)`;
+  }
+  return af.label;
 }
 
 function renderEntryLabel(e: ContractFieldMapEntry, options: ContractFieldMapOptions): string {
+  const af = options.available_fields.find((a) => entryMatchesAvailable(e, a));
   const src =
-    options.available_fields.find((af) => entryMatchesAvailable(e, af))?.label ??
+    (af ? availableFieldLabel(af) : null) ??
     (e.src_type === "custom" ? `Custom #${e.src_custom_field_id}` : e.src_builtin);
   const dst =
     e.dst_type === "custom"
@@ -106,11 +135,12 @@ export function BuyerContractFieldMapSection({
   const [rowTargets, setRowTargets] = useState<Record<string, string>>({});
   const [createForKey, setCreateForKey] = useState<string | null>(null);
 
+  const mappedKeys = useMemo(() => mappedSourceKeys(entries), [entries]);
+
   const unmapped = useMemo(() => {
     const available = options?.available_fields ?? [];
-    const mapped = entries ?? [];
-    return available.filter((af) => !mapped.some((e) => entryMatchesAvailable(e, af)));
-  }, [options, entries]);
+    return available.filter((af) => !mappedKeys.has(af.key));
+  }, [options, mappedKeys]);
 
   const suggestions = useMemo(
     () => buildPayloadSuggestions(unmapped.map((a) => a.label), options?.buyer_fields ?? []),
@@ -132,6 +162,22 @@ export function BuyerContractFieldMapSection({
     });
   }, [suggestions, unmapped]);
 
+  useEffect(() => {
+    setRowTargets((prev) => {
+      const unmappedKeySet = new Set(unmapped.map((a) => a.key));
+      const next: Record<string, string> = {};
+      let changed = false;
+      for (const [k, v] of Object.entries(prev)) {
+        if (unmappedKeySet.has(k)) {
+          next[k] = v;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [unmapped]);
+
   const complete = fieldMappingComplete(options, entries);
 
   useEffect(() => {
@@ -142,13 +188,23 @@ export function BuyerContractFieldMapSection({
     return rowTargets[key] ?? suggestions[unmapped.find((a) => a.key === key)?.label ?? ""] ?? "first_name";
   }
 
+  function clearRowTarget(key: string) {
+    setRowTargets((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
+
   function addMapping(af: ContractFieldMapOptions["available_fields"][number], dstVal: string) {
     const body = { ...srcBodyFromAvailable(af), ...fieldBody("dst", dstVal) };
+    const onSuccess = () => clearRowTarget(af.key);
     const onError = (e: unknown) => toast.error(errorMessage(e));
     if (isParticipation && participationId) {
-      addParticipation.mutate({ participationId, body }, { onError });
+      addParticipation.mutate({ participationId, body }, { onSuccess, onError });
     } else if (contractId) {
-      addContract.mutate({ contractId, body }, { onError });
+      addContract.mutate({ contractId, body }, { onSuccess, onError });
     }
   }
 
@@ -210,8 +266,8 @@ export function BuyerContractFieldMapSection({
             <p className="text-xs text-gray-500">Map publisher fields to your built-in or custom fields.</p>
           </div>
           {unmapped.map((af) => (
-            <div key={af.key} className="rounded-md border border-gray-100 p-3">
-              <div className="mb-2 font-medium text-gray-800">{af.label}</div>
+            <div key={`${af.field_type}:${af.key}`} className="rounded-md border border-gray-100 p-3">
+              <div className="mb-2 font-medium text-gray-800">{availableFieldLabel(af)}</div>
               <div className="flex flex-wrap items-end gap-2">
                 <div className="min-w-[11rem] flex-1">
                   <BuiltinCustomFieldSelect

@@ -23,7 +23,7 @@ function tabsForAccount(accountType: string, prefix: string): Tab[] {
     { to: `${prefix}/settings/business`, label: "Business", end: false, adminOnly: true },
     { to: `${prefix}/settings/notifications`, label: "Notifications", end: false },
     { to: `${prefix}/settings/users`, label: "Users", end: false, adminOnly: true },
-    { to: `${prefix}/settings/api`, label: "API Keys", end: false, adminOnly: true },
+    { to: `${prefix}/settings/api`, label: "API", end: false, adminOnly: true },
   ];
 }
 

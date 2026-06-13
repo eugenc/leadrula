@@ -46,7 +46,7 @@ func (s *Service) Create(ctx context.Context, accountID int64, name string, scop
 		return nil, "", err
 	}
 	if scopes == nil {
-		scopes = []string{"leads:write"}
+		scopes = []string{"leads:read", "leads:write"}
 	}
 	scopesJSON, _ := json.Marshal(scopes)
 
@@ -145,7 +145,7 @@ func (s *Service) Verify(ctx context.Context, full string) (*auth.APIKeyAccount,
 		return nil, errors.New("malformed key")
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT k.id, k.key_hash, k.account_id, a.type
+		`SELECT k.id, k.key_hash, k.account_id, a.type, k.scopes
 		 FROM api_keys k JOIN accounts a ON a.id = k.account_id
 		 WHERE k.key_prefix = $1 AND k.revoked_at IS NULL`, prefix)
 	if err != nil {
@@ -155,16 +155,43 @@ func (s *Service) Verify(ctx context.Context, full string) (*auth.APIKeyAccount,
 	for rows.Next() {
 		var id, accountID int64
 		var hash, atype string
-		if err := rows.Scan(&id, &hash, &accountID, &atype); err != nil {
+		var scopesJSON json.RawMessage
+		if err := rows.Scan(&id, &hash, &accountID, &atype, &scopesJSON); err != nil {
 			return nil, err
 		}
 		match, _ := auth.VerifyPassword(full, hash)
 		if match {
 			_, _ = s.pool.Exec(ctx, `UPDATE api_keys SET last_used_at = now() WHERE id = $1`, id)
-			return &auth.APIKeyAccount{AccountID: accountID, AccountType: atype}, nil
+			var scopes []string
+			_ = json.Unmarshal(scopesJSON, &scopes)
+			return &auth.APIKeyAccount{AccountID: accountID, AccountType: atype, Scopes: scopes}, nil
 		}
 	}
 	return nil, errors.New("invalid key")
+}
+
+// RequireLeadsRead ensures the API key may read leads.
+func (s *Service) RequireLeadsRead(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		acct := auth.APIKeyAccountFromContext(r.Context())
+		if acct == nil || !acct.CanReadLeads() {
+			httpx.Err(w, http.StatusForbidden, httpx.CodeForbidden, "missing leads:read scope")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// RequireLeadsWrite ensures the API key may write leads.
+func (s *Service) RequireLeadsWrite(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		acct := auth.APIKeyAccountFromContext(r.Context())
+		if acct == nil || !acct.CanWriteLeads() {
+			httpx.Err(w, http.StatusForbidden, httpx.CodeForbidden, "missing leads:write scope")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // RequireAPIKey is middleware that authenticates the public intake API.

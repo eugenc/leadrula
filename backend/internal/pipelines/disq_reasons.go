@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/jackc/pgx/v5"
 )
@@ -19,25 +20,27 @@ type DisqReason struct {
 	CreatedAt time.Time `json:"created_at,omitempty"`
 }
 
-func (s *Service) assertDisqStage(ctx context.Context, accountID, stageID int64) error {
-	var ok bool
-	err := s.pool.QueryRow(ctx,
-		`SELECT EXISTS(
-		   SELECT 1 FROM pipeline_stages ps
-		   JOIN pipelines p ON p.id = ps.pipeline_id
-		   WHERE ps.id = $1 AND p.account_id = $2 AND ps.stage_type = 'disqualification'
-		 )`, stageID, accountID).Scan(&ok)
-	if err != nil {
+func (s *Service) assertDisqStage(ctx context.Context, p *auth.Principal, stageID int64) error {
+	if err := s.requireStage(ctx, p, stageID); err != nil {
 		return err
 	}
-	if !ok {
+	var disq bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT stage_type = 'disqualification' FROM pipeline_stages WHERE id = $1`, stageID).Scan(&disq)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return httpx.NotFound("disqualification stage not found")
+		}
+		return err
+	}
+	if !disq {
 		return httpx.NotFound("disqualification stage not found")
 	}
 	return nil
 }
 
-func (s *Service) ListStageReasons(ctx context.Context, accountID, stageID int64) ([]DisqReason, error) {
-	if err := s.assertDisqStage(ctx, accountID, stageID); err != nil {
+func (s *Service) ListStageReasons(ctx context.Context, p *auth.Principal, stageID int64) ([]DisqReason, error) {
+	if err := s.assertDisqStage(ctx, p, stageID); err != nil {
 		return nil, err
 	}
 	rows, err := s.pool.Query(ctx,
@@ -50,14 +53,9 @@ func (s *Service) ListStageReasons(ctx context.Context, accountID, stageID int64
 	return scanDisqReasons(rows)
 }
 
-func (s *Service) ListPipelineReasons(ctx context.Context, accountID, pipelineID int64) ([]DisqReason, error) {
-	var owned bool
-	if err := s.pool.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM pipelines WHERE id=$1 AND account_id=$2)`, pipelineID, accountID).Scan(&owned); err != nil {
+func (s *Service) ListPipelineReasons(ctx context.Context, p *auth.Principal, pipelineID int64) ([]DisqReason, error) {
+	if err := s.requirePipeline(ctx, p, pipelineID); err != nil {
 		return nil, err
-	}
-	if !owned {
-		return nil, httpx.NotFound("pipeline not found")
 	}
 	rows, err := s.pool.Query(ctx,
 		`SELECT dr.id, dr.stage_id, ps.name, dr.label, dr.position, dr.is_active, dr.created_at
@@ -80,8 +78,8 @@ func (s *Service) ListPipelineReasons(ctx context.Context, accountID, pipelineID
 	return out, rows.Err()
 }
 
-func (s *Service) CreateStageReason(ctx context.Context, accountID, stageID int64, label string) (*DisqReason, error) {
-	if err := s.assertDisqStage(ctx, accountID, stageID); err != nil {
+func (s *Service) CreateStageReason(ctx context.Context, p *auth.Principal, stageID int64, label string) (*DisqReason, error) {
+	if err := s.assertDisqStage(ctx, p, stageID); err != nil {
 		return nil, err
 	}
 	d := &DisqReason{}
@@ -93,18 +91,27 @@ func (s *Service) CreateStageReason(ctx context.Context, accountID, stageID int6
 	return d, err
 }
 
-func (s *Service) UpdateStageReason(ctx context.Context, accountID, id int64, label *string, position *int, isActive *bool) (*DisqReason, error) {
+func (s *Service) UpdateStageReason(ctx context.Context, p *auth.Principal, id int64, label *string, position *int, isActive *bool) (*DisqReason, error) {
+	var stageID int64
+	err := s.pool.QueryRow(ctx, `SELECT stage_id FROM disqualification_reasons WHERE id = $1`, id).Scan(&stageID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, httpx.NotFound("reason not found")
+		}
+		return nil, err
+	}
+	if err := s.assertDisqStage(ctx, p, stageID); err != nil {
+		return nil, err
+	}
 	d := &DisqReason{}
-	err := s.pool.QueryRow(ctx,
+	err = s.pool.QueryRow(ctx,
 		`UPDATE disqualification_reasons dr SET
-		   label = COALESCE($3, dr.label),
-		   position = COALESCE($4, dr.position),
-		   is_active = COALESCE($5, dr.is_active)
-		 FROM pipeline_stages ps
-		 JOIN pipelines p ON p.id = ps.pipeline_id
-		 WHERE dr.id = $1 AND dr.stage_id = ps.id AND p.account_id = $2
+		   label = COALESCE($2, dr.label),
+		   position = COALESCE($3, dr.position),
+		   is_active = COALESCE($4, dr.is_active)
+		 WHERE dr.id = $1
 		 RETURNING dr.id, dr.stage_id, dr.label, dr.position, dr.is_active, dr.created_at`,
-		id, accountID, label, position, isActive).Scan(
+		id, label, position, isActive).Scan(
 		&d.ID, &d.StageID, &d.Label, &d.Position, &d.IsActive, &d.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("reason not found")
@@ -112,7 +119,18 @@ func (s *Service) UpdateStageReason(ctx context.Context, accountID, id int64, la
 	return d, err
 }
 
-func (s *Service) DeleteStageReason(ctx context.Context, accountID, id int64) error {
+func (s *Service) DeleteStageReason(ctx context.Context, p *auth.Principal, id int64) error {
+	var stageID int64
+	err := s.pool.QueryRow(ctx, `SELECT stage_id FROM disqualification_reasons WHERE id = $1`, id).Scan(&stageID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return httpx.NotFound("reason not found")
+		}
+		return err
+	}
+	if err := s.assertDisqStage(ctx, p, stageID); err != nil {
+		return err
+	}
 	var inUse bool
 	if err := s.pool.QueryRow(ctx,
 		`SELECT EXISTS(SELECT 1 FROM leads WHERE disqualification_reason_id = $1)`, id).Scan(&inUse); err != nil {
@@ -121,11 +139,7 @@ func (s *Service) DeleteStageReason(ctx context.Context, accountID, id int64) er
 	if inUse {
 		return httpx.BusinessRule("cannot delete a reason in use; deactivate it instead")
 	}
-	ct, err := s.pool.Exec(ctx,
-		`DELETE FROM disqualification_reasons dr
-		 USING pipeline_stages ps, pipelines p
-		 WHERE dr.id = $1 AND dr.stage_id = ps.id AND p.id = ps.pipeline_id AND p.account_id = $2`,
-		id, accountID)
+	ct, err := s.pool.Exec(ctx, `DELETE FROM disqualification_reasons WHERE id = $1`, id)
 	if err != nil {
 		return err
 	}

@@ -192,6 +192,11 @@ func (s *Service) ingestPayload(ctx context.Context, wa *WebhookAuth, slug strin
 	if !forceProcess {
 		s.logDelivery(ctx, webhook.ID, firstEventID, firstLeadID, "success", rawJSON, "")
 	}
+	for _, ar := range results {
+		if ar.LeadInternalID != 0 && s.leadSvc != nil {
+			s.leadSvc.TryApplyWebhookOriginRoute(ctx, webhook.AccountID, webhook.ID, ar.LeadInternalID)
+		}
+	}
 	return &IngestResult{Status: "processed", Results: results}, nil
 }
 

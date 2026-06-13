@@ -14,9 +14,16 @@ type Handler struct{ svc *Service }
 
 func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 
-// RegisterBuyer mounts read-only inbound routes for buyer accounts.
+// RegisterBuyer mounts buyer route list + admin CRUD for buyer-owned routes.
 func (h *Handler) RegisterBuyer(r chi.Router) {
 	r.Get("/routes", h.buyerListRoutes)
+
+	r.Group(func(r chi.Router) {
+		r.Use(auth.RequireRole("admin"))
+		r.Post("/routes", h.buyerCreateRoute)
+		r.Patch("/routes/{id}", h.buyerUpdateRoute)
+		r.Delete("/routes/{id}", h.buyerDeleteRoute)
+	})
 }
 
 // RegisterRoutes mounts sources, routes, and field maps (publisher admin).
@@ -201,6 +208,20 @@ func (h *Handler) createRoute(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, rt)
 }
 
+func (h *Handler) buyerCreateRoute(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body CreateRouteParams
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	rt, err := h.svc.CreateBuyerRoute(r.Context(), p.AccountID, body)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, rt)
+}
+
 func (h *Handler) updateRoute(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body UpdateRouteParams
@@ -215,9 +236,38 @@ func (h *Handler) updateRoute(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, rt)
 }
 
+func (h *Handler) buyerUpdateRoute(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	rid := idp(r, "id")
+	ok, err := h.svc.RouteOwnedByBuyer(r.Context(), p.AccountID, rid)
+	if err != nil || !ok {
+		httpx.Err(w, http.StatusNotFound, httpx.CodeNotFound, "route not found")
+		return
+	}
+	var body UpdateRouteParams
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	rt, err := h.svc.UpdateBuyerRoute(r.Context(), p.AccountID, rid, body)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, rt)
+}
+
 func (h *Handler) deleteRoute(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	if err := h.svc.DeleteRoute(r.Context(), p.AccountID, idp(r, "id")); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) buyerDeleteRoute(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	if err := h.svc.DeleteBuyerRoute(r.Context(), p.AccountID, idp(r, "id")); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}

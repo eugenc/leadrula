@@ -32,8 +32,8 @@ func resolvePublisherID(r *http.Request) (int64, bool) {
 
 // RegisterPublicRoutes mounts the API-key-authenticated ingest endpoints.
 func (h *Handler) RegisterPublicRoutes(r chi.Router) {
-	r.Post("/api/v1/leads", h.ingest)
-	r.Post("/api/v1/leads/{id}/action", h.action)
+	r.With(h.apikeys.RequireLeadsWrite).Post("/api/v1/leads", h.ingest)
+	r.With(h.apikeys.RequireLeadsWrite).Post("/api/v1/leads/{id}/action", h.action)
 }
 
 // RegisterPublicSourceRoutes mounts source ingest with per-source API-key auth.

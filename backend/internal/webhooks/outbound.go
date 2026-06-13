@@ -345,6 +345,7 @@ func (s *Service) FireOutbound(ctx context.Context, accountID int64, event strin
 
 	tctx := buildTemplateContext(event, lead, pctx)
 
+	firedWebhooks := map[int64]struct{}{}
 	for _, tr := range triggers {
 		if ec != nil {
 			conds, err := pipelines.ParseConditions(tr.conditions)
@@ -388,6 +389,13 @@ func (s *Service) FireOutbound(ctx context.Context, accountID int64, event strin
 		}
 		if err := s.outbound.EnqueueWebhookDelivery(ctx, tr.connectionID, tr.id, leadID, payload); err != nil {
 			log.Printf("webhooks: trigger %d enqueue error: %v", tr.id, err)
+		} else {
+			firedWebhooks[tr.webhookID] = struct{}{}
+		}
+	}
+	if lead != nil && s.leadSvc != nil {
+		for webhookID := range firedWebhooks {
+			s.leadSvc.TryApplyWebhookOriginRoute(ctx, accountID, webhookID, lead.ID)
 		}
 	}
 }

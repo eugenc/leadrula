@@ -28,6 +28,7 @@ const titles: Record<string, string> = {
   billing: "Billing",
   users: "Users",
   api: "API Keys",
+  "api-docs": "API Documentation",
   calendar: "Calendar",
   settings: "Settings",
   collaboration: "Collaboration",

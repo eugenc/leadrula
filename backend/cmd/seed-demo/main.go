@@ -155,12 +155,12 @@ func seedBuyer(ctx context.Context, pool *pgxpool.Pool, publisherID, buyerID int
 	stageIDPtr := newLead
 	_, _ = pool.Exec(ctx,
 		`INSERT INTO routes(publisher_id, name, origin, source_id, destination, contract_id, delivery, target_stage_id)
-		 VALUES ($1,$2,'source',$3,'buyer',$4,$5,$6)`,
+		 VALUES ($1,$2,'source',$3,'contract',$4,$5,$6)`,
 		publisherID, "Roofing GTA → Buyer", sourceID, contractIDPtr, delivery, stageIDPtr)
 	// pipeline-origin route: when lead hits publisher Ready stage, send to buyer
 	_, _ = pool.Exec(ctx,
 		`INSERT INTO routes(publisher_id, name, origin, origin_pipeline_id, origin_stage_id, destination, contract_id, delivery, target_stage_id)
-		 VALUES ($1,$2,'pipeline',$3,$4,'buyer',$5,$6,$7)`,
+		 VALUES ($1,$2,'pipeline',$3,$4,'contract',$5,$6,$7)`,
 		publisherID, "Ready → Buyer", pubPipeline, pubReady, contractID, delivery, newLead)
 
 	// sample distributed leads

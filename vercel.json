@@ -5,7 +5,7 @@
   "buildCommand": "npm run build --prefix frontend",
   "outputDirectory": "frontend/dist",
   "env": {
-    "VITE_API_URL": "https://leadrula-production.up.railway.app"
+    "VITE_API_URL": "https://api.leadrula.com"
   },
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
 }

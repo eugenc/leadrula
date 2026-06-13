@@ -3,10 +3,12 @@ package calendar
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/collaboration"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -30,7 +32,48 @@ func NewService(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
 
 // List returns calendar events for an account. If userID != 0, filters to that
 // user's assigned leads.
-func (s *Service) List(ctx context.Context, accountID, userID int64, from, to *time.Time) ([]Event, error) {
+func (s *Service) List(ctx context.Context, p *auth.Principal, userID int64, from, to *time.Time) ([]Event, error) {
+	where := `l.owner_account_id = $1 AND l.action_at IS NOT NULL AND l.deleted_at IS NULL`
+	args := []any{p.AccountID}
+	if userID != 0 {
+		args = append(args, userID)
+		where += fmt.Sprintf(` AND l.assigned_user_id = $%d`, len(args))
+	}
+	if from != nil {
+		args = append(args, from)
+		where += fmt.Sprintf(` AND l.action_at >= $%d`, len(args))
+	}
+	if to != nil {
+		args = append(args, to)
+		where += fmt.Sprintf(` AND l.action_at <= $%d`, len(args))
+	}
+	where, args = collaboration.AppendLeadScope(p, where, args)
+
+	rows, err := s.pool.Query(ctx,
+		`SELECT l.id, (l.first_name || ' ' || l.last_name), l.stage_id, l.pipeline_id, l.assigned_user_id, l.action_at
+		 FROM leads l
+		 WHERE `+where+`
+		 ORDER BY l.action_at`,
+		args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	now := time.Now()
+	var out []Event
+	for rows.Next() {
+		var e Event
+		if err := rows.Scan(&e.LeadID, &e.Title, &e.StageID, &e.PipelineID, &e.UserID, &e.ActionAt); err != nil {
+			return nil, err
+		}
+		e.Overdue = e.ActionAt.Before(now)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// ListForAccount returns calendar events without collaboration scoping (publisher oversight).
+func (s *Service) ListForAccount(ctx context.Context, accountID, userID int64, from, to *time.Time) ([]Event, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, title, stage_id, pipeline_id, user_id, action_at
 		 FROM v_calendar
@@ -69,7 +112,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 func (h *Handler) global(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	from, to := parseRange(r)
-	items, err := h.svc.List(r.Context(), p.AccountID, 0, from, to)
+	items, err := h.svc.List(r.Context(), p, 0, from, to)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -80,7 +123,7 @@ func (h *Handler) global(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	from, to := parseRange(r)
-	items, err := h.svc.List(r.Context(), p.AccountID, p.UserID, from, to)
+	items, err := h.svc.List(r.Context(), p, p.UserID, from, to)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return

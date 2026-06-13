@@ -68,6 +68,7 @@ export interface SwitchableAccount {
   handler_id: string;
   type: "publisher" | "buyer";
   name: string;
+  access_via?: "switch" | "impersonate";
 }
 
 export interface SwitchLoginResult {
@@ -368,15 +369,20 @@ export interface Source {
 
 export interface Route {
   id: number;
+  buyer_id?: number | null;
   name: string;
-  origin: "source" | "pipeline";
+  origin: "source" | "pipeline" | "webhook" | "integration";
   source_id: number | null;
   source_name?: string | null;
   origin_pipeline_id: number | null;
   origin_stage_id: number | null;
   origin_pipeline_name?: string | null;
   origin_stage_name?: string | null;
-  destination: "publisher" | "buyer";
+  origin_webhook_id?: number | null;
+  origin_webhook_name?: string | null;
+  origin_connection_id?: number | null;
+  origin_connection_name?: string | null;
+  destination: "contract" | "pipeline" | "webhook" | "integration";
   contract_id: number | null;
   compensation_id?: number | null;
   contract_name?: string | null;
@@ -386,6 +392,8 @@ export interface Route {
   target_stage_id: number | null;
   target_pipeline_name?: string | null;
   target_stage_name?: string | null;
+  dest_webhook_id?: number | null;
+  dest_webhook_name?: string | null;
   is_active: boolean;
 }
 
@@ -431,6 +439,8 @@ export interface Webhook {
   outbound_payload_template?: string;
   outbound_field_map?: OutboundFieldMapEntry[];
   outbound_response_map?: ResponseMapEntry[];
+  integration_connection_id?: number | null;
+  integration_provider_slug?: string | null;
   created_at: string;
 }
 

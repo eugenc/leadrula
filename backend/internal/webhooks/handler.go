@@ -142,8 +142,20 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, map[string]any{"webhook": wb, "secret": secret})
 }
 
+func (h *Handler) guardUserEditable(w http.ResponseWriter, r *http.Request, accountID, webhookID int64) bool {
+	if err := h.svc.AssertUserEditableWebhook(r.Context(), accountID, webhookID); err != nil {
+		httpx.WriteError(w, err)
+		return false
+	}
+	return true
+}
+
 func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
+	wid := idp(r, "id")
+	if !h.guardUserEditable(w, r, p.AccountID, wid) {
+		return
+	}
 	var body struct {
 		Name                    *string         `json:"name"`
 		Slug                    *string         `json:"slug"`
@@ -162,7 +174,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	wb, err := h.svc.Update(r.Context(), p.AccountID, idp(r, "id"), UpdateWebhookInput{
+	wb, err := h.svc.Update(r.Context(), p.AccountID, wid, UpdateWebhookInput{
 		Name:                    body.Name,
 		Slug:                    body.Slug,
 		IsActive:                body.IsActive,
@@ -186,7 +198,11 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	if err := h.svc.Delete(r.Context(), p.AccountID, idp(r, "id")); err != nil {
+	wid := idp(r, "id")
+	if !h.guardUserEditable(w, r, p.AccountID, wid) {
+		return
+	}
+	if err := h.svc.Delete(r.Context(), p.AccountID, wid); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
@@ -195,7 +211,11 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) rotateSecret(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	secret, err := h.svc.RotateSecret(r.Context(), p.AccountID, idp(r, "id"))
+	wid := idp(r, "id")
+	if !h.guardUserEditable(w, r, p.AccountID, wid) {
+		return
+	}
+	secret, err := h.svc.RotateSecret(r.Context(), p.AccountID, wid)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -224,8 +244,7 @@ func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	wid := idp(r, "id")
-	if ok, err := h.svc.OwnedBy(r.Context(), p.AccountID, wid); err != nil || !ok {
-		httpx.Err(w, http.StatusNotFound, httpx.CodeNotFound, "webhook not found")
+	if !h.guardUserEditable(w, r, p.AccountID, wid) {
 		return
 	}
 	var body CreateEventParams
@@ -243,8 +262,7 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) updateEvent(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	wid := idp(r, "id")
-	if ok, err := h.svc.OwnedBy(r.Context(), p.AccountID, wid); err != nil || !ok {
-		httpx.Err(w, http.StatusNotFound, httpx.CodeNotFound, "webhook not found")
+	if !h.guardUserEditable(w, r, p.AccountID, wid) {
 		return
 	}
 	var body UpdateEventParams
@@ -262,8 +280,7 @@ func (h *Handler) updateEvent(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteEvent(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	wid := idp(r, "id")
-	if ok, err := h.svc.OwnedBy(r.Context(), p.AccountID, wid); err != nil || !ok {
-		httpx.Err(w, http.StatusNotFound, httpx.CodeNotFound, "webhook not found")
+	if !h.guardUserEditable(w, r, p.AccountID, wid) {
 		return
 	}
 	if err := h.svc.DeleteEvent(r.Context(), wid, idp(r, "eventId")); err != nil {
@@ -294,8 +311,7 @@ func (h *Handler) listFieldMap(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) addFieldMap(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	wid := idp(r, "id")
-	if ok, err := h.svc.OwnedBy(r.Context(), p.AccountID, wid); err != nil || !ok {
-		httpx.Err(w, http.StatusNotFound, httpx.CodeNotFound, "webhook not found")
+	if !h.guardUserEditable(w, r, p.AccountID, wid) {
 		return
 	}
 	var body struct {
@@ -316,6 +332,11 @@ func (h *Handler) addFieldMap(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) deleteFieldMap(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	if err := h.svc.AssertUserEditableFieldMap(r.Context(), p.AccountID, idp(r, "mapId")); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
 	if err := h.svc.DeleteFieldMap(r.Context(), idp(r, "mapId")); err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -394,7 +415,11 @@ func (h *Handler) listDeliveries(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) rotateOutboundSecret(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	secret, err := h.svc.RotateOutboundSecret(r.Context(), p.AccountID, idp(r, "id"))
+	wid := idp(r, "id")
+	if !h.guardUserEditable(w, r, p.AccountID, wid) {
+		return
+	}
+	secret, err := h.svc.RotateOutboundSecret(r.Context(), p.AccountID, wid)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -420,8 +445,7 @@ func (h *Handler) listTriggers(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) createTrigger(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	wid := idp(r, "id")
-	if ok, err := h.svc.OwnedBy(r.Context(), p.AccountID, wid); err != nil || !ok {
-		httpx.Err(w, http.StatusNotFound, httpx.CodeNotFound, "webhook not found")
+	if !h.guardUserEditable(w, r, p.AccountID, wid) {
 		return
 	}
 	var body CreateTriggerInput
@@ -439,8 +463,7 @@ func (h *Handler) createTrigger(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) updateTrigger(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	wid := idp(r, "id")
-	if ok, err := h.svc.OwnedBy(r.Context(), p.AccountID, wid); err != nil || !ok {
-		httpx.Err(w, http.StatusNotFound, httpx.CodeNotFound, "webhook not found")
+	if !h.guardUserEditable(w, r, p.AccountID, wid) {
 		return
 	}
 	var body UpdateTriggerInput
@@ -458,11 +481,9 @@ func (h *Handler) updateTrigger(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteTrigger(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	wid := idp(r, "id")
-	if ok, err := h.svc.OwnedBy(r.Context(), p.AccountID, wid); err != nil || !ok {
-		httpx.Err(w, http.StatusNotFound, httpx.CodeNotFound, "webhook not found")
+	if !h.guardUserEditable(w, r, p.AccountID, wid) {
 		return
 	}
-	_ = wid
 	if err := h.svc.DeleteTrigger(r.Context(), idp(r, "triggerId")); err != nil {
 		httpx.WriteError(w, err)
 		return

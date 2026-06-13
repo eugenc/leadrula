@@ -42,29 +42,50 @@ type SourceSamplePayload struct {
 }
 
 type Route struct {
-	ID                 int64     `json:"id"`
-	PublisherID        int64     `json:"-"`
-	Name               string    `json:"name"`
-	Origin             string    `json:"origin"`
-	SourceID           *int64    `json:"source_id"`
-	SourceName         *string   `json:"source_name,omitempty"`
-	OriginPipelineID   *int64    `json:"origin_pipeline_id"`
-	OriginStageID      *int64    `json:"origin_stage_id"`
-	OriginPipelineName *string   `json:"origin_pipeline_name,omitempty"`
-	OriginStageName    *string   `json:"origin_stage_name,omitempty"`
-	Destination        string    `json:"destination"`
-	ContractID         *int64    `json:"contract_id"`
-	CompensationID     *int64    `json:"compensation_id,omitempty"`
-	ContractName       *string   `json:"contract_name,omitempty"`
-	BuyerName          *string   `json:"buyer_name,omitempty"`
-	Delivery           string    `json:"delivery"`
-	TargetPipelineID   *int64    `json:"target_pipeline_id"`
-	TargetStageID      *int64    `json:"target_stage_id"`
-	TargetPipelineName *string   `json:"target_pipeline_name,omitempty"`
-	TargetStageName    *string   `json:"target_stage_name,omitempty"`
-	IsActive           bool      `json:"is_active"`
-	CreatedAt          time.Time `json:"created_at"`
+	ID                   int64     `json:"id"`
+	PublisherID          *int64    `json:"-"`
+	BuyerID              *int64    `json:"buyer_id,omitempty"`
+	Name                 string    `json:"name"`
+	Origin               string    `json:"origin"`
+	SourceID             *int64    `json:"source_id"`
+	SourceName           *string   `json:"source_name,omitempty"`
+	OriginPipelineID     *int64    `json:"origin_pipeline_id"`
+	OriginStageID        *int64    `json:"origin_stage_id"`
+	OriginPipelineName   *string   `json:"origin_pipeline_name,omitempty"`
+	OriginStageName      *string   `json:"origin_stage_name,omitempty"`
+	OriginWebhookID      *int64    `json:"origin_webhook_id"`
+	OriginWebhookName    *string   `json:"origin_webhook_name,omitempty"`
+	OriginConnectionID   *int64    `json:"origin_connection_id"`
+	OriginConnectionName *string   `json:"origin_connection_name,omitempty"`
+	Destination          string    `json:"destination"`
+	ContractID           *int64    `json:"contract_id"`
+	CompensationID       *int64    `json:"compensation_id,omitempty"`
+	ContractName         *string   `json:"contract_name,omitempty"`
+	BuyerName            *string   `json:"buyer_name,omitempty"`
+	Delivery             string    `json:"delivery"`
+	TargetPipelineID     *int64    `json:"target_pipeline_id"`
+	TargetStageID        *int64    `json:"target_stage_id"`
+	TargetPipelineName   *string   `json:"target_pipeline_name,omitempty"`
+	TargetStageName      *string   `json:"target_stage_name,omitempty"`
+	DestWebhookID        *int64    `json:"dest_webhook_id"`
+	DestWebhookName      *string   `json:"dest_webhook_name,omitempty"`
+	IsActive             bool      `json:"is_active"`
+	CreatedAt            time.Time `json:"created_at"`
 }
+
+// OwnerAccountID returns the account that owns this route definition.
+func (rt *Route) OwnerAccountID() int64 {
+	if rt.BuyerID != nil {
+		return *rt.BuyerID
+	}
+	if rt.PublisherID != nil {
+		return *rt.PublisherID
+	}
+	return 0
+}
+
+// BuyerOwned reports whether the buyer account created this route.
+func (rt *Route) BuyerOwned() bool { return rt.BuyerID != nil }
 
 type RouteFieldMapEntry struct {
 	ID               int64     `json:"id"`
@@ -87,31 +108,37 @@ type RouteFieldMapOptions struct {
 }
 
 type CreateRouteParams struct {
-	Name             string `json:"name"`
-	Origin           string `json:"origin"`
-	SourceID         *int64 `json:"source_id"`
-	OriginPipelineID *int64 `json:"origin_pipeline_id"`
-	OriginStageID    *int64 `json:"origin_stage_id"`
-	Destination      string `json:"destination"`
-	ContractID       *int64 `json:"contract_id"`
-	CompensationID   *int64 `json:"compensation_id"`
-	Delivery         string `json:"delivery"`
-	TargetPipelineID *int64 `json:"target_pipeline_id"`
-	TargetStageID    *int64 `json:"target_stage_id"`
+	Name               string `json:"name"`
+	Origin             string `json:"origin"`
+	SourceID           *int64 `json:"source_id"`
+	OriginPipelineID   *int64 `json:"origin_pipeline_id"`
+	OriginStageID      *int64 `json:"origin_stage_id"`
+	OriginWebhookID    *int64 `json:"origin_webhook_id"`
+	OriginConnectionID *int64 `json:"origin_connection_id"`
+	Destination        string `json:"destination"`
+	ContractID         *int64 `json:"contract_id"`
+	CompensationID     *int64 `json:"compensation_id"`
+	Delivery           string `json:"delivery"`
+	TargetPipelineID   *int64 `json:"target_pipeline_id"`
+	TargetStageID      *int64 `json:"target_stage_id"`
+	DestWebhookID      *int64 `json:"dest_webhook_id"`
 }
 
 type UpdateRouteParams struct {
-	Name             *string `json:"name"`
-	IsActive         *bool   `json:"is_active"`
-	SourceID         *int64  `json:"source_id"`
-	OriginPipelineID *int64  `json:"origin_pipeline_id"`
-	OriginStageID    *int64  `json:"origin_stage_id"`
-	Destination      *string `json:"destination"`
-	ContractID       *int64  `json:"contract_id"`
-	CompensationID   *int64  `json:"compensation_id"`
-	Delivery         *string `json:"delivery"`
-	TargetPipelineID *int64  `json:"target_pipeline_id"`
-	TargetStageID    *int64  `json:"target_stage_id"`
+	Name               *string `json:"name"`
+	IsActive           *bool   `json:"is_active"`
+	SourceID           *int64  `json:"source_id"`
+	OriginPipelineID   *int64  `json:"origin_pipeline_id"`
+	OriginStageID      *int64  `json:"origin_stage_id"`
+	OriginWebhookID    *int64  `json:"origin_webhook_id"`
+	OriginConnectionID *int64  `json:"origin_connection_id"`
+	Destination        *string `json:"destination"`
+	ContractID         *int64  `json:"contract_id"`
+	CompensationID     *int64  `json:"compensation_id"`
+	Delivery           *string `json:"delivery"`
+	TargetPipelineID   *int64  `json:"target_pipeline_id"`
+	TargetStageID      *int64  `json:"target_stage_id"`
+	DestWebhookID      *int64  `json:"dest_webhook_id"`
 }
 
 type Service struct {
@@ -127,23 +154,32 @@ const routeFrom = `
  LEFT JOIN accounts ba ON ba.id = c.buyer_id
  LEFT JOIN pipelines op ON op.id = r.origin_pipeline_id
  LEFT JOIN pipeline_stages os ON os.id = r.origin_stage_id
- LEFT JOIN pipelines tp ON tp.id = r.target_pipeline_id
- LEFT JOIN pipeline_stages ts ON ts.id = r.target_stage_id AND r.destination = 'publisher'
+ LEFT JOIN webhooks ow ON ow.id = r.origin_webhook_id
+ LEFT JOIN integration_connections oc ON oc.id = r.origin_connection_id
+ LEFT JOIN pipelines tp ON tp.id = r.target_pipeline_id AND r.destination = 'pipeline'
+ LEFT JOIN pipeline_stages ts ON ts.id = r.target_stage_id AND r.destination = 'pipeline'
  LEFT JOIN pipelines bp ON bp.id = c.buyer_pipeline_id
- LEFT JOIN pipeline_stages bs ON bs.id = r.target_stage_id AND r.destination = 'buyer'`
+ LEFT JOIN pipeline_stages bs ON bs.id = r.target_stage_id AND r.destination = 'contract'
+ LEFT JOIN webhooks dw ON dw.id = r.dest_webhook_id`
 
-const routeCols = `r.id, r.publisher_id, r.name, r.origin, r.source_id, s.name,
-	r.origin_pipeline_id, r.origin_stage_id, r.destination, r.contract_id, r.compensation_id, c.name,
-	r.delivery, r.target_pipeline_id, r.target_stage_id, r.is_active, r.created_at,
+const routeCols = `r.id, r.publisher_id, r.buyer_id, r.name, r.origin, r.source_id, s.name,
+	r.origin_pipeline_id, r.origin_stage_id, r.origin_webhook_id, ow.name,
+	r.origin_connection_id, oc.name,
+	r.destination, r.contract_id, r.compensation_id, c.name,
+	r.delivery, r.target_pipeline_id, r.target_stage_id, r.dest_webhook_id, dw.name,
+	r.is_active, r.created_at,
 	ba.name, op.name, os.name,
-	CASE WHEN r.destination = 'publisher' THEN tp.name ELSE bp.name END,
-	CASE WHEN r.destination = 'publisher' THEN ts.name ELSE bs.name END`
+	CASE WHEN r.destination = 'pipeline' THEN tp.name WHEN r.destination = 'contract' AND r.delivery = 'leads_pipeline' THEN bp.name ELSE NULL END,
+	CASE WHEN r.destination = 'pipeline' THEN ts.name WHEN r.destination = 'contract' AND r.delivery = 'leads_pipeline' THEN bs.name ELSE NULL END`
 
 func scanRoute(row pgx.Row) (*Route, error) {
 	rt := &Route{}
-	err := row.Scan(&rt.ID, &rt.PublisherID, &rt.Name, &rt.Origin, &rt.SourceID, &rt.SourceName,
-		&rt.OriginPipelineID, &rt.OriginStageID, &rt.Destination, &rt.ContractID, &rt.CompensationID, &rt.ContractName,
-		&rt.Delivery, &rt.TargetPipelineID, &rt.TargetStageID, &rt.IsActive, &rt.CreatedAt,
+	err := row.Scan(&rt.ID, &rt.PublisherID, &rt.BuyerID, &rt.Name, &rt.Origin, &rt.SourceID, &rt.SourceName,
+		&rt.OriginPipelineID, &rt.OriginStageID, &rt.OriginWebhookID, &rt.OriginWebhookName,
+		&rt.OriginConnectionID, &rt.OriginConnectionName,
+		&rt.Destination, &rt.ContractID, &rt.CompensationID, &rt.ContractName,
+		&rt.Delivery, &rt.TargetPipelineID, &rt.TargetStageID, &rt.DestWebhookID, &rt.DestWebhookName,
+		&rt.IsActive, &rt.CreatedAt,
 		&rt.BuyerName, &rt.OriginPipelineName, &rt.OriginStageName, &rt.TargetPipelineName, &rt.TargetStageName)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -215,15 +251,15 @@ func RouteForSource(ctx context.Context, q database.Querier, sourceID int64) (*R
 	return scanRouteOptional(q.QueryRow(ctx,
 		`SELECT `+routeCols+routeFrom+`
 		 WHERE r.source_id=$1 AND r.origin='source' AND r.is_active
-		   AND (r.destination <> 'buyer' OR (c.status = 'active' AND c.deleted_at IS NULL))`, sourceID))
+		   AND (r.destination <> 'contract' OR (c.status = 'active' AND c.deleted_at IS NULL))`, sourceID))
 }
 
-// BuyerRouteForSourceAndBuyer finds an active buyer route for a source and contract buyer.
+// BuyerRouteForSourceAndBuyer finds an active contract route for a source and contract buyer.
 func BuyerRouteForSourceAndBuyer(ctx context.Context, q database.Querier, publisherID, sourceID, buyerID int64) (*Route, error) {
 	return scanRouteOptional(q.QueryRow(ctx,
 		`SELECT `+routeCols+routeFrom+`
 		 JOIN contracts c ON c.id = r.contract_id
-		 WHERE r.publisher_id=$1 AND r.source_id=$2 AND r.origin='source' AND r.destination='buyer'
+		 WHERE r.publisher_id=$1 AND r.source_id=$2 AND r.origin='source' AND r.destination='contract'
 		   AND r.is_active AND c.buyer_id=$3 AND c.deleted_at IS NULL AND c.status = 'active'
 		 LIMIT 1`, publisherID, sourceID, buyerID))
 }
@@ -233,8 +269,34 @@ func MatchRouteByStage(ctx context.Context, q database.Querier, publisherID, sta
 	return scanRouteOptional(q.QueryRow(ctx,
 		`SELECT `+routeCols+routeFrom+`
 		 WHERE r.publisher_id=$1 AND r.origin='pipeline' AND r.origin_stage_id=$2 AND r.is_active
-		   AND (r.destination <> 'buyer' OR (c.status = 'active' AND c.deleted_at IS NULL))`,
+		   AND (r.destination <> 'contract' OR (c.status = 'active' AND c.deleted_at IS NULL))`,
 		publisherID, stageID))
+}
+
+// MatchBuyerRouteByStage finds an active buyer-owned pipeline-origin route.
+func MatchBuyerRouteByStage(ctx context.Context, q database.Querier, buyerID, stageID int64) (*Route, error) {
+	return scanRouteOptional(q.QueryRow(ctx,
+		`SELECT `+routeCols+routeFrom+`
+		 WHERE r.buyer_id=$1 AND r.origin='pipeline' AND r.origin_stage_id=$2 AND r.is_active`,
+		buyerID, stageID))
+}
+
+// MatchRouteByOriginWebhook finds an active route triggered by a webhook.
+func MatchRouteByOriginWebhook(ctx context.Context, q database.Querier, accountID, webhookID int64) (*Route, error) {
+	return scanRouteOptional(q.QueryRow(ctx,
+		`SELECT `+routeCols+routeFrom+`
+		 WHERE r.origin='webhook' AND r.origin_webhook_id=$2 AND r.is_active
+		   AND (r.publisher_id=$1 OR r.buyer_id=$1)`,
+		accountID, webhookID))
+}
+
+// MatchRouteByOriginConnection finds an active route triggered by an integration connection.
+func MatchRouteByOriginConnection(ctx context.Context, q database.Querier, accountID, connectionID int64) (*Route, error) {
+	return scanRouteOptional(q.QueryRow(ctx,
+		`SELECT `+routeCols+routeFrom+`
+		 WHERE r.origin='integration' AND r.origin_connection_id=$2 AND r.is_active
+		   AND (r.publisher_id=$1 OR r.buyer_id=$1)`,
+		accountID, connectionID))
 }
 
 func scanRouteOptional(row pgx.Row) (*Route, error) {
@@ -431,37 +493,153 @@ func (s *Service) DeleteSourceFieldMap(ctx context.Context, id int64) error {
 	return err
 }
 
-func validateRouteParams(p CreateRouteParams) error {
-	if p.Origin != "source" && p.Origin != "pipeline" {
-		return httpx.Validation("origin must be source or pipeline")
+func validateRouteParams(p CreateRouteParams, publisherOwned bool) error {
+	if p.Origin != "source" && p.Origin != "pipeline" && p.Origin != "webhook" && p.Origin != "integration" {
+		return httpx.Validation("origin must be source, pipeline, webhook, or integration")
 	}
-	if p.Destination != "publisher" && p.Destination != "buyer" {
-		return httpx.Validation("destination must be publisher or buyer")
+	if p.Destination != "contract" && p.Destination != "pipeline" && p.Destination != "webhook" && p.Destination != "integration" {
+		return httpx.Validation("destination must be contract, pipeline, webhook, or integration")
 	}
-	if p.Delivery != "leads" && p.Delivery != "leads_pipeline" {
-		return httpx.Validation("delivery must be leads or leads_pipeline")
+	if !publisherOwned {
+		if p.Origin == "source" {
+			return httpx.Validation("source origin is publisher-only")
+		}
+		if p.Destination == "contract" {
+			return httpx.Validation("contract destination is publisher-only")
+		}
 	}
-	if p.Origin == "source" {
+	if p.Destination == "contract" || p.Destination == "pipeline" {
+		if p.Delivery != "leads" && p.Delivery != "leads_pipeline" {
+			return httpx.Validation("delivery must be leads or leads_pipeline")
+		}
+	} else {
+		p.Delivery = "leads"
+	}
+	switch p.Origin {
+	case "source":
 		if p.SourceID == nil || *p.SourceID == 0 {
 			return httpx.Validation("source_id is required for source origin")
 		}
-	} else {
+	case "pipeline":
 		if p.OriginPipelineID == nil || p.OriginStageID == nil {
 			return httpx.Validation("origin_pipeline_id and origin_stage_id are required for pipeline origin")
 		}
-		if p.Destination == "publisher" {
-			return httpx.Validation("pipeline origin routes must target a buyer")
+	case "webhook":
+		if p.OriginWebhookID == nil || *p.OriginWebhookID == 0 {
+			return httpx.Validation("origin_webhook_id is required for webhook origin")
+		}
+	case "integration":
+		if p.OriginConnectionID == nil || *p.OriginConnectionID == 0 {
+			return httpx.Validation("origin_connection_id is required for integration origin")
 		}
 	}
-	if p.Destination == "buyer" {
+	switch p.Destination {
+	case "contract":
 		if p.ContractID == nil || *p.ContractID == 0 {
-			return httpx.Validation("contract_id is required for buyer destination")
+			return httpx.Validation("contract_id is required for contract destination")
+		}
+	case "pipeline":
+		if p.Delivery == "leads_pipeline" {
+			if p.TargetPipelineID == nil || p.TargetStageID == nil {
+				return httpx.Validation("target_pipeline_id and target_stage_id are required for pipeline destination")
+			}
+		}
+	case "webhook":
+		if p.DestWebhookID == nil || *p.DestWebhookID == 0 {
+			return httpx.Validation("dest_webhook_id is required for webhook destination")
 		}
 	}
-	if p.Destination == "publisher" && p.Delivery == "leads_pipeline" {
-		if p.TargetPipelineID == nil || p.TargetStageID == nil {
-			return httpx.Validation("target_pipeline_id and target_stage_id are required for publisher pipeline delivery")
+	return nil
+}
+
+func (s *Service) validateRouteOwnership(ctx context.Context, accountID int64, publisherOwned bool, p CreateRouteParams) error {
+	if err := validateRouteParams(p, publisherOwned); err != nil {
+		return err
+	}
+	if p.Origin == "source" {
+		ok, err := s.SourceOwnedBy(ctx, accountID, *p.SourceID)
+		if err != nil || !ok {
+			return httpx.Validation("source not found")
 		}
+	}
+	if p.Origin == "pipeline" {
+		if err := s.pipelineStageOwnedBy(ctx, accountID, *p.OriginPipelineID, *p.OriginStageID); err != nil {
+			return err
+		}
+	}
+	if p.Origin == "webhook" {
+		if err := s.webhookOwnedBy(ctx, accountID, *p.OriginWebhookID); err != nil {
+			return err
+		}
+	}
+	if p.Origin == "integration" {
+		if err := s.connectionOwnedBy(ctx, accountID, *p.OriginConnectionID); err != nil {
+			return err
+		}
+	}
+	if p.Destination == "contract" {
+		var pubID int64
+		err := s.pool.QueryRow(ctx,
+			`SELECT publisher_id FROM contracts WHERE id=$1 AND deleted_at IS NULL`, *p.ContractID).Scan(&pubID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return httpx.Validation("contract not found")
+		}
+		if err != nil || pubID != accountID {
+			return httpx.Validation("contract not found")
+		}
+	}
+	if p.Destination == "pipeline" && p.Delivery == "leads_pipeline" {
+		if err := s.pipelineStageOwnedBy(ctx, accountID, *p.TargetPipelineID, *p.TargetStageID); err != nil {
+			return err
+		}
+	}
+	if p.Destination == "webhook" {
+		if err := s.webhookOwnedBy(ctx, accountID, *p.DestWebhookID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) pipelineStageOwnedBy(ctx context.Context, accountID, pipelineID, stageID int64) error {
+	var ok bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(
+			SELECT 1 FROM pipeline_stages ps
+			JOIN pipelines p ON p.id = ps.pipeline_id
+			WHERE ps.id=$1 AND ps.pipeline_id=$2 AND p.account_id=$3)`,
+		stageID, pipelineID, accountID).Scan(&ok)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return httpx.Validation("pipeline stage not found")
+	}
+	return nil
+}
+
+func (s *Service) webhookOwnedBy(ctx context.Context, accountID, webhookID int64) error {
+	var ok bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM webhooks WHERE id=$1 AND account_id=$2)`, webhookID, accountID).Scan(&ok)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return httpx.Validation("webhook not found")
+	}
+	return nil
+}
+
+func (s *Service) connectionOwnedBy(ctx context.Context, accountID, connectionID int64) error {
+	var ok bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM integration_connections WHERE id=$1 AND account_id=$2)`, connectionID, accountID).Scan(&ok)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return httpx.Validation("integration connection not found")
 	}
 	return nil
 }
@@ -474,26 +652,23 @@ func (s *Service) ListRoutes(ctx context.Context, publisherID int64) ([]Route, e
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Route
-	for rows.Next() {
-		rt, err := scanRoute(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *rt)
-	}
-	return out, rows.Err()
+	return scanRouteList(rows)
 }
 
 func (s *Service) ListRoutesForBuyer(ctx context.Context, buyerID int64) ([]Route, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT `+routeCols+routeFrom+`
-		 WHERE r.destination='buyer' AND c.buyer_id=$1 AND c.deleted_at IS NULL
+		 WHERE (r.destination='contract' AND c.buyer_id=$1 AND c.deleted_at IS NULL)
+		    OR r.buyer_id=$1
 		 ORDER BY r.name`, buyerID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	return scanRouteList(rows)
+}
+
+func scanRouteList(rows pgx.Rows) ([]Route, error) {
 	var out []Route
 	for rows.Next() {
 		rt, err := scanRoute(rows)
@@ -505,24 +680,49 @@ func (s *Service) ListRoutesForBuyer(ctx context.Context, buyerID int64) ([]Rout
 	return out, rows.Err()
 }
 
-func (s *Service) CreateRoute(ctx context.Context, publisherID int64, p CreateRouteParams) (*Route, error) {
+const routeInsertCols = `publisher_id, buyer_id, name, origin, source_id, origin_pipeline_id, origin_stage_id,
+	origin_webhook_id, origin_connection_id, destination, contract_id, compensation_id, delivery,
+	target_pipeline_id, target_stage_id, dest_webhook_id`
+
+func (s *Service) insertRoute(ctx context.Context, publisherID, buyerID *int64, p CreateRouteParams) (*Route, error) {
 	if p.Delivery == "" {
-		p.Delivery = "leads_pipeline"
-	}
-	if err := validateRouteParams(p); err != nil {
-		return nil, err
+		if p.Destination == "integration" || p.Destination == "webhook" {
+			p.Delivery = "leads"
+		} else {
+			p.Delivery = "leads_pipeline"
+		}
 	}
 	var id int64
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO routes(publisher_id, name, origin, source_id, origin_pipeline_id, origin_stage_id,
-		    destination, contract_id, compensation_id, delivery, target_pipeline_id, target_stage_id)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
-		publisherID, p.Name, p.Origin, p.SourceID, p.OriginPipelineID, p.OriginStageID,
-		p.Destination, p.ContractID, p.CompensationID, p.Delivery, p.TargetPipelineID, p.TargetStageID).Scan(&id)
+		`INSERT INTO routes(`+routeInsertCols+`)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+		publisherID, buyerID, p.Name, p.Origin, p.SourceID, p.OriginPipelineID, p.OriginStageID,
+		p.OriginWebhookID, p.OriginConnectionID, p.Destination, p.ContractID, p.CompensationID, p.Delivery,
+		p.TargetPipelineID, p.TargetStageID, p.DestWebhookID).Scan(&id)
 	if err != nil {
 		return nil, err
 	}
-	return s.GetRoute(ctx, publisherID, id)
+	return s.GetRouteByID(ctx, id)
+}
+
+func (s *Service) CreateRoute(ctx context.Context, publisherID int64, p CreateRouteParams) (*Route, error) {
+	if err := s.validateRouteOwnership(ctx, publisherID, true, p); err != nil {
+		return nil, err
+	}
+	pid := publisherID
+	return s.insertRoute(ctx, &pid, nil, p)
+}
+
+func (s *Service) CreateBuyerRoute(ctx context.Context, buyerID int64, p CreateRouteParams) (*Route, error) {
+	if err := s.validateRouteOwnership(ctx, buyerID, false, p); err != nil {
+		return nil, err
+	}
+	bid := buyerID
+	return s.insertRoute(ctx, nil, &bid, p)
+}
+
+func (s *Service) GetRouteByID(ctx context.Context, id int64) (*Route, error) {
+	return scanRoute(s.pool.QueryRow(ctx, `SELECT `+routeCols+routeFrom+` WHERE r.id=$1`, id))
 }
 
 func (s *Service) GetRoute(ctx context.Context, publisherID, id int64) (*Route, error) {
@@ -531,25 +731,52 @@ func (s *Service) GetRoute(ctx context.Context, publisherID, id int64) (*Route, 
 		 WHERE r.id=$1 AND r.publisher_id=$2`, id, publisherID))
 }
 
-func (s *Service) UpdateRoute(ctx context.Context, publisherID, id int64, p UpdateRouteParams) (*Route, error) {
-	cur, err := scanRoute(s.pool.QueryRow(ctx,
+func (s *Service) GetBuyerRoute(ctx context.Context, buyerID, id int64) (*Route, error) {
+	return scanRoute(s.pool.QueryRow(ctx,
 		`SELECT `+routeCols+routeFrom+`
-		 WHERE r.id=$1 AND r.publisher_id=$2`, id, publisherID))
+		 WHERE r.id=$1 AND r.buyer_id=$2`, id, buyerID))
+}
+
+func (s *Service) UpdateRoute(ctx context.Context, publisherID, id int64, p UpdateRouteParams) (*Route, error) {
+	cur, err := s.GetRoute(ctx, publisherID, id)
 	if err != nil {
 		return nil, err
 	}
+	merged := mergeRouteParams(cur, p)
+	if err := s.validateRouteOwnership(ctx, publisherID, true, merged); err != nil {
+		return nil, err
+	}
+	return s.applyRouteUpdate(ctx, id, &publisherID, nil, cur.Name, p, merged)
+}
+
+func (s *Service) UpdateBuyerRoute(ctx context.Context, buyerID, id int64, p UpdateRouteParams) (*Route, error) {
+	cur, err := s.GetBuyerRoute(ctx, buyerID, id)
+	if err != nil {
+		return nil, err
+	}
+	merged := mergeRouteParams(cur, p)
+	if err := s.validateRouteOwnership(ctx, buyerID, false, merged); err != nil {
+		return nil, err
+	}
+	return s.applyRouteUpdate(ctx, id, nil, &buyerID, cur.Name, p, merged)
+}
+
+func mergeRouteParams(cur *Route, p UpdateRouteParams) CreateRouteParams {
 	merged := CreateRouteParams{
-		Name:             cur.Name,
-		Origin:           cur.Origin,
-		SourceID:         cur.SourceID,
-		OriginPipelineID: cur.OriginPipelineID,
-		OriginStageID:    cur.OriginStageID,
-		Destination:      cur.Destination,
-		ContractID:       cur.ContractID,
-		CompensationID:   cur.CompensationID,
-		Delivery:         cur.Delivery,
-		TargetPipelineID: cur.TargetPipelineID,
-		TargetStageID:    cur.TargetStageID,
+		Name:               cur.Name,
+		Origin:             cur.Origin,
+		SourceID:           cur.SourceID,
+		OriginPipelineID:   cur.OriginPipelineID,
+		OriginStageID:      cur.OriginStageID,
+		OriginWebhookID:    cur.OriginWebhookID,
+		OriginConnectionID: cur.OriginConnectionID,
+		Destination:        cur.Destination,
+		ContractID:         cur.ContractID,
+		CompensationID:     cur.CompensationID,
+		Delivery:           cur.Delivery,
+		TargetPipelineID:   cur.TargetPipelineID,
+		TargetStageID:      cur.TargetStageID,
+		DestWebhookID:      cur.DestWebhookID,
 	}
 	if p.SourceID != nil {
 		merged.SourceID = p.SourceID
@@ -559,6 +786,12 @@ func (s *Service) UpdateRoute(ctx context.Context, publisherID, id int64, p Upda
 	}
 	if p.OriginStageID != nil {
 		merged.OriginStageID = p.OriginStageID
+	}
+	if p.OriginWebhookID != nil {
+		merged.OriginWebhookID = p.OriginWebhookID
+	}
+	if p.OriginConnectionID != nil {
+		merged.OriginConnectionID = p.OriginConnectionID
 	}
 	if p.Destination != nil {
 		merged.Destination = *p.Destination
@@ -578,37 +811,65 @@ func (s *Service) UpdateRoute(ctx context.Context, publisherID, id int64, p Upda
 	if p.TargetStageID != nil {
 		merged.TargetStageID = p.TargetStageID
 	}
-	if err := validateRouteParams(merged); err != nil {
-		return nil, err
+	if p.DestWebhookID != nil {
+		merged.DestWebhookID = p.DestWebhookID
 	}
-	name := cur.Name
+	return merged
+}
+
+func (s *Service) applyRouteUpdate(ctx context.Context, id int64, publisherID, buyerID *int64, curName string, p UpdateRouteParams, merged CreateRouteParams) (*Route, error) {
+	name := curName
 	if p.Name != nil {
 		name = *p.Name
 	}
-	_, err = s.pool.Exec(ctx,
+	var ownerClause string
+	var ownerArg int64
+	if publisherID != nil {
+		ownerClause = "publisher_id=$2"
+		ownerArg = *publisherID
+	} else {
+		ownerClause = "buyer_id=$2"
+		ownerArg = *buyerID
+	}
+	_, err := s.pool.Exec(ctx,
 		`UPDATE routes SET
 		   name = $3,
 		   source_id = COALESCE($4, source_id),
 		   origin_pipeline_id = COALESCE($5, origin_pipeline_id),
 		   origin_stage_id = COALESCE($6, origin_stage_id),
-		   destination = COALESCE($7, destination),
-		   contract_id = COALESCE($8, contract_id),
-		   compensation_id = COALESCE($9, compensation_id),
-		   delivery = COALESCE($10, delivery),
-		   target_pipeline_id = COALESCE($11, target_pipeline_id),
-		   target_stage_id = COALESCE($12, target_stage_id),
-		   is_active = COALESCE($13, is_active)
-		 WHERE id=$1 AND publisher_id=$2`,
-		id, publisherID, name, p.SourceID, p.OriginPipelineID, p.OriginStageID,
-		p.Destination, p.ContractID, p.CompensationID, p.Delivery, p.TargetPipelineID, p.TargetStageID, p.IsActive)
+		   origin_webhook_id = COALESCE($7, origin_webhook_id),
+		   origin_connection_id = COALESCE($8, origin_connection_id),
+		   destination = COALESCE($9, destination),
+		   contract_id = COALESCE($10, contract_id),
+		   compensation_id = COALESCE($11, compensation_id),
+		   delivery = COALESCE($12, delivery),
+		   target_pipeline_id = COALESCE($13, target_pipeline_id),
+		   target_stage_id = COALESCE($14, target_stage_id),
+		   dest_webhook_id = COALESCE($15, dest_webhook_id),
+		   is_active = COALESCE($16, is_active)
+		 WHERE id=$1 AND `+ownerClause,
+		id, ownerArg, name, p.SourceID, p.OriginPipelineID, p.OriginStageID,
+		p.OriginWebhookID, p.OriginConnectionID, p.Destination, p.ContractID, p.CompensationID, p.Delivery,
+		p.TargetPipelineID, p.TargetStageID, p.DestWebhookID, p.IsActive)
 	if err != nil {
 		return nil, err
 	}
-	return s.GetRoute(ctx, publisherID, id)
+	return s.GetRouteByID(ctx, id)
 }
 
 func (s *Service) DeleteRoute(ctx context.Context, publisherID, id int64) error {
 	ct, err := s.pool.Exec(ctx, `DELETE FROM routes WHERE id=$1 AND publisher_id=$2`, id, publisherID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return httpx.NotFound("route not found")
+	}
+	return nil
+}
+
+func (s *Service) DeleteBuyerRoute(ctx context.Context, buyerID, id int64) error {
+	ct, err := s.pool.Exec(ctx, `DELETE FROM routes WHERE id=$1 AND buyer_id=$2`, id, buyerID)
 	if err != nil {
 		return err
 	}
@@ -625,6 +886,13 @@ func (s *Service) RouteOwnedBy(ctx context.Context, publisherID, routeID int64) 
 	return ok, err
 }
 
+func (s *Service) RouteOwnedByBuyer(ctx context.Context, buyerID, routeID int64) (bool, error) {
+	var ok bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM routes WHERE id=$1 AND buyer_id=$2)`, routeID, buyerID).Scan(&ok)
+	return ok, err
+}
+
 func (s *Service) ListRouteFieldMap(ctx context.Context, routeID int64) ([]RouteFieldMapEntry, error) {
 	return RouteFieldMap(ctx, s.pool, routeID)
 }
@@ -634,8 +902,8 @@ func (s *Service) RouteFieldMapOptions(ctx context.Context, publisherID, routeID
 	if err != nil {
 		return nil, err
 	}
-	if rt.Destination != "buyer" {
-		return nil, httpx.Validation("field map is only for buyer routes")
+	if rt.Destination != "contract" {
+		return nil, httpx.Validation("field map is only for contract routes")
 	}
 	if rt.ContractID == nil {
 		return nil, httpx.Validation("route missing contract")
@@ -702,8 +970,8 @@ func (s *Service) AddRouteFieldMap(ctx context.Context, publisherID, routeID int
 	if err != nil {
 		return nil, err
 	}
-	if rt.Destination != "buyer" {
-		return nil, httpx.Validation("field map is only for buyer routes")
+	if rt.Destination != "contract" {
+		return nil, httpx.Validation("field map is only for contract routes")
 	}
 	if rt.ContractID == nil {
 		return nil, httpx.Validation("route missing contract")
@@ -777,8 +1045,8 @@ func (s *Service) CreateBuyerCustomField(ctx context.Context, publisherID, route
 	if err != nil {
 		return nil, err
 	}
-	if rt.Destination != "buyer" {
-		return nil, httpx.Validation("field map is only for buyer routes")
+	if rt.Destination != "contract" {
+		return nil, httpx.Validation("field map is only for contract routes")
 	}
 	if rt.ContractID == nil {
 		return nil, httpx.Validation("route missing contract")

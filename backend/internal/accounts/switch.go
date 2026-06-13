@@ -200,13 +200,7 @@ func (s *Service) ListSwitchable(ctx context.Context, actor *auth.Principal) ([]
 		if origin.Role != "admin" {
 			return []map[string]any{}, nil
 		}
-		rows, err = s.repo.pool.Query(ctx,
-			`SELECT a.public_id, a.handler_id, a.type, a.name
-			 FROM accounts a
-			 JOIN partnerships p ON p.buyer_id = a.id
-			 WHERE p.publisher_id = $1 AND p.status = 'active'
-			   AND a.operational_status = 'active' AND a.deleted_at IS NULL
-			 ORDER BY a.name`, origin.AccountID)
+		return s.listPublisherSwitchable(ctx, origin.AccountID)
 	case "buyer":
 		if origin.Role != "admin" {
 			return []map[string]any{}, nil
@@ -237,6 +231,42 @@ func (s *Service) ListSwitchable(ctx context.Context, actor *auth.Principal) ([]
 		}
 		out = append(out, map[string]any{
 			"id": pubID, "handler_id": handlerID, "type": acctType, "name": name,
+		})
+	}
+	if out == nil {
+		out = []map[string]any{}
+	}
+	return out, rows.Err()
+}
+
+func (s *Service) listPublisherSwitchable(ctx context.Context, publisherID int64) ([]map[string]any, error) {
+	rows, err := s.repo.pool.Query(ctx,
+		`SELECT DISTINCT ON (a.id)
+			a.public_id, a.handler_id, a.type, a.name,
+			CASE WHEN bc.status = 'active' THEN 'impersonate' ELSE 'switch' END AS access_via
+		 FROM accounts a
+		 LEFT JOIN partnerships p
+		   ON p.buyer_id = a.id AND p.publisher_id = $1 AND p.status = 'active'
+		 LEFT JOIN buyer_collaborations bc
+		   ON bc.buyer_id = a.id AND bc.publisher_id = $1 AND bc.status = 'active'
+		 WHERE a.type = 'buyer'
+		   AND a.operational_status = 'active' AND a.deleted_at IS NULL
+		   AND (p.buyer_id IS NOT NULL OR bc.buyer_id IS NOT NULL)
+		 ORDER BY a.id, a.name`, publisherID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []map[string]any
+	for rows.Next() {
+		var pubID, handlerID, acctType, name, accessVia string
+		if err := rows.Scan(&pubID, &handlerID, &acctType, &name, &accessVia); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{
+			"id": pubID, "handler_id": handlerID, "type": acctType, "name": name,
+			"access_via": accessVia,
 		})
 	}
 	if out == nil {

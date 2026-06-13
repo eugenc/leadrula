@@ -33,8 +33,10 @@ type Webhook struct {
 	OutboundPayloadTemplate string          `json:"outbound_payload_template"`
 	OutboundFieldMap        json.RawMessage `json:"outbound_field_map"`
 	OutboundResponseMap     json.RawMessage `json:"outbound_response_map"`
-	OutboundConnectionID    *int64          `json:"-"`
-	CreatedAt               time.Time       `json:"created_at"`
+	OutboundConnectionID        *int64          `json:"-"`
+	IntegrationConnectionID     *int64          `json:"integration_connection_id,omitempty"`
+	IntegrationProviderSlug     *string         `json:"integration_provider_slug,omitempty"`
+	CreatedAt                   time.Time       `json:"created_at"`
 }
 
 // OutboundFieldMapEntry maps an external param name to a lead/event value source.
@@ -149,11 +151,19 @@ func NewService(pool *pgxpool.Pool, leadRepo *leads.Repository, leadSvc *leads.S
 	return &Service{pool: pool, leads: leadRepo, leadSvc: leadSvc, encKey: encKey, outbound: outbound}
 }
 
-const webhookCols = `id, account_id, name, slug, COALESCE(secret_prefix, ''), is_active,
+const webhookReturningCols = `id, account_id, name, slug, COALESCE(secret_prefix, ''), is_active,
     inbound_enabled, inbound_secret_required, outbound_enabled, outbound_sign_enabled,
     outbound_url, outbound_format, outbound_method,
     outbound_payload_template, outbound_field_map, outbound_response_map,
-    outbound_connection_id, created_at`
+    outbound_connection_id, integration_connection_id, created_at`
+
+const webhookSelectCols = `w.id, w.account_id, w.name, w.slug, COALESCE(w.secret_prefix, ''), w.is_active,
+    w.inbound_enabled, w.inbound_secret_required, w.outbound_enabled, w.outbound_sign_enabled,
+    w.outbound_url, w.outbound_format, w.outbound_method,
+    w.outbound_payload_template, w.outbound_field_map, w.outbound_response_map,
+    w.outbound_connection_id, w.integration_connection_id, w.created_at`
+
+const webhookListCols = webhookSelectCols + `, ip.slug AS integration_provider_slug`
 
 func scanWebhook(row interface{ Scan(...any) error }) (Webhook, error) {
 	var w Webhook
@@ -161,19 +171,32 @@ func scanWebhook(row interface{ Scan(...any) error }) (Webhook, error) {
 		&w.InboundEnabled, &w.InboundSecretRequired, &w.OutboundEnabled, &w.OutboundSignEnabled,
 		&w.OutboundURL, &w.OutboundFormat, &w.OutboundMethod,
 		&w.OutboundPayloadTemplate, &w.OutboundFieldMap, &w.OutboundResponseMap,
-		&w.OutboundConnectionID, &w.CreatedAt)
+		&w.OutboundConnectionID, &w.IntegrationConnectionID, &w.CreatedAt)
+}
+
+func scanWebhookList(row interface{ Scan(...any) error }) (Webhook, error) {
+	var w Webhook
+	return w, row.Scan(&w.ID, &w.AccountID, &w.Name, &w.Slug, &w.SecretPrefix, &w.IsActive,
+		&w.InboundEnabled, &w.InboundSecretRequired, &w.OutboundEnabled, &w.OutboundSignEnabled,
+		&w.OutboundURL, &w.OutboundFormat, &w.OutboundMethod,
+		&w.OutboundPayloadTemplate, &w.OutboundFieldMap, &w.OutboundResponseMap,
+		&w.OutboundConnectionID, &w.IntegrationConnectionID, &w.CreatedAt, &w.IntegrationProviderSlug)
 }
 
 func (s *Service) List(ctx context.Context, accountID int64) ([]Webhook, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT `+webhookCols+` FROM webhooks WHERE account_id=$1 ORDER BY name`, accountID)
+		`SELECT `+webhookListCols+`
+		 FROM webhooks w
+		 LEFT JOIN integration_connections ic ON ic.id = w.integration_connection_id
+		 LEFT JOIN integration_providers ip ON ip.id = ic.provider_id
+		 WHERE w.account_id=$1 ORDER BY w.name`, accountID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []Webhook
 	for rows.Next() {
-		w, err := scanWebhook(rows)
+		w, err := scanWebhookList(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -183,13 +206,14 @@ func (s *Service) List(ctx context.Context, accountID int64) ([]Webhook, error) 
 }
 
 type CreateWebhookInput struct {
-	Name                  string
-	Slug                  string
-	InboundEnabled        *bool
-	InboundSecretRequired *bool
-	OutboundEnabled       *bool
-	OutboundSignEnabled   *bool
-	OutboundURL           *string
+	Name                      string
+	Slug                      string
+	InboundEnabled            *bool
+	InboundSecretRequired     *bool
+	OutboundEnabled           *bool
+	OutboundSignEnabled       *bool
+	OutboundURL               *string
+	IntegrationConnectionID   *int64
 }
 
 func (s *Service) Create(ctx context.Context, accountID int64, in CreateWebhookInput) (*Webhook, *string, error) {
@@ -225,11 +249,13 @@ func (s *Service) Create(ctx context.Context, accountID int64, in CreateWebhookI
 	w := &Webhook{}
 	row := s.pool.QueryRow(ctx,
 		`INSERT INTO webhooks(account_id, name, slug, secret_hash, secret_prefix,
-		 inbound_enabled, inbound_secret_required, outbound_enabled, outbound_sign_enabled, outbound_url)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-		 RETURNING `+webhookCols,
+		 inbound_enabled, inbound_secret_required, outbound_enabled, outbound_sign_enabled, outbound_url,
+		 integration_connection_id)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		 RETURNING `+webhookReturningCols,
 		accountID, in.Name, in.Slug, hash, prefix,
-		inbound, inboundSecretRequired, outbound, outboundSignEnabled, in.OutboundURL)
+		inbound, inboundSecretRequired, outbound, outboundSignEnabled, in.OutboundURL,
+		in.IntegrationConnectionID)
 	var err error
 	if *w, err = scanWebhook(row); err != nil {
 		if database.IsUniqueViolation(err) {
@@ -287,7 +313,7 @@ func (s *Service) Update(ctx context.Context, accountID, id int64, in UpdateWebh
 		   outbound_field_map        = COALESCE($14, outbound_field_map),
 		   outbound_response_map     = COALESCE($15, outbound_response_map)
 		 WHERE id=$1 AND account_id=$2
-		 RETURNING `+webhookCols,
+		 RETURNING `+webhookReturningCols,
 		id, accountID, in.Name, in.Slug, in.IsActive,
 		in.InboundEnabled, in.InboundSecretRequired, in.OutboundEnabled, in.OutboundSignEnabled,
 		in.OutboundURL, in.OutboundFormat, in.OutboundMethod,
@@ -316,9 +342,44 @@ func (s *Service) Update(ctx context.Context, accountID, id int64, in UpdateWebh
 	return w, nil
 }
 
+func (s *Service) AssertUserEditableWebhook(ctx context.Context, accountID, webhookID int64) error {
+	var connID *int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT integration_connection_id FROM webhooks WHERE id=$1 AND account_id=$2`,
+		webhookID, accountID).Scan(&connID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return httpx.NotFound("webhook not found")
+		}
+		return err
+	}
+	if connID != nil && *connID > 0 {
+		return httpx.Validation("webhook is managed by an integration")
+	}
+	return nil
+}
+
+func (s *Service) AssertUserEditableFieldMap(ctx context.Context, accountID, mapID int64) error {
+	var webhookID int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT we.webhook_id
+		 FROM webhook_event_field_map fm
+		 JOIN webhook_events we ON we.id = fm.event_id
+		 JOIN webhooks w ON w.id = we.webhook_id
+		 WHERE fm.id=$1 AND w.account_id=$2`,
+		mapID, accountID).Scan(&webhookID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return httpx.NotFound("field map not found")
+		}
+		return err
+	}
+	return s.AssertUserEditableWebhook(ctx, accountID, webhookID)
+}
+
 func (s *Service) getWebhook(ctx context.Context, accountID, id int64) (*Webhook, error) {
 	w, err := scanWebhook(s.pool.QueryRow(ctx,
-		`SELECT `+webhookCols+` FROM webhooks WHERE id=$1 AND account_id=$2`, id, accountID))
+		`SELECT `+webhookSelectCols+` FROM webhooks w WHERE w.id=$1 AND w.account_id=$2`, id, accountID))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, httpx.NotFound("webhook not found")

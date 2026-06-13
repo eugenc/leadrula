@@ -727,12 +727,43 @@ export function useBuyerParticipationFieldMapOptions(participationId: number | n
   });
 }
 
+function contractFieldMapSourceKey(e: import("@/types").ContractFieldMapEntry): string | null {
+  if (e.src_type === "custom" && e.src_custom_field_id != null) {
+    return `cf:${e.src_custom_field_id}`;
+  }
+  if (e.src_type === "builtin" && e.src_builtin) {
+    return e.src_builtin;
+  }
+  return null;
+}
+
+function sameContractFieldMapSource(
+  a: import("@/types").ContractFieldMapEntry,
+  b: import("@/types").ContractFieldMapEntry
+): boolean {
+  const ka = contractFieldMapSourceKey(a);
+  const kb = contractFieldMapSourceKey(b);
+  return ka != null && ka === kb;
+}
+
+function upsertContractFieldMapEntry(
+  prev: import("@/types").ContractFieldMapEntry[] | undefined,
+  entry: import("@/types").ContractFieldMapEntry
+): import("@/types").ContractFieldMapEntry[] {
+  const list = prev ?? [];
+  return [...list.filter((e) => !sameContractFieldMapSource(e, entry)), entry];
+}
+
 export function useAddBuyerContractFieldMap() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ contractId, body }: { contractId: number; body: Record<string, unknown> }) =>
-      post(`/buyer/contracts/${contractId}/field-map`, body),
-    onSuccess: (_, v) => {
+      post<import("@/types").ContractFieldMapEntry>(`/buyer/contracts/${contractId}/field-map`, body),
+    onSuccess: (entry, v) => {
+      qc.setQueryData<import("@/types").ContractFieldMapEntry[]>(
+        ["buyer-contract-field-map", v.contractId],
+        (prev) => upsertContractFieldMapEntry(prev, entry)
+      );
       qc.invalidateQueries({ queryKey: ["buyer-contract-field-map", v.contractId] });
       qc.invalidateQueries({ queryKey: ["buyer-contract-field-map-options", v.contractId] });
     },
@@ -743,8 +774,12 @@ export function useAddBuyerParticipationFieldMap() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ participationId, body }: { participationId: number; body: Record<string, unknown> }) =>
-      post(`/buyer/participations/${participationId}/field-map`, body),
-    onSuccess: (_, v) => {
+      post<import("@/types").ContractFieldMapEntry>(`/buyer/participations/${participationId}/field-map`, body),
+    onSuccess: (entry, v) => {
+      qc.setQueryData<import("@/types").ContractFieldMapEntry[]>(
+        ["buyer-participation-field-map", v.participationId],
+        (prev) => upsertContractFieldMapEntry(prev, entry)
+      );
       qc.invalidateQueries({ queryKey: ["buyer-participation-field-map", v.participationId] });
       qc.invalidateQueries({ queryKey: ["buyer-participation-field-map-options", v.participationId] });
     },
@@ -787,6 +822,24 @@ export function useBuyerRoutes() {
     queryKey: ["buyer-routes"],
     queryFn: () => get<Route[]>("/buyer/routes"),
   });
+}
+
+export function useCreateBuyerRoute() {
+  const inv = useInvalidate(["buyer-routes"]);
+  return useMutation({ mutationFn: (body: Record<string, unknown>) => post(`/buyer/routes`, body), onSuccess: inv });
+}
+
+export function useUpdateBuyerRoute() {
+  const inv = useInvalidate(["buyer-routes"]);
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) => patch(`/buyer/routes/${id}`, body),
+    onSuccess: inv,
+  });
+}
+
+export function useDeleteBuyerRoute() {
+  const inv = useInvalidate(["buyer-routes"]);
+  return useMutation({ mutationFn: (id: number) => del(`/buyer/routes/${id}`), onSuccess: inv });
 }
 
 export interface BuyerLogsFilters {
@@ -1495,7 +1548,7 @@ export function useInvitePublisherCollaborationForPublisher() {
 }
 
 export function useAcceptCollaborationForPublisher() {
-  const inv = useInvalidate(["collaboration", "publishers"]);
+  const inv = useInvalidate(["collaboration", "publishers", "switchable"]);
   return useMutation({
     mutationFn: (publisherId: number) =>
       post<CollaborationStatus>(`/buyer/collaboration/publishers/${publisherId}/accept`),
@@ -1513,7 +1566,7 @@ export function useRejectCollaborationForPublisher() {
 }
 
 export function useRevokeCollaborationForPublisher() {
-  const inv = useInvalidate(["collaboration", "publishers"]);
+  const inv = useInvalidate(["collaboration", "publishers", "switchable"]);
   return useMutation({
     mutationFn: (publisherId: number) =>
       del<CollaborationStatus>(`/buyer/collaboration/publishers/${publisherId}`),
@@ -1530,7 +1583,7 @@ export function useRequestCollaboration() {
 }
 
 export function useAcceptCollaborationPublisher() {
-  const inv = useInvalidate(["collaboration", "collab-summaries"]);
+  const inv = useInvalidate(["collaboration", "collab-summaries", "switchable"]);
   return useMutation({
     mutationFn: (buyerId: number) => post<CollaborationStatus>(`/publisher/collaboration/buyers/${buyerId}/accept`),
     onSuccess: inv,
@@ -1538,7 +1591,7 @@ export function useAcceptCollaborationPublisher() {
 }
 
 export function useAcceptCollaborationByPublicId() {
-  const inv = useInvalidate(["collaboration", "collab-summaries"]);
+  const inv = useInvalidate(["collaboration", "collab-summaries", "switchable"]);
   return useMutation({
     mutationFn: (buyerPublicId: string) =>
       post<CollaborationStatus>("/publisher/collaboration/accept", { buyer_id: buyerPublicId }),
@@ -1563,7 +1616,7 @@ export function useInvitePublisherCollaboration() {
 }
 
 export function useAcceptCollaborationBuyer() {
-  const inv = useInvalidate(["collaboration"]);
+  const inv = useInvalidate(["collaboration", "switchable"]);
   return useMutation({
     mutationFn: () => post<CollaborationStatus>("/buyer/collaboration/accept"),
     onSuccess: inv,
@@ -1579,7 +1632,7 @@ export function useRejectCollaborationBuyer() {
 }
 
 export function useRevokeCollaboration() {
-  const inv = useInvalidate(["collaboration"]);
+  const inv = useInvalidate(["collaboration", "switchable"]);
   return useMutation({
     mutationFn: () => del<CollaborationStatus>("/buyer/collaboration"),
     onSuccess: inv,

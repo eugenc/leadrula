@@ -39,6 +39,11 @@ type Service struct {
 	encKey    []byte
 	oauth     OAuthConfig
 	providers map[string]providers.Provider
+	leadSvc   originRouteApplier
+}
+
+type originRouteApplier interface {
+	TryApplyConnectionOriginRoute(ctx context.Context, accountID, connectionID, leadID int64)
 }
 
 func NewService(pool *pgxpool.Pool, encKey []byte, oauth OAuthConfig) *Service {
@@ -57,6 +62,9 @@ func NewService(pool *pgxpool.Pool, encKey []byte, oauth OAuthConfig) *Service {
 		},
 	}
 }
+
+// SetLeadService wires origin-route application after integration callbacks.
+func (s *Service) SetLeadService(svc originRouteApplier) { s.leadSvc = svc }
 
 func (s *Service) ListProviders(ctx context.Context) ([]map[string]any, error) {
 	rows, err := s.pool.Query(ctx,
@@ -177,8 +185,11 @@ func (s *Service) canAccessRoute(ctx context.Context, accountID int64, accountTy
 		err := s.pool.QueryRow(ctx,
 			`SELECT EXISTS(
 				SELECT 1 FROM routes r
-				JOIN contracts c ON c.id = r.contract_id AND c.deleted_at IS NULL
-				WHERE r.id = $1 AND c.buyer_id = $2 AND r.destination = 'buyer')`,
+				LEFT JOIN contracts c ON c.id = r.contract_id AND c.deleted_at IS NULL
+				WHERE r.id = $1 AND (
+					r.buyer_id = $2
+					OR (r.destination = 'contract' AND c.buyer_id = $2)
+				))`,
 			routeID, accountID).Scan(&ok)
 		return ok, err
 	default:

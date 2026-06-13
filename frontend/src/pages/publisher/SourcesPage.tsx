@@ -32,11 +32,10 @@ import { format } from "date-fns";
 import { ArrowRightLeft, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { IntakeLogSection } from "@/features/intake/IntakeLogTable";
 import { toast } from "@/store/toastStore";
-import { errorMessage } from "@/lib/api";
+import { errorMessage, apiBaseURL } from "@/lib/api";
 import type { Route, RouteFieldMapEntry, Source, SourceType } from "@/types";
 
 const BUILTINS = MAP_BUILTIN_FIELDS;
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
 function slugify(name: string) {
   return name
@@ -107,7 +106,7 @@ export function SourcesPage() {
                   <TD className="font-semibold">{s.name}</TD>
                   <TD className="font-mono">{s.slug}</TD>
                   <TD className="font-mono text-xs text-gray-500">
-                    <div>POST {API_URL}/api/v1/sources/{s.slug}</div>
+                    <div>POST {apiBaseURL}/api/v1/sources/{s.slug}</div>
                     <Badge className="mt-1">{s.api_key_required ? "Auth required" : "Open"}</Badge>
                   </TD>
                   <TD>
@@ -290,7 +289,7 @@ function SourceDrawerContent({
         </div>
         {slug && (
           <p className="text-xs font-mono text-gray-500">
-            POST {API_URL}/api/v1/sources/{slug}
+            POST {apiBaseURL}/api/v1/sources/{slug}
           </p>
         )}
         <div className="flex items-center justify-between">
@@ -399,7 +398,7 @@ function SourceFieldMapContent({
         (r) =>
           r.origin === "source" &&
           r.source_id === sourceId &&
-          r.destination === "buyer" &&
+          r.destination === "contract" &&
           r.is_active
       ),
     [routes, sourceId]
@@ -513,7 +512,7 @@ function SourceFieldMapContent({
             <div className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-sm text-gray-500">
               <p>No webhook received yet.</p>
               <p className="mt-1 font-mono text-xs">
-                POST {API_URL}/api/v1/sources/{slug}
+                POST {apiBaseURL}/api/v1/sources/{slug}
               </p>
             </div>
           ) : (

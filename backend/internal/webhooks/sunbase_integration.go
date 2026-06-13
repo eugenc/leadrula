@@ -85,13 +85,18 @@ func (s *Service) ProvisionSunbaseWebhooks(
 	trueVal := true
 	noSign := false
 	inboundSecretRequired := false
+	var integrationConnID *int64
+	if connectionID > 0 {
+		integrationConnID = &connectionID
+	}
 
 	inbound, _, err := s.Create(ctx, accountID, CreateWebhookInput{
-		Name:                  fmt.Sprintf("SunBase Inbound — %s", connectionName),
-		Slug:                  inboundSlug,
-		InboundEnabled:        &trueVal,
-		InboundSecretRequired: &inboundSecretRequired,
-		OutboundEnabled:       &falseVal,
+		Name:                    fmt.Sprintf("SunBase Inbound — %s", connectionName),
+		Slug:                    inboundSlug,
+		InboundEnabled:          &trueVal,
+		InboundSecretRequired:   &inboundSecretRequired,
+		OutboundEnabled:         &falseVal,
+		IntegrationConnectionID: integrationConnID,
 	})
 	if err != nil {
 		return nil, err
@@ -122,12 +127,13 @@ func (s *Service) ProvisionSunbaseWebhooks(
 	emptyTemplate := ""
 
 	postWH, _, err := s.Create(ctx, accountID, CreateWebhookInput{
-		Name:                fmt.Sprintf("SunBase Outbound POST — %s", connectionName),
-		Slug:                postSlug,
-		InboundEnabled:      &falseVal,
-		OutboundEnabled:     &trueVal,
-		OutboundSignEnabled: &noSign,
-		OutboundURL:         &outboundURL,
+		Name:                    fmt.Sprintf("SunBase Outbound POST — %s", connectionName),
+		Slug:                    postSlug,
+		InboundEnabled:          &falseVal,
+		OutboundEnabled:         &trueVal,
+		OutboundSignEnabled:     &noSign,
+		OutboundURL:             &outboundURL,
+		IntegrationConnectionID: integrationConnID,
 	})
 	if err != nil {
 		s.deleteSunbaseWebhooks(ctx, accountID, inbound.ID, 0, 0)
@@ -146,12 +152,13 @@ func (s *Service) ProvisionSunbaseWebhooks(
 	}
 
 	getWH, _, err := s.Create(ctx, accountID, CreateWebhookInput{
-		Name:                fmt.Sprintf("SunBase Outbound GET — %s", connectionName),
-		Slug:                getSlug,
-		InboundEnabled:      &falseVal,
-		OutboundEnabled:     &trueVal,
-		OutboundSignEnabled: &noSign,
-		OutboundURL:         &outboundURL,
+		Name:                    fmt.Sprintf("SunBase Outbound GET — %s", connectionName),
+		Slug:                    getSlug,
+		InboundEnabled:          &falseVal,
+		OutboundEnabled:         &trueVal,
+		OutboundSignEnabled:     &noSign,
+		OutboundURL:             &outboundURL,
+		IntegrationConnectionID: integrationConnID,
 	})
 	if err != nil {
 		s.deleteSunbaseWebhooks(ctx, accountID, inbound.ID, postWH.ID, 0)

@@ -49,6 +49,9 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 	if lead.OwnerAccountID != p.AccountID {
 		return nil, nil, httpx.NotFound("lead not found")
 	}
+	if !s.repo.CollaborationLeadAllowed(ctx, p, lead) {
+		return nil, nil, httpx.NotFound("lead not found")
+	}
 	if err := assertCanEdit(p, lead); err != nil {
 		return nil, nil, err
 	}
@@ -59,6 +62,9 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 	}
 	if stage.AccountID != p.AccountID {
 		return nil, nil, httpx.BusinessRule("stage does not belong to this account")
+	}
+	if err := s.pipelines.CheckStageAccess(ctx, p, newStageID); err != nil {
+		return nil, nil, err
 	}
 
 	switch stage.StageType {
@@ -124,6 +130,8 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 	}
 
 	var enqueueRouteID int64
+	deps := RouteApplyDeps{Repo: s.repo, Accounts: s.accounts, Notif: s.notif, Integrations: s.integrations}
+
 	// pipeline-origin route: publisher-owned lead reached a trigger stage
 	if lead.ContractID == nil && lead.OwnerAccountID == lead.PublisherID {
 		rt, err := routing.MatchRouteByStage(ctx, tx, lead.PublisherID, *finalStageID)
@@ -131,13 +139,34 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 			return nil, nil, err
 		}
 		if rt != nil {
-			deps := RouteApplyDeps{Repo: s.repo, Accounts: s.accounts, Notif: s.notif, Integrations: s.integrations}
-			emails, err := ApplyRoute(ctx, tx, deps, rt, lead.PublisherID, leadID)
+			enqueue, emails, err := TryApplyMatchedRoute(ctx, tx, deps, rt, leadID)
 			if err != nil {
 				return nil, nil, err
 			}
 			pendingEmails = append(pendingEmails, emails...)
-			enqueueRouteID = rt.ID
+			if enqueue {
+				enqueueRouteID = rt.ID
+			}
+			updated, err = s.repo.GetByID(ctx, tx, leadID)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+
+	// buyer-owned pipeline-origin routes
+	if p.AccountType == "buyer" && lead.OwnerAccountID == p.AccountID {
+		if rt, err := routing.MatchBuyerRouteByStage(ctx, tx, p.AccountID, *finalStageID); err != nil {
+			return nil, nil, err
+		} else if rt != nil && enqueueRouteID == 0 {
+			enqueue, emails, err := TryApplyMatchedRoute(ctx, tx, deps, rt, leadID)
+			if err != nil {
+				return nil, nil, err
+			}
+			pendingEmails = append(pendingEmails, emails...)
+			if enqueue {
+				enqueueRouteID = rt.ID
+			}
 			updated, err = s.repo.GetByID(ctx, tx, leadID)
 			if err != nil {
 				return nil, nil, err
@@ -325,8 +354,11 @@ func (s *Service) Bulk(ctx context.Context, p *auth.Principal, bp BulkParams) (*
 	}
 	switch bp.Action {
 	case BulkDelete:
-		n, err := s.repo.Delete(ctx, p.AccountID, bp.LeadIDs)
+		n, err := s.repo.Delete(ctx, p, bp.LeadIDs)
 		if err != nil {
+			return nil, nil, err
+		}
+		if err := rejectPartialBulk(p, len(bp.LeadIDs), int(n)); err != nil {
 			return nil, nil, err
 		}
 		return &BulkResult{Affected: int(n)}, nil, nil
@@ -335,8 +367,11 @@ func (s *Service) Bulk(ctx context.Context, p *auth.Principal, bp BulkParams) (*
 			return nil, nil, httpx.Validation("user_id required")
 		}
 		uid := bp.UserID
-		n, err := s.repo.BulkSetAssignee(ctx, p.AccountID, bp.LeadIDs, &uid)
+		n, err := s.repo.BulkSetAssignee(ctx, p, bp.LeadIDs, &uid)
 		if err != nil {
+			return nil, nil, err
+		}
+		if err := rejectPartialBulk(p, len(bp.LeadIDs), int(n)); err != nil {
 			return nil, nil, err
 		}
 		var auditChanges []auth.ImpersonationChange
@@ -352,7 +387,7 @@ func (s *Service) Bulk(ctx context.Context, p *auth.Principal, bp BulkParams) (*
 		if bp.UserID == 0 {
 			return nil, nil, httpx.Validation("user_id required")
 		}
-		if err := s.repo.BulkAddFollowers(ctx, bp.LeadIDs, bp.UserID); err != nil {
+		if err := s.repo.BulkAddFollowers(ctx, p, bp.LeadIDs, bp.UserID); err != nil {
 			return nil, nil, err
 		}
 		return &BulkResult{Affected: len(bp.LeadIDs)}, nil, nil
@@ -374,6 +409,13 @@ func (s *Service) Bulk(ctx context.Context, p *auth.Principal, bp BulkParams) (*
 	default:
 		return nil, nil, httpx.Validation("unknown bulk action")
 	}
+}
+
+func rejectPartialBulk(p *auth.Principal, requested, affected int) error {
+	if _, scoped := p.CollaborationPublisherID(); scoped && affected != requested {
+		return httpx.Forbidden("one or more leads are not accessible")
+	}
+	return nil
 }
 
 func assertCanEdit(p *auth.Principal, l *Lead) error {

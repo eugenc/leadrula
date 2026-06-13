@@ -339,7 +339,7 @@ function DrawerContent({
         )}
         {step < STEPS.length - 1 ? (
           <Button
-            disabled={step === 1 && !deliveryValid}
+            disabled={(step === 1 && !deliveryValid) || (step === 2 && !mappingComplete)}
             onClick={() => setStep((s) => s + 1)}
           >
             Next

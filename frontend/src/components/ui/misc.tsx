@@ -100,19 +100,23 @@ export function Spinner({ className }: { className?: string }) {
 export function Switch({
   checked,
   onChange,
+  disabled = false,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
         "relative inline-flex h-5 w-9 items-center rounded-full transition-colors",
-        checked ? "bg-jade-500" : "bg-gray-200"
+        checked ? "bg-jade-500" : "bg-gray-200",
+        disabled && "cursor-not-allowed opacity-50"
       )}
     >
       <span

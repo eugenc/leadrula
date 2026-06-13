@@ -1,72 +1,138 @@
 import { useState } from "react";
-import { useBuyerRoutes } from "@/features/admin/hooks";
+import {
+  useBuyerRoutes,
+  useCreateBuyerRoute,
+  useUpdateBuyerRoute,
+  useDeleteBuyerRoute,
+} from "@/features/admin/hooks";
+import { RouteDrawer } from "@/features/routing/RouteDrawer";
+import { formatRouteOrigin, formatRouteTarget, routeEditableByBuyer } from "@/features/routing/routeFormatters";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
+import { IconButton } from "@/components/layout/IconButton";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Badge, Spinner, EmptyState } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { FormDrawer } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/misc";
 import { RouteIntegrationsPanel } from "@/features/integrations/RouteIntegrationsPanel";
+import { useAuthStore } from "@/store/authStore";
+import { Plus, Trash2 } from "lucide-react";
+import { toast } from "@/store/toastStore";
+import { errorMessage } from "@/lib/api";
 import type { Route } from "@/types";
 
-function pipelineStage(pipeline?: string | null, stage?: string | null) {
-  if (!pipeline) return "—";
-  if (!stage) return `${pipeline} > First stage`;
-  return `${pipeline} > ${stage}`;
-}
-
-function formatOrigin(r: Route) {
-  if (r.origin === "source") return `Source: ${r.source_name ?? `#${r.source_id}`}`;
-  return pipelineStage(r.origin_pipeline_name, r.origin_stage_name);
-}
-
-function formatTarget(r: Route) {
-  return pipelineStage(r.target_pipeline_name, r.target_stage_name);
-}
-
 function deliveryCell(r: Route) {
+  if (r.destination === "integration" || r.destination === "webhook") return "—";
   if (r.delivery === "leads") return "Lead";
   return <Badge variant="distributed">Pipeline</Badge>;
 }
 
 export function RoutesPage() {
+  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
   const { data: routes, isLoading } = useBuyerRoutes();
+  const createRoute = useCreateBuyerRoute();
+  const updateRoute = useUpdateBuyerRoute();
+  const removeRoute = useDeleteBuyerRoute();
+
+  const [drawerRoute, setDrawerRoute] = useState<Route | null | undefined>(undefined);
   const [integrationsRoute, setIntegrationsRoute] = useState<Route | null>(null);
 
+  const drawerOpen = drawerRoute !== undefined;
+
   return (
-    <PageBody>
-      {isLoading ? (
-        <Spinner className="h-6 w-6" />
-      ) : (routes ?? []).length === 0 ? (
-        <EmptyState title="No inbound routes yet." />
-      ) : (
-        <Table>
-          <THead>
-            <tr>
-              <TH>Name</TH>
-              <TH>Origin</TH>
-              <TH>Target</TH>
-              <TH>Delivery</TH>
-              <TH>Active</TH>
-              <TH className="min-w-0 w-12" />
-            </tr>
-          </THead>
-          <TBody>
-            {(routes ?? []).map((r) => (
-              <TR key={r.id}>
-                <TD className="font-semibold">{r.name}</TD>
-                <TD>{formatOrigin(r)}</TD>
-                <TD>{formatTarget(r)}</TD>
-                <TD>{deliveryCell(r)}</TD>
-                <TD>{r.is_active ? "Yes" : "No"}</TD>
-                <TD>
-                  <Button size="sm" variant="secondary" onClick={() => setIntegrationsRoute(r)}>
-                    Integrations
-                  </Button>
-                </TD>
-              </TR>
-            ))}
-          </TBody>
-        </Table>
+    <>
+      <PageHeader
+        action={
+          isAdmin ? (
+            <Button onClick={() => setDrawerRoute(null)}>
+              <Plus className="h-4 w-4" /> New Route
+            </Button>
+          ) : undefined
+        }
+      />
+      <PageBody>
+        {isLoading ? (
+          <Spinner className="h-6 w-6" />
+        ) : (routes ?? []).length === 0 ? (
+          <EmptyState title="No inbound routes yet." />
+        ) : (
+          <Table>
+            <THead>
+              <tr>
+                <TH>Name</TH>
+                <TH>Origin</TH>
+                <TH>Target</TH>
+                <TH>Delivery</TH>
+                <TH>Active</TH>
+                <TH className="min-w-0 w-12" />
+              </tr>
+            </THead>
+            <TBody>
+              {(routes ?? []).map((r) => {
+                const editable = routeEditableByBuyer(r);
+                return (
+                  <TR
+                    key={r.id}
+                    onClick={() => {
+                      if (editable && isAdmin) setDrawerRoute(r);
+                    }}
+                  >
+                    <TD className="font-semibold">{r.name}</TD>
+                    <TD>{formatRouteOrigin(r)}</TD>
+                    <TD>{formatRouteTarget(r)}</TD>
+                    <TD>{deliveryCell(r)}</TD>
+                    <TD>
+                      {editable && isAdmin ? (
+                        <div onClick={(e) => e.stopPropagation()}>
+                          <Switch
+                            checked={r.is_active}
+                            onChange={(v) =>
+                              updateRoute.mutate(
+                                { id: r.id, body: { is_active: v } },
+                                { onError: (e) => toast.error(errorMessage(e)) }
+                              )
+                            }
+                          />
+                        </div>
+                      ) : (
+                        (r.is_active ? "Yes" : "No")
+                      )}
+                    </TD>
+                    <TD>
+                      <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                        <Button size="sm" variant="secondary" onClick={() => setIntegrationsRoute(r)}>
+                          Integrations
+                        </Button>
+                        {editable && isAdmin && (
+                          <IconButton
+                            variant="danger"
+                            onClick={() =>
+                              removeRoute.mutate(r.id, { onError: (e) => toast.error(errorMessage(e)) })
+                            }
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </IconButton>
+                        )}
+                      </div>
+                    </TD>
+                  </TR>
+                );
+              })}
+            </TBody>
+          </Table>
+        )}
+      </PageBody>
+
+      {isAdmin && (
+        <RouteDrawer
+          accountType="buyer"
+          route={drawerRoute ?? null}
+          open={drawerOpen}
+          onClose={() => setDrawerRoute(undefined)}
+          onCreate={(body) => createRoute.mutateAsync(body).then(() => undefined)}
+          onUpdate={(id, body) => updateRoute.mutateAsync({ id, body }).then(() => undefined)}
+        />
       )}
 
       <FormDrawer
@@ -77,6 +143,6 @@ export function RoutesPage() {
       >
         {integrationsRoute && <RouteIntegrationsPanel routeId={integrationsRoute.id} />}
       </FormDrawer>
-    </PageBody>
+    </>
   );
 }

@@ -21,6 +21,7 @@ import { SettingsLayout } from "@/pages/SettingsLayout";
 import { BusinessSettingsPage } from "@/pages/BusinessSettingsPage";
 import { NotificationsSettingsPage } from "@/pages/NotificationsSettingsPage";
 import { ApiKeysPage } from "@/pages/buyer/ApiKeysPage";
+import { ApiDocsPage } from "@/pages/settings/ApiDocsPage";
 
 import { IntakeLogLayout } from "@/pages/publisher/IntakeLogLayout";
 import { IntakeLogTab } from "@/pages/publisher/IntakeLogTab";
@@ -111,6 +112,7 @@ export default function App() {
                 <Route path="billing" element={<PublisherBillingPage />} />
                 <Route path="users" element={<Navigate to="/p/settings/users" replace />} />
                 <Route path="api" element={<Navigate to="/p/settings/api" replace />} />
+                <Route path="api-docs" element={<ApiDocsPage />} />
                 <Route path="integrations/deliveries" element={<Navigate to="/p/log?type=integrations" replace />} />
                 <Route path="integrations" element={<IntegrationsLayout />}>
                   <Route index element={<IntegrationsConnectionsTab />} />
@@ -147,6 +149,7 @@ export default function App() {
                 <Route path="billing" element={<BuyerBillingPage />} />
                 <Route path="users" element={<Navigate to="/b/settings/users" replace />} />
                 <Route path="api" element={<Navigate to="/b/settings/api" replace />} />
+                <Route path="api-docs" element={<ApiDocsPage />} />
                 <Route path="webhooks" element={<WebhooksPage />} />
                 <Route path="integrations/deliveries" element={<Navigate to="/b/logs" replace />} />
                 <Route path="integrations" element={<IntegrationsLayout />}>

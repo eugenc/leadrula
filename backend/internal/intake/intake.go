@@ -204,12 +204,12 @@ func (s *Service) IngestFromSource(ctx context.Context, publisherID int64, slug 
 		return &IngestResult{LeadID: publicID, Status: "review"}, nil
 	}
 
-	emails, err := leads.ApplyRoute(ctx, tx, s.routeDeps(), rt, publisherID, leadID)
+	emails, err := leads.ApplyRoute(ctx, tx, s.routeDeps(), rt, leadID)
 	if err != nil {
 		return nil, err
 	}
 	status := "review"
-	if rt.Destination == "buyer" && rt.Delivery == "leads_pipeline" {
+	if rt.Destination == "contract" && rt.Delivery == "leads_pipeline" {
 		status = "distributed"
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -572,7 +572,7 @@ func (s *Service) RouteFromQueue(ctx context.Context, queueID, routeID, pipeline
 		if err != nil {
 			return err
 		}
-		if rt.PublisherID != publisherID {
+		if rt.OwnerAccountID() != publisherID {
 			return httpx.NotFound("route not found")
 		}
 		if !rt.IsActive {
@@ -589,7 +589,7 @@ func (s *Service) RouteFromQueue(ctx context.Context, queueID, routeID, pipeline
 				}
 			}
 		}
-		emails, err := leads.ApplyRoute(ctx, tx, s.routeDeps(), rt, publisherID, leadID)
+		emails, err := leads.ApplyRoute(ctx, tx, s.routeDeps(), rt, leadID)
 		if err != nil {
 			return err
 		}

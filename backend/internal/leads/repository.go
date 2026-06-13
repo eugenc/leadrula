@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/collaboration"
 	"github.com/echayko/leadrula/backend/internal/customfields"
 	"github.com/echayko/leadrula/backend/internal/database"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
@@ -134,10 +135,28 @@ func (r *Repository) GetByID(ctx context.Context, q database.Querier, leadID int
 
 // Get loads a lead enforcing account ownership + role visibility, with custom values.
 func (r *Repository) Get(ctx context.Context, p *auth.Principal, leadID int64) (*Lead, error) {
-	l, err := scanLead(r.pool.QueryRow(ctx,
-		`SELECT `+leadCols+` FROM leads WHERE id=$1 AND owner_account_id=$2 AND `+leadNotDeleted, leadID, p.AccountID))
+	return r.GetByRef(ctx, p, strconv.FormatInt(leadID, 10))
+}
+
+// GetByRef loads a lead by numeric id or public_id UUID string.
+func (r *Repository) GetByRef(ctx context.Context, p *auth.Principal, ref string) (*Lead, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil, httpx.NotFound("lead not found")
+	}
+	var l *Lead
+	var err error
+	if leadID, parseErr := strconv.ParseInt(ref, 10, 64); parseErr == nil && leadID > 0 {
+		l, err = scanLead(r.pool.QueryRow(ctx,
+			`SELECT `+leadCols+` FROM leads WHERE id=$1 AND owner_account_id=$2 AND `+leadNotDeleted, leadID, p.AccountID))
+	} else {
+		l, err = r.GetByPublicID(ctx, r.pool, p.AccountID, ref)
+	}
 	if err != nil {
 		return nil, err
+	}
+	if !r.CollaborationLeadAllowed(ctx, p, l) {
+		return nil, httpx.NotFound("lead not found")
 	}
 	if !r.visible(ctx, p, l) {
 		return nil, httpx.Forbidden("not permitted to view this lead")
@@ -183,6 +202,27 @@ func (r *Repository) attachCustomValues(ctx context.Context, l *Lead) error {
 		l.CustomValues[fmt.Sprintf("%d", fid)] = val
 	}
 	return rows.Err()
+}
+
+func (r *Repository) CollaborationLeadAllowed(ctx context.Context, p *auth.Principal, l *Lead) bool {
+	pubID, ok := p.CollaborationPublisherID()
+	if !ok {
+		return true
+	}
+	if l.PublisherID != pubID || l.OwnerAccountID != p.AccountID {
+		return false
+	}
+	if l.ContractID == nil {
+		return true
+	}
+	var valid bool
+	_ = r.pool.QueryRow(ctx,
+		`SELECT EXISTS(
+			SELECT 1 FROM contracts c
+			WHERE c.id = $1 AND c.publisher_id = $2 AND c.buyer_id = $3
+			  AND c.status = 'active' AND c.deleted_at IS NULL
+		)`, *l.ContractID, pubID, p.AccountID).Scan(&valid)
+	return valid
 }
 
 func (r *Repository) visible(ctx context.Context, p *auth.Principal, l *Lead) bool {
@@ -358,6 +398,7 @@ func (r *Repository) listWhere(p *auth.Principal, f ListFilters) (string, []any)
 	if f.Search != "" {
 		where, args = appendLeadSearch(where, args, f.Search)
 	}
+	where, args = collaboration.AppendLeadScope(p, where, args)
 	return where, args
 }
 
@@ -383,6 +424,7 @@ func appendLeadSearch(where string, args []any, term string) (string, []any) {
 		(l.first_name || ' ' || l.last_name) ILIKE $%d OR
 		l.email ILIKE $%d OR
 		l.phone ILIKE $%d OR
+		l.public_id::text ILIKE $%d OR
 		l.address ILIKE $%d OR
 		l.city ILIKE $%d OR
 		l.state ILIKE $%d OR
@@ -391,7 +433,7 @@ func appendLeadSearch(where string, args []any, term string) (string, []any) {
 		ba.name ILIKE $%d OR
 		l.status ILIKE $%d OR
 		(%s) ILIKE $%d
-	)`, n, n, n, n, n, n, n, n, n, n, n, n, leadStatusSearchLabel, n)
+	)`, n, n, n, n, n, n, n, n, n, n, n, n, n, leadStatusSearchLabel, n)
 	return where, args
 }
 
@@ -827,9 +869,11 @@ func (r *Repository) SoftDelete(ctx context.Context, q database.Querier, account
 }
 
 // Delete removes leads owned by the account.
-func (r *Repository) Delete(ctx context.Context, accountID int64, leadIDs []int64) (int64, error) {
+func (r *Repository) Delete(ctx context.Context, p *auth.Principal, leadIDs []int64) (int64, error) {
+	where, args := r.listWhere(p, ListFilters{})
+	args = append(args, leadIDs)
 	tag, err := r.pool.Exec(ctx,
-		`DELETE FROM leads WHERE owner_account_id=$1 AND id = ANY($2)`, accountID, leadIDs)
+		`DELETE FROM leads l WHERE `+where+` AND l.id = ANY($`+fmt.Sprint(len(args))+`)`, args...)
 	if err != nil {
 		if database.IsForeignKeyViolation(err) {
 			return 0, httpx.BusinessRule("lead cannot be deleted while referenced by billing records")
@@ -840,10 +884,14 @@ func (r *Repository) Delete(ctx context.Context, accountID int64, leadIDs []int6
 }
 
 // BulkSetAssignee sets assignee on leads owned by the account.
-func (r *Repository) BulkSetAssignee(ctx context.Context, accountID int64, leadIDs []int64, userID *int64) (int64, error) {
+func (r *Repository) BulkSetAssignee(ctx context.Context, p *auth.Principal, leadIDs []int64, userID *int64) (int64, error) {
+	where, args := r.listWhere(p, ListFilters{})
+	userArg := len(args) + 1
+	idsArg := len(args) + 2
+	args = append(args, userID, leadIDs)
 	tag, err := r.pool.Exec(ctx,
-		`UPDATE leads SET assigned_user_id=$3 WHERE owner_account_id=$1 AND id = ANY($2)`,
-		accountID, leadIDs, userID)
+		`UPDATE leads l SET assigned_user_id=$`+fmt.Sprint(userArg)+` WHERE `+where+` AND l.id = ANY($`+fmt.Sprint(idsArg)+`)`,
+		args...)
 	if err != nil {
 		return 0, err
 	}
@@ -851,8 +899,11 @@ func (r *Repository) BulkSetAssignee(ctx context.Context, accountID int64, leadI
 }
 
 // BulkAddFollowers adds a follower to each lead.
-func (r *Repository) BulkAddFollowers(ctx context.Context, leadIDs []int64, userID int64) error {
+func (r *Repository) BulkAddFollowers(ctx context.Context, p *auth.Principal, leadIDs []int64, userID int64) error {
 	for _, leadID := range leadIDs {
+		if _, err := r.Get(ctx, p, leadID); err != nil {
+			return err
+		}
 		if err := r.AddFollower(ctx, leadID, userID); err != nil {
 			return err
 		}

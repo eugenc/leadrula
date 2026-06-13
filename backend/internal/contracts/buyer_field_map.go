@@ -72,7 +72,7 @@ func (s *Service) FieldMapOptionsForParticipationBuyer(ctx context.Context, buye
 	if err := s.pool.QueryRow(ctx, `SELECT publisher_id FROM contracts WHERE id = $1`, part.ContractID).Scan(&pubID); err != nil {
 		return nil, err
 	}
-	return s.fieldMapOptions(ctx, pubID, buyerID, part.ContractID, nil)
+	return s.fieldMapOptions(ctx, pubID, buyerID, part.ContractID, &participationID)
 }
 
 func (s *Service) AddFieldMapForBuyer(ctx context.Context, buyerID, contractID int64, p AddFieldMapParams) (*FieldMapEntry, error) {
@@ -201,7 +201,7 @@ func contractFieldMapToRoute(e FieldMapEntry) routing.RouteFieldMapEntry {
 }
 
 func (s *Service) fieldMapOptions(ctx context.Context, publisherID, buyerID, contractID int64, participationID *int64) (*ContractFieldMapOptions, error) {
-	required, err := loadTemplateRequiredFields(ctx, s.pool, contractID)
+	required, err := loadRequiredFieldsForMapping(ctx, s.pool, contractID, participationID)
 	if err != nil {
 		return nil, err
 	}
@@ -219,6 +219,7 @@ func (s *Service) fieldMapOptions(ctx context.Context, publisherID, buyerID, con
 		pubByID[f.ID] = f.Name
 	}
 	available := make([]AvailableField, 0, len(required))
+	seenKey := map[string]bool{}
 	for _, r := range required {
 		af := AvailableField{
 			FieldType:     r.FieldType,
@@ -235,6 +236,10 @@ func (s *Service) fieldMapOptions(ctx context.Context, publisherID, buyerID, con
 			af.Label = strings.ReplaceAll(r.BuiltinField, "_", " ")
 			af.Key = r.BuiltinField
 		}
+		if seenKey[af.Key] {
+			continue
+		}
+		seenKey[af.Key] = true
 		available = append(available, af)
 	}
 	if buyerFields == nil {
@@ -244,6 +249,42 @@ func (s *Service) fieldMapOptions(ctx context.Context, publisherID, buyerID, con
 		AvailableFields: available,
 		BuyerFields:     buyerFields,
 	}, nil
+}
+
+func loadParticipationRequiredFields(ctx context.Context, q database.Querier, contractID, participationID int64) ([]RequiredField, error) {
+	rows, err := q.Query(ctx,
+		`SELECT id, field_type, COALESCE(builtin_field,''), custom_field_id
+		 FROM contract_required_fields
+		 WHERE contract_id = $1 AND participation_id = $2
+		 ORDER BY id`, contractID, participationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RequiredField
+	for rows.Next() {
+		var r RequiredField
+		var builtin string
+		if err := rows.Scan(&r.ID, &r.FieldType, &builtin, &r.CustomFieldID); err != nil {
+			return nil, err
+		}
+		r.BuiltinField = builtin
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func loadRequiredFieldsForMapping(ctx context.Context, q database.Querier, contractID int64, participationID *int64) ([]RequiredField, error) {
+	if participationID != nil {
+		part, err := loadParticipationRequiredFields(ctx, q, contractID, *participationID)
+		if err != nil {
+			return nil, err
+		}
+		if len(part) > 0 {
+			return part, nil
+		}
+	}
+	return loadTemplateRequiredFields(ctx, q, contractID)
 }
 
 func loadTemplateRequiredFields(ctx context.Context, q database.Querier, contractID int64) ([]RequiredField, error) {
@@ -308,7 +349,7 @@ func (s *Service) addFieldMapEntry(ctx context.Context, contractID int64, partic
 	if err := validateFieldMapParams(p); err != nil {
 		return nil, err
 	}
-	required, err := loadTemplateRequiredFields(ctx, s.pool, contractID)
+	required, err := loadRequiredFieldsForMapping(ctx, s.pool, contractID, participationID)
 	if err != nil {
 		return nil, err
 	}
