@@ -92,7 +92,7 @@ func (s *Service) loadLeadCriteria(ctx context.Context, contractID int64) (*Lead
 	rows.Close()
 
 	rows, err = s.pool.Query(ctx,
-		`SELECT id, src_type, src_builtin, src_custom_field_id, dst_type, dst_builtin, dst_custom_field_id
+		`SELECT id, src_type, COALESCE(src_builtin,''), src_custom_field_id, dst_type, COALESCE(dst_builtin,''), dst_custom_field_id
 		 FROM contract_field_map WHERE contract_id = $1 ORDER BY id`, contractID)
 	if err != nil {
 		return nil, err

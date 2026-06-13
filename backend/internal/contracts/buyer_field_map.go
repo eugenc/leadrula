@@ -319,13 +319,13 @@ func loadFieldMapEntriesQuerier(ctx context.Context, q database.Querier, contrac
 	var err error
 	if participationID == nil {
 		rows, err = q.Query(ctx,
-			`SELECT id, src_type, src_builtin, src_custom_field_id, dst_type, dst_builtin, dst_custom_field_id
+			`SELECT id, src_type, COALESCE(src_builtin,''), src_custom_field_id, dst_type, COALESCE(dst_builtin,''), dst_custom_field_id
 			 FROM contract_field_map
 			 WHERE contract_id = $1 AND participation_id IS NULL
 			 ORDER BY id`, contractID)
 	} else {
 		rows, err = q.Query(ctx,
-			`SELECT id, src_type, src_builtin, src_custom_field_id, dst_type, dst_builtin, dst_custom_field_id
+			`SELECT id, src_type, COALESCE(src_builtin,''), src_custom_field_id, dst_type, COALESCE(dst_builtin,''), dst_custom_field_id
 			 FROM contract_field_map
 			 WHERE contract_id = $1 AND participation_id = $2
 			 ORDER BY id`, contractID, *participationID)
@@ -391,14 +391,14 @@ func (s *Service) addFieldMapEntry(ctx context.Context, contractID int64, partic
 			`INSERT INTO contract_field_map(
 			    contract_id, src_type, src_builtin, src_custom_field_id, dst_type, dst_builtin, dst_custom_field_id)
 			 VALUES ($1,$2,NULLIF($3,''),$4,$5,NULLIF($6,''),$7)
-			 RETURNING id, src_type, src_builtin, src_custom_field_id, dst_type, dst_builtin, dst_custom_field_id`,
+			 RETURNING id, src_type, COALESCE(src_builtin,''), src_custom_field_id, dst_type, COALESCE(dst_builtin,''), dst_custom_field_id`,
 			contractID, p.SrcType, p.SrcBuiltin, p.SrcCustomFieldID, p.DstType, p.DstBuiltin, p.DstCustomFieldID)
 	} else {
 		row = tx.QueryRow(ctx,
 			`INSERT INTO contract_field_map(
 			    contract_id, participation_id, src_type, src_builtin, src_custom_field_id, dst_type, dst_builtin, dst_custom_field_id)
 			 VALUES ($1,$2,$3,NULLIF($4,''),$5,$6,NULLIF($7,''),$8)
-			 RETURNING id, src_type, src_builtin, src_custom_field_id, dst_type, dst_builtin, dst_custom_field_id`,
+			 RETURNING id, src_type, COALESCE(src_builtin,''), src_custom_field_id, dst_type, COALESCE(dst_builtin,''), dst_custom_field_id`,
 			contractID, *participationID, p.SrcType, p.SrcBuiltin, p.SrcCustomFieldID, p.DstType, p.DstBuiltin, p.DstCustomFieldID)
 	}
 	if err := row.Scan(&e.ID, &e.SrcType, &e.SrcBuiltin, &e.SrcCustomFieldID, &e.DstType, &e.DstBuiltin, &e.DstCustomFieldID); err != nil {
