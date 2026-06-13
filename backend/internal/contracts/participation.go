@@ -38,6 +38,8 @@ type Participation struct {
 	CapPeriod               string          `json:"cap_period,omitempty"`
 	CapTotal                *int            `json:"cap_total,omitempty"`
 	CapMaxDaily             *int            `json:"cap_max_daily,omitempty"`
+	LeadCount               int             `json:"lead_count,omitempty"`
+	RatePerLead             float64         `json:"rate_per_lead,omitempty"`
 	CreatedAt               time.Time       `json:"created_at"`
 	UpdatedAt               time.Time       `json:"updated_at"`
 }
@@ -174,6 +176,13 @@ func (s *Service) listParticipationsByContract(ctx context.Context, contractID i
 	return out, rows.Err()
 }
 
+const participationBuyerLeadCountSubquery = `(SELECT COUNT(DISTINCT t.lead_id) FROM transactions t
+ WHERE t.contract_id = p.contract_id AND t.buyer_id = p.buyer_id
+   AND t.type = 'debit' AND t.lead_id IS NOT NULL
+   AND (t.description LIKE 'lead routed:%'
+        OR t.description = 'lead routed from intake queue'
+        OR t.description = 'lead re-distributed'))`
+
 func (s *Service) ListParticipationsForBuyer(ctx context.Context, buyerID int64) ([]Participation, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT p.id, p.contract_id, p.buyer_id, p.status::text, COALESCE(p.delivery,''),
@@ -184,10 +193,17 @@ func (s *Service) ListParticipationsForBuyer(ctx context.Context, buyerID int64)
 			p.integration_connection_id, p.outbound_webhook_id,
 			p.counter_proposal, p.superseded_by_contract_id, p.created_at, p.updated_at,
 			c.name, pub.name, COALESCE(c.lead_type,''), c.allowed_delivery_modes,
-			c.handler_id, c.status, COALESCE(c.description,''), c.cap_period, c.cap_total, c.cap_max_daily
+			c.handler_id, c.status, COALESCE(c.description,''), c.cap_period, c.cap_total, c.cap_max_daily,
+			COALESCE(rate.rate, 0), `+participationBuyerLeadCountSubquery+`
 		 FROM contract_participations p
 		 JOIN contracts c ON c.id = p.contract_id
 		 JOIN accounts pub ON pub.id = c.publisher_id
+		 LEFT JOIN LATERAL (
+		   SELECT COALESCE(cc.flat_amount, cc.bid_max, 0)::float8 AS rate
+		   FROM contract_compensations cc
+		   WHERE cc.participation_id = p.id AND cc.trigger = 'per_lead'
+		   ORDER BY cc.position, cc.id LIMIT 1
+		 ) rate ON true
 		 WHERE p.buyer_id = $1 AND c.deleted_at IS NULL AND c.contract_type = 'sell'
 		 ORDER BY p.updated_at DESC`, buyerID)
 	if err != nil {
@@ -204,7 +220,8 @@ func (s *Service) ListParticipationsForBuyer(ctx context.Context, buyerID int64)
 		if err := scanParticipationFields(p, &delivery, &counter, rows,
 			&contractName, &publisherName, &leadType, &allowed,
 			&p.ContractHandlerID, &p.ContractStatus, &p.ContractDescription,
-			&p.CapPeriod, &p.CapTotal, &p.CapMaxDaily); err != nil {
+			&p.CapPeriod, &p.CapTotal, &p.CapMaxDaily,
+			&p.RatePerLead, &p.LeadCount); err != nil {
 			return nil, err
 		}
 		p.Delivery = delivery
@@ -300,6 +317,15 @@ func (s *Service) AddParticipation(ctx context.Context, publisherID, contractID 
 		contractID, p.BuyerID))
 	if err != nil {
 		if database.IsUniqueViolation(err) {
+			var existingID int64
+			var existingStatus string
+			if qerr := s.pool.QueryRow(ctx,
+				`SELECT id, status::text FROM contract_participations
+				 WHERE contract_id = $1 AND buyer_id = $2`, contractID, p.BuyerID).
+				Scan(&existingID, &existingStatus); qerr == nil &&
+				(existingStatus == "withdrawn" || existingStatus == "declined") {
+				return s.ReinviteParticipation(ctx, publisherID, existingID)
+			}
 			return nil, httpx.Conflict("buyer already on this contract")
 		}
 		return nil, err
@@ -333,6 +359,80 @@ func (s *Service) copyContractTemplateToParticipation(ctx context.Context, tx pg
 		 WHERE contract_id = $1 AND participation_id IS NULL`,
 		contractID, participationID)
 	return err
+}
+
+func (s *Service) clearParticipationConfig(ctx context.Context, tx pgx.Tx, participationID int64) error {
+	tables := []string{
+		"contract_return_rules",
+		"contract_field_map",
+		"contract_compensations",
+		"contract_required_fields",
+		"contract_filter_rules",
+		"contract_quality_rules",
+	}
+	for _, table := range tables {
+		if _, err := tx.Exec(ctx,
+			`DELETE FROM `+table+` WHERE participation_id = $1`, participationID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) ReinviteParticipation(ctx context.Context, publisherID, participationID int64) (*Participation, error) {
+	part, err := s.GetParticipationForPublisher(ctx, publisherID, participationID)
+	if err != nil {
+		return nil, err
+	}
+	if part.Status != "withdrawn" && part.Status != "declined" {
+		return nil, httpx.Validation("only withdrawn or declined participations can be reinvited")
+	}
+	c, err := s.Get(ctx, publisherID, part.ContractID)
+	if err != nil {
+		return nil, err
+	}
+	if c.Status != "active" {
+		return nil, httpx.Validation("contract must be active to reinvite buyers")
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	if err := s.clearParticipationConfig(ctx, tx, participationID); err != nil {
+		return nil, err
+	}
+
+	updated, err := scanParticipation(tx.QueryRow(ctx,
+		`UPDATE contract_participations SET
+		   status = 'pending', delivery = NULL,
+		   buyer_pipeline_id = NULL, buyer_target_stage_id = NULL,
+		   integration_connection_id = NULL, outbound_webhook_id = NULL,
+		   counter_proposal = NULL, buyer_responded_at = NULL, publisher_responded_at = NULL,
+		   source_pipeline_id = c.source_pipeline_id,
+		   source_stage_id = c.source_stage_id,
+		   return_stage_id = c.return_stage_id,
+		   updated_at = now()
+		 FROM contracts c
+		 WHERE contract_participations.id = $1 AND c.id = contract_participations.contract_id
+		 RETURNING `+participationReturningCols, participationID))
+	if err != nil {
+		return nil, err
+	}
+	if err := s.copyContractTemplateToParticipation(ctx, tx, part.ContractID, participationID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	s.notifyParticipation(ctx, s.pool, part.BuyerID, "contract_participation_pending", map[string]any{
+		"contract_id":      part.ContractID,
+		"participation_id": participationID,
+		"contract_name":    c.Name,
+	})
+	return updated, nil
 }
 
 type AcceptParticipationParams struct {

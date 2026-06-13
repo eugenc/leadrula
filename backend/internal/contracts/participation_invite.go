@@ -73,5 +73,14 @@ func (s *Service) AttachByInvite(ctx context.Context, buyerID int64, token strin
 	if status != "active" {
 		return nil, httpx.Validation("contract is not accepting buyers")
 	}
+	var existingID int64
+	var existingStatus string
+	err = s.pool.QueryRow(ctx,
+		`SELECT id, status::text FROM contract_participations
+		 WHERE contract_id = $1 AND buyer_id = $2`, contractID, buyerID).
+		Scan(&existingID, &existingStatus)
+	if err == nil && (existingStatus == "withdrawn" || existingStatus == "declined") {
+		return s.ReinviteParticipation(ctx, publisherID, existingID)
+	}
 	return s.AddParticipation(ctx, publisherID, contractID, AddParticipationParams{BuyerID: buyerID})
 }

@@ -10,6 +10,7 @@ import {
   useContractInvite,
   useAcceptCounter,
   useRejectCounter,
+  useReinviteParticipation,
   useBuyers,
 } from "@/features/admin/hooks";
 import { formatParticipationStatus } from "@/features/admin/contractOffer";
@@ -159,6 +160,7 @@ function ParticipationRow({
   onRejectCounter: () => void;
   counterLoading: boolean;
 }) {
+  const reinvite = useReinviteParticipation();
   const { data: pipelines } = usePipelines();
   const { data: stages } = useStages(part.buyer_pipeline_id ?? undefined);
   const pipelineName = pipelines?.find((p) => p.id === part.buyer_pipeline_id)?.name;
@@ -184,6 +186,30 @@ function ParticipationRow({
             </Button>
             <Button className="h-8 px-2 text-xs" variant="secondary" disabled={counterLoading} onClick={onRejectCounter}>
               Reject
+            </Button>
+          </div>
+        )}
+        {(part.status === "withdrawn" || part.status === "declined") && (
+          <div className="flex justify-end">
+            <Button
+              className="h-8 px-2 text-xs"
+              variant="secondary"
+              disabled={reinvite.isPending}
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    "Send a new contract invitation to this buyer? They will need to accept again."
+                  )
+                ) {
+                  return;
+                }
+                reinvite.mutate(part.id, {
+                  onSuccess: () => toast.success("Invitation resent"),
+                  onError: (e) => toast.error(errorMessage(e)),
+                });
+              }}
+            >
+              Resend invite
             </Button>
           </div>
         )}

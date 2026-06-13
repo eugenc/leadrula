@@ -86,9 +86,14 @@ function DrawerContent({
   const returnRoutesValid = !pipelineDelivery || (returnRoutes?.length ?? 0) > 0;
 
   const primaryRate =
+    participation.rate_per_lead ??
     compensations?.find((c) => c.kind === "flat_rate")?.flat_amount ??
     compensations?.find((c) => c.trigger === "per_lead")?.flat_amount ??
     0;
+
+  const hasTriggerComps = (compensations ?? []).some(
+    (c) => (c.kind === "rev_share" || c.kind === "profit_share") && c.trigger === "buyer_stage"
+  );
 
   function buildDeliveryBody() {
     const body: Record<string, unknown> = { delivery };
@@ -138,7 +143,7 @@ function DrawerContent({
     <div className="flex h-full flex-col">
       <DrawerHeader
         title={participation.contract_name ?? "Contract"}
-        subtitle={`${participation.publisher_name ?? "Publisher"} · ${formatParticipationStatus(status)} · ${formatMoney(primaryRate)}/lead`}
+        subtitle={`${participation.publisher_name ?? "Publisher"} · ${formatParticipationStatus(status)} · ${formatMoney(primaryRate)}/lead · ${participation.lead_count ?? 0} received`}
         onClose={onClose}
       />
 
@@ -328,16 +333,20 @@ function DrawerContent({
               <p className="text-sm text-gray-500">Return routes apply when delivery mode is Pipeline.</p>
             ),
             fieldmap: <BuyerContractFieldMapSection participationId={participation.id} />,
-            triggers: (
-              <BuyerTriggerStageFields
-                participationId={participation.id}
-                buyerPipelineId={pipelineId || participation.buyer_pipeline_id}
-              />
-            ),
+            ...(hasTriggerComps
+              ? {
+                  triggers: (
+                    <BuyerTriggerStageFields
+                      participationId={participation.id}
+                      buyerPipelineId={pipelineId || participation.buyer_pipeline_id}
+                    />
+                  ),
+                }
+              : {}),
           }}
           extraTabs={[
             { id: "fieldmap", label: "Field mapping" },
-            { id: "triggers", label: "Triggers", optional: true },
+            ...(hasTriggerComps ? [{ id: "triggers" as const, label: "Rev / profit share" }] : []),
           ]}
         />
       </DrawerBody>

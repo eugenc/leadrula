@@ -87,6 +87,16 @@ func (h *Handler) rejectCounter(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, updated)
 }
 
+func (h *Handler) reinviteParticipation(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	part, err := h.svc.ReinviteParticipation(r.Context(), p.AccountID, idp(r, "id"))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, part)
+}
+
 func (h *Handler) buyerListParticipations(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	items, err := h.svc.ListParticipationsForBuyer(r.Context(), p.AccountID)

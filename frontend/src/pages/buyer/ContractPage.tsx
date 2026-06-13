@@ -4,6 +4,7 @@ import { PageBody } from "@/components/layout/PageBody";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Spinner, EmptyState } from "@/components/ui/misc";
 import { errorMessage } from "@/lib/api";
+import { formatMoney } from "@/lib/utils";
 import { formatContractLeadType } from "@/features/admin/contractLeadType";
 import { formatParticipationStatus, PUBLISHER_DELIVERY_MODES } from "@/features/admin/contractOffer";
 import { BuyerParticipationAcceptDrawer } from "@/features/admin/BuyerParticipationAcceptDrawer";
@@ -105,6 +106,8 @@ export function ContractPage() {
                       <TH>Publisher</TH>
                       <TH>Contract</TH>
                       <TH>Lead Type</TH>
+                      <TH>Rate / Lead</TH>
+                      <TH>Leads</TH>
                       <TH>Status</TH>
                       <TH>Delivery</TH>
                     </tr>
@@ -115,6 +118,8 @@ export function ContractPage() {
                         <TD className="font-semibold">{p.publisher_name}</TD>
                         <TD>{p.contract_name}</TD>
                         <TD>{formatContractLeadType(p.lead_type) || "—"}</TD>
+                        <TD>{formatMoney(p.rate_per_lead ?? 0)}</TD>
+                        <TD>{p.lead_count ?? 0}</TD>
                         <TD>{formatParticipationStatus(p.status)}</TD>
                         <TD>{formatDeliveryMode(p.delivery)}</TD>
                       </TR>

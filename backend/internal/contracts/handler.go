@@ -41,6 +41,7 @@ func (h *Handler) RegisterPublisher(r chi.Router) {
 		r.Post("/contracts/{id}/invites", h.createInvite)
 		r.Post("/participations/{id}/accept-counter", h.acceptCounter)
 		r.Post("/participations/{id}/reject-counter", h.rejectCounter)
+		r.Post("/participations/{id}/reinvite", h.reinviteParticipation)
 		r.Patch("/return-rules/{ruleId}", h.updateRule)
 		r.Delete("/return-rules/{ruleId}", h.deleteRule)
 	})

@@ -281,6 +281,8 @@ export interface ContractParticipation {
   cap_period?: string;
   cap_total?: number | null;
   cap_max_daily?: number | null;
+  lead_count?: number;
+  rate_per_lead?: number;
   created_at?: string;
   updated_at?: string;
 }

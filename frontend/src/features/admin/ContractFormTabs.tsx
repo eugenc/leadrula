@@ -15,7 +15,7 @@ const BASE_TABS: { id: ContractTabId; label: string; optional?: boolean }[] = [
   { id: "compensation", label: "Compensation" },
   { id: "delivery", label: "Delivery" },
   { id: "criteria", label: "Lead criteria" },
-  { id: "returns", label: "Return routes", optional: true },
+  { id: "returns", label: "Return routes" },
 ];
 
 export function ContractFormTabs({

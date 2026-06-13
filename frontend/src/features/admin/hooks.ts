@@ -432,6 +432,19 @@ export function useRejectCounter() {
   });
 }
 
+export function useReinviteParticipation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (participationId: number) =>
+      post<ContractParticipation>(`/publisher/participations/${participationId}/reinvite`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["contracts"] });
+      qc.invalidateQueries({ queryKey: ["contract-detail"] });
+      qc.invalidateQueries({ queryKey: ["contract-participations"] });
+    },
+  });
+}
+
 export function useUpdateContractOffer() {
   const qc = useQueryClient();
   return useMutation({
