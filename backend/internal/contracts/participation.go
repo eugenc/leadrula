@@ -411,12 +411,11 @@ func (s *Service) ReinviteParticipation(ctx context.Context, publisherID, partic
 		   buyer_pipeline_id = NULL, buyer_target_stage_id = NULL,
 		   integration_connection_id = NULL, outbound_webhook_id = NULL,
 		   counter_proposal = NULL, buyer_responded_at = NULL, publisher_responded_at = NULL,
-		   source_pipeline_id = c.source_pipeline_id,
-		   source_stage_id = c.source_stage_id,
-		   return_stage_id = c.return_stage_id,
+		   source_pipeline_id = (SELECT source_pipeline_id FROM contracts WHERE id = contract_participations.contract_id),
+		   source_stage_id = (SELECT source_stage_id FROM contracts WHERE id = contract_participations.contract_id),
+		   return_stage_id = (SELECT return_stage_id FROM contracts WHERE id = contract_participations.contract_id),
 		   updated_at = now()
-		 FROM contracts c
-		 WHERE contract_participations.id = $1 AND c.id = contract_participations.contract_id
+		 WHERE id = $1
 		 RETURNING `+participationReturningCols, participationID))
 	if err != nil {
 		return nil, err
