@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/database"
+	"github.com/echayko/leadrula/backend/internal/leads"
 )
 
 func testEncKey(t *testing.T) []byte {
@@ -84,5 +85,57 @@ func TestProvisionSunbaseWebhooks_createsOutboundConnections(t *testing.T) {
 	}
 	if len(postFieldMap) == 0 {
 		t.Fatal("expected outbound field map on post webhook")
+	}
+}
+
+func TestIngest_sunbaseInbound_nullSecretPrefix(t *testing.T) {
+	ctx := context.Background()
+	pool, err := database.Connect(ctx, "postgres://crm:crm@localhost:5432/crm?sslmode=disable")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer pool.Close()
+
+	svc := NewService(pool, nil, nil, testEncKey(t), nil)
+
+	var accountID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM accounts ORDER BY id LIMIT 1`).Scan(&accountID); err != nil {
+		t.Skip(err)
+	}
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	publicID := fmt.Sprintf("00000000-0000-4000-8000-%012s", suffix[len(suffix)-12:])
+	fieldMap := defaultSunbaseOutboundFieldMapJSON("sunbrightsolarusa")
+
+	ids, err := svc.ProvisionSunbaseWebhooks(
+		ctx, accountID, 0, publicID, "SunBase Ingest "+suffix,
+		"sunbrightsolarusa", sunbaseDefaultEndpoint, fieldMap,
+	)
+	if err != nil {
+		t.Fatalf("ProvisionSunbaseWebhooks: %v", err)
+	}
+	defer svc.DeleteSunbaseWebhooks(ctx, accountID, *ids)
+
+	var secretPrefix *string
+	if err := pool.QueryRow(ctx, `SELECT secret_prefix FROM webhooks WHERE id=$1`, ids.Inbound).Scan(&secretPrefix); err != nil {
+		t.Fatal(err)
+	}
+	if secretPrefix != nil {
+		t.Fatalf("expected null secret_prefix on sunbase inbound webhook, got %q", *secretPrefix)
+	}
+
+	repo := leads.NewRepository(pool)
+	leadSvc := leads.NewService(repo, nil, nil, nil, nil)
+	svc.leads = repo
+	svc.leadSvc = leadSvc
+
+	res, err := svc.Ingest(ctx, &WebhookAuth{WebhookID: ids.Inbound, AccountID: accountID}, ids.InboundSlug, map[string]any{
+		"action": "Update",
+	})
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if res.Status != "captured" {
+		t.Fatalf("status = %q, want captured for non-matching action", res.Status)
 	}
 }

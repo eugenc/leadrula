@@ -124,7 +124,7 @@ func (s *Service) ingestPayload(ctx context.Context, wa *WebhookAuth, slug strin
 
 	var webhook Webhook
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, account_id, name, slug, secret_prefix, is_active, created_at, integration_connection_id
+		`SELECT id, account_id, name, slug, COALESCE(secret_prefix, ''), is_active, created_at, integration_connection_id
 		 FROM webhooks WHERE id=$1 AND slug=$2 AND is_active`,
 		wa.WebhookID, slug).Scan(
 		&webhook.ID, &webhook.AccountID, &webhook.Name, &webhook.Slug, &webhook.SecretPrefix,
