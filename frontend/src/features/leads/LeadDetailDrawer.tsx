@@ -28,7 +28,7 @@ import {
 } from "./hooks";
 import { DeleteLeadConfirmDialog } from "./DeleteLeadConfirmDialog";
 import { StagePromptModal, type PromptResult } from "./StagePromptModal";
-import { stageNeedsPrompt } from "@/features/pipelines/stageTypes";
+import { stageNeedsPrompt, stagePromptMissingError } from "@/features/pipelines/stageTypes";
 import type { Lead, Stage } from "@/types";
 import { formatStatus, leadSourceLabel } from "./leadsListColumns";
 import { LeadTagsEditor } from "./LeadTagsEditor";
@@ -400,10 +400,13 @@ function LeadPipelineFields({ lead }: { lead: Lead }) {
     changeStage.mutate(
       { leadId: lead.id, payload: { stage_id: stage.id, ...extra } },
       {
-        onSuccess: () => toast.success("Saved"),
+        onSuccess: () => {
+          setPrompt(null);
+          toast.success("Saved");
+        },
         onError: (err) => {
           const e = apiError(err);
-          if (e.code === "business_rule" && stageNeedsPrompt(stage.stage_type)) {
+          if (stagePromptMissingError(e.code, e.message, stage.stage_type)) {
             setPrompt({ stage });
           } else {
             toast.error(errorMessage(err));
@@ -503,6 +506,7 @@ function LeadPipelineFields({ lead }: { lead: Lead }) {
         </div>
       )}
       <StagePromptModal
+        key={prompt ? `${lead.id}-${prompt.stage.id}` : "closed"}
         open={!!prompt}
         stage={prompt?.stage ?? null}
         onCancel={() => {
@@ -511,7 +515,6 @@ function LeadPipelineFields({ lead }: { lead: Lead }) {
         }}
         onConfirm={(r) => {
           if (prompt) commitStage(prompt.stage, r);
-          setPrompt(null);
         }}
       />
     </>

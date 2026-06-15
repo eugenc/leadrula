@@ -179,7 +179,7 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 
 	if lead.ContractID != nil && finalStageID != nil {
 		if lead.OwnerAccountID != lead.PublisherID {
-			if err := contracts.SyncPublisherStage(ctx, tx, *lead.ContractID, leadID, lead.OwnerAccountID, *finalStageID); err != nil {
+			if err := contracts.SyncPublisherStageWithRebuild(ctx, tx, *lead.ContractID, leadID, lead.OwnerAccountID, *finalStageID); err != nil {
 				return nil, nil, err
 			}
 		}

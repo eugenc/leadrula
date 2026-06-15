@@ -18,7 +18,7 @@ import {
 } from "./hooks";
 import { BoardSortPicker } from "./BoardSortPicker";
 import { BoardColumn } from "./BoardColumn";
-import { stageNeedsPrompt } from "@/features/pipelines/stageTypes";
+import { stageNeedsPrompt, stagePromptMissingError } from "@/features/pipelines/stageTypes";
 import { LeadCard } from "./LeadCard";
 import { LeadsColumnPicker } from "./LeadsColumnPicker";
 import { StagePromptModal, type PromptResult } from "./StagePromptModal";
@@ -233,9 +233,10 @@ export function Board() {
     changeStage.mutate(
       { leadId, payload: { stage_id: stage.id, ...extra } },
       {
+        onSuccess: () => setPrompt(null),
         onError: (err) => {
           const e = apiError(err);
-          if (e.code === "business_rule" && stageNeedsPrompt(stage.stage_type)) {
+          if (stagePromptMissingError(e.code, e.message, stage.stage_type)) {
             setPrompt({ leadId, stage });
           } else {
             toast.error(errorMessage(err));
@@ -389,6 +390,7 @@ export function Board() {
       </DndContext>
 
       <StagePromptModal
+        key={prompt ? `${prompt.leadId}-${prompt.stage.id}` : "closed"}
         open={!!prompt}
         stage={prompt?.stage ?? null}
         onCancel={() => {
@@ -397,7 +399,6 @@ export function Board() {
         }}
         onConfirm={(r) => {
           if (prompt) commit(prompt.leadId, prompt.stage, r);
-          setPrompt(null);
         }}
       />
     </div>

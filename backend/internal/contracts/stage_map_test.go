@@ -14,6 +14,26 @@ func TestBuildStageMaps_byPosition(t *testing.T) {
 	}
 }
 
+func TestBuildStageMaps_byType_actionStage(t *testing.T) {
+	buyer := []stageRow{
+		{id: 1, stageType: "standard"},
+		{id: 2, stageType: "action"},
+		{id: 3, stageType: "won"},
+	}
+	pub := []stageRow{
+		{id: 10, stageType: "standard"},
+		{id: 20, stageType: "action"},
+		{id: 30, stageType: "won"},
+	}
+	maps, err := buildStageMaps(buyer, pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maps[2] != 20 {
+		t.Fatalf("action stage map = %d want 20", maps[2])
+	}
+}
+
 func TestBuildStageMaps_requiresWonOnBoth(t *testing.T) {
 	buyer := []stageRow{{id: 1, stageType: "open"}}
 	pub := []stageRow{{id: 10, stageType: "open"}, {id: 20, stageType: "won"}}

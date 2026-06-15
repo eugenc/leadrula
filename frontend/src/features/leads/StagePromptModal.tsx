@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -24,6 +24,12 @@ export function StagePromptModal({
   const { data: reasons } = useStageDisqReasons(stage?.id ?? null);
   const [actionAt, setActionAt] = useState("");
   const [reasonId, setReasonId] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    setActionAt("");
+    setReasonId("");
+  }, [open, stage?.id]);
 
   if (!stage) return null;
 

@@ -199,6 +199,82 @@ func RebuildParticipationStageMaps(ctx context.Context, q database.Querier, cont
 	return saveStageMaps(ctx, q, contractID, &pid, maps)
 }
 
+// RebuildAllActiveContractStageMaps rebuilds stage maps for active contracts and participations.
+func RebuildAllActiveContractStageMaps(ctx context.Context, q database.Querier) error {
+	rows, err := q.Query(ctx,
+		`SELECT id FROM contracts
+		 WHERE deleted_at IS NULL AND status = 'active'
+		   AND source_pipeline_id IS NOT NULL AND buyer_pipeline_id IS NOT NULL
+		   AND source_pipeline_id > 0 AND buyer_pipeline_id > 0`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var contractID int64
+		if err := rows.Scan(&contractID); err != nil {
+			return err
+		}
+		if err := RebuildContractStageMaps(ctx, q, contractID); err != nil {
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	pRows, err := q.Query(ctx,
+		`SELECT contract_id, id FROM contract_participations
+		 WHERE status = 'active' AND buyer_pipeline_id > 0`)
+	if err != nil {
+		return err
+	}
+	defer pRows.Close()
+	for pRows.Next() {
+		var contractID, participationID int64
+		if err := pRows.Scan(&contractID, &participationID); err != nil {
+			return err
+		}
+		if err := RebuildParticipationStageMaps(ctx, q, contractID, participationID); err != nil {
+			return err
+		}
+	}
+	return pRows.Err()
+}
+
+// SyncPublisherStageWithRebuild updates publisher-board placement, rebuilding stage maps once if missing.
+func SyncPublisherStageWithRebuild(ctx context.Context, q database.Querier, contractID, leadID, buyerID, buyerStageID int64) error {
+	err := SyncPublisherStage(ctx, q, contractID, leadID, buyerID, buyerStageID)
+	if err == nil {
+		return nil
+	}
+	var appErr *httpx.AppError
+	if !errors.As(err, &appErr) || appErr.Code != httpx.CodeBusinessRule {
+		return err
+	}
+	if appErr.Message != "contract stage map is not configured for this buyer stage" {
+		return err
+	}
+
+	var participationID int64
+	partErr := q.QueryRow(ctx,
+		`SELECT id FROM contract_participations
+		 WHERE contract_id = $1 AND buyer_id = $2 AND status = 'active' LIMIT 1`,
+		contractID, buyerID).Scan(&participationID)
+	if partErr == nil {
+		if rbErr := RebuildParticipationStageMaps(ctx, q, contractID, participationID); rbErr != nil {
+			return err
+		}
+	} else if errors.Is(partErr, pgx.ErrNoRows) {
+		if rbErr := RebuildContractStageMaps(ctx, q, contractID); rbErr != nil {
+			return err
+		}
+	} else {
+		return partErr
+	}
+	return SyncPublisherStage(ctx, q, contractID, leadID, buyerID, buyerStageID)
+}
+
 func lookupPublisherStage(ctx context.Context, q database.Querier, contractID, buyerID, buyerStageID int64) (int64, int64, error) {
 	var sourcePipelineID *int64
 	err := q.QueryRow(ctx,

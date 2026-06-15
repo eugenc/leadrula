@@ -54,6 +54,9 @@ func main() {
 		log.Fatalf("migrate: %v", err)
 	}
 	log.Println("migrations applied")
+	if err := contracts.RebuildAllActiveContractStageMaps(ctx, pool); err != nil {
+		log.Printf("warning: rebuild contract stage maps: %v", err)
+	}
 
 	// ── wiring ───────────────────────────────────────────────────
 	tokens := auth.NewTokenManager(cfg.JWTAccessSecret, cfg.JWTRefreshSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
