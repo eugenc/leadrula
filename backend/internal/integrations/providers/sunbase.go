@@ -15,9 +15,11 @@ import (
 const DefaultSunbaseEndpoint = "https://server4.sunbasedata.com/sunbase/portal/api/lead_post.jsp"
 
 var (
-	sunbaseSchemaErr     = regexp.MustCompile(`(?i)schema_name`)
-	sunbaseCustIDRe      = regexp.MustCompile(`cust-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
-	sunbaseUUIDRe        = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
+	sunbaseSchemaErr      = regexp.MustCompile(`(?i)schema_name`)
+	sunbaseCustIDRe       = regexp.MustCompile(`cust-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
+	sunbaseUUIDRe         = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
+	sunbaseHexIDRe        = regexp.MustCompile(`[0-9a-f]{32}`)
+	sunbaseInsertedLeadRe = regexp.MustCompile(`(?i)successfully inserted lead\s+\S+\s+([0-9a-f]{32})`)
 )
 
 type SunbaseFieldMapEntry struct {
@@ -304,6 +306,14 @@ func parseSunbaseExternalID(body []byte) string {
 	if m := sunbaseUUIDRe.FindString(text); m != "" {
 		return m
 	}
+	if m := sunbaseInsertedLeadRe.FindStringSubmatch(text); len(m) > 1 {
+		return m[1]
+	}
+	if strings.Contains(strings.ToLower(text), "successfully inserted") {
+		if m := sunbaseHexIDRe.FindString(text); m != "" {
+			return m
+		}
+	}
 	return ""
 }
 
@@ -314,7 +324,10 @@ func isSunbaseCustomerID(s string) bool {
 	if strings.HasPrefix(strings.ToLower(s), "cust-") {
 		return sunbaseCustIDRe.MatchString(s)
 	}
-	return sunbaseUUIDRe.MatchString(s)
+	if sunbaseUUIDRe.MatchString(s) {
+		return true
+	}
+	return sunbaseHexIDRe.MatchString(s)
 }
 
 func anyToString(v any) string {
