@@ -49,7 +49,7 @@ func BuildDeliveryPayload(lead *Lead) ([]byte, error) {
 }
 
 // TryEnqueueIntegrations runs after a route apply transaction commits.
-func TryEnqueueIntegrations(ctx context.Context, q database.Querier, repo *Repository, enq IntegrationEnqueuer, routeID, leadID int64) {
+func TryEnqueueIntegrations(ctx context.Context, q database.Querier, repo *Repository, enq IntegrationEnqueuer, routeID, leadID int64, branchPosition int) {
 	if enq == nil || routeID == 0 {
 		return
 	}
@@ -64,5 +64,5 @@ func TryEnqueueIntegrations(ctx context.Context, q database.Querier, repo *Repos
 	if err != nil {
 		return
 	}
-	_ = enq.EnqueueDelivery(ctx, routeID, leadID, payloadJSON)
+	_ = enq.EnqueueDelivery(ctx, routeID, leadID, branchPosition, payloadJSON)
 }

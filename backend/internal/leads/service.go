@@ -130,11 +130,12 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 	}
 
 	var enqueueRouteID int64
+	var enqueueBranchPos int
 	deps := RouteApplyDeps{Repo: s.repo, Accounts: s.accounts, Notif: s.notif, Integrations: s.integrations}
 
 	// pipeline-origin route: publisher-owned lead reached a trigger stage
 	if lead.ContractID == nil && lead.OwnerAccountID == lead.PublisherID {
-		rt, err := routing.MatchRouteByStage(ctx, tx, lead.PublisherID, *finalStageID)
+		rt, err := routing.MatchRouteByStage(ctx, tx, lead.PublisherID, *finalStageID, leadID, nil)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -146,6 +147,7 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 			pendingEmails = append(pendingEmails, emails...)
 			if enqueue {
 				enqueueRouteID = rt.ID
+				enqueueBranchPos = rt.MatchedBranchPosition
 			}
 			updated, err = s.repo.GetByID(ctx, tx, leadID)
 			if err != nil {
@@ -156,7 +158,7 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 
 	// buyer-owned pipeline-origin routes
 	if p.AccountType == "buyer" && lead.OwnerAccountID == p.AccountID {
-		if rt, err := routing.MatchBuyerRouteByStage(ctx, tx, p.AccountID, *finalStageID); err != nil {
+		if rt, err := routing.MatchBuyerRouteByStage(ctx, tx, p.AccountID, *finalStageID, leadID, nil); err != nil {
 			return nil, nil, err
 		} else if rt != nil && enqueueRouteID == 0 {
 			enqueue, emails, err := TryApplyMatchedRoute(ctx, tx, deps, rt, leadID)
@@ -166,6 +168,7 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 			pendingEmails = append(pendingEmails, emails...)
 			if enqueue {
 				enqueueRouteID = rt.ID
+				enqueueBranchPos = rt.MatchedBranchPosition
 			}
 			updated, err = s.repo.GetByID(ctx, tx, leadID)
 			if err != nil {
@@ -217,7 +220,7 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 	}
 	s.notif.SendEmails(pendingEmails)
 	if enqueueRouteID != 0 {
-		TryEnqueueIntegrations(ctx, s.repo.Pool(), s.repo, s.integrations, enqueueRouteID, leadID)
+		TryEnqueueIntegrations(ctx, s.repo.Pool(), s.repo, s.integrations, enqueueRouteID, leadID, enqueueBranchPos)
 	}
 	_ = s.repo.attachCustomValues(ctx, updated)
 	var auditChanges []auth.ImpersonationChange

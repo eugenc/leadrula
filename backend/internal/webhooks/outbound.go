@@ -395,7 +395,7 @@ func (s *Service) FireOutbound(ctx context.Context, accountID int64, event strin
 	}
 	if lead != nil && s.leadSvc != nil {
 		for webhookID := range firedWebhooks {
-			s.leadSvc.TryApplyWebhookOriginRoute(ctx, accountID, webhookID, lead.ID)
+			s.leadSvc.TryApplyWebhookOriginRoute(ctx, accountID, webhookID, lead.ID, nil)
 		}
 	}
 }

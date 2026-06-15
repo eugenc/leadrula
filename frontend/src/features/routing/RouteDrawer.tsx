@@ -1,29 +1,113 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   useSources,
-  useContracts,
-  useBuyerContracts,
 } from "@/features/admin/hooks";
 import { usePipelines, useStages } from "@/features/leads/hooks";
 import { useWebhooks } from "@/features/webhooks/hooks";
-import { useIntegrationConnections } from "@/features/integrations/hooks";
+import {
+  useIntegrationConnections,
+  useRouteIntegrations,
+  useAttachRouteIntegration,
+  useDetachRouteIntegration,
+} from "@/features/integrations/hooks";
+import { type RouteDestinationIntegrationSelection } from "@/features/integrations/RouteDestinationIntegrationsEditor";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { FormDrawer } from "@/components/ui/dialog";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
-import type { Route } from "@/types";
+import type { Route, RouteBranch } from "@/types";
 import {
-  BUYER_DESTINATIONS,
   BUYER_ORIGINS,
-  DESTINATION_LABELS,
   ORIGIN_LABELS,
-  PUBLISHER_DESTINATIONS,
   PUBLISHER_ORIGINS,
 } from "./routeFormatters";
+import {
+  RouteBranchesEditor,
+  blankBranch,
+  branchDestinationValid,
+  reindexBranches,
+} from "./RouteBranchesEditor";
 
 type Origin = Route["origin"];
-type Destination = Route["destination"];
+
+function mapAttachedIntegrations(
+  attached: {
+    id: number;
+    branch_position: number;
+    connection_id: number;
+    connection_name: string;
+    provider_slug: string;
+    delivery_config: Record<string, unknown>;
+  }[]
+): Record<number, RouteDestinationIntegrationSelection[]> {
+  const out: Record<number, RouteDestinationIntegrationSelection[]> = {};
+  for (const a of attached) {
+    const pos = a.branch_position ?? 0;
+    if (!out[pos]) out[pos] = [];
+    out[pos].push({
+      connection_id: a.connection_id,
+      connection_name: a.connection_name,
+      provider_slug: a.provider_slug,
+      route_integration_id: a.id,
+      delivery_config: a.delivery_config,
+    });
+  }
+  return out;
+}
+
+async function syncBranchIntegrations(
+  routeId: number,
+  branches: RouteBranch[],
+  initial: Record<number, RouteDestinationIntegrationSelection[]>,
+  current: Record<number, RouteDestinationIntegrationSelection[]>,
+  attach: ReturnType<typeof useAttachRouteIntegration>,
+  detach: ReturnType<typeof useDetachRouteIntegration>
+) {
+  for (const branch of branches) {
+    if (branch.destination !== "integration") continue;
+    const pos = branch.position;
+    const init = initial[pos] ?? [];
+    const curr = current[pos] ?? [];
+    const removed = init.filter((s) => !curr.some((n) => n.connection_id === s.connection_id));
+    const added = curr.filter((n) => !init.some((s) => s.connection_id === n.connection_id));
+
+    for (const r of removed) {
+      if (r.route_integration_id) {
+        await detach.mutateAsync({ id: r.route_integration_id, routeId });
+      }
+    }
+    for (const a of added) {
+      await attach.mutateAsync({
+        routeId,
+        branch_position: pos,
+        connection_id: a.connection_id,
+        delivery_config: a.delivery_config,
+      });
+    }
+  }
+}
+
+function branchesFromRoute(route: Route | null, accountType: "publisher" | "buyer"): RouteBranch[] {
+  if (route?.branches?.length) return route.branches;
+  if (route) {
+    return [
+      {
+        position: 0,
+        condition_logic: "and",
+        conditions: [],
+        destination: route.destination,
+        delivery: route.delivery,
+        target_pipeline_id: route.target_pipeline_id,
+        target_stage_id: route.target_stage_id,
+        contract_id: route.contract_id,
+        compensation_id: route.compensation_id,
+        dest_webhook_id: route.dest_webhook_id ?? null,
+      },
+    ];
+  }
+  return [blankBranch(0, accountType)];
+}
 
 export function RouteDrawer({
   accountType,
@@ -37,20 +121,21 @@ export function RouteDrawer({
   route: Route | null;
   open: boolean;
   onClose: () => void;
-  onCreate: (body: Record<string, unknown>) => Promise<void>;
-  onUpdate: (id: number, body: Record<string, unknown>) => Promise<void>;
+  onCreate: (body: Record<string, unknown>) => Promise<Route>;
+  onUpdate: (id: number, body: Record<string, unknown>) => Promise<Route>;
 }) {
   const editing = route !== null;
   const origins = accountType === "publisher" ? PUBLISHER_ORIGINS : BUYER_ORIGINS;
-  const destinations = accountType === "publisher" ? PUBLISHER_DESTINATIONS : BUYER_DESTINATIONS;
 
   const { data: sources } = useSources();
-  const { data: publisherContracts } = useContracts(accountType === "publisher");
-  const { data: buyerContracts } = useBuyerContracts();
-  const contracts = accountType === "publisher" ? publisherContracts : buyerContracts;
   const { data: pipelines } = usePipelines();
   const { data: webhooks } = useWebhooks();
   const { data: connections } = useIntegrationConnections();
+  const { data: attachedIntegrations, isLoading: attachedLoading } = useRouteIntegrations(
+    editing && open ? route.id : null
+  );
+  const attachIntegration = useAttachRouteIntegration();
+  const detachIntegration = useDetachRouteIntegration();
 
   const [name, setName] = useState(route?.name ?? "");
   const [origin, setOrigin] = useState<Origin>(route?.origin ?? origins[0]);
@@ -59,12 +144,11 @@ export function RouteDrawer({
   const [originStageId, setOriginStageId] = useState(route?.origin_stage_id ?? 0);
   const [originWebhookId, setOriginWebhookId] = useState(route?.origin_webhook_id ?? 0);
   const [originConnectionId, setOriginConnectionId] = useState(route?.origin_connection_id ?? 0);
-  const [destination, setDestination] = useState<Destination>(route?.destination ?? (accountType === "publisher" ? "contract" : "pipeline"));
-  const [contractId, setContractId] = useState(route?.contract_id ?? 0);
-  const [delivery, setDelivery] = useState<"leads" | "leads_pipeline">(route?.delivery ?? "leads_pipeline");
-  const [targetPipelineId, setTargetPipelineId] = useState(route?.target_pipeline_id ?? 0);
-  const [targetStageId, setTargetStageId] = useState(route?.target_stage_id ?? 0);
-  const [destWebhookId, setDestWebhookId] = useState(route?.dest_webhook_id ?? 0);
+  const [branches, setBranches] = useState<RouteBranch[]>(() => branchesFromRoute(route, accountType));
+  const [integrationSelections, setIntegrationSelections] = useState<
+    Record<number, RouteDestinationIntegrationSelection[]>
+  >({});
+  const initialIntegrationsRef = useRef<Record<number, RouteDestinationIntegrationSelection[]>>({});
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -75,31 +159,29 @@ export function RouteDrawer({
     setOriginStageId(route?.origin_stage_id ?? 0);
     setOriginWebhookId(route?.origin_webhook_id ?? 0);
     setOriginConnectionId(route?.origin_connection_id ?? 0);
-    setDestination(route?.destination ?? (accountType === "publisher" ? "contract" : "pipeline"));
-    setContractId(route?.contract_id ?? 0);
-    setDelivery(route?.delivery ?? "leads_pipeline");
-    setTargetPipelineId(route?.target_pipeline_id ?? 0);
-    setTargetStageId(route?.target_stage_id ?? 0);
-    setDestWebhookId(route?.dest_webhook_id ?? 0);
+    setBranches(branchesFromRoute(route, accountType));
+    if (!route) {
+      setIntegrationSelections({});
+      initialIntegrationsRef.current = {};
+    }
   }, [route, accountType, origins]);
 
-  const { data: originStages } = useStages(origin === "pipeline" ? originPipelineId || undefined : undefined);
-  const { data: targetStages } = useStages(
-    destination === "pipeline" && delivery === "leads_pipeline" ? targetPipelineId || undefined : undefined
-  );
+  useEffect(() => {
+    if (!editing || !attachedIntegrations) return;
+    const mapped = mapAttachedIntegrations(attachedIntegrations);
+    setIntegrationSelections(mapped);
+    initialIntegrationsRef.current = mapped;
+  }, [editing, attachedIntegrations]);
 
-  const selectedContract = (contracts ?? []).find((c) => c.id === contractId);
-  const { data: contractBuyerStages } = useStages(
-    destination === "contract" && delivery === "leads_pipeline"
-      ? selectedContract?.buyer_pipeline_id ?? undefined
-      : undefined
-  );
+  const { data: originStages } = useStages(origin === "pipeline" ? originPipelineId || undefined : undefined);
 
   function buildBody(): Record<string, unknown> {
-    const body: Record<string, unknown> = { name, origin, destination };
-    if (destination === "contract" || destination === "pipeline") {
-      body.delivery = delivery;
-    }
+    const normalized = reindexBranches(branches);
+    const body: Record<string, unknown> = {
+      name,
+      origin,
+      branches: normalized,
+    };
     switch (origin) {
       case "source":
         body.source_id = sourceId;
@@ -115,21 +197,6 @@ export function RouteDrawer({
         body.origin_connection_id = originConnectionId;
         break;
     }
-    switch (destination) {
-      case "contract":
-        body.contract_id = contractId;
-        if (delivery === "leads_pipeline") body.target_stage_id = targetStageId || null;
-        break;
-      case "pipeline":
-        if (delivery === "leads_pipeline") {
-          body.target_pipeline_id = targetPipelineId;
-          body.target_stage_id = targetStageId;
-        }
-        break;
-      case "webhook":
-        body.dest_webhook_id = destWebhookId;
-        break;
-    }
     return body;
   }
 
@@ -139,25 +206,33 @@ export function RouteDrawer({
     (origin === "webhook" && originWebhookId) ||
     (origin === "integration" && originConnectionId);
 
-  const destValid =
-    (destination === "contract" && contractId) ||
-    (destination === "pipeline" && (delivery === "leads" || (targetPipelineId && targetStageId))) ||
-    (destination === "webhook" && destWebhookId) ||
-    destination === "integration";
+  const branchesValid = branches.every((b) =>
+    branchDestinationValid(b, (integrationSelections[b.position] ?? []).length)
+  );
 
-  const valid = name && originValid && destValid;
+  const integrationsLoading = branches.some((b) => b.destination === "integration") && editing && attachedLoading;
+  const showPayloadDomain = origin === "webhook" || origin === "integration" || origin === "source";
+  const valid = name && originValid && branchesValid && branches.length > 0 && !integrationsLoading;
 
   async function submit() {
     setSaving(true);
     try {
       const body = buildBody();
+      let saved: Route;
       if (editing) {
-        await onUpdate(route.id, body);
-        toast.success("Route updated");
+        saved = await onUpdate(route.id, body);
       } else {
-        await onCreate(body);
-        toast.success("Route created");
+        saved = await onCreate(body);
       }
+      await syncBranchIntegrations(
+        saved.id,
+        reindexBranches(branches),
+        editing ? initialIntegrationsRef.current : {},
+        integrationSelections,
+        attachIntegration,
+        detachIntegration
+      );
+      toast.success(editing ? "Route updated" : "Route created");
       onClose();
     } catch (e) {
       toast.error(errorMessage(e));
@@ -264,106 +339,16 @@ export function RouteDrawer({
             </Select>
           </div>
         )}
-        <div>
-          <Label>Destination type</Label>
-          <Select value={destination} onChange={(e) => setDestination(e.target.value as Destination)}>
-            {destinations.map((d) => (
-              <option key={d} value={d}>
-                {DESTINATION_LABELS[d]}
-              </option>
-            ))}
-          </Select>
-        </div>
-        {destination === "contract" && (
-          <>
-            <div>
-              <Label>Contract</Label>
-              <Select value={contractId} onChange={(e) => setContractId(Number(e.target.value))}>
-                <option value={0}>Select…</option>
-                {(contracts ?? []).map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.buyer_name ?? c.publisher_name ?? c.name}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div>
-              <Label>Delivery</Label>
-              <Select value={delivery} onChange={(e) => setDelivery(e.target.value as "leads" | "leads_pipeline")}>
-                <option value="leads">Lead</option>
-                <option value="leads_pipeline">Pipeline</option>
-              </Select>
-            </div>
-            {delivery === "leads_pipeline" && (
-              <div>
-                <Label>Target stage</Label>
-                <Select value={targetStageId} onChange={(e) => setTargetStageId(Number(e.target.value))}>
-                  <option value={0}>First stage (default)</option>
-                  {(contractBuyerStages ?? []).map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            )}
-          </>
-        )}
-        {destination === "pipeline" && (
-          <>
-            <div>
-              <Label>Delivery</Label>
-              <Select value={delivery} onChange={(e) => setDelivery(e.target.value as "leads" | "leads_pipeline")}>
-                <option value="leads">Lead</option>
-                <option value="leads_pipeline">Pipeline</option>
-              </Select>
-            </div>
-            {delivery === "leads_pipeline" && (
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label>Pipeline</Label>
-                  <Select value={targetPipelineId} onChange={(e) => setTargetPipelineId(Number(e.target.value))}>
-                    <option value={0}>Select…</option>
-                    {(pipelines ?? []).map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-                <div>
-                  <Label>Target stage</Label>
-                  <Select value={targetStageId} onChange={(e) => setTargetStageId(Number(e.target.value))}>
-                    <option value={0}>Select…</option>
-                    {(targetStages ?? []).map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-        {destination === "webhook" && (
-          <div>
-            <Label>Webhook</Label>
-            <Select value={destWebhookId} onChange={(e) => setDestWebhookId(Number(e.target.value))}>
-              <option value={0}>Select…</option>
-              {(webhooks ?? []).filter((w) => w.outbound_enabled).map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-        )}
-        {destination === "integration" && (
-          <p className="text-sm text-muted-foreground">
-            Attach webhooks and integrations to this route after saving.
-          </p>
-        )}
+        <RouteBranchesEditor
+          accountType={accountType}
+          branches={branches}
+          onChange={setBranches}
+          integrationSelections={integrationSelections}
+          onIntegrationSelectionsChange={setIntegrationSelections}
+          integrationsLoading={integrationsLoading}
+          showPayloadDomain={showPayloadDomain}
+          disabled={saving}
+        />
       </div>
     </FormDrawer>
   );

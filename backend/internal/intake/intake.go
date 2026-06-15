@@ -188,7 +188,7 @@ func (s *Service) IngestFromSource(ctx context.Context, publisherID int64, slug 
 		return nil, err
 	}
 
-	rt, err := routing.RouteForSource(ctx, tx, src.ID)
+	rt, err := routing.RouteForSource(ctx, tx, src.ID, leadID, sources)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +216,9 @@ func (s *Service) IngestFromSource(ctx context.Context, publisherID int64, slug 
 		return nil, err
 	}
 	s.notif.SendEmails(emails)
-	leads.TryEnqueueIntegrations(ctx, s.leads.Pool(), s.leads, s.integrations, rt.ID, leadID)
+	if rt.Destination == "integration" {
+		leads.TryEnqueueIntegrations(ctx, s.leads.Pool(), s.leads, s.integrations, rt.ID, leadID, rt.MatchedBranchPosition)
+	}
 	return &IngestResult{LeadID: publicID, Status: status}, nil
 }
 
@@ -589,7 +591,15 @@ func (s *Service) RouteFromQueue(ctx context.Context, queueID, routeID, pipeline
 				}
 			}
 		}
-		emails, err := leads.ApplyRoute(ctx, tx, s.routeDeps(), rt, leadID)
+		branch, branchPos, err := routing.PickMatchingBranch(ctx, tx, publisherID, leadID, rt, nil)
+		if err != nil {
+			return err
+		}
+		if branch == nil {
+			return httpx.BusinessRule("no matching route branch for this lead")
+		}
+		applied := routing.RouteForApply(rt, branch)
+		emails, err := leads.ApplyRoute(ctx, tx, s.routeDeps(), applied, leadID)
 		if err != nil {
 			return err
 		}
@@ -602,7 +612,9 @@ func (s *Service) RouteFromQueue(ctx context.Context, queueID, routeID, pipeline
 			return err
 		}
 		s.notif.SendEmails(emails)
-		leads.TryEnqueueIntegrations(ctx, s.pool, s.leads, s.integrations, routeID, leadID)
+		if applied.Destination == "integration" {
+			leads.TryEnqueueIntegrations(ctx, s.pool, s.leads, s.integrations, routeID, leadID, branchPos)
+		}
 		return nil
 	}
 
@@ -612,7 +624,7 @@ func (s *Service) RouteFromQueue(ctx context.Context, queueID, routeID, pipeline
 			return err
 		}
 		if src != nil {
-			rt, err := routing.BuyerRouteForSourceAndBuyer(ctx, tx, publisherID, src.ID, buyerID)
+			rt, err := routing.BuyerRouteForSourceAndBuyer(ctx, tx, publisherID, src.ID, buyerID, leadID, nil)
 			if err != nil {
 				return err
 			}

@@ -148,7 +148,7 @@ func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, p
 	if leadID != 0 && s.leadSvc != nil {
 		var accountID int64
 		if err := s.pool.QueryRow(ctx, `SELECT account_id FROM integration_connections WHERE id=$1`, connID).Scan(&accountID); err == nil {
-			s.leadSvc.TryApplyConnectionOriginRoute(ctx, accountID, connID, leadID)
+			s.leadSvc.TryApplyConnectionOriginRoute(ctx, accountID, connID, leadID, nil)
 		}
 	}
 }

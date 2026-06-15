@@ -110,7 +110,7 @@ export type RuleConditionOp =
   | "empty"
   | "not_empty";
 
-export type RuleConditionDomain = "lead" | "pipeline";
+export type RuleConditionDomain = "lead" | "pipeline" | "payload";
 export type RuleActionDomain = "lead" | "pipeline" | "user";
 
 export interface RuleCondition {
@@ -382,6 +382,20 @@ export interface Source {
   api_key_required: boolean;
 }
 
+export interface RouteBranch {
+  name?: string;
+  position: number;
+  condition_logic: "and" | "or";
+  conditions: RuleCondition[];
+  destination: "contract" | "pipeline" | "webhook" | "integration";
+  delivery: "leads" | "leads_pipeline";
+  target_pipeline_id: number | null;
+  target_stage_id: number | null;
+  contract_id: number | null;
+  compensation_id?: number | null;
+  dest_webhook_id: number | null;
+}
+
 export interface Route {
   id: number;
   buyer_id?: number | null;
@@ -409,6 +423,7 @@ export interface Route {
   target_stage_name?: string | null;
   dest_webhook_id?: number | null;
   dest_webhook_name?: string | null;
+  branches: RouteBranch[];
   is_active: boolean;
 }
 
@@ -934,6 +949,7 @@ export interface SunbaseConnectionDetail {
 export interface RouteIntegration {
   id: number;
   route_id: number;
+  branch_position: number;
   connection_id: number;
   connection_name: string;
   provider_slug: string;

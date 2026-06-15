@@ -16,7 +16,7 @@ import (
 
 // IntegrationEnqueuer enqueues outbound integration deliveries after routing.
 type IntegrationEnqueuer interface {
-	EnqueueDelivery(ctx context.Context, routeID, leadID int64, payloadJSON []byte) error
+	EnqueueDelivery(ctx context.Context, routeID, leadID int64, branchPosition int, payloadJSON []byte) error
 	EnqueueConnectionDelivery(ctx context.Context, connectionID, leadID int64, payloadJSON []byte) error
 	EnqueueParticipationWebhook(ctx context.Context, webhookID, leadID int64, payloadJSON []byte) error
 }
@@ -104,7 +104,7 @@ func TryApplyMatchedRoute(ctx context.Context, q database.Querier, deps RouteApp
 	if err != nil {
 		return false, nil, err
 	}
-	return true, emails, nil
+	return route.Destination == "integration", emails, nil
 }
 
 func applyContractRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, leadID int64) ([]notifications.EmailJob, error) {

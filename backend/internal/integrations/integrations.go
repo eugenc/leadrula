@@ -27,6 +27,7 @@ type Connection struct {
 type RouteIntegration struct {
 	ID             int64  `json:"id"`
 	RouteID        int64  `json:"route_id"`
+	BranchPosition int    `json:"branch_position"`
 	ConnectionID   int64  `json:"connection_id"`
 	ConnectionName string `json:"connection_name"`
 	ProviderSlug   string `json:"provider_slug"`
@@ -43,7 +44,7 @@ type Service struct {
 }
 
 type originRouteApplier interface {
-	TryApplyConnectionOriginRoute(ctx context.Context, accountID, connectionID, leadID int64)
+	TryApplyConnectionOriginRoute(ctx context.Context, accountID, connectionID, leadID int64, payloadFlat map[string]any) bool
 }
 
 func NewService(pool *pgxpool.Pool, encKey []byte, oauth OAuthConfig) *Service {
@@ -197,7 +198,7 @@ func (s *Service) canAccessRoute(ctx context.Context, accountID int64, accountTy
 	}
 }
 
-func (s *Service) AttachToRoute(ctx context.Context, accountID int64, accountType string, routeID, connectionID int64, deliveryConfig map[string]any) error {
+func (s *Service) AttachToRoute(ctx context.Context, accountID int64, accountType string, routeID, connectionID int64, branchPosition int, deliveryConfig map[string]any) error {
 	ok, err := s.canAccessRoute(ctx, accountID, accountType, routeID)
 	if err != nil {
 		return err
@@ -219,10 +220,11 @@ func (s *Service) AttachToRoute(ctx context.Context, accountID int64, accountTyp
 	}
 	configJSON, _ := json.Marshal(deliveryConfig)
 	_, err = s.pool.Exec(ctx,
-		`INSERT INTO route_integrations (route_id, connection_id, delivery_config)
-		 VALUES ($1, $2, $3)
-		 ON CONFLICT (route_id, connection_id) DO UPDATE SET delivery_config = EXCLUDED.delivery_config, is_active = true`,
-		routeID, connectionID, configJSON)
+		`INSERT INTO route_integrations (route_id, connection_id, branch_position, delivery_config)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (route_id, connection_id, branch_position) DO UPDATE
+		   SET delivery_config = EXCLUDED.delivery_config, is_active = true`,
+		routeID, connectionID, branchPosition, configJSON)
 	return err
 }
 
@@ -259,7 +261,7 @@ func (s *Service) ListRouteIntegrations(ctx context.Context, accountID int64, ac
 		return nil, httpx.NotFound("route not found")
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT ri.id, ri.route_id, ri.connection_id, c.name, p.slug, ri.delivery_config, ri.is_active
+		`SELECT ri.id, ri.route_id, ri.branch_position, ri.connection_id, c.name, p.slug, ri.delivery_config, ri.is_active
 		 FROM route_integrations ri
 		 JOIN integration_connections c ON c.id = ri.connection_id
 		 JOIN integration_providers p ON p.id = c.provider_id
@@ -271,7 +273,7 @@ func (s *Service) ListRouteIntegrations(ctx context.Context, accountID int64, ac
 	var out []RouteIntegration
 	for rows.Next() {
 		var ri RouteIntegration
-		if err := rows.Scan(&ri.ID, &ri.RouteID, &ri.ConnectionID, &ri.ConnectionName,
+		if err := rows.Scan(&ri.ID, &ri.RouteID, &ri.BranchPosition, &ri.ConnectionID, &ri.ConnectionName,
 			&ri.ProviderSlug, &ri.DeliveryConfig, &ri.IsActive); err != nil {
 			return nil, err
 		}
@@ -280,11 +282,11 @@ func (s *Service) ListRouteIntegrations(ctx context.Context, accountID int64, ac
 	return out, rows.Err()
 }
 
-func (s *Service) EnqueueDelivery(ctx context.Context, routeID, leadID int64, payloadJSON []byte) error {
+func (s *Service) EnqueueDelivery(ctx context.Context, routeID, leadID int64, branchPosition int, payloadJSON []byte) error {
 	rows, err := s.pool.Query(ctx,
 		`SELECT ri.connection_id, ri.delivery_config
 		 FROM route_integrations ri
-		 WHERE ri.route_id = $1 AND ri.is_active`, routeID)
+		 WHERE ri.route_id = $1 AND ri.branch_position = $2 AND ri.is_active`, routeID, branchPosition)
 	if err != nil {
 		return err
 	}

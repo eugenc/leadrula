@@ -956,13 +956,17 @@ export function useBuyerRoutes() {
 
 export function useCreateBuyerRoute() {
   const inv = useInvalidate(["buyer-routes"]);
-  return useMutation({ mutationFn: (body: Record<string, unknown>) => post(`/buyer/routes`, body), onSuccess: inv });
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) => post<Route>(`/buyer/routes`, body),
+    onSuccess: inv,
+  });
 }
 
 export function useUpdateBuyerRoute() {
   const inv = useInvalidate(["buyer-routes"]);
   return useMutation({
-    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) => patch(`/buyer/routes/${id}`, body),
+    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
+      patch<Route>(`/buyer/routes/${id}`, body),
     onSuccess: inv,
   });
 }
@@ -1090,12 +1094,16 @@ export function useRoutes() {
 }
 export function useCreateRoute() {
   const inv = useInvalidate(["routes"]);
-  return useMutation({ mutationFn: (body: Record<string, unknown>) => post(`/publisher/routes`, body), onSuccess: inv });
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) => post<Route>(`/publisher/routes`, body),
+    onSuccess: inv,
+  });
 }
 export function useUpdateRoute() {
   const inv = useInvalidate(["routes"]);
   return useMutation({
-    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) => patch(`/publisher/routes/${id}`, body),
+    mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
+      patch<Route>(`/publisher/routes/${id}`, body),
     onSuccess: inv,
   });
 }

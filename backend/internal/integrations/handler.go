@@ -266,12 +266,13 @@ func (h *Handler) attachToRoute(w http.ResponseWriter, r *http.Request) {
 	routeID, _ := strconv.ParseInt(chi.URLParam(r, "routeID"), 10, 64)
 	var body struct {
 		ConnectionID   int64          `json:"connection_id"`
+		BranchPosition int            `json:"branch_position"`
 		DeliveryConfig map[string]any `json:"delivery_config"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	if err := h.svc.AttachToRoute(r.Context(), p.AccountID, p.AccountType, routeID, body.ConnectionID, body.DeliveryConfig); err != nil {
+	if err := h.svc.AttachToRoute(r.Context(), p.AccountID, p.AccountType, routeID, body.ConnectionID, body.BranchPosition, body.DeliveryConfig); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}

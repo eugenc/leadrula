@@ -113,15 +113,18 @@ export function useAttachRouteIntegration() {
   return useMutation({
     mutationFn: ({
       routeId,
+      branch_position,
       connection_id,
       delivery_config,
     }: {
       routeId: number;
+      branch_position?: number;
       connection_id: number;
       delivery_config?: Record<string, unknown>;
     }) =>
       post(`${ns()}/integrations/routes/${routeId}/attach`, {
         connection_id,
+        branch_position: branch_position ?? 0,
         delivery_config: delivery_config ?? {},
       }),
     onSuccess: (_, v) => qc.invalidateQueries({ queryKey: ["route-integrations", v.routeId] }),

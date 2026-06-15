@@ -124,11 +124,11 @@ func (s *Service) ingestPayload(ctx context.Context, wa *WebhookAuth, slug strin
 
 	var webhook Webhook
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, account_id, name, slug, secret_prefix, is_active, created_at
+		`SELECT id, account_id, name, slug, secret_prefix, is_active, created_at, integration_connection_id
 		 FROM webhooks WHERE id=$1 AND slug=$2 AND is_active`,
 		wa.WebhookID, slug).Scan(
 		&webhook.ID, &webhook.AccountID, &webhook.Name, &webhook.Slug, &webhook.SecretPrefix,
-		&webhook.IsActive, &webhook.CreatedAt)
+		&webhook.IsActive, &webhook.CreatedAt, &webhook.IntegrationConnectionID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, httpx.NotFound("webhook not found")
@@ -193,11 +193,29 @@ func (s *Service) ingestPayload(ctx context.Context, wa *WebhookAuth, slug strin
 		s.logDelivery(ctx, webhook.ID, firstEventID, firstLeadID, "success", rawJSON, "")
 	}
 	for _, ar := range results {
-		if ar.LeadInternalID != 0 && s.leadSvc != nil {
-			s.leadSvc.TryApplyWebhookOriginRoute(ctx, webhook.AccountID, webhook.ID, ar.LeadInternalID)
+		if ar.LeadInternalID != 0 {
+			applyInboundOriginRoutes(ctx, s.leadSvc, webhook, ar.LeadInternalID, flat)
 		}
 	}
 	return &IngestResult{Status: "processed", Results: results}, nil
+}
+
+type inboundOriginApplier interface {
+	TryApplyConnectionOriginRoute(ctx context.Context, accountID, connectionID, leadID int64, payloadFlat map[string]any) bool
+	TryApplyWebhookOriginRoute(ctx context.Context, accountID, webhookID, leadID int64, payloadFlat map[string]any) bool
+}
+
+func applyInboundOriginRoutes(ctx context.Context, svc inboundOriginApplier, webhook Webhook, leadID int64, payloadFlat map[string]any) {
+	if svc == nil || leadID == 0 {
+		return
+	}
+	applied := false
+	if webhook.IntegrationConnectionID != nil && *webhook.IntegrationConnectionID != 0 {
+		applied = svc.TryApplyConnectionOriginRoute(ctx, webhook.AccountID, *webhook.IntegrationConnectionID, leadID, payloadFlat)
+	}
+	if !applied {
+		svc.TryApplyWebhookOriginRoute(ctx, webhook.AccountID, webhook.ID, leadID, payloadFlat)
+	}
 }
 
 func (s *Service) listMatchingActions(ctx context.Context, webhookID int64, flat map[string]any) ([]*WebhookEvent, error) {

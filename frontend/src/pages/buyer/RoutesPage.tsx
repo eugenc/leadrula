@@ -6,16 +6,14 @@ import {
   useDeleteBuyerRoute,
 } from "@/features/admin/hooks";
 import { RouteDrawer } from "@/features/routing/RouteDrawer";
-import { formatRouteOrigin, formatRouteTarget, routeEditableByBuyer } from "@/features/routing/routeFormatters";
+import { formatRouteOrigin, formatRouteTargetsSummary, formatRouteBranchesSummary, routeEditableByBuyer } from "@/features/routing/routeFormatters";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Badge, Spinner, EmptyState } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
-import { FormDrawer } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/misc";
-import { RouteIntegrationsPanel } from "@/features/integrations/RouteIntegrationsPanel";
 import { useAuthStore } from "@/store/authStore";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "@/store/toastStore";
@@ -36,7 +34,6 @@ export function RoutesPage() {
   const removeRoute = useDeleteBuyerRoute();
 
   const [drawerRoute, setDrawerRoute] = useState<Route | null | undefined>(undefined);
-  const [integrationsRoute, setIntegrationsRoute] = useState<Route | null>(null);
 
   const drawerOpen = drawerRoute !== undefined;
 
@@ -62,7 +59,8 @@ export function RoutesPage() {
               <tr>
                 <TH>Name</TH>
                 <TH>Origin</TH>
-                <TH>Target</TH>
+                <TH>Routes</TH>
+                <TH>Targets</TH>
                 <TH>Delivery</TH>
                 <TH>Active</TH>
                 <TH className="min-w-0 w-12" />
@@ -80,7 +78,8 @@ export function RoutesPage() {
                   >
                     <TD className="font-semibold">{r.name}</TD>
                     <TD>{formatRouteOrigin(r)}</TD>
-                    <TD>{formatRouteTarget(r)}</TD>
+                    <TD className="text-sm text-muted-foreground">{formatRouteBranchesSummary(r)}</TD>
+                    <TD>{formatRouteTargetsSummary(r)}</TD>
                     <TD>{deliveryCell(r)}</TD>
                     <TD>
                       {editable && isAdmin ? (
@@ -100,11 +99,8 @@ export function RoutesPage() {
                       )}
                     </TD>
                     <TD>
-                      <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-                        <Button size="sm" variant="secondary" onClick={() => setIntegrationsRoute(r)}>
-                          Integrations
-                        </Button>
-                        {editable && isAdmin && (
+                      {editable && isAdmin && (
+                        <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
                           <IconButton
                             variant="danger"
                             onClick={() =>
@@ -113,8 +109,8 @@ export function RoutesPage() {
                           >
                             <Trash2 className="h-4 w-4" />
                           </IconButton>
-                        )}
-                      </div>
+                        </div>
+                      )}
                     </TD>
                   </TR>
                 );
@@ -130,19 +126,10 @@ export function RoutesPage() {
           route={drawerRoute ?? null}
           open={drawerOpen}
           onClose={() => setDrawerRoute(undefined)}
-          onCreate={(body) => createRoute.mutateAsync(body).then(() => undefined)}
-          onUpdate={(id, body) => updateRoute.mutateAsync({ id, body }).then(() => undefined)}
+          onCreate={(body) => createRoute.mutateAsync(body)}
+          onUpdate={(id, body) => updateRoute.mutateAsync({ id, body })}
         />
       )}
-
-      <FormDrawer
-        open={!!integrationsRoute}
-        onClose={() => setIntegrationsRoute(null)}
-        title={integrationsRoute ? `Integrations — ${integrationsRoute.name}` : "Integrations"}
-        width={520}
-      >
-        {integrationsRoute && <RouteIntegrationsPanel routeId={integrationsRoute.id} />}
-      </FormDrawer>
     </>
   );
 }

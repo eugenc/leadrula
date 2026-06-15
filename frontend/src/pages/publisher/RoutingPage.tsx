@@ -14,7 +14,7 @@ import {
   useCreateField,
 } from "@/features/admin/hooks";
 import { RouteDrawer } from "@/features/routing/RouteDrawer";
-import { formatRouteOrigin, formatRouteTarget } from "@/features/routing/routeFormatters";
+import { formatRouteOrigin, formatRouteTargetsSummary, formatRouteBranchesSummary } from "@/features/routing/routeFormatters";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
@@ -85,7 +85,8 @@ export function RoutingPage() {
                 <TH>Name</TH>
                 <TH>Buyer</TH>
                 <TH>Origin</TH>
-                <TH>Target</TH>
+                <TH>Routes</TH>
+                <TH>Targets</TH>
                 <TH>Delivery</TH>
                 <TH>Active</TH>
                 <TH className="min-w-0 w-12" />
@@ -97,7 +98,8 @@ export function RoutingPage() {
                   <TD className="font-semibold">{r.name}</TD>
                   <TD>{r.buyer_name ?? "—"}</TD>
                   <TD>{formatRouteOrigin(r)}</TD>
-                  <TD>{formatRouteTarget(r)}</TD>
+                  <TD className="text-sm text-muted-foreground">{formatRouteBranchesSummary(r)}</TD>
+                  <TD>{formatRouteTargetsSummary(r)}</TD>
                   <TD>{deliveryCell(r)}</TD>
                   <TD>
                     <div onClick={(e) => e.stopPropagation()}>
@@ -134,8 +136,8 @@ export function RoutingPage() {
         route={drawerRoute ?? null}
         open={drawerOpen}
         onClose={() => setDrawerRoute(undefined)}
-        onCreate={(body) => createRoute.mutateAsync(body).then(() => undefined)}
-        onUpdate={(id, body) => updateRoute.mutateAsync({ id, body }).then(() => undefined)}
+        onCreate={(body) => createRoute.mutateAsync(body)}
+        onUpdate={(id, body) => updateRoute.mutateAsync({ id, body })}
       />
       <RouteFieldMapDrawer route={routeMapFor} open={!!routeMapFor} onClose={() => setRouteMapFor(null)} />
     </>

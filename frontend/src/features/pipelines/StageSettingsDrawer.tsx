@@ -656,7 +656,7 @@ function ConditionRow({
     );
   }
 
-  const fields = conditionFields(cond.domain, lk.customFields);
+  const fields = conditionFields(cond.domain as "lead" | "pipeline", lk.customFields);
   const def = findField(fields, cond.field) ?? fields[0];
   const ops = CONDITION_OPS[def.kind];
   const showValue = cond.op !== "empty" && cond.op !== "not_empty";
@@ -677,7 +677,7 @@ function ConditionRow({
 
       <Select
         value={def.field}
-        onChange={(e) => onChange(makeCondition(cond.domain, lk, e.target.value))}
+        onChange={(e) => onChange(makeCondition(cond.domain as "lead" | "pipeline", lk, e.target.value))}
         className="min-w-[140px]"
       >
         {fields.map((f) => (
