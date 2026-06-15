@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"time"
 )
 
 const hubspotBase = "https://api.hubapi.com"
@@ -40,21 +39,16 @@ func (p *HubSpotProvider) Deliver(ctx context.Context, credentials []byte, paylo
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	result, err := executeHTTP(req, body, StringMapToMapped(props))
 	if err != nil {
-		return nil, err
+		return result, fmt.Errorf("hubspot returned %d", result.HTTPStatus)
 	}
-	defer resp.Body.Close()
-	var result struct {
+	var hs struct {
 		ID string `json:"id"`
 	}
-	raw, _ := json.Marshal(&result)
-	_ = json.NewDecoder(resp.Body).Decode(&result)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("hubspot returned %d", resp.StatusCode)
-	}
-	return &DeliveryResult{ExternalID: result.ID, Raw: raw}, nil
+	_ = json.Unmarshal(result.Raw, &hs)
+	result.ExternalID = hs.ID
+	return result, nil
 }
 
 func (p *HubSpotProvider) ValidateCredentials(ctx context.Context, credentials []byte, config map[string]any) error {

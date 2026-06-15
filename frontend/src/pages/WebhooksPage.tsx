@@ -91,6 +91,10 @@ function managedByLabel(slug?: string | null) {
   return "Integration";
 }
 
+function managedWebhookBanner(slug?: string | null) {
+  return `Managed by ${managedByLabel(slug)} — connection settings are fixed here. Inbound actions and field maps can be edited below.`;
+}
+
 function InboundConditionRow({
   condition,
   mappableKeys,
@@ -438,6 +442,7 @@ function WebhookDrawer({
   if (!open) return null;
   const editing = webhook !== null;
   const managed = editing && isManagedWebhook(webhook!);
+  const managedSettings = managed;
   const create = useCreateWebhook();
   const update = useUpdateWebhook();
   const [actionDrawer, setActionDrawer] = useState<WebhookEvent | null | undefined>(undefined);
@@ -458,6 +463,7 @@ function WebhookDrawer({
   const [slugTouched, setSlugTouched] = useState(false);
   const [isActive, setIsActive] = useState(webhook?.is_active ?? true);
   const [inboundEnabled, setInboundEnabled] = useState(webhook?.inbound_enabled ?? true);
+  const inboundActionsEditable = inboundEnabled;
   const [inboundSecretRequired, setInboundSecretRequired] = useState(webhook?.inbound_secret_required ?? true);
   const [outboundEnabled, setOutboundEnabled] = useState(webhook?.outbound_enabled ?? false);
   const [outboundSignEnabled, setOutboundSignEnabled] = useState(webhook?.outbound_sign_enabled ?? true);
@@ -559,16 +565,16 @@ function WebhookDrawer({
       <div className="space-y-3">
         {managed && (
           <p className="rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            Managed by {managedByLabel(webhook!.integration_provider_slug)} — edit settings in Integrations, or disconnect to remove.
+            {managedWebhookBanner(webhook!.integration_provider_slug)}
           </p>
         )}
         <div>
           <Label>Name</Label>
-          <Input disabled={managed} value={name} onChange={(e) => { setName(e.target.value); if (!editing && !slugTouched) setSlug(slugify(e.target.value)); }} />
+          <Input disabled={managedSettings} value={name} onChange={(e) => { setName(e.target.value); if (!editing && !slugTouched) setSlug(slugify(e.target.value)); }} />
         </div>
         <div>
           <Label>Slug</Label>
-          <Input disabled={managed} value={slug} onChange={(e) => { setSlugTouched(true); setSlug(e.target.value); }} />
+          <Input disabled={managedSettings} value={slug} onChange={(e) => { setSlugTouched(true); setSlug(e.target.value); }} />
         </div>
         <div className="space-y-3">
           <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Direction</p>
@@ -577,7 +583,7 @@ function WebhookDrawer({
               <Label>Inbound</Label>
               <p className="text-xs text-gray-500">Accept POST callbacks from providers</p>
             </div>
-            <Switch disabled={managed} checked={inboundEnabled} onChange={setInboundEnabled} />
+            <Switch disabled={managedSettings} checked={inboundEnabled} onChange={setInboundEnabled} />
           </div>
           {inboundEnabled && (
             <div className="flex items-center justify-between pl-2 border-l-2 border-gray-100">
@@ -585,7 +591,7 @@ function WebhookDrawer({
                 <Label>Require secret</Label>
                 <p className="text-xs text-gray-500">Bearer token on inbound POST requests</p>
               </div>
-              <Switch disabled={managed} checked={inboundSecretRequired} onChange={setInboundSecretRequired} />
+              <Switch disabled={managedSettings} checked={inboundSecretRequired} onChange={setInboundSecretRequired} />
             </div>
           )}
           {inboundEnabled && !inboundSecretRequired && (
@@ -596,7 +602,7 @@ function WebhookDrawer({
               <Label>Outbound</Label>
               <p className="text-xs text-gray-500">{outboundEnabled ? outboundHelperText(outboundFormat, outboundMethod) : "Send HTTP GET or POST on lead/pipeline events"}</p>
             </div>
-            <Switch disabled={managed} checked={outboundEnabled} onChange={setOutboundEnabled} />
+            <Switch disabled={managedSettings} checked={outboundEnabled} onChange={setOutboundEnabled} />
           </div>
           {outboundEnabled && (
             <div className="flex items-center justify-between pl-2 border-l-2 border-gray-100">
@@ -604,7 +610,7 @@ function WebhookDrawer({
                 <Label>Sign requests</Label>
                 <p className="text-xs text-gray-500">X-Leadrula-Signature HMAC header</p>
               </div>
-              <Switch disabled={managed} checked={outboundSignEnabled} onChange={setOutboundSignEnabled} />
+              <Switch disabled={managedSettings} checked={outboundSignEnabled} onChange={setOutboundSignEnabled} />
             </div>
           )}
           {outboundEnabled && !outboundSignEnabled && (
@@ -615,7 +621,7 @@ function WebhookDrawer({
               <div>
                 <Label>Outbound URL</Label>
                 <Input
-                  disabled={managed}
+                  disabled={managedSettings}
                   value={outboundURL}
                   onChange={(e) => setOutboundURL(e.target.value)}
                   placeholder="https://example.com/webhook"
@@ -625,11 +631,11 @@ function WebhookDrawer({
                 <Label>Outbound format</Label>
                 <div className="mt-1 flex gap-4">
                   <label className="flex items-center gap-1.5 text-sm">
-                    <input type="radio" disabled={managed} name="outbound-format" checked={outboundFormat === "json"} onChange={() => setOutboundFormat("json")} />
+                    <input type="radio" disabled={managedSettings} name="outbound-format" checked={outboundFormat === "json"} onChange={() => setOutboundFormat("json")} />
                     JSON body
                   </label>
                   <label className="flex items-center gap-1.5 text-sm">
-                    <input type="radio" disabled={managed} name="outbound-format" checked={outboundFormat === "url"} onChange={() => setOutboundFormat("url")} />
+                    <input type="radio" disabled={managedSettings} name="outbound-format" checked={outboundFormat === "url"} onChange={() => setOutboundFormat("url")} />
                     URL parameters
                   </label>
                 </div>
@@ -638,16 +644,16 @@ function WebhookDrawer({
                 <Label>HTTP method</Label>
                 <div className="mt-1 flex gap-4">
                   <label className="flex items-center gap-1.5 text-sm">
-                    <input type="radio" disabled={managed} name="outbound-method" checked={outboundMethod === "GET"} onChange={() => setOutboundMethod("GET")} />
+                    <input type="radio" disabled={managedSettings} name="outbound-method" checked={outboundMethod === "GET"} onChange={() => setOutboundMethod("GET")} />
                     GET
                   </label>
                   <label className="flex items-center gap-1.5 text-sm">
-                    <input type="radio" disabled={managed} name="outbound-method" checked={outboundMethod === "POST"} onChange={() => setOutboundMethod("POST")} />
+                    <input type="radio" disabled={managedSettings} name="outbound-method" checked={outboundMethod === "POST"} onChange={() => setOutboundMethod("POST")} />
                     POST
                   </label>
                 </div>
               </div>
-              {outboundFormat === "url" && !managed && (
+              {outboundFormat === "url" && !managedSettings && (
                 <Button
                   size="sm"
                   variant="secondary"
@@ -668,9 +674,9 @@ function WebhookDrawer({
           <>
             <div className="flex items-center justify-between">
               <Label>Active</Label>
-              <Switch disabled={managed} checked={isActive} onChange={setIsActive} />
+              <Switch disabled={managedSettings} checked={isActive} onChange={setIsActive} />
             </div>
-            {outboundEnabled && webhook!.outbound_url && outboundSignEnabled && !managed && (
+            {outboundEnabled && webhook!.outbound_url && outboundSignEnabled && !managedSettings && (
               <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-800">
                 <p className="font-medium">Outbound HMAC secret</p>
                 <p className="text-xs text-blue-600 mt-1">Used to sign outbound requests (X-Leadrula-Signature header)</p>
@@ -696,7 +702,7 @@ function WebhookDrawer({
               <div className="space-y-3 border-t border-gray-100 pt-3">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Inbound actions</p>
-                  {!managed && (
+                  {inboundActionsEditable && (
                     <Button size="sm" onClick={() => setActionDrawer(null)}><Plus className="h-3.5 w-3.5" /> Add action</Button>
                   )}
                 </div>
@@ -711,7 +717,7 @@ function WebhookDrawer({
                           <TD className="text-xs text-gray-600">{conditionSummary(a.conditions ?? [], a.condition_logic)}</TD>
                           <TD><Badge>{a.action}</Badge></TD>
                           <TD>
-                            {!managed && (
+                            {inboundActionsEditable && (
                               <div className="flex justify-end gap-1">
                                 <IconButton aria-label="Edit action" onClick={() => setActionDrawer(a)}><Pencil className="h-4 w-4" /></IconButton>
                                 <IconButton variant="danger" onClick={() => deleteAction.mutate({ webhookId: webhook!.id, eventId: a.id }, { onError: (e) => toast.error(errorMessage(e)) })}>
@@ -730,15 +736,15 @@ function WebhookDrawer({
             {outboundEnabled && (
               <div className="space-y-4 border-t border-gray-100 pt-3">
                 {outboundFormat === "json" ? (
-                  <OutboundPayloadTemplateEditor readOnly={managed} value={payloadTemplate} onChange={setPayloadTemplate} />
+                  <OutboundPayloadTemplateEditor readOnly={managedSettings} value={payloadTemplate} onChange={setPayloadTemplate} />
                 ) : (
-                  <OutboundFieldMapping readOnly={managed} entries={fieldMap} onChange={setFieldMap} />
+                  <OutboundFieldMapping readOnly={managedSettings} entries={fieldMap} onChange={setFieldMap} />
                 )}
-                <OutboundResponseMapping readOnly={managed} entries={responseMap} onChange={setResponseMap} />
+                <OutboundResponseMapping readOnly={managedSettings} entries={responseMap} onChange={setResponseMap} />
                 <div className="space-y-3 border-t border-gray-100 pt-3">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-semibold uppercase tracking-wide text-gray-600">Outbound triggers</p>
-                  {!managed && (
+                  {!managedSettings && (
                     <Button size="sm" onClick={() => setTriggerDrawer(null)}><Plus className="h-3.5 w-3.5" /> Add trigger</Button>
                   )}
                 </div>
@@ -753,7 +759,7 @@ function WebhookDrawer({
                           <TD><Badge>{t.trigger_event}</Badge></TD>
                           <TD>{t.is_active ? "✓" : "—"}</TD>
                           <TD>
-                            {!managed && (
+                            {!managedSettings && (
                               <div className="flex justify-end gap-1">
                                 <IconButton aria-label="Edit" onClick={() => setTriggerDrawer(t)}><Zap className="h-4 w-4" /></IconButton>
                                 <IconButton variant="danger" onClick={() => deleteTrigger.mutate({ webhookId: webhook!.id, triggerId: t.id }, { onError: (e) => toast.error(errorMessage(e)) })}>
@@ -835,6 +841,7 @@ function WebhookDetailDrawer({
   if (!open || !webhook) return null;
 
   const managed = isManagedWebhook(webhook);
+  const inboundActionsEditable = webhook.inbound_enabled;
 
   function handleRotate() {
     rotate.mutate(webhook!.id, {
@@ -853,7 +860,7 @@ function WebhookDetailDrawer({
       <div className="space-y-4">
         {managed && (
           <p className="rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            Managed by {managedByLabel(webhook.integration_provider_slug)} — edit settings in Integrations, or disconnect to remove.
+            {managedWebhookBanner(webhook.integration_provider_slug)}
           </p>
         )}
         {webhook.inbound_enabled && (
@@ -891,7 +898,7 @@ function WebhookDetailDrawer({
                           <Button size="sm" variant="secondary" onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>
                             {expandedId === d.id ? "Hide" : "View"}
                           </Button>
-                          {!managed && (
+                          {inboundActionsEditable && (
                             <Button
                               size="sm"
                               variant="secondary"

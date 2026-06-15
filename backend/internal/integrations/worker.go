@@ -120,18 +120,27 @@ func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, p
 	}
 	duration := int(time.Since(start).Milliseconds())
 
+	reqLog := payload
+	httpStatus := 0
+	var respRaw []byte
+	if result != nil {
+		if len(result.Request) > 0 {
+			reqLog = result.Request
+		}
+		httpStatus = result.HTTPStatus
+		respRaw = result.Raw
+	}
+
 	if err != nil {
-		s.logAttempt(ctx, jobID, attempts, "failed", 0, payload, nil, duration, err.Error())
+		s.logAttempt(ctx, jobID, attempts, "failed", httpStatus, reqLog, respRaw, duration, err.Error())
 		s.markFailed(ctx, jobID, attempts, err.Error())
 		return
 	}
 	extID := ""
-	var respRaw []byte
 	if result != nil {
 		extID = result.ExternalID
-		respRaw = result.Raw
 	}
-	s.logAttempt(ctx, jobID, attempts, "success", 200, payload, respRaw, duration, "")
+	s.logAttempt(ctx, jobID, attempts, "success", httpStatus, reqLog, respRaw, duration, "")
 	s.markSuccess(ctx, jobID, extID)
 	_, _ = s.pool.Exec(ctx, `UPDATE integration_connections SET last_used_at = now(), last_error = NULL WHERE id = $1`, connID)
 	if leadID != 0 && len(respRaw) > 0 {

@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 )
 
 type WebhookProvider struct{}
@@ -59,6 +58,10 @@ func DeliverWebhook(ctx context.Context, credentials, rawJSON []byte) (*Delivery
 }
 
 func deliverJSONBody(ctx context.Context, baseURL, secret string, headers map[string]string, rawJSON []byte) (*DeliveryResult, error) {
+	mapped, err := jsonPayloadToMapped(rawJSON)
+	if err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL, bytes.NewReader(rawJSON))
 	if err != nil {
 		return nil, err
@@ -70,7 +73,11 @@ func deliverJSONBody(ctx context.Context, baseURL, secret string, headers map[st
 	if secret != "" {
 		req.Header.Set("X-Leadrula-Signature", hmacSHA256(rawJSON, secret))
 	}
-	return doRequest(req)
+	result, err := executeHTTP(req, rawJSON, mapped)
+	if err != nil {
+		return result, fmt.Errorf("webhook returned %d", result.HTTPStatus)
+	}
+	return result, nil
 }
 
 func deliverQueryParams(ctx context.Context, baseURL, method, secret string, headers map[string]string, rawJSON []byte) (*DeliveryResult, error) {
@@ -78,6 +85,7 @@ func deliverQueryParams(ctx context.Context, baseURL, method, secret string, hea
 	if err != nil {
 		return nil, err
 	}
+	mapped := URLValuesToMapped(params)
 	fullURL, err := appendQueryParams(baseURL, params)
 	if err != nil {
 		return nil, err
@@ -92,7 +100,19 @@ func deliverQueryParams(ctx context.Context, baseURL, method, secret string, hea
 	if secret != "" {
 		req.Header.Set("X-Leadrula-Signature", hmacSHA256([]byte(fullURL), secret))
 	}
-	return doRequest(req)
+	result, err := executeHTTP(req, nil, mapped)
+	if err != nil {
+		return result, fmt.Errorf("webhook returned %d", result.HTTPStatus)
+	}
+	return result, nil
+}
+
+func jsonPayloadToMapped(rawJSON []byte) (map[string]string, error) {
+	var raw map[string]any
+	if err := json.Unmarshal(rawJSON, &raw); err != nil {
+		return nil, fmt.Errorf("invalid payload json: %w", err)
+	}
+	return AnyMapToMapped(raw), nil
 }
 
 func payloadToQueryValues(rawJSON []byte) (url.Values, error) {
@@ -142,22 +162,6 @@ func appendQueryParams(baseURL string, params url.Values) (string, error) {
 	}
 	u.RawQuery = q.Encode()
 	return u.String(), nil
-}
-
-func doRequest(req *http.Request) (*DeliveryResult, error) {
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	buf := make([]byte, 4096)
-	n, _ := resp.Body.Read(buf)
-	raw := buf[:n]
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("webhook returned %d", resp.StatusCode)
-	}
-	return &DeliveryResult{Raw: raw}, nil
 }
 
 func (p *WebhookProvider) ValidateCredentials(ctx context.Context, credentials []byte, config map[string]any) error {

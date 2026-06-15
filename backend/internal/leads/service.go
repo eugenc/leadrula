@@ -178,6 +178,11 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 	}
 
 	if lead.ContractID != nil && finalStageID != nil {
+		if lead.OwnerAccountID != lead.PublisherID {
+			if err := contracts.SyncPublisherStage(ctx, tx, *lead.ContractID, leadID, lead.OwnerAccountID, *finalStageID); err != nil {
+				return nil, nil, err
+			}
+		}
 		if err := contracts.TryAccrueOnBuyerStage(ctx, tx, *lead.ContractID, leadID, *finalStageID); err != nil {
 			return nil, nil, err
 		}
@@ -326,6 +331,9 @@ func (s *Service) Redistribute(ctx context.Context, p *auth.Principal, leadID, c
 		return nil, httpx.BusinessRule("target pipeline has no stages")
 	}
 	if err := s.repo.PlaceInPipeline(ctx, tx, leadID, target.BuyerID, target.BuyerPipelineID, firstStage, &target.ID); err != nil {
+		return nil, err
+	}
+	if err := contracts.InitPublisherTracking(ctx, tx, target.ID, leadID, target.BuyerID, firstStage); err != nil {
 		return nil, err
 	}
 	if err := contracts.CheckCap(ctx, tx, target.ID, target.CompensationID); err != nil {

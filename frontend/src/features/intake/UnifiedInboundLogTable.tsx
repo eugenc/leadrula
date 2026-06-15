@@ -9,7 +9,7 @@ import { format } from "date-fns";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import { useUIStore } from "@/store/uiStore";
-import type { IntegrationDeliveryDetail, QueueItem } from "@/types";
+import type { DeliveryRequestLog, IntegrationDeliveryDetail, QueueItem } from "@/types";
 import { QueueItemDrawer, RouteDialog } from "@/pages/publisher/intakeShared";
 import {
   LogPagination,
@@ -52,17 +52,57 @@ function formatJsonBlock(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
-function payloadWithoutCustomFields(payload: Record<string, unknown>): Record<string, unknown> {
-  const { custom_fields: _, ...rest } = payload;
-  return rest;
+function parseDeliveryRequestLog(body: unknown): DeliveryRequestLog | null {
+  if (!body || typeof body !== "object") return null;
+  const o = body as Record<string, unknown>;
+  if (!o.mapped || typeof o.mapped !== "object" || !o.http || typeof o.http !== "object") return null;
+  return body as DeliveryRequestLog;
+}
+
+function MappedPayloadPanel({ mapped }: { mapped: Record<string, string> }) {
+  const entries = Object.entries(mapped).sort(([a], [b]) => a.localeCompare(b));
+  if (entries.length === 0) {
+    return <p className="text-xs text-gray-400">No mapped fields.</p>;
+  }
+  return (
+    <div className="space-y-1 rounded-md border border-gray-100 bg-gray-50 p-3">
+      {entries.map(([key, value]) => (
+        <div key={key} className="text-xs text-gray-700">
+          <span className="font-mono font-medium text-gray-800">{key}</span>
+          <span className="ml-2 font-mono text-gray-600">{formatJsonBlock(value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function HTTPRequestPanel({ http }: { http: DeliveryRequestLog["http"] }) {
+  return (
+    <div className="space-y-2 rounded-md border border-gray-100 bg-gray-50 p-3">
+      <p className="font-mono text-xs text-gray-800">
+        {http.method} {http.url}
+      </p>
+      {http.headers && Object.keys(http.headers).length > 0 && (
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-gray-500">Headers</p>
+          {Object.entries(http.headers).map(([key, value]) => (
+            <div key={key} className="font-mono text-xs text-gray-600">
+              {key}: {value}
+            </div>
+          ))}
+        </div>
+      )}
+      {http.body != null && (
+        <pre className="max-h-48 overflow-auto font-mono text-xs text-gray-700">{formatJsonBlock(http.body)}</pre>
+      )}
+    </div>
+  );
 }
 
 function IntegrationDeliveryExpand({ detail }: { detail: IntegrationDeliveryDetail | undefined }) {
   if (!detail) {
     return <Spinner className="h-4 w-4" />;
   }
-
-  const labeled = detail.custom_fields_labeled ?? [];
 
   return (
     <div className="space-y-3">
@@ -72,47 +112,46 @@ function IntegrationDeliveryExpand({ detail }: { detail: IntegrationDeliveryDeta
         </p>
       )}
       {detail.last_error && <p className="text-xs text-red-600">{detail.last_error}</p>}
-      <div>
-        <p className="mb-1 text-xs font-medium text-gray-500">Request (sent)</p>
-        {labeled.length > 0 && (
-          <div className="mb-2 space-y-1 rounded-md border border-gray-100 bg-gray-50 p-3">
-            <p className="text-xs font-medium text-gray-500">Custom fields</p>
-            {labeled.map((f) => (
-              <div key={f.id} className="text-xs text-gray-700">
-                <span className="font-medium text-gray-800">{f.name}</span>
-                <span className="ml-1 font-mono text-gray-400">({f.field_key})</span>
-                <span className="ml-2 font-mono text-gray-600">{formatJsonBlock(f.value)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        <pre className="max-h-48 overflow-auto rounded-md border border-gray-100 bg-gray-50 p-3 font-mono text-xs">
-          {formatJsonBlock(labeled.length > 0 ? payloadWithoutCustomFields(detail.payload) : detail.payload)}
-        </pre>
-      </div>
       {detail.attempts.length === 0 ? (
         <p className="text-xs text-gray-400">Not delivered yet.</p>
       ) : (
-        detail.attempts.map((attempt) => (
-          <div key={attempt.attempt_number}>
-            <p className="mb-1 text-xs font-medium text-gray-500">
-              Attempt {attempt.attempt_number} — {attempt.status}
-              {attempt.http_status != null && attempt.http_status > 0 ? ` — HTTP ${attempt.http_status}` : ""}
-              {attempt.duration_ms != null ? ` — ${attempt.duration_ms}ms` : ""}
-            </p>
-            {attempt.error && <p className="mb-1 text-xs text-red-600">{attempt.error}</p>}
-            {attempt.response_body ? (
-              <>
-                <p className="mb-1 text-xs text-gray-400">Response from server</p>
-                <pre className="max-h-48 overflow-auto rounded-md border border-gray-100 bg-gray-50 p-3 font-mono text-xs">
-                  {formatJsonBlock(attempt.response_body)}
-                </pre>
-              </>
-            ) : (
-              !attempt.error && <p className="text-xs text-gray-400">No response body recorded.</p>
-            )}
-          </div>
-        ))
+        detail.attempts.map((attempt) => {
+          const reqLog = parseDeliveryRequestLog(attempt.request_body);
+          return (
+            <div key={attempt.attempt_number} className="space-y-2">
+              <p className="text-xs font-medium text-gray-500">
+                Attempt {attempt.attempt_number} — {attempt.status}
+                {attempt.http_status != null && attempt.http_status > 0 ? ` — HTTP ${attempt.http_status}` : ""}
+                {attempt.duration_ms != null ? ` — ${attempt.duration_ms}ms` : ""}
+              </p>
+              {attempt.error && <p className="text-xs text-red-600">{attempt.error}</p>}
+              {reqLog ? (
+                <>
+                  <div>
+                    <p className="mb-1 text-xs font-medium text-gray-500">Outbound payload (mapped)</p>
+                    <MappedPayloadPanel mapped={reqLog.mapped} />
+                  </div>
+                  <div>
+                    <p className="mb-1 text-xs font-medium text-gray-500">HTTP request (actual)</p>
+                    <HTTPRequestPanel http={reqLog.http} />
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-gray-400">Request not recorded — resend to capture mapped + HTTP payload.</p>
+              )}
+              {attempt.response_body ? (
+                <>
+                  <p className="mb-1 text-xs text-gray-400">Response from server</p>
+                  <pre className="max-h-48 overflow-auto rounded-md border border-gray-100 bg-gray-50 p-3 font-mono text-xs">
+                    {formatJsonBlock(attempt.response_body)}
+                  </pre>
+                </>
+              ) : (
+                !attempt.error && <p className="text-xs text-gray-400">No response body recorded.</p>
+              )}
+            </div>
+          );
+        })
       )}
     </div>
   );
@@ -289,7 +328,8 @@ export function UnifiedInboundLogTable({
 
             const d = row.item;
             const isInbound = row.direction === "inbound";
-            const expandKey = `webhook:${d.webhook_id}:${d.id}`;
+            const isOutbound = row.direction === "outbound";
+            const expandKey = isOutbound ? `integration:${d.id}` : `webhook:${d.webhook_id}:${d.id}`;
             const isExpanded = expandedKey === expandKey;
             const statusNode = isInbound
               ? webhookDeliveryStatusText(d.status)
@@ -321,8 +361,8 @@ export function UnifiedInboundLogTable({
                   </TD>
                   <TD>{statusNode}</TD>
                   <TD>
-                    {isInbound && (
-                      <div className="flex shrink-0 justify-end gap-1">
+                    <div className="flex shrink-0 justify-end gap-1">
+                      {(isInbound || isOutbound) && (
                         <Button
                           size="sm"
                           variant="secondary"
@@ -331,29 +371,47 @@ export function UnifiedInboundLogTable({
                         >
                           {isExpanded ? "Hide" : "View"}
                         </Button>
-                        {canReplayWebhooks && canReplayDelivery(d) && (
-                          <Button
-                            size="sm"
-                            className="shrink-0 whitespace-nowrap"
-                            disabled={replay.isPending}
-                            onClick={() =>
-                              replay.mutate(
-                                { webhookId: d.webhook_id, deliveryId: d.id },
-                                {
-                                  onSuccess: () => {
-                                    toast.success("Replayed");
-                                    onWebhookReplayed?.();
-                                  },
-                                  onError: (e) => toast.error(errorMessage(e)),
-                                }
-                              )
-                            }
-                          >
-                            Run again
-                          </Button>
-                        )}
-                      </div>
-                    )}
+                      )}
+                      {isInbound && canReplayWebhooks && canReplayDelivery(d) && (
+                        <Button
+                          size="sm"
+                          className="shrink-0 whitespace-nowrap"
+                          disabled={replay.isPending}
+                          onClick={() =>
+                            replay.mutate(
+                              { webhookId: d.webhook_id, deliveryId: d.id },
+                              {
+                                onSuccess: () => {
+                                  toast.success("Replayed");
+                                  onWebhookReplayed?.();
+                                },
+                                onError: (e) => toast.error(errorMessage(e)),
+                              }
+                            )
+                          }
+                        >
+                          Run again
+                        </Button>
+                      )}
+                      {isOutbound && canReplayWebhooks && (
+                        <Button
+                          size="sm"
+                          className="shrink-0 whitespace-nowrap"
+                          disabled={retryIntegration.isPending}
+                          onClick={() =>
+                            retryIntegration.mutate(d.id, {
+                              onSuccess: () => {
+                                toast.success("Resent");
+                                onWebhookReplayed?.();
+                              },
+                              onError: (e) => toast.error(errorMessage(e)),
+                            })
+                          }
+                        >
+                          Resend
+                        </Button>
+                      )}
+                    </div>
                   </TD>
                 </TR>
                 {isInbound && isExpanded && (
@@ -366,6 +424,16 @@ export function UnifiedInboundLogTable({
                         {JSON.stringify(expandedDelivery?.request_payload ?? {}, null, 2)}
                       </pre>
                       {d.error_message && <p className="mt-1 text-xs text-red-600">{d.error_message}</p>}
+                    </td>
+                  </tr>
+                )}
+                {isOutbound && isExpanded && (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-2">
+                      <IntegrationDeliveryExpand detail={expandedIntegration} />
+                      {d.error_message && !expandedIntegration?.last_error && (
+                        <p className="mt-1 text-xs text-red-600">{d.error_message}</p>
+                      )}
                     </td>
                   </tr>
                 )}

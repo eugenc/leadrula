@@ -360,21 +360,20 @@ func (s *Service) AssertUserEditableWebhook(ctx context.Context, accountID, webh
 }
 
 func (s *Service) AssertUserEditableFieldMap(ctx context.Context, accountID, mapID int64) error {
-	var webhookID int64
 	err := s.pool.QueryRow(ctx,
-		`SELECT we.webhook_id
+		`SELECT 1
 		 FROM webhook_event_field_map fm
 		 JOIN webhook_events we ON we.id = fm.event_id
 		 JOIN webhooks w ON w.id = we.webhook_id
 		 WHERE fm.id=$1 AND w.account_id=$2`,
-		mapID, accountID).Scan(&webhookID)
+		mapID, accountID).Scan(new(int))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return httpx.NotFound("field map not found")
 		}
 		return err
 	}
-	return s.AssertUserEditableWebhook(ctx, accountID, webhookID)
+	return nil
 }
 
 func (s *Service) getWebhook(ctx context.Context, accountID, id int64) (*Webhook, error) {

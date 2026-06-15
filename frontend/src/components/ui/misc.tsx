@@ -1,6 +1,43 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { cn, initials } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
+
+const overflowTooltipClass =
+  "pointer-events-none absolute left-0 top-full z-20 mt-1.5 max-w-md rounded-md bg-[#101828] px-2 py-1.5 text-xs font-normal leading-snug text-[#F9FAFB] opacity-0 shadow-sm transition-opacity duration-150 group-hover/overflow:opacity-100 whitespace-normal break-words";
+
+export function TextWithOverflowTooltip({
+  children,
+  className,
+}: {
+  children: string;
+  className?: string;
+}) {
+  const textRef = useRef<HTMLSpanElement>(null);
+  const [overflow, setOverflow] = useState(false);
+
+  useLayoutEffect(() => {
+    const el = textRef.current;
+    if (!el) return;
+    const check = () => setOverflow(el.scrollWidth > el.clientWidth);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [children]);
+
+  return (
+    <span className="group/overflow relative block max-w-full">
+      <span ref={textRef} className={cn("block truncate max-w-full", className)}>
+        {children}
+      </span>
+      {overflow && children && (
+        <span role="tooltip" className={overflowTooltipClass}>
+          {children}
+        </span>
+      )}
+    </span>
+  );
+}
 
 export function Card({ className, children }: { className?: string; children: React.ReactNode }) {
   return (

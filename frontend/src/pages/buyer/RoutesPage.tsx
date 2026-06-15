@@ -11,7 +11,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
-import { Badge, Spinner, EmptyState } from "@/components/ui/misc";
+import { Badge, Spinner, EmptyState, TextWithOverflowTooltip } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/misc";
 import { useAuthStore } from "@/store/authStore";
@@ -60,7 +60,7 @@ export function RoutesPage() {
                 <TH>Name</TH>
                 <TH>Origin</TH>
                 <TH>Routes</TH>
-                <TH>Targets</TH>
+                <TH className="max-w-xs">Targets</TH>
                 <TH>Delivery</TH>
                 <TH>Active</TH>
                 <TH className="min-w-0 w-12" />
@@ -69,6 +69,7 @@ export function RoutesPage() {
             <TBody>
               {(routes ?? []).map((r) => {
                 const editable = routeEditableByBuyer(r);
+                const targetsSummary = formatRouteTargetsSummary(r);
                 return (
                   <TR
                     key={r.id}
@@ -79,7 +80,9 @@ export function RoutesPage() {
                     <TD className="font-semibold">{r.name}</TD>
                     <TD>{formatRouteOrigin(r)}</TD>
                     <TD className="text-sm text-muted-foreground">{formatRouteBranchesSummary(r)}</TD>
-                    <TD>{formatRouteTargetsSummary(r)}</TD>
+                    <TD className="max-w-xs">
+                      <TextWithOverflowTooltip>{targetsSummary}</TextWithOverflowTooltip>
+                    </TD>
                     <TD>{deliveryCell(r)}</TD>
                     <TD>
                       {editable && isAdmin ? (

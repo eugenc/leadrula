@@ -49,33 +49,28 @@ func (p *GHLProvider) Deliver(ctx context.Context, credentials []byte, payload D
 	}
 	req.Header.Set("Authorization", "Bearer "+creds.APIKey)
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	result, err := executeHTTP(req, body, AnyMapToMapped(contact))
 	if err != nil {
-		return nil, err
+		return result, fmt.Errorf("ghl returned %d", result.HTTPStatus)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("ghl returned %d", resp.StatusCode)
-	}
-	var result struct {
+	var ghlResult struct {
 		Contact struct {
 			ID string `json:"id"`
 		} `json:"contact"`
 	}
-	raw, _ := json.Marshal(result)
-	_ = json.NewDecoder(resp.Body).Decode(&result)
+	_ = json.Unmarshal(result.Raw, &ghlResult)
 	pipelineID, hasPipeline := payload.Config["pipeline_id"].(string)
 	stageID, hasStage := payload.Config["stage_id"].(string)
-	if hasPipeline && hasStage && result.Contact.ID != "" {
-		_ = createGHLOpportunity(ctx, creds.APIKey, locationID, result.Contact.ID, pipelineID, stageID, payload)
+	if hasPipeline && hasStage && ghlResult.Contact.ID != "" {
+		_ = createGHLOpportunity(ctx, creds.APIKey, locationID, ghlResult.Contact.ID, pipelineID, stageID, payload)
 	}
-	return &DeliveryResult{ExternalID: result.Contact.ID, Raw: raw}, nil
+	result.ExternalID = ghlResult.Contact.ID
+	return result, nil
 }
 
 func createGHLOpportunity(ctx context.Context, apiKey, locationID, contactID, pipelineID, stageID string, payload DeliveryPayload) error {
 	opp := map[string]any{
-		"pipelineId":        pipelineID,
+		"pipelineId":      pipelineID,
 		"locationId":        locationID,
 		"name":              payload.FirstName + " " + payload.LastName,
 		"pipelineStageId":   stageID,

@@ -155,6 +155,9 @@ export interface Lead {
   external_id: string | null;
   pipeline_id: number | null;
   stage_id: number | null;
+  publisher_pipeline_id?: number | null;
+  publisher_stage_id?: number | null;
+  board_stage_id?: number | null;
   position: number;
   assigned_user_id: number | null;
   action_at: string | null;
@@ -367,8 +370,15 @@ export interface ContractCompensation {
 export interface ReturnRule {
   id: number;
   contract_id: number;
+  participation_id?: number;
   buyer_stage_id: number;
   return_stage_id: number;
+  buyer_stage_name?: string;
+}
+
+export interface ParticipationReturnRule extends ReturnRule {
+  buyer_name: string;
+  buyer_stage_name: string;
 }
 
 export type SourceType = "webhook";
@@ -628,11 +638,23 @@ export interface InboundLogListResponse {
   limit: number;
 }
 
+export interface HTTPRequestLog {
+  method: string;
+  url: string;
+  headers?: Record<string, string>;
+  body?: unknown;
+}
+
+export interface DeliveryRequestLog {
+  mapped: Record<string, string>;
+  http: HTTPRequestLog;
+}
+
 export interface IntegrationDeliveryAttemptLog {
   attempt_number: number;
   status: string;
   http_status?: number | null;
-  request_body?: Record<string, unknown> | null;
+  request_body?: DeliveryRequestLog | Record<string, unknown> | null;
   response_body?: string;
   duration_ms?: number | null;
   error?: string | null;

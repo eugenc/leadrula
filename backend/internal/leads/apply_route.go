@@ -189,6 +189,9 @@ func applyContractRoute(ctx context.Context, q database.Querier, deps RouteApply
 	if err := deps.Repo.PlaceInPipeline(ctx, q, leadID, target.BuyerID, target.BuyerPipelineID, destStage, &contractID); err != nil {
 		return nil, err
 	}
+	if err := contracts.InitPublisherTracking(ctx, q, contractID, leadID, target.BuyerID, destStage); err != nil {
+		return nil, err
+	}
 	if err := contracts.CheckCap(ctx, q, target.ID, target.CompensationID); err != nil {
 		return nil, err
 	}

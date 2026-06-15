@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 )
 
 type ZohoCRMProvider struct{}
@@ -49,30 +48,22 @@ func (p *ZohoCRMProvider) Deliver(ctx context.Context, credentials []byte, paylo
 	}
 	req.Header.Set("Authorization", "Zoho-oauthtoken "+token)
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	result, err := executeHTTP(req, body, AnyMapToMapped(record))
 	if err != nil {
-		return nil, err
+		return result, fmt.Errorf("zoho returned %d", result.HTTPStatus)
 	}
-	defer resp.Body.Close()
-	var result struct {
+	var zoho struct {
 		Data []struct {
 			Details struct {
 				ID string `json:"id"`
 			} `json:"details"`
-			Status string `json:"status"`
 		} `json:"data"`
 	}
-	raw, _ := json.Marshal(&result)
-	_ = json.NewDecoder(resp.Body).Decode(&result)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("zoho returned %d", resp.StatusCode)
+	_ = json.Unmarshal(result.Raw, &zoho)
+	if len(zoho.Data) > 0 {
+		result.ExternalID = zoho.Data[0].Details.ID
 	}
-	extID := ""
-	if len(result.Data) > 0 {
-		extID = result.Data[0].Details.ID
-	}
-	return &DeliveryResult{ExternalID: extID, Raw: raw}, nil
+	return result, nil
 }
 
 func (p *ZohoCRMProvider) ValidateCredentials(ctx context.Context, credentials []byte, config map[string]any) error {

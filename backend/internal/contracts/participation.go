@@ -553,6 +553,9 @@ func (s *Service) AcceptParticipation(ctx context.Context, buyerID, participatio
 		if err := applyBuyerStageTriggersToWon(ctx, s.pool, part.ContractID, participationID, validated.buyerPipelineID); err != nil {
 			return nil, err
 		}
+		if err := RebuildParticipationStageMaps(ctx, s.pool, part.ContractID, participationID); err != nil {
+			return nil, err
+		}
 	}
 	updated, err := scanParticipation(s.pool.QueryRow(ctx,
 		`UPDATE contract_participations SET
@@ -601,6 +604,9 @@ func (s *Service) UpdateParticipationDelivery(ctx context.Context, buyerID, part
 	}
 	if validated.delivery == "leads_pipeline" {
 		if err := applyBuyerStageTriggersToWon(ctx, s.pool, part.ContractID, participationID, validated.buyerPipelineID); err != nil {
+			return nil, err
+		}
+		if err := RebuildParticipationStageMaps(ctx, s.pool, part.ContractID, participationID); err != nil {
 			return nil, err
 		}
 	}

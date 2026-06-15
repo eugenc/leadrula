@@ -20,7 +20,7 @@ type Props = {
 };
 
 const BUYER_DESCRIPTION =
-  "Pick which stages on your pipeline send leads back to the publisher. Return destination is set by the publisher on the offer.";
+  "Pick which stages on your pipeline send leads back to the publisher.";
 
 const PUBLISHER_DESCRIPTION =
   "When a lead enters the return start stage on the buyer pipeline, it moves to the publisher return destination stage.";
@@ -232,6 +232,19 @@ function RuleRow({
 
   return (
     <div className="flex flex-wrap items-end gap-2 rounded-md border border-gray-100 px-3 py-2">
+      <div className="min-w-[120px] flex-1">
+        <div className="mb-1 text-xs font-semibold text-gray-500">Return start</div>
+        <Select
+          value={rule.buyer_stage_id}
+          onChange={(e) => onUpdate(rule.id, Number(e.target.value), rule.return_stage_id)}
+        >
+          {fromOptions.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </Select>
+      </div>
       <div className="min-w-[120px] flex-1">
         <div className="mb-1 text-xs font-semibold text-gray-500">Return destination</div>
         <Select

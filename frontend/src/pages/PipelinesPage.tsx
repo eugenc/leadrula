@@ -1,4 +1,10 @@
 import { useEffect, useState } from "react";
+import {
+  DragDropContext,
+  Droppable,
+  Draggable,
+  type DropResult,
+} from "@hello-pangea/dnd";
 import { usePipelines, useStages } from "@/features/leads/hooks";
 import {
   useCreatePipeline,
@@ -7,6 +13,7 @@ import {
   useCreateStage,
   useUpdateStage,
   useDeleteStage,
+  useReorderStages,
 } from "@/features/admin/hooks";
 import { StageSettingsDrawer } from "@/features/pipelines/StageSettingsDrawer";
 import { stageColorDot } from "@/features/pipelines/stageColors";
@@ -18,7 +25,7 @@ import { Input, Select } from "@/components/ui/input";
 import { STAGE_TYPES } from "@/features/pipelines/stageTypes";
 import { Card, Spinner, EmptyState } from "@/components/ui/misc";
 import { cn } from "@/lib/utils";
-import { Plus, Settings2, Trash2 } from "lucide-react";
+import { Plus, Settings2, Trash2, GripVertical } from "lucide-react";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import type { Stage, StageType } from "@/types";
@@ -121,76 +128,113 @@ function StagesEditor({ pipelineId }: { pipelineId: number }) {
   const createStage = useCreateStage();
   const updateStage = useUpdateStage();
   const deleteStage = useDeleteStage();
+  const reorderStages = useReorderStages();
   const [name, setName] = useState("");
   const [newStageType, setNewStageType] = useState<StageType>("standard");
   const [settingsStage, setSettingsStage] = useState<Stage | null>(null);
 
   const sorted = [...(stages ?? [])].sort((a, b) => a.position - b.position);
 
+  function onDragEnd(result: DropResult) {
+    if (!result.destination || result.destination.index === result.source.index) return;
+    const next = [...sorted];
+    const [moved] = next.splice(result.source.index, 1);
+    next.splice(result.destination.index, 0, moved!);
+    reorderStages.mutate(
+      { pipelineId, orderedStageIds: next.map((s) => s.id) },
+      { onError: (err) => toast.error(errorMessage(err)) }
+    );
+  }
+
   return (
     <>
       <Card className="p-4">
-        <div className="mb-3 grid grid-cols-[auto_1fr_9rem_auto_auto] items-center gap-3">
+        <div className="mb-3 grid grid-cols-[auto_auto_1fr_9rem_auto_auto] items-center gap-3">
+          <span />
           <SectionLabel className="col-span-1"> </SectionLabel>
           <SectionLabel>Stage</SectionLabel>
           <SectionLabel>Type</SectionLabel>
           <SectionLabel>Settings</SectionLabel>
           <span />
         </div>
-        <div className="space-y-2">
-          {sorted.map((s) => (
-            <div
-              key={s.id}
-              className="grid grid-cols-[auto_1fr_9rem_auto_auto] items-center gap-3 rounded-md hover:bg-gray-100"
-            >
-              <span className={cn("ml-1 h-3 w-3 shrink-0 rounded-full", stageColorDot(s.color))} />
-              <Input
-                defaultValue={s.name}
-                className="h-8 text-sm"
-                onBlur={(e) =>
-                  e.target.value !== s.name &&
-                  updateStage.mutate({ id: s.id, body: { name: e.target.value } })
-                }
-              />
-              <Select
-                value={s.stage_type}
-                className="h-8 text-sm"
-                onChange={(e) => {
-                  const stage_type = e.target.value as StageType;
-                  if (stage_type !== s.stage_type) {
-                    updateStage.mutate(
-                      { id: s.id, body: { stage_type } },
-                      { onError: (err) => toast.error(errorMessage(err)) }
-                    );
-                  }
-                }}
-              >
-                {STAGE_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
+        <DragDropContext onDragEnd={onDragEnd}>
+          <Droppable droppableId="pipeline-stages">
+            {(provided) => (
+              <div ref={provided.innerRef} {...provided.droppableProps} className="space-y-2">
+                {sorted.map((s, index) => (
+                  <Draggable key={s.id} draggableId={String(s.id)} index={index}>
+                    {(drag, snapshot) => (
+                      <div
+                        ref={drag.innerRef}
+                        {...drag.draggableProps}
+                        className={cn(
+                          "grid grid-cols-[auto_auto_1fr_9rem_auto_auto] items-center gap-3 rounded-md",
+                          snapshot.isDragging ? "bg-jade-50 shadow-sm" : "hover:bg-gray-100"
+                        )}
+                      >
+                        <span
+                          {...drag.dragHandleProps}
+                          className="cursor-grab px-1 text-gray-400 hover:text-gray-600"
+                        >
+                          <GripVertical className="h-4 w-4" />
+                        </span>
+                        <span
+                          className={cn("ml-1 h-3 w-3 shrink-0 rounded-full", stageColorDot(s.color))}
+                        />
+                        <Input
+                          defaultValue={s.name}
+                          className="h-8 text-sm"
+                          onBlur={(e) =>
+                            e.target.value !== s.name &&
+                            updateStage.mutate({ id: s.id, body: { name: e.target.value } })
+                          }
+                        />
+                        <Select
+                          value={s.stage_type}
+                          className="h-8 text-sm"
+                          onChange={(e) => {
+                            const stage_type = e.target.value as StageType;
+                            if (stage_type !== s.stage_type) {
+                              updateStage.mutate(
+                                { id: s.id, body: { stage_type } },
+                                { onError: (err) => toast.error(errorMessage(err)) }
+                              );
+                            }
+                          }}
+                        >
+                          {STAGE_TYPES.map((t) => (
+                            <option key={t.value} value={t.value}>
+                              {t.label}
+                            </option>
+                          ))}
+                        </Select>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setSettingsStage(s)}
+                          aria-label={`Settings for ${s.name}`}
+                        >
+                          <Settings2 className="h-3.5 w-3.5" />
+                        </Button>
+                        <IconButton
+                          variant="danger"
+                          onClick={() =>
+                            deleteStage.mutate(s.id, { onError: (e) => toast.error(errorMessage(e)) })
+                          }
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </IconButton>
+                      </div>
+                    )}
+                  </Draggable>
                 ))}
-              </Select>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setSettingsStage(s)}
-                aria-label={`Settings for ${s.name}`}
-              >
-                <Settings2 className="h-3.5 w-3.5" />
-              </Button>
-              <IconButton
-                variant="danger"
-                onClick={() =>
-                  deleteStage.mutate(s.id, { onError: (e) => toast.error(errorMessage(e)) })
-                }
-              >
-                <Trash2 className="h-4 w-4" />
-              </IconButton>
-            </div>
-          ))}
-        </div>
-        <div className="mt-4 grid grid-cols-[auto_1fr_9rem_auto_auto] items-center gap-3">
+                {provided.placeholder}
+              </div>
+            )}
+          </Droppable>
+        </DragDropContext>
+        <div className="mt-4 grid grid-cols-[auto_auto_1fr_9rem_auto_auto] items-center gap-3">
+          <span />
           <span />
           <Input
             value={name}

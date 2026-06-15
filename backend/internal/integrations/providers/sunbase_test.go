@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,12 +16,22 @@ func TestDoSunbaseRequest_unableToFindSiteOn200(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	_, err := doSunbaseRequest(context.Background(), http.MethodPost, srv.URL)
+	res, err := doSunbaseRequest(context.Background(), http.MethodPost, srv.URL, map[string]string{"schema_name": "sunbrightsolarusa"})
 	if err == nil {
 		t.Fatal("expected error for unable to find site response")
 	}
 	if !strings.Contains(strings.ToLower(err.Error()), "unable to find site") {
 		t.Fatalf("error = %q, want unable to find site", err.Error())
+	}
+	if res == nil || len(res.Request) == 0 {
+		t.Fatal("expected request log on error")
+	}
+	var reqLog DeliveryRequestLog
+	if json.Unmarshal(res.Request, &reqLog) != nil || reqLog.Mapped["schema_name"] != "sunbrightsolarusa" {
+		t.Fatalf("request log mapped = %v", reqLog.Mapped)
+	}
+	if res.HTTPStatus != http.StatusOK {
+		t.Fatalf("http status = %d", res.HTTPStatus)
 	}
 }
 
@@ -31,12 +42,15 @@ func TestDoSunbaseRequest_successWithUUID(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	res, err := doSunbaseRequest(context.Background(), http.MethodPost, srv.URL)
+	res, err := doSunbaseRequest(context.Background(), http.MethodPost, srv.URL, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if res.ExternalID != "cust-4f70f8df-7639-442c-be5c-d44efa235210" {
 		t.Fatalf("external_id = %q", res.ExternalID)
+	}
+	if len(res.Request) == 0 {
+		t.Fatal("expected request log")
 	}
 }
 
@@ -48,7 +62,7 @@ func TestDoSunbaseRequest_successWithPlainTextID(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	res, err := doSunbaseRequest(context.Background(), http.MethodPost, srv.URL)
+	res, err := doSunbaseRequest(context.Background(), http.MethodPost, srv.URL, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -91,5 +105,27 @@ func TestParseSunbaseExternalID(t *testing.T) {
 				t.Fatalf("parseSunbaseExternalID() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestBuildDeliveryRequestLog_queryParams(t *testing.T) {
+	req, err := http.NewRequest(http.MethodPost, "https://example.com/post?first_name=Eugene&dob=1988%2F22%2F12", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapped := map[string]string{"first_name": "Eugene", "dob": "1988/22/12"}
+	raw := BuildDeliveryRequestLog(mapped, req, nil)
+	var log DeliveryRequestLog
+	if err := json.Unmarshal(raw, &log); err != nil {
+		t.Fatal(err)
+	}
+	if log.Mapped["dob"] != "1988/22/12" {
+		t.Fatalf("mapped dob = %q", log.Mapped["dob"])
+	}
+	if log.HTTP.Method != http.MethodPost {
+		t.Fatalf("method = %q", log.HTTP.Method)
+	}
+	if !strings.Contains(log.HTTP.URL, "first_name=Eugene") {
+		t.Fatalf("url = %q", log.HTTP.URL)
 	}
 }

@@ -53,7 +53,7 @@ func (s *Service) GetIntegrationDelivery(ctx context.Context, accountID, deliver
 		 JOIN integration_connections c ON c.id = q.connection_id
 		 JOIN integration_providers p ON p.id = c.provider_id
 		 LEFT JOIN leads l ON l.id = q.lead_id
-		 WHERE q.id = $1 AND c.account_id = $2 AND q.webhook_trigger_id IS NULL`,
+		 WHERE q.id = $1 AND c.account_id = $2`,
 		deliveryID, accountID,
 	).Scan(
 		&detail.ID, &detail.Status, &detail.ConnectionName, &detail.ProviderSlug,
@@ -116,7 +116,7 @@ func (s *Service) RetryIntegrationDelivery(ctx context.Context, accountID, deliv
 		`UPDATE integration_delivery_queue q
 		 SET status = 'pending', attempts = 0, next_attempt_at = now(), last_error = NULL, updated_at = now()
 		 FROM integration_connections c
-		 WHERE q.id = $1 AND q.connection_id = c.id AND c.account_id = $2 AND q.webhook_trigger_id IS NULL
+		 WHERE q.id = $1 AND q.connection_id = c.id AND c.account_id = $2
 		 RETURNING q.id`,
 		deliveryID, accountID,
 	).Scan(&id)

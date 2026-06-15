@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 )
 
 type SalesforceProvider struct{}
@@ -40,15 +39,15 @@ func (p *SalesforceProvider) Deliver(ctx context.Context, credentials []byte, pa
 		lastName = "Lead"
 	}
 	lead := map[string]any{
-		"FirstName": payload.FirstName,
-		"LastName":  lastName,
-		"Phone":     payload.Phone,
-		"Email":     payload.Email,
-		"Street":    payload.Address,
-		"City":      payload.City,
-		"State":     payload.State,
+		"FirstName":  payload.FirstName,
+		"LastName":   lastName,
+		"Phone":      payload.Phone,
+		"Email":      payload.Email,
+		"Street":     payload.Address,
+		"City":       payload.City,
+		"State":      payload.State,
 		"PostalCode": payload.Zip,
-		"Company":   payload.Source,
+		"Company":    payload.Source,
 	}
 	if rt, ok := payload.Config["record_type_id"].(string); ok && rt != "" {
 		lead["RecordTypeId"] = rt
@@ -61,22 +60,20 @@ func (p *SalesforceProvider) Deliver(ctx context.Context, credentials []byte, pa
 	}
 	req.Header.Set("Authorization", "Bearer "+creds.AccessToken)
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	result, err := executeHTTP(req, body, AnyMapToMapped(lead))
 	if err != nil {
-		return nil, err
+		return result, fmt.Errorf("salesforce returned %d", result.HTTPStatus)
 	}
-	defer resp.Body.Close()
-	var result struct {
+	var sf struct {
 		ID      string `json:"id"`
 		Success bool   `json:"success"`
 	}
-	raw, _ := json.Marshal(&result)
-	_ = json.NewDecoder(resp.Body).Decode(&result)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 || !result.Success {
-		return nil, fmt.Errorf("salesforce returned %d", resp.StatusCode)
+	_ = json.Unmarshal(result.Raw, &sf)
+	if !sf.Success {
+		return result, fmt.Errorf("salesforce returned %d", result.HTTPStatus)
 	}
-	return &DeliveryResult{ExternalID: result.ID, Raw: raw}, nil
+	result.ExternalID = sf.ID
+	return result, nil
 }
 
 func (p *SalesforceProvider) ValidateCredentials(ctx context.Context, credentials []byte, config map[string]any) error {

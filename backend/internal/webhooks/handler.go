@@ -150,6 +150,19 @@ func (h *Handler) guardUserEditable(w http.ResponseWriter, r *http.Request, acco
 	return true
 }
 
+func (h *Handler) guardOwnedWebhook(w http.ResponseWriter, r *http.Request, accountID, webhookID int64) bool {
+	ok, err := h.svc.OwnedBy(r.Context(), accountID, webhookID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return false
+	}
+	if !ok {
+		httpx.Err(w, http.StatusNotFound, httpx.CodeNotFound, "webhook not found")
+		return false
+	}
+	return true
+}
+
 func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	wid := idp(r, "id")
@@ -244,7 +257,7 @@ func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	wid := idp(r, "id")
-	if !h.guardUserEditable(w, r, p.AccountID, wid) {
+	if !h.guardOwnedWebhook(w, r, p.AccountID, wid) {
 		return
 	}
 	var body CreateEventParams
@@ -262,7 +275,7 @@ func (h *Handler) createEvent(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) updateEvent(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	wid := idp(r, "id")
-	if !h.guardUserEditable(w, r, p.AccountID, wid) {
+	if !h.guardOwnedWebhook(w, r, p.AccountID, wid) {
 		return
 	}
 	var body UpdateEventParams
@@ -280,7 +293,7 @@ func (h *Handler) updateEvent(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteEvent(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	wid := idp(r, "id")
-	if !h.guardUserEditable(w, r, p.AccountID, wid) {
+	if !h.guardOwnedWebhook(w, r, p.AccountID, wid) {
 		return
 	}
 	if err := h.svc.DeleteEvent(r.Context(), wid, idp(r, "eventId")); err != nil {
@@ -311,7 +324,7 @@ func (h *Handler) listFieldMap(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) addFieldMap(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	wid := idp(r, "id")
-	if !h.guardUserEditable(w, r, p.AccountID, wid) {
+	if !h.guardOwnedWebhook(w, r, p.AccountID, wid) {
 		return
 	}
 	var body struct {

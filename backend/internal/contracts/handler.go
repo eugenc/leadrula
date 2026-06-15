@@ -19,6 +19,7 @@ func (h *Handler) RegisterPublisher(r chi.Router) {
 	r.Get("/contracts", h.list)
 	r.Get("/contracts/{id}", h.get)
 	r.Get("/contracts/{id}/return-rules", h.listRules)
+	r.Get("/contracts/{id}/participation-return-routes", h.listParticipationReturnRoutes)
 	r.Get("/contracts/{id}/compensations", h.listCompensations)
 	r.Get("/contracts/{id}/lead-criteria", h.getLeadCriteria)
 	r.Get("/contracts/{id}/participations", h.listParticipations)
@@ -43,6 +44,8 @@ func (h *Handler) RegisterPublisher(r chi.Router) {
 		r.Post("/participations/{id}/reject-counter", h.rejectCounter)
 		r.Post("/participations/{id}/reinvite", h.reinviteParticipation)
 		r.Patch("/return-rules/{ruleId}", h.updateRule)
+		r.Patch("/participation-return-routes/{ruleId}", h.updateParticipationReturnRouteDestination)
+		r.Patch("/contract-return-routes/{ruleId}", h.updateContractReturnRouteDestination)
 		r.Delete("/return-rules/{ruleId}", h.deleteRule)
 	})
 }
@@ -570,16 +573,62 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listRules(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	if _, err := h.svc.Get(r.Context(), p.AccountID, idp(r, "id")); err != nil {
-		httpx.WriteError(w, err)
-		return
-	}
-	rules, err := h.svc.ListReturnRules(r.Context(), idp(r, "id"))
+	rules, err := h.svc.ListReturnRulesForPublisher(r.Context(), p.AccountID, idp(r, "id"))
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, rules)
+}
+
+func (h *Handler) listParticipationReturnRoutes(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	rules, err := h.svc.ListContractParticipationReturnRules(r.Context(), p.AccountID, idp(r, "id"))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, rules)
+}
+
+func (h *Handler) updateParticipationReturnRouteDestination(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		ReturnStageID int64 `json:"return_stage_id"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	if body.ReturnStageID == 0 {
+		httpx.WriteError(w, httpx.Validation("return_stage_id is required"))
+		return
+	}
+	rr, err := h.svc.UpdateParticipationReturnRuleDestination(r.Context(), p.AccountID, idp(r, "ruleId"), body.ReturnStageID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, rr)
+}
+
+func (h *Handler) updateContractReturnRouteDestination(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		ReturnStageID int64 `json:"return_stage_id"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	if body.ReturnStageID == 0 {
+		httpx.WriteError(w, httpx.Validation("return_stage_id is required"))
+		return
+	}
+	rr, err := h.svc.UpdateContractReturnRuleDestination(r.Context(), p.AccountID, idp(r, "ruleId"), body.ReturnStageID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, rr)
 }
 
 func (h *Handler) addRule(w http.ResponseWriter, r *http.Request) {

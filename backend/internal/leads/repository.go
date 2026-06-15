@@ -35,8 +35,11 @@ var builtinFields = map[string]bool{
 const leadCols = `id, public_id, owner_account_id, publisher_id, contract_id,
 	first_name, last_name, phone, email, address, city, state, zip, source, external_id,
 	cost, revenue,
-	pipeline_id, stage_id, position, assigned_user_id, action_at, status,
+	pipeline_id, stage_id, publisher_pipeline_id, publisher_stage_id, position, assigned_user_id, action_at, status,
 	disqualification_reason_id, created_at, updated_at, tags`
+
+const boardStageExpr = `CASE WHEN l.publisher_stage_id IS NOT NULL AND l.owner_account_id <> l.publisher_id
+	THEN l.publisher_stage_id ELSE l.stage_id END`
 
 const leadNotDeleted = `deleted_at IS NULL`
 
@@ -45,7 +48,7 @@ func scanLead(row pgx.Row) (*Lead, error) {
 	err := row.Scan(&l.ID, &l.PublicID, &l.OwnerAccountID, &l.PublisherID, &l.ContractID,
 		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.Source, &l.ExternalID,
 		&l.Cost, &l.Revenue,
-		&l.PipelineID, &l.StageID, &l.Position, &l.AssignedUserID, &l.ActionAt, &l.Status,
+		&l.PipelineID, &l.StageID, &l.PublisherPipelineID, &l.PublisherStageID, &l.Position, &l.AssignedUserID, &l.ActionAt, &l.Status,
 		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt, &l.Tags)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -147,8 +150,15 @@ func (r *Repository) GetByRef(ctx context.Context, p *auth.Principal, ref string
 	var l *Lead
 	var err error
 	if leadID, parseErr := strconv.ParseInt(ref, 10, 64); parseErr == nil && leadID > 0 {
-		l, err = scanLead(r.pool.QueryRow(ctx,
-			`SELECT `+leadCols+` FROM leads WHERE id=$1 AND owner_account_id=$2 AND `+leadNotDeleted, leadID, p.AccountID))
+		if p.AccountType == "publisher" {
+			l, err = scanLead(r.pool.QueryRow(ctx,
+				`SELECT `+leadCols+` FROM leads WHERE id=$1 AND `+leadNotDeleted+`
+				 AND (owner_account_id=$2 OR (publisher_id=$2 AND publisher_pipeline_id IS NOT NULL AND status IN ('distributed', 'closed')))`,
+				leadID, p.AccountID))
+		} else {
+			l, err = scanLead(r.pool.QueryRow(ctx,
+				`SELECT `+leadCols+` FROM leads WHERE id=$1 AND owner_account_id=$2 AND `+leadNotDeleted, leadID, p.AccountID))
+		}
 	} else {
 		l, err = r.GetByPublicID(ctx, r.pool, p.AccountID, ref)
 	}
@@ -280,6 +290,7 @@ var listSortCols = map[string]string{
 	"stage_name":       "st.name",
 	"stage_entered_at": "stage_entered_at",
 	"position":         "l.position",
+	"board_stage_id":   boardStageExpr,
 }
 
 const listFrom = ` FROM leads l
@@ -292,7 +303,7 @@ const listFrom = ` FROM leads l
 const listSelect = `l.id, l.public_id, l.owner_account_id, l.publisher_id, l.contract_id,
 	l.first_name, l.last_name, l.phone, l.email, l.address, l.city, l.state, l.zip, l.source, l.external_id,
 	l.cost, l.revenue,
-	l.pipeline_id, l.stage_id, l.position, l.assigned_user_id, l.action_at, l.status,
+	l.pipeline_id, l.stage_id, l.publisher_pipeline_id, l.publisher_stage_id, l.position, l.assigned_user_id, l.action_at, l.status,
 	l.disqualification_reason_id, l.created_at, l.updated_at, l.tags,
 	CASE WHEN ba.type = 'buyer' THEN ba.name ELSE NULL END AS buyer_name,
 	rs.name AS source_name,
@@ -300,6 +311,7 @@ const listSelect = `l.id, l.public_id, l.owner_account_id, l.publisher_id, l.con
 	u.prefs->>'avatar_url' AS assignee_avatar_url,
 	pl.name AS pipeline_name,
 	st.name AS stage_name,
+	` + boardStageExpr + ` AS board_stage_id,
 	COALESCE(
 		(SELECT h.created_at FROM lead_stage_history h
 		 WHERE h.lead_id = l.id AND h.to_stage_id = l.stage_id
@@ -312,9 +324,9 @@ func scanListLead(row pgx.Row) (*Lead, error) {
 	err := row.Scan(&l.ID, &l.PublicID, &l.OwnerAccountID, &l.PublisherID, &l.ContractID,
 		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.Source, &l.ExternalID,
 		&l.Cost, &l.Revenue,
-		&l.PipelineID, &l.StageID, &l.Position, &l.AssignedUserID, &l.ActionAt, &l.Status,
+		&l.PipelineID, &l.StageID, &l.PublisherPipelineID, &l.PublisherStageID, &l.Position, &l.AssignedUserID, &l.ActionAt, &l.Status,
 		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt, &l.Tags, &l.BuyerName, &l.SourceName, &l.AssigneeName, &l.AssigneeAvatarURL,
-		&l.PipelineName, &l.StageName, &l.StageEnteredAt)
+		&l.PipelineName, &l.StageName, &l.BoardStageID, &l.StageEnteredAt)
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +338,15 @@ func scanListLead(row pgx.Row) (*Lead, error) {
 
 func (r *Repository) listWhere(p *auth.Principal, f ListFilters) (string, []any) {
 	args := []any{p.AccountID}
+	if p.AccountType == "publisher" {
+		where := `(l.owner_account_id = $1 OR (l.publisher_id = $1 AND l.publisher_pipeline_id IS NOT NULL AND l.status IN ('distributed', 'closed'))) AND l.deleted_at IS NULL`
+		return r.appendListFilters(p, f, where, args)
+	}
 	where := "l.owner_account_id = $1 AND l.deleted_at IS NULL"
+	return r.appendListFilters(p, f, where, args)
+}
+
+func (r *Repository) appendListFilters(p *auth.Principal, f ListFilters, where string, args []any) (string, []any) {
 	add := func(cond string, val any) {
 		args = append(args, val)
 		where += fmt.Sprintf(" AND %s $%d", cond, len(args))
@@ -369,10 +389,28 @@ func (r *Repository) listWhere(p *auth.Principal, f ListFilters) (string, []any)
 			add("l.source =", f.Source)
 		}
 		if f.PipelineID != 0 {
-			add("l.pipeline_id =", f.PipelineID)
+			if p.AccountType == "publisher" {
+				args = append(args, f.PipelineID)
+				n := len(args)
+				where += fmt.Sprintf(` AND (
+					(l.owner_account_id = $1 AND l.pipeline_id = $%d)
+					OR (l.publisher_id = $1 AND l.publisher_pipeline_id = $%d AND l.status IN ('distributed', 'closed'))
+				)`, n, n)
+			} else {
+				add("l.pipeline_id =", f.PipelineID)
+			}
 		}
 		if f.StageID != 0 {
-			add("l.stage_id =", f.StageID)
+			if p.AccountType == "publisher" {
+				args = append(args, f.StageID)
+				n := len(args)
+				where += fmt.Sprintf(` AND (
+					(l.owner_account_id = $1 AND l.stage_id = $%d)
+					OR (l.publisher_id = $1 AND l.publisher_stage_id = $%d AND l.status IN ('distributed', 'closed'))
+				)`, n, n)
+			} else {
+				add("l.stage_id =", f.StageID)
+			}
 		}
 		if f.Assigned != 0 {
 			add("l.assigned_user_id =", f.Assigned)
@@ -729,6 +767,7 @@ func (r *Repository) ClearFromPipeline(ctx context.Context, q database.Querier, 
 func (r *Repository) MoveToPublisher(ctx context.Context, q database.Querier, leadID, publisherID, pipelineID, stageID int64) error {
 	_, err := q.Exec(ctx,
 		`UPDATE leads SET owner_account_id=$2, pipeline_id=$3, stage_id=$4, contract_id=NULL, status='returned',
+		   publisher_pipeline_id=NULL, publisher_stage_id=NULL,
 		   position=COALESCE((SELECT MAX(position)+1 FROM leads WHERE stage_id=$4),0)
 		 WHERE id=$1`, leadID, publisherID, pipelineID, stageID)
 	return err

@@ -632,11 +632,6 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
     );
   }
 
-  const deliveryBlockedByReturnRoutes =
-    !isOpenOffer &&
-    deliveryDraft.delivery === "leads_pipeline" &&
-    (returnRulesCount ?? 0) === 0;
-
   const primaryRate =
     compensations?.find((c) => c.kind === "flat_rate")?.flat_amount ?? contract.rate_per_lead;
 
@@ -779,7 +774,6 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
                   disabled={
                     deliveryUnchanged ||
                     !deliveryDraftValid(deliveryDraft) ||
-                    deliveryBlockedByReturnRoutes ||
                     saveDelivery.isPending
                   }
                   onClick={() =>
@@ -794,11 +788,6 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
                 >
                   Save delivery
                 </Button>
-                {deliveryBlockedByReturnRoutes && (
-                  <p className="mt-2 text-xs text-amber-700">
-                    Add at least one return route on the Return routes tab before saving pipeline delivery.
-                  </p>
-                )}
               </>
             ),
             ...(isOpenOffer

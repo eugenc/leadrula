@@ -60,10 +60,8 @@ export function leadCriteriaSectionComplete(criteria: ContractLeadCriteria): boo
   return hasName && hasPhoneOrEmail;
 }
 
-export function returnRulesRequired(delivery: ContractDeliveryDraft, openOffer: boolean): boolean {
-  if (openOffer) return false;
-  if (delivery.delivery !== "leads_pipeline") return false;
-  return !!delivery.counterparty_pipeline_id;
+export function returnRulesRequired(_delivery: ContractDeliveryDraft, _openOffer: boolean): boolean {
+  return false;
 }
 
 export function returnRulesSectionComplete(

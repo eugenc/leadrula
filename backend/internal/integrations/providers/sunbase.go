@@ -41,11 +41,12 @@ func (p *SunbaseProvider) Deliver(ctx context.Context, credentials []byte, paylo
 	}
 	fieldMap := outboundFieldMapFromConfig(payload.Config)
 	params := buildSunbaseParams(schemaName, fieldMap, payload)
+	mapped := URLValuesToMapped(params)
 	fullURL, err := sunbaseAppendQueryParams(endpointURL, params)
 	if err != nil {
 		return nil, err
 	}
-	return doSunbaseRequest(ctx, http.MethodPost, fullURL)
+	return doSunbaseRequest(ctx, http.MethodPost, fullURL, mapped)
 }
 
 func (p *SunbaseProvider) ValidateCredentials(ctx context.Context, credentials []byte, config map[string]any) error {
@@ -62,11 +63,12 @@ func (p *SunbaseProvider) TestConnection(ctx context.Context, credentials []byte
 	params.Set("schema_name", schemaName)
 	params.Set("last_name", "ConnectionTest")
 	params.Set("first_name", "Leadrula")
+	mapped := URLValuesToMapped(params)
 	fullURL, err := sunbaseAppendQueryParams(endpointURL, params)
 	if err != nil {
 		return err
 	}
-	_, err = doSunbaseRequest(ctx, http.MethodPost, fullURL)
+	_, err = doSunbaseRequest(ctx, http.MethodPost, fullURL, mapped)
 	return err
 }
 
@@ -226,34 +228,37 @@ func sunbaseAppendQueryParams(baseURL string, params url.Values) (string, error)
 	return u.String(), nil
 }
 
-func doSunbaseRequest(ctx context.Context, method, fullURL string) (*DeliveryResult, error) {
+func doSunbaseRequest(ctx context.Context, method, fullURL string, mapped map[string]string) (*DeliveryResult, error) {
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, nil)
 	if err != nil {
 		return nil, err
 	}
+	reqLog := BuildDeliveryRequestLog(mapped, req, nil)
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return &DeliveryResult{Request: reqLog, HTTPStatus: 0}, err
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	raw := body
 	text := string(body)
+	result := &DeliveryResult{Raw: raw, Request: reqLog, HTTPStatus: resp.StatusCode}
 	if sunbaseSchemaErr.MatchString(text) && strings.Contains(strings.ToLower(text), "not specified") {
-		return nil, fmt.Errorf("invalid schema_name")
+		return result, fmt.Errorf("invalid schema_name")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("sunbase returned %d: %s", resp.StatusCode, sunbaseBodySnippet(text))
+		return result, fmt.Errorf("sunbase returned %d: %s", resp.StatusCode, sunbaseBodySnippet(text))
 	}
 	if errMsg := sunbaseErrorFromBody(text); errMsg != "" {
-		return nil, fmt.Errorf("sunbase: %s", errMsg)
+		return result, fmt.Errorf("sunbase: %s", errMsg)
 	}
 	extID := parseSunbaseExternalID(body)
 	if extID == "" && sunbaseBodyLooksLikeError(text) {
-		return nil, fmt.Errorf("sunbase: %s", sunbaseBodySnippet(text))
+		return result, fmt.Errorf("sunbase: %s", sunbaseBodySnippet(text))
 	}
-	return &DeliveryResult{Raw: raw, ExternalID: extID}, nil
+	result.ExternalID = extID
+	return result, nil
 }
 
 func sunbaseBodySnippet(text string) string {

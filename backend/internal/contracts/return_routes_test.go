@@ -255,3 +255,128 @@ func TestActivateOfferDraft_allowsMissingContractReturnRoutes(t *testing.T) {
 
 	_, _ = pool.Exec(ctx, `UPDATE contracts SET status = 'draft' WHERE id = $1`, contractID)
 }
+
+func TestListContractParticipationReturnRules_andUpdateDestination(t *testing.T) {
+	pool := connectContractsTestDB(t)
+	ctx := context.Background()
+	svc := NewService(pool)
+
+	var publisherID, contractID, participationID, buyerStageID, defaultReturnStageID, altReturnStageID int64
+	err := pool.QueryRow(ctx,
+		`SELECT c.publisher_id, c.id, rr.participation_id, rr.buyer_stage_id, rr.return_stage_id,
+		        (SELECT ps2.id FROM pipeline_stages ps2
+		         WHERE ps2.pipeline_id = c.source_pipeline_id AND ps2.id <> rr.return_stage_id
+		         ORDER BY ps2.position, ps2.id LIMIT 1)
+		 FROM contract_return_rules rr
+		 JOIN contracts c ON c.id = rr.contract_id
+		 WHERE rr.participation_id IS NOT NULL AND c.deleted_at IS NULL
+		   AND c.source_pipeline_id IS NOT NULL
+		 LIMIT 1`).Scan(
+		&publisherID, &contractID, &participationID, &buyerStageID, &defaultReturnStageID, &altReturnStageID)
+	if err != nil {
+		t.Skip("no participation return route in database")
+	}
+	if altReturnStageID == 0 {
+		t.Skip("contract publisher pipeline has only one stage")
+	}
+
+	rules, err := svc.ListContractParticipationReturnRules(ctx, publisherID, contractID)
+	if err != nil {
+		t.Fatalf("ListContractParticipationReturnRules: %v", err)
+	}
+	if len(rules) == 0 {
+		t.Fatal("expected at least one participation return rule")
+	}
+	found := false
+	var ruleID int64
+	for _, rr := range rules {
+		if rr.ParticipationID != nil && *rr.ParticipationID == participationID && rr.BuyerStageID == buyerStageID {
+			found = true
+			ruleID = rr.ID
+			if rr.BuyerStageName == "" {
+				t.Fatal("expected buyer_stage_name on participation return rule")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected participation return rule in list")
+	}
+
+	updated, err := svc.UpdateParticipationReturnRuleDestination(ctx, publisherID, ruleID, altReturnStageID)
+	if err != nil {
+		t.Fatalf("UpdateParticipationReturnRuleDestination: %v", err)
+	}
+	if updated.ReturnStageID != altReturnStageID {
+		t.Fatalf("return_stage_id = %d, want %d", updated.ReturnStageID, altReturnStageID)
+	}
+	if updated.BuyerStageID != buyerStageID {
+		t.Fatalf("buyer_stage_id changed from %d to %d", buyerStageID, updated.BuyerStageID)
+	}
+
+	_, err = svc.UpdateParticipationReturnRuleDestination(ctx, publisherID, ruleID, defaultReturnStageID)
+	if err != nil {
+		t.Fatalf("restore return_stage_id: %v", err)
+	}
+}
+
+func TestListReturnRulesForPublisher_andUpdateContractDestination(t *testing.T) {
+	pool := connectContractsTestDB(t)
+	ctx := context.Background()
+	svc := NewService(pool)
+
+	var publisherID, contractID, buyerStageID, defaultReturnStageID, altReturnStageID int64
+	err := pool.QueryRow(ctx,
+		`SELECT c.publisher_id, c.id, rr.buyer_stage_id, rr.return_stage_id,
+		        (SELECT ps2.id FROM pipeline_stages ps2
+		         WHERE ps2.pipeline_id = c.source_pipeline_id AND ps2.id <> rr.return_stage_id
+		         ORDER BY ps2.position, ps2.id LIMIT 1)
+		 FROM contract_return_rules rr
+		 JOIN contracts c ON c.id = rr.contract_id
+		 WHERE rr.participation_id IS NULL AND c.deleted_at IS NULL
+		   AND c.source_pipeline_id IS NOT NULL AND c.buyer_id IS NOT NULL
+		 LIMIT 1`).Scan(
+		&publisherID, &contractID, &buyerStageID, &defaultReturnStageID, &altReturnStageID)
+	if err != nil {
+		t.Skip("no direct contract return route in database")
+	}
+	if altReturnStageID == 0 {
+		t.Skip("contract publisher pipeline has only one stage")
+	}
+
+	rules, err := svc.ListReturnRulesForPublisher(ctx, publisherID, contractID)
+	if err != nil {
+		t.Fatalf("ListReturnRulesForPublisher: %v", err)
+	}
+	if len(rules) == 0 {
+		t.Fatal("expected at least one contract return rule")
+	}
+	found := false
+	var ruleID int64
+	for _, rr := range rules {
+		if rr.BuyerStageID == buyerStageID {
+			found = true
+			ruleID = rr.ID
+			if rr.BuyerStageName == "" {
+				t.Fatal("expected buyer_stage_name on contract return rule")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected contract return rule in list")
+	}
+
+	updated, err := svc.UpdateContractReturnRuleDestination(ctx, publisherID, ruleID, altReturnStageID)
+	if err != nil {
+		t.Fatalf("UpdateContractReturnRuleDestination: %v", err)
+	}
+	if updated.ReturnStageID != altReturnStageID {
+		t.Fatalf("return_stage_id = %d, want %d", updated.ReturnStageID, altReturnStageID)
+	}
+
+	_, err = svc.UpdateContractReturnRuleDestination(ctx, publisherID, ruleID, defaultReturnStageID)
+	if err != nil {
+		t.Fatalf("restore return_stage_id: %v", err)
+	}
+}

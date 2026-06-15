@@ -20,6 +20,8 @@ type DeliveryPayload struct {
 type DeliveryResult struct {
 	ExternalID string
 	Raw        []byte
+	Request    []byte // JSON-marshaled DeliveryRequestLog
+	HTTPStatus int
 }
 
 type Provider interface {

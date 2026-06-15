@@ -30,6 +30,11 @@ func (p *PipedriveProvider) Deliver(ctx context.Context, credentials []byte, pay
 		"phone": []map[string]string{{"value": payload.Phone}},
 		"email": []map[string]string{{"value": payload.Email}},
 	}
+	mapped := map[string]string{
+		"name":  name,
+		"phone": payload.Phone,
+		"email": payload.Email,
+	}
 	body, _ := json.Marshal(personBody)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, pipedriveBase+"/persons", bytes.NewReader(body))
 	if err != nil {
@@ -37,28 +42,26 @@ func (p *PipedriveProvider) Deliver(ctx context.Context, credentials []byte, pay
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	result, err := executeHTTP(req, body, mapped)
 	if err != nil {
-		return nil, err
+		return result, fmt.Errorf("pipedrive returned %d", result.HTTPStatus)
 	}
-	defer resp.Body.Close()
 	var pr struct {
 		Data struct {
 			ID int `json:"id"`
 		} `json:"data"`
 		Success bool `json:"success"`
 	}
-	raw, _ := json.Marshal(&pr)
-	_ = json.NewDecoder(resp.Body).Decode(&pr)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 || !pr.Success {
-		return nil, fmt.Errorf("pipedrive returned %d", resp.StatusCode)
+	_ = json.Unmarshal(result.Raw, &pr)
+	if !pr.Success {
+		return result, fmt.Errorf("pipedrive returned %d", result.HTTPStatus)
 	}
 	extID := strconv.Itoa(pr.Data.ID)
 	if pipelineID, ok := payload.Config["pipeline_id"]; ok && extID != "0" {
 		_ = createPipedriveDeal(ctx, token, pr.Data.ID, pipelineID, payload)
 	}
-	return &DeliveryResult{ExternalID: extID, Raw: raw}, nil
+	result.ExternalID = extID
+	return result, nil
 }
 
 func createPipedriveDeal(ctx context.Context, token string, personID int, pipelineID any, payload DeliveryPayload) error {

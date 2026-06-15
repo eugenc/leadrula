@@ -258,8 +258,7 @@ function DrawerContent({
           <div className="space-y-3">
             <SectionLabel>Return routes</SectionLabel>
             <p className="text-xs text-gray-400">
-              Pick which stages on your pipeline send leads back to the publisher. Return destination is set by the
-              publisher on the contract offer.
+              Pick which stages on your pipeline send leads back to the publisher.
             </p>
             {!returnRoutesLoading && !buyerPipelineSelected && (
               <p className="text-sm text-gray-500">
@@ -268,8 +267,7 @@ function DrawerContent({
             )}
             {!returnRoutesLoading && buyerPipelineSelected && !publisherPipelineConfigured && (
               <p className="text-sm text-gray-500">
-                The publisher has not configured a return destination on this offer yet. They must set the publisher
-                pipeline and return stage on the contract before you can add return routes.
+                The publisher must finish pipeline delivery setup before you can add return routes.
               </p>
             )}
             {(returnRoutesLoading || (buyerPipelineSelected && publisherPipelineConfigured)) && (

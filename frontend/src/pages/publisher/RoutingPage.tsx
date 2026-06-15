@@ -20,7 +20,7 @@ import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Switch, Spinner, EmptyState, Badge } from "@/components/ui/misc";
+import { Switch, Spinner, EmptyState, Badge, TextWithOverflowTooltip } from "@/components/ui/misc";
 import { FormDrawer } from "@/components/ui/dialog";
 import { ArrowRightLeft, Plus, Trash2 } from "lucide-react";
 import { toast } from "@/store/toastStore";
@@ -86,20 +86,24 @@ export function RoutingPage() {
                 <TH>Buyer</TH>
                 <TH>Origin</TH>
                 <TH>Routes</TH>
-                <TH>Targets</TH>
+                <TH className="max-w-xs">Targets</TH>
                 <TH>Delivery</TH>
                 <TH>Active</TH>
                 <TH className="min-w-0 w-12" />
               </tr>
             </THead>
             <TBody>
-              {(routes ?? []).map((r) => (
+              {(routes ?? []).map((r) => {
+                const targetsSummary = formatRouteTargetsSummary(r);
+                return (
                 <TR key={r.id} onClick={() => setDrawerRoute(r)}>
                   <TD className="font-semibold">{r.name}</TD>
                   <TD>{r.buyer_name ?? "—"}</TD>
                   <TD>{formatRouteOrigin(r)}</TD>
                   <TD className="text-sm text-muted-foreground">{formatRouteBranchesSummary(r)}</TD>
-                  <TD>{formatRouteTargetsSummary(r)}</TD>
+                  <TD className="max-w-xs">
+                    <TextWithOverflowTooltip>{targetsSummary}</TextWithOverflowTooltip>
+                  </TD>
                   <TD>{deliveryCell(r)}</TD>
                   <TD>
                     <div onClick={(e) => e.stopPropagation()}>
@@ -125,7 +129,8 @@ export function RoutingPage() {
                     </div>
                   </TD>
                 </TR>
-              ))}
+              );
+              })}
             </TBody>
           </Table>
         )}

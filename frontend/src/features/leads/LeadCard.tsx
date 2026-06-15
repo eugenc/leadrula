@@ -90,6 +90,10 @@ export const LeadCard = memo(function LeadCard({
   const activeFields = cardFields.filter((id) => id !== "name");
   const showReturnedInHeader =
     lead.status === "returned" && !activeFields.includes("status");
+  const showBuyerStage =
+    (lead.status === "distributed" || lead.status === "closed") &&
+    !!lead.stage_name &&
+    !!lead.buyer_name;
 
   return (
     <div
@@ -131,6 +135,12 @@ export const LeadCard = memo(function LeadCard({
           )}
         </div>
       </div>
+
+      {showBuyerStage && (
+        <p className="mb-2 text-xs text-gray-500">
+          {lead.buyer_name}: {lead.stage_name}
+        </p>
+      )}
 
       {activeFields.length > 0 && (
         <div className="flex flex-col gap-1.5">

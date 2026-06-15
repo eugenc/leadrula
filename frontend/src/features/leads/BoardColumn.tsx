@@ -13,6 +13,7 @@ function VirtualLeadRow({
   cardFields,
   onClick,
   isDragOverlaySource,
+  draggable,
 }: {
   lead: Lead;
   stageId: number;
@@ -20,18 +21,20 @@ function VirtualLeadRow({
   cardFields: string[];
   onClick: () => void;
   isDragOverlaySource: boolean;
+  draggable: boolean;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: String(lead.id),
     data: { lead, stageId },
+    disabled: !draggable,
   });
 
   return (
     <div
       ref={setNodeRef}
       className={cn((isDragging || isDragOverlaySource) && "opacity-40")}
-      {...listeners}
-      {...attributes}
+      {...(draggable ? listeners : {})}
+      {...(draggable ? attributes : {})}
     >
       <LeadCard
         lead={lead}
@@ -51,6 +54,7 @@ export function BoardColumn({
   rowHeight,
   onCardClick,
   activeDragId,
+  accountId,
 }: {
   stage: Stage;
   items: Lead[];
@@ -59,6 +63,7 @@ export function BoardColumn({
   rowHeight: number;
   onCardClick: (leadId: number) => void;
   activeDragId: string | null;
+  accountId?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { setNodeRef, isOver } = useDroppable({
@@ -130,6 +135,7 @@ export function BoardColumn({
                   cardFields={cardFields}
                   onClick={() => onCardClick(lead.id)}
                   isDragOverlaySource={activeDragId === String(lead.id)}
+                  draggable={accountId == null || lead.owner_account_id === Number(accountId)}
                 />
               </div>
             );

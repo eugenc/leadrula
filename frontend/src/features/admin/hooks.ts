@@ -29,6 +29,7 @@ import type {
   QueueItem,
   QueueListResponse,
   ReturnRule,
+  ParticipationReturnRule,
   RuleAction,
   RuleCondition,
   StageRule,
@@ -39,6 +40,7 @@ import type {
   UserRow,
   CustomField,
   DisqReason,
+  Stage,
 } from "@/types";
 
 function useInvalidate(keys: string[]) {
@@ -83,6 +85,42 @@ export function useDeleteStage() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => del(`${ns()}/stages/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["stages"] }),
+  });
+}
+export function useReorderStages() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      pipelineId,
+      orderedStageIds,
+    }: {
+      pipelineId: number;
+      orderedStageIds: number[];
+    }) =>
+      post(`${ns()}/pipelines/${pipelineId}/stages/reorder`, {
+        ordered_stage_ids: orderedStageIds,
+      }),
+    onMutate: async ({ pipelineId, orderedStageIds }) => {
+      await qc.cancelQueries({ queryKey: ["stages", pipelineId] });
+      const prev = qc.getQueryData<Stage[]>(["stages", pipelineId]);
+      if (prev) {
+        const byId = new Map(prev.map((s) => [s.id, s]));
+        const reordered = orderedStageIds
+          .map((id, i) => {
+            const stage = byId.get(id);
+            return stage ? { ...stage, position: i } : null;
+          })
+          .filter((s): s is Stage => s != null);
+        qc.setQueryData(["stages", pipelineId], reordered);
+      }
+      return { prev, pipelineId };
+    },
+    onError: (_err, { pipelineId }, context) => {
+      if (context?.prev) {
+        qc.setQueryData(["stages", pipelineId], context.prev);
+      }
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["stages"] }),
   });
 }
@@ -690,6 +728,33 @@ export function useDeleteReturnRule(buyer = false) {
           ? `/buyer/contracts/${contractId}/return-rules/${ruleId}`
           : `/publisher/return-rules/${ruleId}`
       ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["return-rules"] }),
+  });
+}
+
+export function useContractParticipationReturnRoutes(contractId: number | null) {
+  return useQuery({
+    queryKey: ["participation-return-routes", "contract", contractId],
+    queryFn: () =>
+      get<ParticipationReturnRule[]>(`/publisher/contracts/${contractId}/participation-return-routes`),
+    enabled: !!contractId,
+  });
+}
+
+export function useUpdateParticipationReturnRuleDestination() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ruleId, returnStageId }: { ruleId: number; returnStageId: number }) =>
+      patch(`/publisher/participation-return-routes/${ruleId}`, { return_stage_id: returnStageId }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["participation-return-routes"] }),
+  });
+}
+
+export function useUpdateContractReturnRuleDestination() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ruleId, returnStageId }: { ruleId: number; returnStageId: number }) =>
+      patch(`/publisher/contract-return-routes/${ruleId}`, { return_stage_id: returnStageId }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["return-rules"] }),
   });
 }

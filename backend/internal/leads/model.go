@@ -21,9 +21,12 @@ type Lead struct {
 	Zip              *string         `json:"zip"`
 	Source           *string         `json:"source"`
 	ExternalID       *string         `json:"external_id"`
-	PipelineID       *int64          `json:"pipeline_id"`
-	StageID          *int64          `json:"stage_id"`
-	Position         int             `json:"position"`
+	PipelineID           *int64 `json:"pipeline_id"`
+	StageID              *int64 `json:"stage_id"`
+	PublisherPipelineID  *int64 `json:"publisher_pipeline_id,omitempty"`
+	PublisherStageID     *int64 `json:"publisher_stage_id,omitempty"`
+	BoardStageID         *int64 `json:"board_stage_id,omitempty"`
+	Position             int    `json:"position"`
 	AssignedUserID   *int64          `json:"assigned_user_id"`
 	ActionAt         *time.Time      `json:"action_at"`
 	Status           string          `json:"status"`
