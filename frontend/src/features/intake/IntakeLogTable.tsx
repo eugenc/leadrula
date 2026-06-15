@@ -14,6 +14,7 @@ import {
   LogPagination,
   WEBHOOK_DELIVERY_FILTERS,
   statusBadge,
+  LogLeadLink,
   type LogFilter,
   type LogTypeFilter,
   type WebhookDeliveryStatusFilter,
@@ -30,6 +31,7 @@ import { QueueItemDrawer, RouteDialog } from "@/pages/publisher/intakeShared";
 import { useRejectQueue } from "@/features/admin/hooks";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
+import { useUIStore } from "@/store/uiStore";
 
 type LogSource = "publisher" | "buyer";
 
@@ -58,6 +60,7 @@ export function IntakeLogSection({
   compact?: boolean;
 }) {
   const reject = useRejectQueue();
+  const openDetail = useUIStore((s) => s.openDetail);
   const [drawerItem, setDrawerItem] = useState<QueueItem | null>(null);
   const [routing, setRouting] = useState<QueueItem | null>(null);
   const [logFilter, setLogFilter] = useState<LogFilter>("all");
@@ -138,8 +141,13 @@ export function IntakeLogSection({
             <TBody>
               {items.map((q) => (
                 <TR key={q.id} onClick={() => setDrawerItem(q)} className="cursor-pointer">
-                  <TD className="font-medium text-gray-800">
-                    {q.first_name} {q.last_name}
+                  <TD>
+                    <LogLeadLink
+                      leadId={q.lead_id || null}
+                      firstName={q.first_name}
+                      lastName={q.last_name}
+                      onClick={openDetail}
+                    />
                   </TD>
                   {!compact && <TD>{q.source ?? "—"}</TD>}
                   <TD>{format(new Date(q.created_at), "MMM d, h:mma")}</TD>

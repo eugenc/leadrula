@@ -206,6 +206,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
       <DrawerHeader
         title={`${lead.first_name} ${lead.last_name}`}
         subtitle={`${leadSourceLabel(lead)} · ${formatStatus(lead.status)}`}
+        detail={lead.public_id}
         onClose={onClose}
       />
 

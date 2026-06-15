@@ -107,10 +107,12 @@ export const drawerFooterClass = "border-t border-gray-100 px-5 py-3";
 export function DrawerHeader({
   title,
   subtitle,
+  detail,
   onClose,
 }: {
   title: string;
   subtitle?: string;
+  detail?: string;
   onClose: () => void;
 }) {
   return (
@@ -118,6 +120,7 @@ export function DrawerHeader({
       <div>
         <div className={drawerTitleClass}>{title}</div>
         {subtitle && <div className={drawerSubtitleClass}>{subtitle}</div>}
+        {detail && <div className="mt-0.5 font-mono text-xs text-gray-400">{detail}</div>}
       </div>
       <IconButton onClick={onClose} aria-label="Close">
         <X className="h-4 w-4" />

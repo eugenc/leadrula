@@ -8,10 +8,12 @@ import { Spinner, EmptyState, Badge } from "@/components/ui/misc";
 import { format } from "date-fns";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
+import { useUIStore } from "@/store/uiStore";
 import type { IntegrationDeliveryDetail, QueueItem } from "@/types";
 import { QueueItemDrawer, RouteDialog } from "@/pages/publisher/intakeShared";
 import {
   LogPagination,
+  LogLeadLink,
   canReplayDelivery,
   integrationDeliveryStatusText,
   statusText,
@@ -135,6 +137,7 @@ export function UnifiedInboundLogTable({
   const reject = useRejectQueue();
   const replay = useReplayWebhookDelivery();
   const retryIntegration = useRetryIntegrationDelivery(mappingSource);
+  const openDetail = useUIStore((s) => s.openDetail);
   const [drawerItem, setDrawerItem] = useState<QueueItem | null>(null);
   const [routing, setRouting] = useState<QueueItem | null>(null);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
@@ -184,8 +187,13 @@ export function UnifiedInboundLogTable({
                   <TD>
                     <span className="font-mono text-xs text-gray-600">{q.source ?? "—"}</span>
                   </TD>
-                  <TD className="font-medium text-gray-800">
-                    {q.first_name} {q.last_name}
+                  <TD>
+                    <LogLeadLink
+                      leadId={q.lead_id || null}
+                      firstName={q.first_name}
+                      lastName={q.last_name}
+                      onClick={openDetail}
+                    />
                     {unmapped > 0 && (
                       <Badge variant="pending" className="ml-2">
                         {unmapped} unmapped
@@ -224,7 +232,15 @@ export function UnifiedInboundLogTable({
                         <span className="ml-1 font-mono text-xs text-gray-400">{d.provider_slug}</span>
                       )}
                     </TD>
-                    <TD className="font-mono text-xs">{d.lead_public_id ?? "—"}</TD>
+                    <TD>
+                      <LogLeadLink
+                        leadId={d.lead_id}
+                        firstName={d.first_name}
+                        lastName={d.last_name}
+                        fallback={d.lead_public_id}
+                        onClick={openDetail}
+                      />
+                    </TD>
                     <TD>{integrationDeliveryStatusText(d.status)}</TD>
                     <TD>
                       <div className="flex shrink-0 justify-end gap-1">
@@ -294,7 +310,15 @@ export function UnifiedInboundLogTable({
                       <span className="ml-1 font-mono text-xs text-gray-400">{originSlug}</span>
                     )}
                   </TD>
-                  <TD className="font-mono text-xs">{d.lead_public_id ?? "—"}</TD>
+                  <TD>
+                    <LogLeadLink
+                      leadId={d.lead_id}
+                      firstName={d.first_name}
+                      lastName={d.last_name}
+                      fallback={d.lead_public_id}
+                      onClick={openDetail}
+                    />
+                  </TD>
                   <TD>{statusNode}</TD>
                   <TD>
                     {isInbound && (

@@ -132,6 +132,7 @@ func (s *Service) listInboundLogWebhooks(ctx context.Context, accountID int64, p
 
 	rows, err := s.pool.Query(ctx,
 		`SELECT d.id, d.webhook_id, w.name, w.slug, d.lead_id, l.public_id::text,
+		        COALESCE(l.first_name, ''), COALESCE(l.last_name, ''),
 		        d.status, d.error_message, d.created_at
 		 FROM webhook_deliveries d
 		 JOIN webhooks w ON w.id = d.webhook_id
@@ -153,7 +154,8 @@ func (s *Service) listInboundLogWebhooks(ctx context.Context, accountID int64, p
 		var leadPublicID *string
 		if err := rows.Scan(
 			&d.ID, &d.WebhookID, &d.Origin, &d.OriginSlug,
-			&d.LeadID, &leadPublicID, &d.Status, &d.ErrorMessage, &d.CreatedAt,
+			&d.LeadID, &leadPublicID, &d.FirstName, &d.LastName,
+			&d.Status, &d.ErrorMessage, &d.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -203,7 +205,7 @@ func (s *Service) listInboundLogIntegrations(ctx context.Context, accountID int6
 
 	rows, err := s.pool.Query(ctx,
 		`SELECT kind, direction, id, created_at, origin, origin_slug, lead_label, lead_id, status,
-		        webhook_id, error_message, provider_slug, connection_name, attempts
+		        first_name, last_name, webhook_id, error_message, provider_slug, connection_name, attempts
 		 FROM (
 		   SELECT
 		     'integration'::text AS kind,
@@ -215,6 +217,8 @@ func (s *Service) listInboundLogIntegrations(ctx context.Context, accountID int6
 		     COALESCE(l.public_id::text, '') AS lead_label,
 		     q.lead_id,
 		     q.status::text AS status,
+		     COALESCE(l.first_name, '') AS first_name,
+		     COALESCE(l.last_name, '') AS last_name,
 		     0::bigint AS webhook_id,
 		     q.last_error AS error_message,
 		     p.slug AS provider_slug,
@@ -240,6 +244,8 @@ func (s *Service) listInboundLogIntegrations(ctx context.Context, accountID int6
 		     COALESCE(l.public_id::text, '') AS lead_label,
 		     d.lead_id,
 		     d.status::text AS status,
+		     COALESCE(l.first_name, '') AS first_name,
+		     COALESCE(l.last_name, '') AS last_name,
 		     d.webhook_id,
 		     d.error_message,
 		     p.slug AS provider_slug,
@@ -266,7 +272,9 @@ func (s *Service) listInboundLogIntegrations(ctx context.Context, accountID int6
 		var it InboundLogItem
 		if err := rows.Scan(
 			&it.Kind, &it.Direction, &it.ID, &it.CreatedAt, &it.Origin, &it.OriginSlug,
-			&it.LeadLabel, &it.LeadID, &it.Status, &it.WebhookID, &it.ErrorMessage,
+			&it.LeadLabel, &it.LeadID, &it.Status,
+			&it.FirstName, &it.LastName,
+			&it.WebhookID, &it.ErrorMessage,
 			&it.ProviderSlug, &it.ConnectionName, &it.Attempts,
 		); err != nil {
 			return nil, err
@@ -348,8 +356,8 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 		     COALESCE(l.public_id::text, '') AS lead_label,
 		     d.lead_id,
 		     d.status::text AS status,
-		     ''::text AS first_name,
-		     ''::text AS last_name,
+		     COALESCE(l.first_name, '') AS first_name,
+		     COALESCE(l.last_name, '') AS last_name,
 		     NULL::text AS phone,
 		     NULL::text AS source,
 		     NULL::jsonb AS raw_payload,
@@ -375,8 +383,8 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 		     COALESCE(l.public_id::text, '') AS lead_label,
 		     q.lead_id,
 		     q.status::text AS status,
-		     ''::text AS first_name,
-		     ''::text AS last_name,
+		     COALESCE(l.first_name, '') AS first_name,
+		     COALESCE(l.last_name, '') AS last_name,
 		     NULL::text AS phone,
 		     NULL::text AS source,
 		     NULL::jsonb AS raw_payload,
@@ -403,8 +411,8 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 		     COALESCE(l.public_id::text, '') AS lead_label,
 		     q.lead_id,
 		     q.status::text AS status,
-		     ''::text AS first_name,
-		     ''::text AS last_name,
+		     COALESCE(l.first_name, '') AS first_name,
+		     COALESCE(l.last_name, '') AS last_name,
 		     NULL::text AS phone,
 		     NULL::text AS source,
 		     NULL::jsonb AS raw_payload,

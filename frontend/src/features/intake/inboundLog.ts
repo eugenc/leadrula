@@ -4,6 +4,8 @@ export interface IntegrationDeliveryRow {
   id: number;
   lead_id?: number | null;
   lead_public_id?: string | null;
+  first_name?: string;
+  last_name?: string;
   status: string;
   error_message?: string | null;
   created_at: string;
@@ -58,6 +60,8 @@ function inboundItemToWebhookDelivery(item: InboundLogItem): WebhookDelivery {
     provider_slug: item.provider_slug || undefined,
     lead_id: item.lead_id,
     lead_public_id: item.lead_label || null,
+    first_name: item.first_name,
+    last_name: item.last_name,
     status: item.status as WebhookDelivery["status"],
     error_message: item.error_message,
     created_at: item.created_at,
@@ -69,6 +73,8 @@ function inboundItemToIntegrationDelivery(item: InboundLogItem): IntegrationDeli
     id: item.id,
     lead_id: item.lead_id,
     lead_public_id: item.lead_label || null,
+    first_name: item.first_name,
+    last_name: item.last_name,
     status: item.status,
     error_message: item.error_message,
     created_at: item.created_at,

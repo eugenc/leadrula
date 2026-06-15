@@ -544,6 +544,8 @@ export interface WebhookDelivery {
   event_id?: number | null;
   lead_id?: number | null;
   lead_public_id?: string | null;
+  first_name?: string;
+  last_name?: string;
   status: "success" | "error" | "skipped";
   error_message?: string | null;
   request_payload?: Record<string, unknown> | null;

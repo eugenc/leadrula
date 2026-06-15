@@ -75,6 +75,46 @@ export function canReplayDelivery(d: WebhookDelivery) {
   return d.status === "skipped" && !d.lead_id;
 }
 
+export function leadDisplayName(
+  firstName?: string,
+  lastName?: string,
+  fallback?: string | null
+): string {
+  const name = `${firstName ?? ""} ${lastName ?? ""}`.trim();
+  return name || fallback || "—";
+}
+
+export function LogLeadLink({
+  leadId,
+  firstName,
+  lastName,
+  fallback,
+  onClick,
+}: {
+  leadId?: number | null;
+  firstName?: string;
+  lastName?: string;
+  fallback?: string | null;
+  onClick: (leadId: number) => void;
+}) {
+  const label = leadDisplayName(firstName, lastName, fallback);
+  if (leadId == null) {
+    return <span className="font-medium text-gray-800">{label}</span>;
+  }
+  return (
+    <button
+      type="button"
+      className="font-medium text-jade-600 hover:underline"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick(leadId);
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
 export function LogPagination({
   page,
   limit,
