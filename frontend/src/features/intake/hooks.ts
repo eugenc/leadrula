@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import { get } from "@/lib/api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { get, post } from "@/lib/api";
 import type { InboundLogListResponse, IntegrationDeliveryDetail } from "@/types";
 
 export interface InboundLogFilters {
@@ -51,5 +51,18 @@ export function useIntegrationDelivery(id: number | null, source: "publisher" | 
     queryKey: ["integration-delivery", source, id],
     queryFn: () => get<IntegrationDeliveryDetail>(`${base}/integration-deliveries/${id}`),
     enabled: !!id,
+  });
+}
+
+export function useRetryIntegrationDelivery(source: "publisher" | "buyer" = "publisher") {
+  const qc = useQueryClient();
+  const base = source === "buyer" ? "/buyer" : "/publisher";
+  return useMutation({
+    mutationFn: (deliveryId: number) =>
+      post<{ ok: boolean }>(`${base}/integration-deliveries/${deliveryId}/retry`, {}),
+    onSuccess: (_, deliveryId) => {
+      qc.invalidateQueries({ queryKey: ["inbound-log", source] });
+      qc.invalidateQueries({ queryKey: ["integration-delivery", source, deliveryId] });
+    },
   });
 }

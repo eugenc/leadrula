@@ -30,6 +30,37 @@ func TestGetIntegrationDelivery_notFound(t *testing.T) {
 	}
 }
 
+func TestRetryIntegrationDelivery_notFound(t *testing.T) {
+	cfg := config.Load()
+	ctx := context.Background()
+	pool, err := database.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	svc := &Service{pool: pool}
+	err = svc.RetryIntegrationDelivery(ctx, 999999999, 999999999)
+	if err == nil {
+		t.Fatal("expected not found")
+	}
+	var appErr *httpx.AppError
+	if !errors.As(err, &appErr) || appErr.Code != httpx.CodeNotFound {
+		t.Fatalf("expected not found, got %v", err)
+	}
+}
+
+func TestLabelPayloadCustomFields_nonNumericKeys(t *testing.T) {
+	svc := &Service{}
+	labeled, err := svc.labelPayloadCustomFields(context.Background(), 1, []byte(`{"custom_fields":{"not-a-number":"x"}}`))
+	if err != nil {
+		t.Fatalf("labelPayloadCustomFields: %v", err)
+	}
+	if labeled != nil {
+		t.Fatalf("expected nil for non-numeric keys, got %v", labeled)
+	}
+}
+
 func TestGetIntegrationDelivery_attemptsOrdered(t *testing.T) {
 	cfg := config.Load()
 	ctx := context.Background()

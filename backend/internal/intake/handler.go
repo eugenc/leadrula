@@ -82,6 +82,7 @@ func (h *Handler) AuthenticateSource(next http.Handler) http.Handler {
 func (h *Handler) RegisterQueueRoutes(r chi.Router) {
 	r.Get("/inbound-log", h.listInboundLog)
 	r.Get("/integration-deliveries/{id}", h.getIntegrationDelivery)
+	r.Post("/integration-deliveries/{id}/retry", h.retryIntegrationDelivery)
 	r.Get("/intake-queue", h.listQueue)
 	r.With(auth.RequireRole("admin")).Post("/intake-queue/{id}/route", h.route)
 	r.With(auth.RequireRole("admin")).Post("/intake-queue/{id}/reject", h.reject)
@@ -94,6 +95,7 @@ func (h *Handler) RegisterBuyerRoutes(r chi.Router) {
 	r.With(auth.RequireRole("admin")).Get("/routing-log", h.listRoutingLog)
 	r.With(auth.RequireRole("admin")).Get("/inbound-log", h.listInboundLog)
 	r.With(auth.RequireRole("admin")).Get("/integration-deliveries/{id}", h.getIntegrationDelivery)
+	r.With(auth.RequireRole("admin")).Post("/integration-deliveries/{id}/retry", h.retryIntegrationDelivery)
 	r.With(auth.RequireRole("admin")).Post("/routing-log/{id}/map-field", h.mapBuyerRoutingLogField)
 }
 
@@ -157,6 +159,17 @@ func (h *Handler) getIntegrationDelivery(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, detail)
+}
+
+func (h *Handler) retryIntegrationDelivery(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	if err := h.svc.RetryIntegrationDelivery(r.Context(), p.AccountID, idp(r)); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, struct {
+		Ok bool `json:"ok"`
+	}{Ok: true})
 }
 
 func (h *Handler) listInboundLog(w http.ResponseWriter, r *http.Request) {

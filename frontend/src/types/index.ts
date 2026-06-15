@@ -622,6 +622,13 @@ export interface IntegrationDeliveryAttemptLog {
   created_at: string;
 }
 
+export interface LabeledCustomField {
+  id: number;
+  field_key: string;
+  name: string;
+  value: unknown;
+}
+
 export interface IntegrationDeliveryDetail {
   id: number;
   status: string;
@@ -630,6 +637,7 @@ export interface IntegrationDeliveryDetail {
   lead_public_id?: string;
   external_id?: string;
   payload: Record<string, unknown>;
+  custom_fields_labeled?: LabeledCustomField[];
   last_error?: string | null;
   attempts: IntegrationDeliveryAttemptLog[];
 }

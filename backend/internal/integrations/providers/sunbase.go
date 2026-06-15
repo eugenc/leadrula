@@ -242,14 +242,45 @@ func doSunbaseRequest(ctx context.Context, method, fullURL string) (*DeliveryRes
 		return nil, fmt.Errorf("invalid schema_name")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		snippet := text
-		if len(snippet) > 200 {
-			snippet = snippet[:200]
-		}
-		return nil, fmt.Errorf("sunbase returned %d: %s", resp.StatusCode, snippet)
+		return nil, fmt.Errorf("sunbase returned %d: %s", resp.StatusCode, sunbaseBodySnippet(text))
+	}
+	if errMsg := sunbaseErrorFromBody(text); errMsg != "" {
+		return nil, fmt.Errorf("sunbase: %s", errMsg)
 	}
 	extID := parseSunbaseExternalID(body)
+	if extID == "" && sunbaseBodyLooksLikeError(text) {
+		return nil, fmt.Errorf("sunbase: %s", sunbaseBodySnippet(text))
+	}
 	return &DeliveryResult{Raw: raw, ExternalID: extID}, nil
+}
+
+func sunbaseBodySnippet(text string) string {
+	snippet := strings.TrimSpace(text)
+	if len(snippet) > 200 {
+		snippet = snippet[:200]
+	}
+	return snippet
+}
+
+func sunbaseErrorFromBody(text string) string {
+	lower := strings.ToLower(text)
+	if strings.Contains(lower, "unable to find site") {
+		return sunbaseBodySnippet(text)
+	}
+	return ""
+}
+
+func sunbaseBodyLooksLikeError(text string) bool {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if lower == "" {
+		return false
+	}
+	for _, phrase := range []string{"unable to find", "not found", "invalid", "error", "failed", "denied"} {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 func parseSunbaseExternalID(body []byte) string {

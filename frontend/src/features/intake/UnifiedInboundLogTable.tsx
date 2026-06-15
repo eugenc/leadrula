@@ -1,6 +1,6 @@
 import { Fragment, useState } from "react";
 import { useRejectQueue } from "@/features/admin/hooks";
-import { useIntegrationDelivery } from "@/features/intake/hooks";
+import { useIntegrationDelivery, useRetryIntegrationDelivery } from "@/features/intake/hooks";
 import { useReplayWebhookDelivery, useWebhookDelivery } from "@/features/webhooks/hooks";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -50,10 +50,17 @@ function formatJsonBlock(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+function payloadWithoutCustomFields(payload: Record<string, unknown>): Record<string, unknown> {
+  const { custom_fields: _, ...rest } = payload;
+  return rest;
+}
+
 function IntegrationDeliveryExpand({ detail }: { detail: IntegrationDeliveryDetail | undefined }) {
   if (!detail) {
     return <Spinner className="h-4 w-4" />;
   }
+
+  const labeled = detail.custom_fields_labeled ?? [];
 
   return (
     <div className="space-y-3">
@@ -65,8 +72,20 @@ function IntegrationDeliveryExpand({ detail }: { detail: IntegrationDeliveryDeta
       {detail.last_error && <p className="text-xs text-red-600">{detail.last_error}</p>}
       <div>
         <p className="mb-1 text-xs font-medium text-gray-500">Request (sent)</p>
+        {labeled.length > 0 && (
+          <div className="mb-2 space-y-1 rounded-md border border-gray-100 bg-gray-50 p-3">
+            <p className="text-xs font-medium text-gray-500">Custom fields</p>
+            {labeled.map((f) => (
+              <div key={f.id} className="text-xs text-gray-700">
+                <span className="font-medium text-gray-800">{f.name}</span>
+                <span className="ml-1 font-mono text-gray-400">({f.field_key})</span>
+                <span className="ml-2 font-mono text-gray-600">{formatJsonBlock(f.value)}</span>
+              </div>
+            ))}
+          </div>
+        )}
         <pre className="max-h-48 overflow-auto rounded-md border border-gray-100 bg-gray-50 p-3 font-mono text-xs">
-          {formatJsonBlock(detail.payload)}
+          {formatJsonBlock(labeled.length > 0 ? payloadWithoutCustomFields(detail.payload) : detail.payload)}
         </pre>
       </div>
       {detail.attempts.length === 0 ? (
@@ -115,6 +134,7 @@ export function UnifiedInboundLogTable({
 }: UnifiedInboundLogTableProps) {
   const reject = useRejectQueue();
   const replay = useReplayWebhookDelivery();
+  const retryIntegration = useRetryIntegrationDelivery(mappingSource);
   const [drawerItem, setDrawerItem] = useState<QueueItem | null>(null);
   const [routing, setRouting] = useState<QueueItem | null>(null);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
@@ -216,6 +236,24 @@ export function UnifiedInboundLogTable({
                         >
                           {isExpanded ? "Hide" : "View"}
                         </Button>
+                        {canReplayWebhooks && (
+                          <Button
+                            size="sm"
+                            className="shrink-0 whitespace-nowrap"
+                            disabled={retryIntegration.isPending}
+                            onClick={() =>
+                              retryIntegration.mutate(d.id, {
+                                onSuccess: () => {
+                                  toast.success("Resent");
+                                  onWebhookReplayed?.();
+                                },
+                                onError: (e) => toast.error(errorMessage(e)),
+                              })
+                            }
+                          >
+                            Resend
+                          </Button>
+                        )}
                       </div>
                     </TD>
                   </TR>
