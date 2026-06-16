@@ -73,6 +73,7 @@ func (s *Service) UpdateSunbaseConnection(
 	credentialsRaw json.RawMessage,
 	config map[string]any,
 	syncOutbound func(ctx context.Context, ids webhooks.SunbaseWebhookIDs, endpointURL string, fieldMap json.RawMessage) error,
+	syncInbound func(ctx context.Context, ids webhooks.SunbaseWebhookIDs) error,
 ) (*Connection, error) {
 	conn, err := s.GetConnection(ctx, accountID, id)
 	if err != nil {
@@ -121,6 +122,11 @@ func (s *Service) UpdateSunbaseConnection(
 	if syncOutbound != nil && (ids.OutboundPost > 0 || ids.OutboundGet > 0) {
 		if err := syncOutbound(ctx, ids, endpointURL, fieldMapJSON); err != nil {
 			return nil, wrapSunbaseProvisionErr("sync outbound webhooks", err)
+		}
+	}
+	if syncInbound != nil && ids.Inbound > 0 {
+		if err := syncInbound(ctx, ids); err != nil {
+			return nil, wrapSunbaseProvisionErr("sync inbound webhook", err)
 		}
 	}
 

@@ -106,7 +106,7 @@ func (s *Service) ProvisionSunbaseWebhooks(
 	event, err := s.CreateEvent(ctx, inbound.ID, CreateEventParams{
 		Action:        "create",
 		DuplicateMode: &dupUpdate,
-		Conditions:    json.RawMessage(`[{"field":"action","op":"eq","value":"Create"}]`),
+		Conditions:    json.RawMessage(`[]`),
 	})
 	if err != nil {
 		_ = s.Delete(ctx, accountID, inbound.ID)
@@ -181,6 +181,18 @@ func (s *Service) ProvisionSunbaseWebhooks(
 		InboundSlug:  inboundSlug,
 	}
 	return ids, nil
+}
+
+// SyncSunbaseInboundEvent clears inbound create-event conditions so Create and Update payloads upsert by external_id.
+func (s *Service) SyncSunbaseInboundEvent(ctx context.Context, inboundWebhookID int64) error {
+	if inboundWebhookID <= 0 {
+		return nil
+	}
+	_, err := s.pool.Exec(ctx,
+		`UPDATE webhook_events SET conditions='[]'::jsonb
+		 WHERE webhook_id=$1 AND action='create'`,
+		inboundWebhookID)
+	return err
 }
 
 func (s *Service) SyncSunbaseOutboundWebhooks(ctx context.Context, accountID int64, ids SunbaseWebhookIDs, endpointURL string, outboundFieldMap json.RawMessage) error {

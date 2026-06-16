@@ -15,6 +15,7 @@ import (
 
 type WebhookSunbaseService interface {
 	ProvisionSunbaseWebhooks(ctx context.Context, accountID int64, connectionID int64, connectionPublicID, connectionName, schemaName, endpointURL string, outboundFieldMap json.RawMessage) (*webhooks.SunbaseWebhookIDs, error)
+	SyncSunbaseInboundEvent(ctx context.Context, inboundWebhookID int64) error
 	SyncSunbaseOutboundWebhooks(ctx context.Context, accountID int64, ids webhooks.SunbaseWebhookIDs, endpointURL string, outboundFieldMap json.RawMessage) error
 	DeleteSunbaseWebhooks(ctx context.Context, accountID int64, ids webhooks.SunbaseWebhookIDs)
 }
@@ -183,13 +184,17 @@ func (h *Handler) patchConnection(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, httpx.Validation("patch only supported for sunbase connections"))
 		return
 	}
-	var sync func(ctx context.Context, ids webhooks.SunbaseWebhookIDs, endpointURL string, fieldMap json.RawMessage) error
+	var syncOutbound func(ctx context.Context, ids webhooks.SunbaseWebhookIDs, endpointURL string, fieldMap json.RawMessage) error
+	var syncInbound func(ctx context.Context, ids webhooks.SunbaseWebhookIDs) error
 	if h.webhooks != nil {
-		sync = func(ctx context.Context, ids webhooks.SunbaseWebhookIDs, endpointURL string, fieldMap json.RawMessage) error {
+		syncOutbound = func(ctx context.Context, ids webhooks.SunbaseWebhookIDs, endpointURL string, fieldMap json.RawMessage) error {
 			return h.webhooks.SyncSunbaseOutboundWebhooks(ctx, p.AccountID, ids, endpointURL, fieldMap)
 		}
+		syncInbound = func(ctx context.Context, ids webhooks.SunbaseWebhookIDs) error {
+			return h.webhooks.SyncSunbaseInboundEvent(ctx, ids.Inbound)
+		}
 	}
-	conn, err := h.svc.UpdateSunbaseConnection(r.Context(), p.AccountID, id, body.Credentials, body.Config, sync)
+	conn, err := h.svc.UpdateSunbaseConnection(r.Context(), p.AccountID, id, body.Credentials, body.Config, syncOutbound, syncInbound)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
