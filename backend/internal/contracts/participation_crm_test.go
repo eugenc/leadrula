@@ -53,7 +53,8 @@ func TestUpdateParticipationDelivery_withCRMIntegration(t *testing.T) {
 		 JOIN integration_providers pr ON pr.id = ic.provider_id
 		 WHERE p.status = 'active' AND p.delivery = 'leads_pipeline'
 		   AND pr.slug = 'sunbase' AND ic.status = 'active'
-		   AND p.buyer_pipeline_id > 0 AND p.buyer_target_stage_id > 0
+		 AND p.buyer_pipeline_id > 0 AND p.buyer_target_stage_id > 0
+		   AND EXISTS (SELECT 1 FROM pipeline_stages ps WHERE ps.pipeline_id = p.buyer_pipeline_id AND ps.stage_type = 'won')
 		   AND EXISTS (SELECT 1 FROM contract_return_rules r WHERE r.participation_id = p.id)
 		 LIMIT 1`).Scan(&participationID, &buyerID, &pipelineID, &stageID, &connID)
 	if err != nil {

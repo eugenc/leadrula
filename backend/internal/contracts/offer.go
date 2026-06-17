@@ -212,6 +212,9 @@ func (s *Service) UpdateOffer(ctx context.Context, publisherID, contractID int64
 	if err != nil {
 		return nil, err
 	}
+	if err := RebuildActiveParticipationStageMaps(ctx, s.pool, contractID); err != nil {
+		return nil, err
+	}
 	s.syncContractRoute(ctx, publisherID, contractID)
 	return s.Get(ctx, publisherID, contractID)
 }
