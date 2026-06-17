@@ -192,6 +192,8 @@ export function Board() {
 
   const [board, setBoard] = useState<Record<number, Lead[]>>({});
   const [unplacedLeads, setUnplacedLeads] = useState<Lead[]>([]);
+  const [prompt, setPrompt] = useState<{ leadId: number; stage: Stage } | null>(null);
+  const [activeDrag, setActiveDrag] = useState<Lead | null>(null);
 
   const stageList = useMemo(
     () => [...(stages ?? [])].sort((a, b) => a.position - b.position),
