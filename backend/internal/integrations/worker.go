@@ -98,6 +98,13 @@ func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, p
 		return
 	}
 
+	if leadID != 0 && providerSlug == "sunbase" {
+		repo := leads.NewRepository(s.pool)
+		if refreshed, err := leads.RefreshDeliveryPayload(ctx, s.pool, repo, leadID, payload); err == nil {
+			payload = refreshed
+		}
+	}
+
 	var result *providers.DeliveryResult
 	if providerSlug == "webhook" {
 		result, err = providers.DeliverWebhook(ctx, credentials, payload)

@@ -66,7 +66,7 @@ func TestLabelPayloadCustomFields_nonNumericKeys(t *testing.T) {
 func TestMergeDeliveryConfig_preservesConfig(t *testing.T) {
 	old := []byte(`{"first_name":"Old","_config":{"route_key":"x"}}`)
 	rebuilt := []byte(`{"first_name":"New","custom_fields":{"22":"2026-06-17T17:00"}}`)
-	got := mergeDeliveryConfig(rebuilt, old)
+	got := leads.MergeDeliveryConfig(rebuilt, old)
 	var m map[string]any
 	if err := json.Unmarshal(got, &m); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -86,7 +86,7 @@ func TestMergeDeliveryConfig_preservesConfig(t *testing.T) {
 
 func TestMergeDeliveryConfig_invalidJSON(t *testing.T) {
 	rebuilt := []byte(`{"ok":true}`)
-	if got := mergeDeliveryConfig(rebuilt, []byte(`not json`)); string(got) != string(rebuilt) {
+	if got := leads.MergeDeliveryConfig(rebuilt, []byte(`not json`)); string(got) != string(rebuilt) {
 		t.Fatalf("got %s, want unchanged rebuilt", got)
 	}
 }
@@ -148,7 +148,7 @@ func TestRetryIntegrationDelivery_rebuildsPayloadFromLead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildDeliveryPayload: %v", err)
 	}
-	expected = mergeDeliveryConfig(expected, payloadBefore)
+	expected = leads.MergeDeliveryConfig(expected, payloadBefore)
 
 	var gotMap, wantMap map[string]any
 	if err := json.Unmarshal(payloadAfter, &gotMap); err != nil {

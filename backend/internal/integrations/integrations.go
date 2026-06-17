@@ -3,10 +3,14 @@ package integrations
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/integrations/providers"
+	"github.com/echayko/leadrula/backend/internal/leads"
+	"github.com/echayko/leadrula/backend/internal/webhooks"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -324,18 +328,38 @@ func (s *Service) EnqueueConnectionDelivery(ctx context.Context, connectionID, l
 
 // EnqueueParticipationWebhook fires the first active lead.create trigger on a buyer webhook.
 func (s *Service) EnqueueParticipationWebhook(ctx context.Context, webhookID, leadID int64, payloadJSON []byte) error {
-	var triggerID, connID int64
+	var triggerID, connID, accountID int64
+	var fieldMap json.RawMessage
+	var format string
 	err := s.pool.QueryRow(ctx,
-		`SELECT t.id, COALESCE(w.outbound_connection_id, 0)
+		`SELECT t.id, COALESCE(w.outbound_connection_id, 0), w.outbound_field_map, COALESCE(NULLIF(w.outbound_format, ''), 'json'), w.account_id
 		 FROM webhook_outbound_triggers t
 		 JOIN webhooks w ON w.id = t.webhook_id
 		 WHERE t.webhook_id = $1 AND t.trigger_event = 'lead.create' AND t.is_active AND w.is_active
-		 ORDER BY t.position, t.id LIMIT 1`, webhookID).Scan(&triggerID, &connID)
+		 ORDER BY t.position, t.id LIMIT 1`, webhookID).Scan(&triggerID, &connID, &fieldMap, &format, &accountID)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
 		return err
 	}
 	if connID == 0 {
 		return nil
+	}
+	if format == "url" && len(fieldMap) > 0 && leadID != 0 {
+		repo := leads.NewRepository(s.pool)
+		lead, err := repo.GetByID(ctx, s.pool, leadID)
+		if err != nil {
+			return err
+		}
+		if err := leads.LoadCustomValues(ctx, s.pool, lead); err != nil {
+			return err
+		}
+		mapped, err := webhooks.BuildOutboundURLPayload(ctx, s.pool, accountID, webhooks.EventLeadCreate, lead, fieldMap)
+		if err != nil {
+			return err
+		}
+		payloadJSON = mapped
 	}
 	return s.EnqueueWebhookDelivery(ctx, connID, triggerID, leadID, payloadJSON)
 }

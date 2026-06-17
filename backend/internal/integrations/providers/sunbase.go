@@ -42,13 +42,13 @@ func (p *SunbaseProvider) Deliver(ctx context.Context, credentials []byte, paylo
 		return nil, err
 	}
 	fieldMap := outboundFieldMapFromConfig(payload.Config)
-	params := buildSunbaseParams(schemaName, fieldMap, payload)
+	params, skipped := buildSunbaseParams(schemaName, fieldMap, payload)
 	mapped := URLValuesToMapped(params)
 	fullURL, err := sunbaseAppendQueryParams(endpointURL, params)
 	if err != nil {
 		return nil, err
 	}
-	return doSunbaseRequest(ctx, http.MethodPost, fullURL, mapped)
+	return doSunbaseRequest(ctx, http.MethodPost, fullURL, mapped, skipped)
 }
 
 func (p *SunbaseProvider) ValidateCredentials(ctx context.Context, credentials []byte, config map[string]any) error {
@@ -70,7 +70,7 @@ func (p *SunbaseProvider) TestConnection(ctx context.Context, credentials []byte
 	if err != nil {
 		return err
 	}
-	_, err = doSunbaseRequest(ctx, http.MethodPost, fullURL, mapped)
+	_, err = doSunbaseRequest(ctx, http.MethodPost, fullURL, mapped, nil)
 	return err
 }
 
@@ -128,8 +128,9 @@ func DefaultSunbaseOutboundFieldMap(schemaName string) []SunbaseFieldMapEntry {
 
 func strPtr(s string) *string { return &s }
 
-func buildSunbaseParams(schemaName string, entries []SunbaseFieldMapEntry, payload DeliveryPayload) url.Values {
+func buildSunbaseParams(schemaName string, entries []SunbaseFieldMapEntry, payload DeliveryPayload) (url.Values, map[string]string) {
 	vals := url.Values{}
+	skipped := map[string]string{}
 	for _, e := range entries {
 		if e.DestKey == "" {
 			continue
@@ -140,15 +141,36 @@ func buildSunbaseParams(schemaName string, entries []SunbaseFieldMapEntry, paylo
 		}
 		if v != "" {
 			vals.Set(e.DestKey, v)
+			continue
 		}
+		if e.DestKey == "last_name" && payload.LastName != "" {
+			vals.Set("last_name", payload.LastName)
+			continue
+		}
+		skipped[e.DestKey] = sunbaseSkipReason(e, payload)
 	}
 	if vals.Get("schema_name") == "" {
 		vals.Set("schema_name", schemaName)
+		delete(skipped, "schema_name")
 	}
 	if vals.Get("last_name") == "" && payload.LastName != "" {
 		vals.Set("last_name", payload.LastName)
+		delete(skipped, "last_name")
 	}
-	return vals
+	return vals, skipped
+}
+
+func sunbaseSkipReason(e SunbaseFieldMapEntry, payload DeliveryPayload) string {
+	if e.SourceType == "custom" && e.CustomFieldID != nil {
+		key := fmt.Sprintf("%d", *e.CustomFieldID)
+		if payload.CustomFields == nil {
+			return "missing custom field value"
+		}
+		if _, ok := payload.CustomFields[key]; !ok {
+			return "missing custom field value"
+		}
+	}
+	return "empty"
 }
 
 func resolveSunbaseFieldValue(e SunbaseFieldMapEntry, payload DeliveryPayload) string {
@@ -257,12 +279,12 @@ func sunbaseAppendQueryParams(baseURL string, params url.Values) (string, error)
 	return u.String(), nil
 }
 
-func doSunbaseRequest(ctx context.Context, method, fullURL string, mapped map[string]string) (*DeliveryResult, error) {
+func doSunbaseRequest(ctx context.Context, method, fullURL string, mapped, skipped map[string]string) (*DeliveryResult, error) {
 	req, err := http.NewRequestWithContext(ctx, method, fullURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	reqLog := BuildDeliveryRequestLog(mapped, req, nil)
+	reqLog := BuildDeliveryRequestLog(mapped, req, nil, skipped)
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {

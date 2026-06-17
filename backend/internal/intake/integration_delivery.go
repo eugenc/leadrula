@@ -141,7 +141,7 @@ func (s *Service) RetryIntegrationDelivery(ctx context.Context, accountID, deliv
 		if err != nil {
 			return err
 		}
-		newPayload = mergeDeliveryConfig(rebuilt, oldPayload)
+		newPayload = leads.MergeDeliveryConfig(rebuilt, oldPayload)
 	}
 
 	var id int64
@@ -161,21 +161,6 @@ func (s *Service) RetryIntegrationDelivery(ctx context.Context, accountID, deliv
 		return err
 	}
 	return nil
-}
-
-func mergeDeliveryConfig(rebuilt, old []byte) []byte {
-	var oldMap, newMap map[string]any
-	if json.Unmarshal(old, &oldMap) != nil || json.Unmarshal(rebuilt, &newMap) != nil {
-		return rebuilt
-	}
-	if cfg, ok := oldMap["_config"]; ok {
-		newMap["_config"] = cfg
-	}
-	b, err := json.Marshal(newMap)
-	if err != nil {
-		return rebuilt
-	}
-	return b
 }
 
 func (s *Service) labelPayloadCustomFields(ctx context.Context, accountID int64, payload []byte) ([]LabeledCustomField, error) {

@@ -18,8 +18,9 @@ type HTTPRequestLog struct {
 
 // DeliveryRequestLog is stored in integration_delivery_logs.request_body.
 type DeliveryRequestLog struct {
-	Mapped map[string]string `json:"mapped"`
-	HTTP   HTTPRequestLog    `json:"http"`
+	Mapped  map[string]string `json:"mapped"`
+	Skipped map[string]string `json:"skipped,omitempty"`
+	HTTP    HTTPRequestLog    `json:"http"`
 }
 
 var sensitiveHeaderNames = map[string]bool{
@@ -28,7 +29,7 @@ var sensitiveHeaderNames = map[string]bool{
 	"x-leadrula-signature": true,
 }
 
-func BuildDeliveryRequestLog(mapped map[string]string, req *http.Request, body []byte) []byte {
+func BuildDeliveryRequestLog(mapped map[string]string, req *http.Request, body []byte, skipped map[string]string) []byte {
 	if mapped == nil {
 		mapped = map[string]string{}
 	}
@@ -38,6 +39,9 @@ func BuildDeliveryRequestLog(mapped map[string]string, req *http.Request, body [
 			Method: req.Method,
 			URL:    req.URL.String(),
 		},
+	}
+	if len(skipped) > 0 {
+		log.Skipped = skipped
 	}
 	if len(body) > 0 {
 		log.HTTP.Body = json.RawMessage(body)
@@ -97,7 +101,7 @@ func AnyMapToMapped(m map[string]any) map[string]string {
 }
 
 func executeHTTP(req *http.Request, body []byte, mapped map[string]string) (*DeliveryResult, error) {
-	reqLog := BuildDeliveryRequestLog(mapped, req, body)
+	reqLog := BuildDeliveryRequestLog(mapped, req, body, nil)
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {

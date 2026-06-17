@@ -502,6 +502,22 @@ func parseOutboundFieldMap(raw json.RawMessage) ([]OutboundFieldMapEntry, error)
 	return entries, nil
 }
 
+// BuildOutboundURLPayload maps lead fields to outbound URL params using a webhook field map.
+func BuildOutboundURLPayload(ctx context.Context, q database.Querier, accountID int64, event string, l *leads.Lead, fieldMap json.RawMessage) ([]byte, error) {
+	entries, err := parseOutboundFieldMap(fieldMap)
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("empty outbound field map")
+	}
+	var fieldTypes map[string]string
+	if types, err := customfields.FieldTypesByAccount(ctx, q, accountID); err == nil && len(types) > 0 {
+		fieldTypes = types
+	}
+	return buildURLPayload(event, l, PipelineContext{}, entries, fieldTypes)
+}
+
 func buildURLPayload(event string, l *leads.Lead, pctx PipelineContext, entries []OutboundFieldMapEntry, fieldTypes map[string]string) ([]byte, error) {
 	tctx := buildTemplateContext(event, l, pctx)
 	out := map[string]string{}

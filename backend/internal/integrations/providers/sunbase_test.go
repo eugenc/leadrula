@@ -16,7 +16,7 @@ func TestDoSunbaseRequest_unableToFindSiteOn200(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	res, err := doSunbaseRequest(context.Background(), http.MethodPost, srv.URL, map[string]string{"schema_name": "sunbrightsolarusa"})
+	res, err := doSunbaseRequest(context.Background(), http.MethodPost, srv.URL, map[string]string{"schema_name": "sunbrightsolarusa"}, nil)
 	if err == nil {
 		t.Fatal("expected error for unable to find site response")
 	}
@@ -42,7 +42,7 @@ func TestDoSunbaseRequest_successWithUUID(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	res, err := doSunbaseRequest(context.Background(), http.MethodPost, srv.URL, nil)
+	res, err := doSunbaseRequest(context.Background(), http.MethodPost, srv.URL, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestDoSunbaseRequest_successWithPlainTextID(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	res, err := doSunbaseRequest(context.Background(), http.MethodPost, srv.URL, nil)
+	res, err := doSunbaseRequest(context.Background(), http.MethodPost, srv.URL, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -184,13 +184,44 @@ func TestResolveSunbaseFieldValue_datetimeWithoutTypeMap(t *testing.T) {
 	}
 }
 
+func TestBuildSunbaseParams_skippedEmptyFields(t *testing.T) {
+	fid := int64(22)
+	payload := DeliveryPayload{
+		FirstName: "Manuel",
+		CustomFields: map[string]any{
+			"23": "note",
+		},
+	}
+	entries := []SunbaseFieldMapEntry{
+		{DestKey: "first_name", SourceType: "builtin", BuiltinField: strPtr("first_name")},
+		{DestKey: "appt_time", SourceType: "custom", CustomFieldID: &fid},
+		{DestKey: "apptComments", SourceType: "custom", CustomFieldID: int64Ptr(23)},
+		{DestKey: "email", SourceType: "builtin", BuiltinField: strPtr("email")},
+	}
+	vals, skipped := buildSunbaseParams("test", entries, payload)
+	if vals.Get("first_name") != "Manuel" {
+		t.Fatalf("first_name = %q", vals.Get("first_name"))
+	}
+	if vals.Get("apptComments") != "note" {
+		t.Fatalf("apptComments = %q", vals.Get("apptComments"))
+	}
+	if skipped["appt_time"] != "missing custom field value" {
+		t.Fatalf("appt_time skip = %q", skipped["appt_time"])
+	}
+	if skipped["email"] != "empty" {
+		t.Fatalf("email skip = %q", skipped["email"])
+	}
+}
+
+func int64Ptr(n int64) *int64 { return &n }
+
 func TestBuildDeliveryRequestLog_queryParams(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPost, "https://example.com/post?first_name=Eugene&dob=1988%2F22%2F12", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	mapped := map[string]string{"first_name": "Eugene", "dob": "1988/22/12"}
-	raw := BuildDeliveryRequestLog(mapped, req, nil)
+	raw := BuildDeliveryRequestLog(mapped, req, nil, nil)
 	var log DeliveryRequestLog
 	if err := json.Unmarshal(raw, &log); err != nil {
 		t.Fatal(err)
