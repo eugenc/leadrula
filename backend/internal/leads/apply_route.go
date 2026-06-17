@@ -127,13 +127,14 @@ func applyContractRoute(ctx context.Context, q database.Querier, deps RouteApply
 }
 
 type contractDistributionParams struct {
-	ContractID       int64
-	CompensationID   *int64
-	TargetStageID    *int64
-	Delivery         string
-	RouteFieldMaps   []routing.RouteFieldMapEntry
-	BillingLabel     string
-	ClearPreassigned bool
+	ContractID         int64
+	CompensationID     *int64
+	PreassignedBuyerID *int64
+	TargetStageID      *int64
+	Delivery           string
+	RouteFieldMaps     []routing.RouteFieldMapEntry
+	BillingLabel       string
+	ClearPreassigned   bool
 }
 
 // ApplyContractDistribution moves a lead to a buyer via contract.
@@ -149,9 +150,17 @@ func ApplyContractDistribution(ctx context.Context, q database.Querier, deps Rou
 	if cb := costBasisFromLead(lead); cb != nil {
 		leadCost = *cb
 	}
-	target, err := contracts.GetTargetForRoute(ctx, q, p.ContractID, p.CompensationID, leadCost)
+	var target *contracts.Target
+	if p.PreassignedBuyerID != nil {
+		target, err = contracts.GetTargetForPreassignedBuyer(ctx, q, p.ContractID, *p.PreassignedBuyerID)
+	} else {
+		target, err = contracts.GetTargetForRoute(ctx, q, p.ContractID, p.CompensationID, leadCost)
+	}
 	if err != nil {
 		return nil, err
+	}
+	if p.PreassignedBuyerID != nil && target.BuyerID != *p.PreassignedBuyerID {
+		return nil, httpx.BusinessRule("pre-assigned buyer does not match contract participation")
 	}
 	if err := contracts.RequireFieldMappingComplete(ctx, q, p.ContractID, target.BuyerID, target.ParticipationID); err != nil {
 		return nil, err
@@ -272,10 +281,12 @@ func TryApplyPreassignedBuyer(ctx context.Context, q database.Querier, deps Rout
 	if err != nil {
 		return nil, err
 	}
+	buyerID := *lead.PreassignedBuyerID
 	return ApplyContractDistribution(ctx, q, deps, contractDistributionParams{
-		ContractID:       contractID,
-		BillingLabel:     "lead pre-assigned",
-		ClearPreassigned: true,
+		ContractID:         contractID,
+		PreassignedBuyerID: &buyerID,
+		BillingLabel:       "lead pre-assigned",
+		ClearPreassigned:   true,
 	}, leadID)
 }
 

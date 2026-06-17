@@ -1,10 +1,15 @@
 import type { AccountType, Lead } from "@/types";
 
-/** Mirrors backend boardStageExpr in leads/repository.go */
+/** Mirrors backend boardStageSQL in leads/repository.go */
 export function computeBoardStageId(
-  lead: Pick<Lead, "publisher_stage_id" | "owner_account_id" | "publisher_id" | "stage_id">
+  lead: Pick<Lead, "publisher_stage_id" | "owner_account_id" | "publisher_id" | "stage_id">,
+  accountType: AccountType | undefined
 ): number | null {
-  if (lead.publisher_stage_id != null && lead.owner_account_id !== lead.publisher_id) {
+  if (
+    accountType === "publisher" &&
+    lead.publisher_stage_id != null &&
+    lead.owner_account_id !== lead.publisher_id
+  ) {
     return lead.publisher_stage_id;
   }
   return lead.stage_id ?? null;

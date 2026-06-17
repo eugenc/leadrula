@@ -3,6 +3,7 @@ import { get, ns, patch, post, del } from "@/lib/api";
 import { chunk } from "@/lib/chunk";
 import { toast } from "@/store/toastStore";
 import { computeBoardStageId } from "./boardStage";
+import { useAuthStore } from "@/store/authStore";
 import type {
   Lead,
   LeadListResponse,
@@ -108,6 +109,7 @@ export type StageChangePayload =
 
 export function useChangeStage() {
   const qc = useQueryClient();
+  const accountType = useAuthStore((s) => s.user?.account_type);
   return useMutation({
     mutationFn: ({ leadId, payload }: { leadId: number; payload: StageChangePayload }) =>
       patch<Lead>(`${ns()}/leads/${leadId}/stage`, payload),
@@ -119,7 +121,7 @@ export function useChangeStage() {
           items: old.items.map((l) => {
             if (l.id !== leadId) return l;
             const merged = { ...l, ...updated };
-            return { ...merged, board_stage_id: computeBoardStageId(merged) };
+            return { ...merged, board_stage_id: computeBoardStageId(merged, accountType) };
           }),
         };
       });

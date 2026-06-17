@@ -158,6 +158,23 @@ func RequireActiveContract(ctx context.Context, q database.Querier, contractID i
 	return nil
 }
 
+// GetTargetForPreassignedBuyer loads the routing target for a buyer's active participation on a contract.
+func GetTargetForPreassignedBuyer(ctx context.Context, q database.Querier, contractID, buyerID int64) (*Target, error) {
+	var participationID int64
+	err := q.QueryRow(ctx,
+		`SELECT id FROM contract_participations
+		 WHERE contract_id = $1 AND buyer_id = $2 AND status = 'active'
+		 ORDER BY id LIMIT 1`,
+		contractID, buyerID).Scan(&participationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, httpx.BusinessRule("pre-assigned buyer has no active participation on this contract")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return loadParticipationTarget(ctx, q, participationID)
+}
+
 // FindActiveContractByBuyerPipeline returns the active contract for a buyer on a publisher pipeline.
 func FindActiveContractByBuyerPipeline(ctx context.Context, q database.Querier, publisherID, buyerID, sourcePipelineID int64) (int64, error) {
 	var contractID int64
@@ -166,6 +183,20 @@ func FindActiveContractByBuyerPipeline(ctx context.Context, q database.Querier, 
 		 WHERE publisher_id=$1 AND buyer_id=$2 AND source_pipeline_id=$3
 		   AND status='active' AND deleted_at IS NULL
 		 ORDER BY id DESC LIMIT 1`,
+		publisherID, buyerID, sourcePipelineID).Scan(&contractID)
+	if err == nil {
+		return contractID, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return 0, err
+	}
+	err = q.QueryRow(ctx,
+		`SELECT c.id FROM contracts c
+		 JOIN contract_participations p ON p.contract_id = c.id
+		 WHERE c.publisher_id = $1 AND c.source_pipeline_id = $3
+		   AND p.buyer_id = $2 AND p.status = 'active'
+		   AND c.status = 'active' AND c.deleted_at IS NULL
+		 ORDER BY c.id DESC LIMIT 1`,
 		publisherID, buyerID, sourcePipelineID).Scan(&contractID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

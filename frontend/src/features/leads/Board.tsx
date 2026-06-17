@@ -52,8 +52,8 @@ import { useAuthStore } from "@/store/authStore";
 import { computeBoardStageId, isPublisherTrackedLead } from "./boardStage";
 import type { AccountType, Lead, Stage } from "@/types";
 
-function boardStageId(lead: Lead): number {
-  return computeBoardStageId(lead) ?? 0;
+function boardStageId(lead: Lead, accountType: AccountType | undefined): number {
+  return computeBoardStageId(lead, accountType) ?? 0;
 }
 
 function isDragBlocked(lead: Lead, accountType: AccountType | undefined): boolean {
@@ -188,11 +188,11 @@ export function Board() {
   useEffect(() => {
     const grouped: Record<number, Lead[]> = {};
     for (const l of leads?.items ?? []) {
-      const sid = boardStageId(l);
+      const sid = boardStageId(l, accountType);
       (grouped[sid] ??= []).push(l);
     }
     setBoard(grouped);
-  }, [leads?.items]);
+  }, [leads?.items, accountType]);
 
   const [prompt, setPrompt] = useState<{ leadId: number; stage: Stage } | null>(null);
   const [activeDrag, setActiveDrag] = useState<Lead | null>(null);
@@ -209,7 +209,7 @@ export function Board() {
   function revert() {
     const grouped: Record<number, Lead[]> = {};
     for (const l of leads?.items ?? []) {
-      const sid = boardStageId(l);
+      const sid = boardStageId(l, accountType);
       (grouped[sid] ??= []).push(l);
     }
     setBoard(grouped);

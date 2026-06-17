@@ -38,8 +38,35 @@ const leadCols = `id, public_id, owner_account_id, publisher_id, contract_id,
 	pipeline_id, stage_id, publisher_pipeline_id, publisher_stage_id, position, assigned_user_id, preassigned_buyer_id, action_at, status,
 	disqualification_reason_id, created_at, updated_at, tags`
 
-const boardStageExpr = `CASE WHEN l.publisher_stage_id IS NOT NULL AND l.owner_account_id <> l.publisher_id
+func boardStageSQL(accountType string) string {
+	if accountType == "publisher" {
+		return `CASE WHEN l.publisher_stage_id IS NOT NULL AND l.owner_account_id <> l.publisher_id
 	THEN l.publisher_stage_id ELSE l.stage_id END`
+	}
+	return `l.stage_id`
+}
+
+func listSelect(accountType string) string {
+	return `l.id, l.public_id, l.owner_account_id, l.publisher_id, l.contract_id,
+	l.first_name, l.last_name, l.phone, l.email, l.address, l.city, l.state, l.zip, l.source, l.external_id,
+	l.cost, l.revenue,
+	l.pipeline_id, l.stage_id, l.publisher_pipeline_id, l.publisher_stage_id, l.position, l.assigned_user_id, l.preassigned_buyer_id, l.action_at, l.status,
+	l.disqualification_reason_id, l.created_at, l.updated_at, l.tags,
+	CASE WHEN ba.type = 'buyer' THEN ba.name ELSE NULL END AS buyer_name,
+	pba.name AS preassigned_buyer_name,
+	rs.name AS source_name,
+	u.full_name AS assignee_name,
+	u.prefs->>'avatar_url' AS assignee_avatar_url,
+	pl.name AS pipeline_name,
+	st.name AS stage_name,
+	` + boardStageSQL(accountType) + ` AS board_stage_id,
+	COALESCE(
+		(SELECT h.created_at FROM lead_stage_history h
+		 WHERE h.lead_id = l.id AND h.to_stage_id = l.stage_id
+		 ORDER BY h.created_at DESC, h.id DESC LIMIT 1),
+		l.created_at
+	) AS stage_entered_at`
+}
 
 const leadNotDeleted = `deleted_at IS NULL`
 
@@ -284,7 +311,6 @@ var listSortCols = map[string]string{
 	"stage_name":       "st.name",
 	"stage_entered_at": "stage_entered_at",
 	"position":         "l.position",
-	"board_stage_id":   boardStageExpr,
 }
 
 const listFrom = ` FROM leads l
@@ -294,26 +320,6 @@ const listFrom = ` FROM leads l
 	LEFT JOIN users u ON u.id = l.assigned_user_id
 	LEFT JOIN pipelines pl ON pl.id = l.pipeline_id
 	LEFT JOIN pipeline_stages st ON st.id = l.stage_id`
-
-const listSelect = `l.id, l.public_id, l.owner_account_id, l.publisher_id, l.contract_id,
-	l.first_name, l.last_name, l.phone, l.email, l.address, l.city, l.state, l.zip, l.source, l.external_id,
-	l.cost, l.revenue,
-	l.pipeline_id, l.stage_id, l.publisher_pipeline_id, l.publisher_stage_id, l.position, l.assigned_user_id, l.preassigned_buyer_id, l.action_at, l.status,
-	l.disqualification_reason_id, l.created_at, l.updated_at, l.tags,
-	CASE WHEN ba.type = 'buyer' THEN ba.name ELSE NULL END AS buyer_name,
-	pba.name AS preassigned_buyer_name,
-	rs.name AS source_name,
-	u.full_name AS assignee_name,
-	u.prefs->>'avatar_url' AS assignee_avatar_url,
-	pl.name AS pipeline_name,
-	st.name AS stage_name,
-	` + boardStageExpr + ` AS board_stage_id,
-	COALESCE(
-		(SELECT h.created_at FROM lead_stage_history h
-		 WHERE h.lead_id = l.id AND h.to_stage_id = l.stage_id
-		 ORDER BY h.created_at DESC, h.id DESC LIMIT 1),
-		l.created_at
-	) AS stage_entered_at`
 
 func scanListLead(row pgx.Row) (*Lead, error) {
 	l := &Lead{}
@@ -482,7 +488,10 @@ func defaultListOrderBy() string {
 	return "l.created_at DESC, l.id DESC"
 }
 
-func listOrderBy(sort, sortDir string) string {
+func listOrderBy(accountType, sort, sortDir string) string {
+	if sort == "board_stage_id" {
+		return boardStageSQL(accountType) + " " + sortDirection(sortDir) + " NULLS LAST, l.id DESC"
+	}
 	col, ok := listSortCols[sort]
 	if !ok {
 		return defaultListOrderBy()
@@ -490,9 +499,9 @@ func listOrderBy(sort, sortDir string) string {
 	return col + " " + sortDirection(sortDir) + " NULLS LAST, l.id DESC"
 }
 
-func (r *Repository) resolveListSort(ctx context.Context, accountID int64, sort, sortDir string, argLen int) (orderBy, extraJoin string, extraArgs []any) {
+func (r *Repository) resolveListSort(ctx context.Context, accountID int64, accountType, sort, sortDir string, argLen int) (orderBy, extraJoin string, extraArgs []any) {
 	if !strings.HasPrefix(sort, "custom_") {
-		return listOrderBy(sort, sortDir), "", nil
+		return listOrderBy(accountType, sort, sortDir), "", nil
 	}
 	fieldID, err := strconv.ParseInt(strings.TrimPrefix(sort, "custom_"), 10, 64)
 	if err != nil {
@@ -543,10 +552,10 @@ func (r *Repository) List(ctx context.Context, p *auth.Principal, o ListOptions)
 	}
 	offset := (page - 1) * limit
 
-	orderBy, extraJoin, sortArgs := r.resolveListSort(ctx, p.AccountID, o.Sort, o.SortDir, len(args))
+	orderBy, extraJoin, sortArgs := r.resolveListSort(ctx, p.AccountID, p.AccountType, o.Sort, o.SortDir, len(args))
 	qArgs := append([]any{}, args...)
 	qArgs = append(qArgs, sortArgs...)
-	q := `SELECT ` + listSelect + listFrom + extraJoin + ` WHERE ` + where + ` ORDER BY ` + orderBy
+	q := `SELECT ` + listSelect(p.AccountType) + listFrom + extraJoin + ` WHERE ` + where + ` ORDER BY ` + orderBy
 	if !o.All && o.Limit > 0 {
 		q += fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(qArgs)+1, len(qArgs)+2)
 		qArgs = append(qArgs, limit, offset)
