@@ -4,7 +4,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { LeadCard } from "./LeadCard";
 import { cn } from "@/lib/utils";
 import { stageColorDot, stageColorLine } from "@/features/pipelines/stageColors";
-import type { CustomField, Lead, Stage } from "@/types";
+import { isBoardDraggable } from "./boardStage";
+import type { AccountType, CustomField, Lead, Stage } from "@/types";
 
 function VirtualLeadRow({
   lead,
@@ -32,7 +33,10 @@ function VirtualLeadRow({
   return (
     <div
       ref={setNodeRef}
-      className={cn((isDragging || isDragOverlaySource) && "opacity-40")}
+      className={cn(
+        draggable ? "cursor-grab active:cursor-grabbing" : "cursor-default",
+        (isDragging || isDragOverlaySource) && "opacity-40"
+      )}
       {...(draggable ? listeners : {})}
       {...(draggable ? attributes : {})}
     >
@@ -54,7 +58,7 @@ export function BoardColumn({
   rowHeight,
   onCardClick,
   activeDragId,
-  accountId,
+  accountType,
 }: {
   stage: Stage;
   items: Lead[];
@@ -63,7 +67,7 @@ export function BoardColumn({
   rowHeight: number;
   onCardClick: (leadId: number) => void;
   activeDragId: string | null;
-  accountId?: string;
+  accountType?: AccountType;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { setNodeRef, isOver } = useDroppable({
@@ -135,7 +139,7 @@ export function BoardColumn({
                   cardFields={cardFields}
                   onClick={() => onCardClick(lead.id)}
                   isDragOverlaySource={activeDragId === String(lead.id)}
-                  draggable={accountId == null || lead.owner_account_id === Number(accountId)}
+                  draggable={isBoardDraggable(lead, accountType)}
                 />
               </div>
             );

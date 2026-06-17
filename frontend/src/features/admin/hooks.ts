@@ -641,7 +641,13 @@ export function useSaveContractLeadCriteria() {
   return useMutation({
     mutationFn: ({ contractId, body }: { contractId: number; body: ContractLeadCriteria }) =>
       patch(`/publisher/contracts/${contractId}/lead-criteria`, body),
-    onSuccess: (_, v) => qc.invalidateQueries({ queryKey: ["contract-lead-criteria", v.contractId] }),
+    onSuccess: (_, v) => {
+      qc.invalidateQueries({ queryKey: ["contract-lead-criteria", v.contractId] });
+      qc.invalidateQueries({ queryKey: ["buyer-contract-field-map-options", v.contractId] });
+      qc.invalidateQueries({ queryKey: ["buyer-contract-field-map", v.contractId] });
+      qc.invalidateQueries({ queryKey: ["buyer-participation-field-map-options"] });
+      qc.invalidateQueries({ queryKey: ["buyer-participation-field-map"] });
+    },
   });
 }
 

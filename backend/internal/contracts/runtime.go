@@ -157,3 +157,21 @@ func RequireActiveContract(ctx context.Context, q database.Querier, contractID i
 	}
 	return nil
 }
+
+// FindActiveContractByBuyerPipeline returns the active contract for a buyer on a publisher pipeline.
+func FindActiveContractByBuyerPipeline(ctx context.Context, q database.Querier, publisherID, buyerID, sourcePipelineID int64) (int64, error) {
+	var contractID int64
+	err := q.QueryRow(ctx,
+		`SELECT id FROM contracts
+		 WHERE publisher_id=$1 AND buyer_id=$2 AND source_pipeline_id=$3
+		   AND status='active' AND deleted_at IS NULL
+		 ORDER BY id DESC LIMIT 1`,
+		publisherID, buyerID, sourcePipelineID).Scan(&contractID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, httpx.BusinessRule("no active contract for buyer on this pipeline")
+		}
+		return 0, err
+	}
+	return contractID, nil
+}

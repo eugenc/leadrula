@@ -75,7 +75,7 @@ func (s *Service) loadLeadCriteria(ctx context.Context, contractID int64) (*Lead
 	}
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, field_type, COALESCE(builtin_field,''), custom_field_id
-		 FROM contract_required_fields WHERE contract_id = $1 ORDER BY id`, contractID)
+		 FROM contract_required_fields WHERE contract_id = $1 AND participation_id IS NULL ORDER BY id`, contractID)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +93,7 @@ func (s *Service) loadLeadCriteria(ctx context.Context, contractID int64) (*Lead
 
 	rows, err = s.pool.Query(ctx,
 		`SELECT id, src_type, COALESCE(src_builtin,''), src_custom_field_id, dst_type, COALESCE(dst_builtin,''), dst_custom_field_id
-		 FROM contract_field_map WHERE contract_id = $1 ORDER BY id`, contractID)
+		 FROM contract_field_map WHERE contract_id = $1 AND participation_id IS NULL ORDER BY id`, contractID)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +109,7 @@ func (s *Service) loadLeadCriteria(ctx context.Context, contractID int64) (*Lead
 
 	rows, err = s.pool.Query(ctx,
 		`SELECT id, field_type, COALESCE(builtin_field,''), custom_field_id, operator, value
-		 FROM contract_filter_rules WHERE contract_id = $1 ORDER BY id`, contractID)
+		 FROM contract_filter_rules WHERE contract_id = $1 AND participation_id IS NULL ORDER BY id`, contractID)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +126,7 @@ func (s *Service) loadLeadCriteria(ctx context.Context, contractID int64) (*Lead
 	rows.Close()
 
 	rows, err = s.pool.Query(ctx,
-		`SELECT id, buyer_stage_id, on_fail FROM contract_quality_rules WHERE contract_id = $1 ORDER BY id`, contractID)
+		`SELECT id, buyer_stage_id, on_fail FROM contract_quality_rules WHERE contract_id = $1 AND participation_id IS NULL ORDER BY id`, contractID)
 	if err != nil {
 		return nil, err
 	}
@@ -154,11 +154,10 @@ func (s *Service) SaveLeadCriteria(ctx context.Context, publisherID, contractID 
 
 	for _, table := range []string{
 		"contract_required_fields",
-		"contract_field_map",
 		"contract_filter_rules",
 		"contract_quality_rules",
 	} {
-		if _, err := tx.Exec(ctx, `DELETE FROM `+table+` WHERE contract_id = $1`, contractID); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM `+table+` WHERE contract_id = $1 AND participation_id IS NULL`, contractID); err != nil {
 			return err
 		}
 	}

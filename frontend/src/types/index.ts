@@ -168,6 +168,8 @@ export interface Lead {
   updated_at: string;
   custom_values: Record<string, unknown>;
   buyer_name?: string | null;
+  preassigned_buyer_id?: number | null;
+  preassigned_buyer_name?: string | null;
   source_name?: string | null;
   assignee_name?: string | null;
   assignee_avatar_url?: string | null;

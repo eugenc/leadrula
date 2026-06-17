@@ -180,7 +180,7 @@ export function cellValue(lead: Lead, colId: string, customFields: CustomField[]
     case "source":
       return leadSourceLabel(lead);
     case "buyer":
-      return lead.buyer_name ?? "—";
+      return lead.buyer_name ?? lead.preassigned_buyer_name ?? "—";
     case "assignee":
       return lead.assignee_name ?? "—";
     case "pipeline":

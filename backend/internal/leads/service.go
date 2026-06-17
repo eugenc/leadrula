@@ -140,14 +140,22 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 			return nil, nil, err
 		}
 		if rt != nil {
-			enqueue, emails, err := TryApplyMatchedRoute(ctx, tx, deps, rt, leadID)
-			if err != nil {
-				return nil, nil, err
-			}
-			pendingEmails = append(pendingEmails, emails...)
-			if enqueue {
-				enqueueRouteID = rt.ID
-				enqueueBranchPos = rt.MatchedBranchPosition
+			if lead.PreassignedBuyerID != nil {
+				emails, err := TryApplyPreassignedBuyer(ctx, tx, deps, lead, leadID)
+				if err != nil {
+					return nil, nil, err
+				}
+				pendingEmails = append(pendingEmails, emails...)
+			} else {
+				enqueue, emails, err := TryApplyMatchedRoute(ctx, tx, deps, rt, leadID)
+				if err != nil {
+					return nil, nil, err
+				}
+				pendingEmails = append(pendingEmails, emails...)
+				if enqueue {
+					enqueueRouteID = rt.ID
+					enqueueBranchPos = rt.MatchedBranchPosition
+				}
 			}
 			updated, err = s.repo.GetByID(ctx, tx, leadID)
 			if err != nil {

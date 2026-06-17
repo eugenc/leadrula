@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { get, ns, patch, post, del } from "@/lib/api";
 import { chunk } from "@/lib/chunk";
 import { toast } from "@/store/toastStore";
+import { computeBoardStageId } from "./boardStage";
 import type {
   Lead,
   LeadListResponse,
@@ -115,7 +116,11 @@ export function useChangeStage() {
         if (!old?.items) return old;
         return {
           ...old,
-          items: old.items.map((l) => (l.id === leadId ? { ...l, ...updated } : l)),
+          items: old.items.map((l) => {
+            if (l.id !== leadId) return l;
+            const merged = { ...l, ...updated };
+            return { ...merged, board_stage_id: computeBoardStageId(merged) };
+          }),
         };
       });
       qc.setQueryData(["lead", leadId], updated);

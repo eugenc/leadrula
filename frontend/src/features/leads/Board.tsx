@@ -49,15 +49,15 @@ import {
   PIPELINE_COLUMNS,
 } from "./leadsListColumns";
 import { useAuthStore } from "@/store/authStore";
-import type { Lead, Stage } from "@/types";
+import { computeBoardStageId, isPublisherTrackedLead } from "./boardStage";
+import type { AccountType, Lead, Stage } from "@/types";
 
 function boardStageId(lead: Lead): number {
-  return lead.board_stage_id ?? lead.stage_id ?? 0;
+  return computeBoardStageId(lead) ?? 0;
 }
 
-function isTrackedLead(lead: Lead, accountId: string | undefined): boolean {
-  if (!accountId) return false;
-  return lead.owner_account_id !== Number(accountId) && lead.publisher_id === Number(accountId);
+function isDragBlocked(lead: Lead, accountType: AccountType | undefined): boolean {
+  return accountType === "publisher" && isPublisherTrackedLead(lead);
 }
 
 function resolveDropStage(over: DragEndEvent["over"]): number | null {
@@ -73,7 +73,7 @@ function estimateRowHeight(cardFieldCount: number): number {
 }
 
 export function Board() {
-  const accountId = useAuthStore((s) => s.user?.account_id);
+  const accountType = useAuthStore((s) => s.user?.account_type);
   const { data: pipelines, isLoading: plLoading } = usePipelines();
   const [pipelineId, setPipelineId] = useState<number | undefined>();
   useEffect(() => {
@@ -249,14 +249,14 @@ export function Board() {
 
   function onDragStart(event: DragStartEvent) {
     const lead = event.active.data.current?.lead as Lead | undefined;
-    if (lead && isTrackedLead(lead, accountId)) return;
+    if (lead && isDragBlocked(lead, accountType)) return;
     if (lead) setActiveDrag(lead);
   }
 
   function onDragEnd(event: DragEndEvent) {
     setActiveDrag(null);
     const lead = event.active.data.current?.lead as Lead | undefined;
-    if (lead && isTrackedLead(lead, accountId)) return;
+    if (lead && isDragBlocked(lead, accountType)) return;
     const { active, over } = event;
     if (!over) return;
 
@@ -372,7 +372,7 @@ export function Board() {
               rowHeight={rowHeight}
               onCardClick={openDetail}
               activeDragId={activeDrag ? String(activeDrag.id) : null}
-              accountId={accountId}
+              accountType={accountType}
             />
           ))}
         </div>

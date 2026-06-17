@@ -35,7 +35,7 @@ var builtinFields = map[string]bool{
 const leadCols = `id, public_id, owner_account_id, publisher_id, contract_id,
 	first_name, last_name, phone, email, address, city, state, zip, source, external_id,
 	cost, revenue,
-	pipeline_id, stage_id, publisher_pipeline_id, publisher_stage_id, position, assigned_user_id, action_at, status,
+	pipeline_id, stage_id, publisher_pipeline_id, publisher_stage_id, position, assigned_user_id, preassigned_buyer_id, action_at, status,
 	disqualification_reason_id, created_at, updated_at, tags`
 
 const boardStageExpr = `CASE WHEN l.publisher_stage_id IS NOT NULL AND l.owner_account_id <> l.publisher_id
@@ -48,7 +48,7 @@ func scanLead(row pgx.Row) (*Lead, error) {
 	err := row.Scan(&l.ID, &l.PublicID, &l.OwnerAccountID, &l.PublisherID, &l.ContractID,
 		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.Source, &l.ExternalID,
 		&l.Cost, &l.Revenue,
-		&l.PipelineID, &l.StageID, &l.PublisherPipelineID, &l.PublisherStageID, &l.Position, &l.AssignedUserID, &l.ActionAt, &l.Status,
+		&l.PipelineID, &l.StageID, &l.PublisherPipelineID, &l.PublisherStageID, &l.Position, &l.AssignedUserID, &l.PreassignedBuyerID, &l.ActionAt, &l.Status,
 		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt, &l.Tags)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -185,15 +185,16 @@ func (r *Repository) GetByRef(ctx context.Context, p *auth.Principal, ref string
 
 func (r *Repository) attachLeadNames(ctx context.Context, l *Lead) error {
 	return r.pool.QueryRow(ctx,
-		`SELECT CASE WHEN ba.type = 'buyer' THEN ba.name ELSE NULL END, rs.name,
+		`SELECT CASE WHEN ba.type = 'buyer' THEN ba.name ELSE NULL END, pba.name, rs.name,
 		        u.full_name, u.prefs->>'avatar_url', pl.name, st.name
 		 FROM leads l
 		 LEFT JOIN accounts ba ON ba.id = l.owner_account_id AND ba.type = 'buyer'
+		 LEFT JOIN accounts pba ON pba.id = l.preassigned_buyer_id
 		 LEFT JOIN routing_sources rs ON rs.slug = l.source AND rs.publisher_id = l.publisher_id
 		 LEFT JOIN users u ON u.id = l.assigned_user_id
 		 LEFT JOIN pipelines pl ON pl.id = l.pipeline_id
 		 LEFT JOIN pipeline_stages st ON st.id = l.stage_id
-		 WHERE l.id = $1`, l.ID).Scan(&l.BuyerName, &l.SourceName, &l.AssigneeName, &l.AssigneeAvatarURL, &l.PipelineName, &l.StageName)
+		 WHERE l.id = $1`, l.ID).Scan(&l.BuyerName, &l.PreassignedBuyerName, &l.SourceName, &l.AssigneeName, &l.AssigneeAvatarURL, &l.PipelineName, &l.StageName)
 }
 
 func (r *Repository) attachCustomValues(ctx context.Context, l *Lead) error {
@@ -295,6 +296,7 @@ var listSortCols = map[string]string{
 
 const listFrom = ` FROM leads l
 	LEFT JOIN accounts ba ON ba.id = l.owner_account_id AND ba.type = 'buyer'
+	LEFT JOIN accounts pba ON pba.id = l.preassigned_buyer_id
 	LEFT JOIN routing_sources rs ON rs.slug = l.source AND rs.publisher_id = l.publisher_id
 	LEFT JOIN users u ON u.id = l.assigned_user_id
 	LEFT JOIN pipelines pl ON pl.id = l.pipeline_id
@@ -303,9 +305,10 @@ const listFrom = ` FROM leads l
 const listSelect = `l.id, l.public_id, l.owner_account_id, l.publisher_id, l.contract_id,
 	l.first_name, l.last_name, l.phone, l.email, l.address, l.city, l.state, l.zip, l.source, l.external_id,
 	l.cost, l.revenue,
-	l.pipeline_id, l.stage_id, l.publisher_pipeline_id, l.publisher_stage_id, l.position, l.assigned_user_id, l.action_at, l.status,
+	l.pipeline_id, l.stage_id, l.publisher_pipeline_id, l.publisher_stage_id, l.position, l.assigned_user_id, l.preassigned_buyer_id, l.action_at, l.status,
 	l.disqualification_reason_id, l.created_at, l.updated_at, l.tags,
 	CASE WHEN ba.type = 'buyer' THEN ba.name ELSE NULL END AS buyer_name,
+	pba.name AS preassigned_buyer_name,
 	rs.name AS source_name,
 	u.full_name AS assignee_name,
 	u.prefs->>'avatar_url' AS assignee_avatar_url,
@@ -324,8 +327,8 @@ func scanListLead(row pgx.Row) (*Lead, error) {
 	err := row.Scan(&l.ID, &l.PublicID, &l.OwnerAccountID, &l.PublisherID, &l.ContractID,
 		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.Source, &l.ExternalID,
 		&l.Cost, &l.Revenue,
-		&l.PipelineID, &l.StageID, &l.PublisherPipelineID, &l.PublisherStageID, &l.Position, &l.AssignedUserID, &l.ActionAt, &l.Status,
-		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt, &l.Tags, &l.BuyerName, &l.SourceName, &l.AssigneeName, &l.AssigneeAvatarURL,
+		&l.PipelineID, &l.StageID, &l.PublisherPipelineID, &l.PublisherStageID, &l.Position, &l.AssignedUserID, &l.PreassignedBuyerID, &l.ActionAt, &l.Status,
+		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt, &l.Tags, &l.BuyerName, &l.PreassignedBuyerName, &l.SourceName, &l.AssigneeName, &l.AssigneeAvatarURL,
 		&l.PipelineName, &l.StageName, &l.BoardStageID, &l.StageEnteredAt)
 	if err != nil {
 		return nil, err
@@ -662,6 +665,50 @@ func (r *Repository) SetAssignee(ctx context.Context, accountID, leadID int64, u
 
 func (r *Repository) setAssignee(ctx context.Context, q database.Querier, accountID, leadID int64, userID *int64) error {
 	_, err := q.Exec(ctx, `UPDATE leads SET assigned_user_id=$3 WHERE id=$1 AND owner_account_id=$2`, leadID, accountID, userID)
+	return err
+}
+
+func (r *Repository) SetPreassignedBuyer(ctx context.Context, publisherID, leadID int64, buyerID *int64) error {
+	var ownerID, pubID int64
+	var contractID *int64
+	var status string
+	err := r.pool.QueryRow(ctx,
+		`SELECT owner_account_id, publisher_id, contract_id, status FROM leads WHERE id=$1 AND deleted_at IS NULL`,
+		leadID).Scan(&ownerID, &pubID, &contractID, &status)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return httpx.NotFound("lead not found")
+		}
+		return err
+	}
+	if ownerID != publisherID || pubID != publisherID {
+		return httpx.BusinessRule("lead is not publisher-owned")
+	}
+	if contractID != nil {
+		return httpx.BusinessRule("lead is already distributed")
+	}
+	if status != "review" {
+		return httpx.BusinessRule("buyer can only be pre-assigned on leads in review")
+	}
+	if buyerID != nil {
+		var ok bool
+		if err := r.pool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM partnerships WHERE publisher_id=$1 AND buyer_id=$2 AND status='active')`,
+			publisherID, *buyerID).Scan(&ok); err != nil {
+			return err
+		}
+		if !ok {
+			return httpx.Validation("no active partnership with this buyer")
+		}
+	}
+	_, err = r.pool.Exec(ctx,
+		`UPDATE leads SET preassigned_buyer_id=$3 WHERE id=$1 AND owner_account_id=$2`,
+		leadID, publisherID, buyerID)
+	return err
+}
+
+func (r *Repository) ClearPreassignedBuyer(ctx context.Context, q database.Querier, leadID int64) error {
+	_, err := q.Exec(ctx, `UPDATE leads SET preassigned_buyer_id=NULL WHERE id=$1`, leadID)
 	return err
 }
 

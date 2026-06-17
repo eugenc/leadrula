@@ -111,7 +111,34 @@ func applyContractRoute(ctx context.Context, q database.Querier, deps RouteApply
 	if route.ContractID == nil {
 		return nil, httpx.BusinessRule("route missing contract")
 	}
-	if err := contracts.RequireActiveContract(ctx, q, *route.ContractID); err != nil {
+	maps, err := routing.RouteFieldMap(ctx, q, route.ID)
+	if err != nil {
+		return nil, err
+	}
+	return ApplyContractDistribution(ctx, q, deps, contractDistributionParams{
+		ContractID:       *route.ContractID,
+		CompensationID:   route.CompensationID,
+		TargetStageID:    route.TargetStageID,
+		Delivery:         route.Delivery,
+		RouteFieldMaps:   maps,
+		BillingLabel:     "lead routed: " + route.Name,
+		ClearPreassigned: false,
+	}, leadID)
+}
+
+type contractDistributionParams struct {
+	ContractID       int64
+	CompensationID   *int64
+	TargetStageID    *int64
+	Delivery         string
+	RouteFieldMaps   []routing.RouteFieldMapEntry
+	BillingLabel     string
+	ClearPreassigned bool
+}
+
+// ApplyContractDistribution moves a lead to a buyer via contract.
+func ApplyContractDistribution(ctx context.Context, q database.Querier, deps RouteApplyDeps, p contractDistributionParams, leadID int64) ([]notifications.EmailJob, error) {
+	if err := contracts.RequireActiveContract(ctx, q, p.ContractID); err != nil {
 		return nil, err
 	}
 	lead, err := deps.Repo.GetByID(ctx, q, leadID)
@@ -122,11 +149,11 @@ func applyContractRoute(ctx context.Context, q database.Querier, deps RouteApply
 	if cb := costBasisFromLead(lead); cb != nil {
 		leadCost = *cb
 	}
-	target, err := contracts.GetTargetForRoute(ctx, q, *route.ContractID, route.CompensationID, leadCost)
+	target, err := contracts.GetTargetForRoute(ctx, q, p.ContractID, p.CompensationID, leadCost)
 	if err != nil {
 		return nil, err
 	}
-	if err := contracts.RequireFieldMappingComplete(ctx, q, *route.ContractID, target.BuyerID, target.ParticipationID); err != nil {
+	if err := contracts.RequireFieldMappingComplete(ctx, q, p.ContractID, target.BuyerID, target.ParticipationID); err != nil {
 		return nil, err
 	}
 	if err := CheckDuplicate(ctx, q, target.BuyerID, lead.Phone, lead.Email, leadID); err != nil {
@@ -135,14 +162,12 @@ func applyContractRoute(ctx context.Context, q database.Querier, deps RouteApply
 	if err := LoadCustomValues(ctx, q, lead); err != nil {
 		return nil, err
 	}
-	maps, err := routing.RouteFieldMap(ctx, q, route.ID)
-	if err != nil {
-		return nil, err
+	if len(p.RouteFieldMaps) > 0 {
+		if err := ApplyRouteFieldMap(ctx, q, deps.Repo, lead, p.RouteFieldMaps); err != nil {
+			return nil, err
+		}
 	}
-	if err := ApplyRouteFieldMap(ctx, q, deps.Repo, lead, maps); err != nil {
-		return nil, err
-	}
-	contractMaps, err := contracts.ContractFieldMapForRoute(ctx, q, *route.ContractID, target.ParticipationID)
+	contractMaps, err := contracts.ContractFieldMapForRoute(ctx, q, p.ContractID, target.ParticipationID)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +183,7 @@ func applyContractRoute(ctx context.Context, q database.Querier, deps RouteApply
 	}
 
 	contractID := target.ID
-	delivery := route.Delivery
+	delivery := p.Delivery
 	if target.Delivery != "" {
 		delivery = target.Delivery
 	}
@@ -166,19 +191,22 @@ func applyContractRoute(ctx context.Context, q database.Querier, deps RouteApply
 		if err := deps.Repo.TransferOwner(ctx, q, leadID, target.BuyerID, &contractID); err != nil {
 			return nil, err
 		}
-		if delivery == "leads" || delivery == "webhook" {
-			if err := deps.Repo.SetStatus(ctx, q, leadID, "review"); err != nil {
+		if err := deps.Repo.SetStatus(ctx, q, leadID, "review"); err != nil {
+			return nil, err
+		}
+		if p.ClearPreassigned {
+			if err := deps.Repo.ClearPreassignedBuyer(ctx, q, leadID); err != nil {
 				return nil, err
 			}
-			return nil, enqueueParticipationIntegration(ctx, deps, target, lead)
 		}
+		return nil, enqueueParticipationIntegration(ctx, deps, target, lead)
 	}
 
 	var destStage int64
 	if target.BuyerStageID != 0 {
 		destStage = target.BuyerStageID
-	} else if route.TargetStageID != nil && *route.TargetStageID != 0 {
-		destStage = *route.TargetStageID
+	} else if p.TargetStageID != nil && *p.TargetStageID != 0 {
+		destStage = *p.TargetStageID
 	} else {
 		if err := q.QueryRow(ctx,
 			`SELECT id FROM pipeline_stages WHERE pipeline_id=$1 ORDER BY position, id LIMIT 1`,
@@ -196,7 +224,7 @@ func applyContractRoute(ctx context.Context, q database.Querier, deps RouteApply
 		return nil, err
 	}
 	costBasis := costBasisFromLead(lead)
-	if err := billing.Debit(ctx, q, target.BuyerID, target.RatePerLead, leadID, target.ID, "lead routed: "+route.Name); err != nil {
+	if err := billing.Debit(ctx, q, target.BuyerID, target.RatePerLead, leadID, target.ID, p.BillingLabel); err != nil {
 		return nil, err
 	}
 	if err := contracts.RecordEarningDistribute(ctx, q, target.CompensationID, leadID, target.RatePerLead, costBasis); err != nil {
@@ -207,6 +235,11 @@ func applyContractRoute(ctx context.Context, q database.Querier, deps RouteApply
 	}
 	if err := deps.Repo.SetStatus(ctx, q, leadID, "distributed"); err != nil {
 		return nil, err
+	}
+	if p.ClearPreassigned {
+		if err := deps.Repo.ClearPreassignedBuyer(ctx, q, leadID); err != nil {
+			return nil, err
+		}
 	}
 	updated, err := deps.Repo.GetByID(ctx, q, leadID)
 	if err != nil {
@@ -225,6 +258,25 @@ func applyContractRoute(ctx context.Context, q database.Querier, deps RouteApply
 		return nil, err
 	}
 	return emails, nil
+}
+
+// TryApplyPreassignedBuyer distributes a lead to its pre-assigned buyer when a trigger stage is reached.
+func TryApplyPreassignedBuyer(ctx context.Context, q database.Querier, deps RouteApplyDeps, lead *Lead, leadID int64) ([]notifications.EmailJob, error) {
+	if lead.PreassignedBuyerID == nil {
+		return nil, httpx.BusinessRule("no pre-assigned buyer")
+	}
+	if lead.PipelineID == nil || *lead.PipelineID == 0 {
+		return nil, httpx.BusinessRule("lead has no pipeline for contract lookup")
+	}
+	contractID, err := contracts.FindActiveContractByBuyerPipeline(ctx, q, lead.PublisherID, *lead.PreassignedBuyerID, *lead.PipelineID)
+	if err != nil {
+		return nil, err
+	}
+	return ApplyContractDistribution(ctx, q, deps, contractDistributionParams{
+		ContractID:       contractID,
+		BillingLabel:     "lead pre-assigned",
+		ClearPreassigned: true,
+	}, leadID)
 }
 
 func enqueueParticipationIntegration(ctx context.Context, deps RouteApplyDeps, target *contracts.Target, lead *Lead) error {

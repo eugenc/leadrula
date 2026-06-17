@@ -22,11 +22,13 @@ var builtinFieldLabels = map[string]string{
 }
 
 type leadUpdateInput struct {
-	Fields         map[string]*string
-	AssignedUserID *int64
-	ClearAssignee  bool
-	CustomValues   map[string]json.RawMessage
-	Tags           *[]string
+	Fields               map[string]*string
+	AssignedUserID       *int64
+	ClearAssignee        bool
+	PreassignedBuyerID   *int64
+	ClearPreassignedBuyer bool
+	CustomValues         map[string]json.RawMessage
+	Tags                 *[]string
 }
 
 func assigneeLabel(name *string) string {
@@ -111,6 +113,13 @@ func stageChange(fromName, toName string) []auth.ImpersonationChange {
 	return []auth.ImpersonationChange{{Field: "Stage", From: from, To: toName}}
 }
 
+func preassignedBuyerLabel(name *string) string {
+	if name == nil || *name == "" {
+		return "None"
+	}
+	return *name
+}
+
 func diffLeadUpdate(before *Lead, after *Lead, in leadUpdateInput, fieldNames map[string]string) []auth.ImpersonationChange {
 	var changes []auth.ImpersonationChange
 
@@ -146,6 +155,23 @@ func diffLeadUpdate(before *Lead, after *Lead, in leadUpdateInput, fieldNames ma
 		if from != to {
 			changes = append(changes, auth.ImpersonationChange{
 				Field: "Assignee", From: from, To: to,
+			})
+		}
+	}
+
+	if in.ClearPreassignedBuyer {
+		from := preassignedBuyerLabel(before.PreassignedBuyerName)
+		if from != "None" {
+			changes = append(changes, auth.ImpersonationChange{
+				Field: "Pre-assigned buyer", From: from, To: "None",
+			})
+		}
+	} else if in.PreassignedBuyerID != nil {
+		from := preassignedBuyerLabel(before.PreassignedBuyerName)
+		to := preassignedBuyerLabel(after.PreassignedBuyerName)
+		if from != to {
+			changes = append(changes, auth.ImpersonationChange{
+				Field: "Pre-assigned buyer", From: from, To: to,
 			})
 		}
 	}

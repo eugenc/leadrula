@@ -59,7 +59,19 @@ import {
 } from "@/features/admin/contractSectionCompleteness";
 import { buildContractPayload } from "@/features/admin/contractDraftPayload";
 import { PublisherContractReturnRoutesSection } from "@/features/admin/PublisherContractReturnRoutesSection";
-import type { Contract } from "@/types";
+import type { Contract, ContractLeadCriteria } from "@/types";
+
+function leadCriteriaForCompare(c: ContractLeadCriteria) {
+  return {
+    required_fields: c.required_fields ?? [],
+    filter_rules: c.filter_rules ?? [],
+    quality_rules: c.quality_rules ?? [],
+  };
+}
+
+function leadCriteriaEqual(a: ContractLeadCriteria, b: ContractLeadCriteria) {
+  return JSON.stringify(leadCriteriaForCompare(a)) === JSON.stringify(leadCriteriaForCompare(b));
+}
 
 export function ContractDetailDrawer({
   contract,
@@ -556,7 +568,9 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
   const offerSaveable =
     isOpenOffer && offerDirty && openOfferDeliveryComplete(offerDraft, deliveryDraft);
   const offerBlocked = isOpenOffer && offerDirty && !openOfferDeliveryComplete(offerDraft, deliveryDraft);
-  const footerDirty = !unchanged || offerSaveable;
+  const savedCriteria = leadCriteriaData ?? emptyLeadCriteria();
+  const criteriaDirty = !leadCriteriaEqual(leadCriteria, savedCriteria);
+  const footerDirty = !unchanged || offerSaveable || criteriaDirty;
   const activeStatuses = CONTRACT_STATUSES.filter((s) => s.value !== "draft");
 
   function offerSaveBody() {
@@ -582,6 +596,19 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
     );
   }
 
+  function saveLeadCriteriaSettings(onSuccess?: () => void) {
+    saveCriteria.mutate(
+      { contractId: contract.id, body: leadCriteria },
+      {
+        onSuccess: () => {
+          toast.success("Lead criteria saved");
+          onSuccess?.();
+        },
+        onError: (e) => toast.error(errorMessage(e)),
+      }
+    );
+  }
+
   function saveDetails() {
     const body: Record<string, unknown> = {};
     const trimmed = name.trim();
@@ -591,32 +618,18 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
     if (status !== contract.status) body.status = status;
     const hasDetails = Object.keys(body).length > 0;
 
-    if (offerSaveable && hasDetails) {
-      update.mutate(
-        { id: contract.id, body },
-        {
-          onSuccess: () => {
-            toast.success("Contract saved");
-            saveOfferSettings();
-          },
-          onError: (e) => toast.error(errorMessage(e)),
-        }
-      );
-      return;
-    }
-    if (hasDetails) {
-      update.mutate(
-        { id: contract.id, body },
-        {
-          onSuccess: () => toast.success("Contract saved"),
-          onError: (e) => toast.error(errorMessage(e)),
-        }
-      );
-      return;
-    }
-    if (offerSaveable) {
-      saveOfferSettings();
-    }
+    if (!hasDetails && !criteriaDirty && !offerSaveable) return;
+
+    void (async () => {
+      try {
+        if (hasDetails) await update.mutateAsync({ id: contract.id, body });
+        if (criteriaDirty) await saveCriteria.mutateAsync({ contractId: contract.id, body: leadCriteria });
+        if (offerSaveable) await saveOffer.mutateAsync({ contractId: contract.id, body: offerSaveBody() });
+        toast.success("Contract saved");
+      } catch (e) {
+        toast.error(errorMessage(e));
+      }
+    })();
   }
 
   function setContractStatus(next: string, successMessage: string) {
@@ -807,16 +820,8 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
                 <Button
                   className="mt-3"
                   variant="secondary"
-                  disabled={saveCriteria.isPending}
-                  onClick={() =>
-                    saveCriteria.mutate(
-                      { contractId: contract.id, body: leadCriteria },
-                      {
-                        onSuccess: () => toast.success("Lead criteria saved"),
-                        onError: (e) => toast.error(errorMessage(e)),
-                      }
-                    )
-                  }
+                  disabled={!criteriaDirty || saveCriteria.isPending}
+                  onClick={() => saveLeadCriteriaSettings()}
                 >
                   Save lead criteria
                 </Button>
@@ -857,7 +862,14 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
         )}
         <Button
           className="min-w-[10.5rem]"
-          disabled={!footerDirty || offerBlocked || invalid || update.isPending || saveOffer.isPending}
+          disabled={
+            !footerDirty ||
+            offerBlocked ||
+            invalid ||
+            update.isPending ||
+            saveOffer.isPending ||
+            saveCriteria.isPending
+          }
           onClick={saveDetails}
         >
           Save details

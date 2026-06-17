@@ -238,11 +238,13 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Fields         map[string]*string         `json:"fields"`
-		AssignedUserID *int64                     `json:"assigned_user_id"`
-		ClearAssignee  bool                       `json:"clear_assignee"`
-		CustomValues   map[string]json.RawMessage `json:"custom_values"`
-		Tags           *[]string                  `json:"tags"`
+		Fields                map[string]*string         `json:"fields"`
+		AssignedUserID        *int64                     `json:"assigned_user_id"`
+		ClearAssignee         bool                       `json:"clear_assignee"`
+		PreassignedBuyerID    *int64                     `json:"preassigned_buyer_id"`
+		ClearPreassignedBuyer bool                       `json:"clear_preassigned_buyer"`
+		CustomValues          map[string]json.RawMessage `json:"custom_values"`
+		Tags                  *[]string                  `json:"tags"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
@@ -266,6 +268,24 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if body.AssignedUserID != nil {
 		if err := h.svc.repo.SetAssignee(r.Context(), p.AccountID, leadID, body.AssignedUserID); err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+	}
+	if body.ClearPreassignedBuyer || body.PreassignedBuyerID != nil {
+		if p.Role != "admin" {
+			httpx.WriteError(w, httpx.Forbidden("only admins can pre-assign buyers"))
+			return
+		}
+		if p.AccountType != "publisher" {
+			httpx.WriteError(w, httpx.Forbidden("only publishers can pre-assign buyers"))
+			return
+		}
+		var buyerID *int64
+		if !body.ClearPreassignedBuyer {
+			buyerID = body.PreassignedBuyerID
+		}
+		if err := h.svc.repo.SetPreassignedBuyer(r.Context(), p.AccountID, leadID, buyerID); err != nil {
 			httpx.WriteError(w, err)
 			return
 		}
@@ -304,11 +324,13 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		in := leadUpdateInput{
-			Fields:         body.Fields,
-			AssignedUserID: body.AssignedUserID,
-			ClearAssignee:  body.ClearAssignee,
-			CustomValues:   body.CustomValues,
-			Tags:           body.Tags,
+			Fields:                body.Fields,
+			AssignedUserID:        body.AssignedUserID,
+			ClearAssignee:         body.ClearAssignee,
+			PreassignedBuyerID:    body.PreassignedBuyerID,
+			ClearPreassignedBuyer: body.ClearPreassignedBuyer,
+			CustomValues:          body.CustomValues,
+			Tags:                  body.Tags,
 		}
 		auth.ApplyImpersonationChanges(r, diffLeadUpdate(before, l, in, fieldNames))
 	}

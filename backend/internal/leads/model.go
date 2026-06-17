@@ -27,8 +27,9 @@ type Lead struct {
 	PublisherStageID     *int64 `json:"publisher_stage_id,omitempty"`
 	BoardStageID         *int64 `json:"board_stage_id,omitempty"`
 	Position             int    `json:"position"`
-	AssignedUserID   *int64          `json:"assigned_user_id"`
-	ActionAt         *time.Time      `json:"action_at"`
+	AssignedUserID      *int64 `json:"assigned_user_id"`
+	PreassignedBuyerID  *int64 `json:"preassigned_buyer_id,omitempty"`
+	ActionAt            *time.Time `json:"action_at"`
 	Status           string          `json:"status"`
 	DisqReasonID     *int64          `json:"disqualification_reason_id"`
 	RawPayload       json.RawMessage `json:"raw_payload,omitempty"`
@@ -36,7 +37,8 @@ type Lead struct {
 	UpdatedAt        time.Time       `json:"updated_at"`
 	DeletedAt        *time.Time      `json:"deleted_at,omitempty"`
 	CustomValues     map[string]json.RawMessage `json:"custom_values"`
-	BuyerName         *string                   `json:"buyer_name,omitempty"`
+	BuyerName              *string `json:"buyer_name,omitempty"`
+	PreassignedBuyerName   *string `json:"preassigned_buyer_name,omitempty"`
 	SourceName        *string                   `json:"source_name,omitempty"`
 	AssigneeName      *string                   `json:"assignee_name,omitempty"`
 	AssigneeAvatarURL *string                   `json:"assignee_avatar_url,omitempty"`

@@ -32,6 +32,9 @@ import { stageNeedsPrompt, stagePromptMissingError } from "@/features/pipelines/
 import type { Lead, Stage } from "@/types";
 import { formatStatus, leadSourceLabel } from "./leadsListColumns";
 import { LeadTagsEditor } from "./LeadTagsEditor";
+import { useQuery } from "@tanstack/react-query";
+import { get } from "@/lib/api";
+import type { BuyerSummary } from "@/types";
 import { effectiveFieldFormat } from "@/features/admin/customFieldConstants";
 import {
   fromNativeDatetimeLocal,
@@ -161,6 +164,18 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   const removeLead = useDeleteLead();
   const { data: users } = useUsers();
   const { data: customFields } = useCustomFields();
+
+  const canEditPreassignedBuyer =
+    isAdmin &&
+    user?.account_type === "publisher" &&
+    lead.status === "review" &&
+    !lead.contract_id &&
+    lead.owner_account_id === lead.publisher_id;
+  const { data: buyers } = useQuery({
+    queryKey: ["buyers"],
+    queryFn: () => get<BuyerSummary[]>("/publisher/buyers"),
+    enabled: canEditPreassignedBuyer,
+  });
 
   const [fields, setFields] = useState<Record<string, string>>({});
   const [actionAtLocal, setActionAtLocal] = useState("");
@@ -299,10 +314,44 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
                     </div>
                   </div>
                 )}
-                <div>
-                  <Label>Buyer</Label>
-                  <div className="mt-1 text-sm text-gray-700">{lead.buyer_name ?? "—"}</div>
-                </div>
+                {canEditPreassignedBuyer ? (
+                  <div>
+                    <Label>Buyer</Label>
+                    <Select
+                      value={lead.preassigned_buyer_id ?? ""}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        update.mutate(
+                          {
+                            leadId: lead.id,
+                            body: val
+                              ? { preassigned_buyer_id: Number(val) }
+                              : { clear_preassigned_buyer: true },
+                          },
+                          {
+                            onSuccess: () => toast.success("Saved"),
+                            onError: (err) => toast.error(errorMessage(err)),
+                          }
+                        );
+                      }}
+                      disabled={update.isPending}
+                    >
+                      <option value="">None</option>
+                      {(buyers ?? []).map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                ) : (
+                  <div>
+                    <Label>Buyer</Label>
+                    <div className="mt-1 text-sm text-gray-700">
+                      {lead.buyer_name ?? lead.preassigned_buyer_name ?? "—"}
+                    </div>
+                  </div>
+                )}
                 <LeadPipelineFields lead={lead} />
               </div>
             </div>
