@@ -5,11 +5,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 
 	"github.com/echayko/leadrula/backend/pkg/httpx"
+	"github.com/jackc/pgx/v5"
 )
 
 const sunbaseDefaultEndpoint = "https://server4.sunbasedata.com/sunbase/portal/api/lead_post.jsp"
@@ -36,7 +38,6 @@ var defaultSunbaseInboundFields = []SunbaseInboundField{
 	{SourceKey: "state", BuiltinField: "state"},
 	{SourceKey: "zip", BuiltinField: "zip"},
 	{SourceKey: "uuid", BuiltinField: "external_id"},
-	{SourceKey: "id", BuiltinField: "external_id"},
 	{SourceKey: "lead_source", BuiltinField: "source"},
 }
 
@@ -183,7 +184,7 @@ func (s *Service) ProvisionSunbaseWebhooks(
 	return ids, nil
 }
 
-// SyncSunbaseInboundEvent clears inbound create-event conditions so Create and Update payloads upsert by external_id.
+// SyncSunbaseInboundEvent clears inbound create-event conditions and ensures uuid → external_id mapping.
 func (s *Service) SyncSunbaseInboundEvent(ctx context.Context, inboundWebhookID int64) error {
 	if inboundWebhookID <= 0 {
 		return nil
@@ -192,6 +193,66 @@ func (s *Service) SyncSunbaseInboundEvent(ctx context.Context, inboundWebhookID 
 		`UPDATE webhook_events SET conditions='[]'::jsonb
 		 WHERE webhook_id=$1 AND action='create'`,
 		inboundWebhookID)
+	if err != nil {
+		return err
+	}
+	return s.ensureSunbaseInboundUUIDFieldMap(ctx, inboundWebhookID)
+}
+
+// SyncAllSunbaseInboundWebhooks repairs inbound webhook config for every SunBase connection.
+func (s *Service) SyncAllSunbaseInboundWebhooks(ctx context.Context) error {
+	rows, err := s.pool.Query(ctx,
+		`SELECT w.id FROM webhooks w
+		 JOIN integration_connections ic ON ic.id = w.integration_connection_id
+		 JOIN integration_providers ip ON ip.id = ic.provider_id
+		 WHERE ip.slug = 'sunbase' AND w.inbound_enabled`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var webhookID int64
+		if err := rows.Scan(&webhookID); err != nil {
+			return err
+		}
+		if err := s.SyncSunbaseInboundEvent(ctx, webhookID); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func (s *Service) ensureSunbaseInboundUUIDFieldMap(ctx context.Context, inboundWebhookID int64) error {
+	var eventID int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT id FROM webhook_events WHERE webhook_id=$1 AND action='create' ORDER BY id LIMIT 1`,
+		inboundWebhookID).Scan(&eventID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx,
+		`DELETE FROM webhook_event_field_map
+		 WHERE event_id=$1 AND source_key='id' AND target_type='builtin' AND builtin_field='external_id'`,
+		eventID)
+	if err != nil {
+		return err
+	}
+	var hasUUID bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(
+		   SELECT 1 FROM webhook_event_field_map
+		   WHERE event_id=$1 AND source_key='uuid' AND target_type='builtin' AND builtin_field='external_id'
+		 )`, eventID).Scan(&hasUUID); err != nil {
+		return err
+	}
+	if hasUUID {
+		return nil
+	}
+	bf := "external_id"
+	_, err = s.AddFieldMap(ctx, eventID, "uuid", "builtin", &bf, nil)
 	return err
 }
 

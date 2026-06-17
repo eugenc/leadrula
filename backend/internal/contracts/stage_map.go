@@ -9,114 +9,56 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-type stageRow struct {
-	id        int64
-	stageType string
+type returnRuleStage struct {
+	buyerStageID  int64
+	returnStageID int64
 }
 
-func loadPipelineStages(ctx context.Context, q database.Querier, pipelineID int64) ([]stageRow, error) {
-	if pipelineID == 0 {
-		return nil, nil
+// RebuildStageMapParams optional overrides when rebuilding before the DB row is updated.
+type RebuildStageMapParams struct {
+	BuyerTargetStageID int64
+}
+
+func buildDeliveryStageMaps(buyerTargetStageID, sourceStageID int64, rules []returnRuleStage) map[int64]int64 {
+	out := make(map[int64]int64)
+	if buyerTargetStageID > 0 && sourceStageID > 0 {
+		out[buyerTargetStageID] = sourceStageID
 	}
-	rows, err := q.Query(ctx,
-		`SELECT id, stage_type FROM pipeline_stages WHERE pipeline_id = $1 ORDER BY position, id`,
-		pipelineID)
+	for _, r := range rules {
+		if r.buyerStageID > 0 && r.returnStageID > 0 {
+			out[r.buyerStageID] = r.returnStageID
+		}
+	}
+	return out
+}
+
+func loadReturnRules(ctx context.Context, q database.Querier, contractID int64, participationID *int64) ([]returnRuleStage, error) {
+	var rows pgx.Rows
+	var err error
+	if participationID == nil {
+		rows, err = q.Query(ctx,
+			`SELECT buyer_stage_id, return_stage_id FROM contract_return_rules
+			 WHERE contract_id = $1 AND participation_id IS NULL`,
+			contractID)
+	} else {
+		rows, err = q.Query(ctx,
+			`SELECT buyer_stage_id, return_stage_id FROM contract_return_rules
+			 WHERE contract_id = $1 AND participation_id = $2`,
+			contractID, *participationID)
+	}
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []stageRow
+	var out []returnRuleStage
 	for rows.Next() {
-		var s stageRow
-		if err := rows.Scan(&s.id, &s.stageType); err != nil {
+		var r returnRuleStage
+		if err := rows.Scan(&r.buyerStageID, &r.returnStageID); err != nil {
 			return nil, err
 		}
-		out = append(out, s)
+		out = append(out, r)
 	}
 	return out, rows.Err()
-}
-
-func publisherStageByType(stages []stageRow, stageType string) (int64, bool) {
-	for _, s := range stages {
-		if s.stageType == stageType {
-			return s.id, true
-		}
-	}
-	return 0, false
-}
-
-func lastPublisherStage(stages []stageRow) int64 {
-	if len(stages) == 0 {
-		return 0
-	}
-	return stages[len(stages)-1].id
-}
-
-func publisherWonStage(pubStages []stageRow, fallbackStageID int64) (int64, error) {
-	if id, ok := publisherStageByType(pubStages, "won"); ok {
-		return id, nil
-	}
-	if fallbackStageID > 0 {
-		return fallbackStageID, nil
-	}
-	if id := lastPublisherStage(pubStages); id > 0 {
-		return id, nil
-	}
-	return 0, httpx.Validation("publisher pipeline has no stages for won mapping")
-}
-
-func buildStageMaps(buyerStages, pubStages []stageRow, pubWonFallback int64) (map[int64]int64, error) {
-	if len(buyerStages) == 0 {
-		return nil, httpx.Validation("buyer pipeline has no stages")
-	}
-	if len(pubStages) == 0 {
-		return nil, httpx.Validation("publisher pipeline has no stages")
-	}
-	buyerWon, hasBuyerWon := publisherStageByType(buyerStages, "won")
-	if !hasBuyerWon {
-		return nil, httpx.Validation("buyer pipeline must have a Won stage for stage sync")
-	}
-	pubWon, err := publisherWonStage(pubStages, pubWonFallback)
-	if err != nil {
-		return nil, err
-	}
-
-	out := make(map[int64]int64, len(buyerStages))
-	if len(buyerStages) == len(pubStages) {
-		for i, bs := range buyerStages {
-			out[bs.id] = pubStages[i].id
-		}
-	} else {
-		pubByType := map[string][]int64{}
-		for _, ps := range pubStages {
-			pubByType[ps.stageType] = append(pubByType[ps.stageType], ps.id)
-		}
-		used := map[int64]bool{}
-		for _, bs := range buyerStages {
-			candidates := pubByType[bs.stageType]
-			var pubStageID int64
-			switch len(candidates) {
-			case 0:
-				return nil, httpx.Validation("buyer and publisher pipelines must have matching stage counts or matching stage types for sync")
-			case 1:
-				pubStageID = candidates[0]
-			default:
-				for _, id := range candidates {
-					if !used[id] {
-						pubStageID = id
-						break
-					}
-				}
-				if pubStageID == 0 {
-					pubStageID = candidates[0]
-				}
-			}
-			out[bs.id] = pubStageID
-			used[pubStageID] = true
-		}
-	}
-	out[buyerWon] = pubWon
-	return out, nil
 }
 
 func saveStageMaps(ctx context.Context, q database.Querier, contractID int64, participationID *int64, maps map[int64]int64) error {
@@ -151,49 +93,68 @@ func saveStageMaps(ctx context.Context, q database.Querier, contractID int64, pa
 	return nil
 }
 
-// RebuildContractStageMaps rebuilds buyer→publisher stage maps for a direct contract.
-func RebuildContractStageMaps(ctx context.Context, q database.Querier, contractID int64) error {
-	var sourcePipelineID, buyerPipelineID, returnStageID *int64
+// RebuildContractStageMaps stores delivery-only buyer→publisher stage maps for a direct contract.
+func RebuildContractStageMaps(ctx context.Context, q database.Querier, contractID int64, params ...RebuildStageMapParams) error {
+	var overrides RebuildStageMapParams
+	if len(params) > 0 {
+		overrides = params[0]
+	}
+
+	var sourcePipelineID, sourceStageID, buyerPipelineID *int64
+	var buyerTargetStageID *int64
 	err := q.QueryRow(ctx,
-		`SELECT source_pipeline_id, buyer_pipeline_id, return_stage_id FROM contracts WHERE id = $1 AND deleted_at IS NULL`,
-		contractID).Scan(&sourcePipelineID, &buyerPipelineID, &returnStageID)
+		`SELECT c.source_pipeline_id, c.source_stage_id, c.buyer_pipeline_id,
+		        cc.counterparty_stage_id
+		 FROM contracts c
+		 LEFT JOIN LATERAL (
+		   SELECT counterparty_stage_id FROM contract_compensations
+		   WHERE contract_id = c.id AND participation_id IS NULL
+		   ORDER BY position, id LIMIT 1
+		 ) cc ON true
+		 WHERE c.id = $1 AND c.deleted_at IS NULL`,
+		contractID).Scan(&sourcePipelineID, &sourceStageID, &buyerPipelineID, &buyerTargetStageID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return httpx.NotFound("contract not found")
 	}
 	if err != nil {
 		return err
 	}
-	if sourcePipelineID == nil || buyerPipelineID == nil || *sourcePipelineID == 0 || *buyerPipelineID == 0 {
+	if sourcePipelineID == nil || *sourcePipelineID == 0 {
 		_, err = q.Exec(ctx, `DELETE FROM contract_stage_maps WHERE contract_id = $1 AND participation_id IS NULL`, contractID)
 		return err
 	}
-	buyerStages, err := loadPipelineStages(ctx, q, *buyerPipelineID)
+
+	buyerTarget := overrides.BuyerTargetStageID
+	if buyerTarget == 0 {
+		buyerTarget = derefInt64(buyerTargetStageID)
+	}
+
+	rules, err := loadReturnRules(ctx, q, contractID, nil)
 	if err != nil {
 		return err
 	}
-	pubStages, err := loadPipelineStages(ctx, q, *sourcePipelineID)
-	if err != nil {
-		return err
-	}
-	maps, err := buildStageMaps(buyerStages, pubStages, derefInt64(returnStageID))
-	if err != nil {
-		return err
-	}
+	maps := buildDeliveryStageMaps(buyerTarget, derefInt64(sourceStageID), rules)
 	return saveStageMaps(ctx, q, contractID, nil, maps)
 }
 
-// RebuildParticipationStageMaps rebuilds maps for a participation's buyer pipeline.
-func RebuildParticipationStageMaps(ctx context.Context, q database.Querier, contractID, participationID int64) error {
-	var sourcePipelineID *int64
+// RebuildParticipationStageMaps stores delivery-only maps for a participation's buyer pipeline.
+func RebuildParticipationStageMaps(ctx context.Context, q database.Querier, contractID, participationID int64, params ...RebuildStageMapParams) error {
+	var overrides RebuildStageMapParams
+	if len(params) > 0 {
+		overrides = params[0]
+	}
+
+	var sourcePipelineID, sourceStageID *int64
 	var buyerPipelineID int64
-	var returnStageID *int64
+	var buyerTargetStageID *int64
 	err := q.QueryRow(ctx,
-		`SELECT COALESCE(p.source_pipeline_id, c.source_pipeline_id), p.buyer_pipeline_id,
-		        COALESCE(p.return_stage_id, c.return_stage_id)
+		`SELECT COALESCE(p.source_pipeline_id, c.source_pipeline_id),
+		        COALESCE(p.source_stage_id, c.source_stage_id),
+		        p.buyer_pipeline_id, p.buyer_target_stage_id
 		 FROM contract_participations p
 		 JOIN contracts c ON c.id = p.contract_id
 		 WHERE p.id = $1 AND p.contract_id = $2`,
-		participationID, contractID).Scan(&sourcePipelineID, &buyerPipelineID, &returnStageID)
+		participationID, contractID).Scan(&sourcePipelineID, &sourceStageID, &buyerPipelineID, &buyerTargetStageID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return httpx.NotFound("participation not found")
 	}
@@ -205,19 +166,18 @@ func RebuildParticipationStageMaps(ctx context.Context, q database.Querier, cont
 			`DELETE FROM contract_stage_maps WHERE contract_id = $1 AND participation_id = $2`, contractID, participationID)
 		return err
 	}
-	buyerStages, err := loadPipelineStages(ctx, q, buyerPipelineID)
-	if err != nil {
-		return err
+
+	buyerTarget := overrides.BuyerTargetStageID
+	if buyerTarget == 0 {
+		buyerTarget = derefInt64(buyerTargetStageID)
 	}
-	pubStages, err := loadPipelineStages(ctx, q, *sourcePipelineID)
-	if err != nil {
-		return err
-	}
-	maps, err := buildStageMaps(buyerStages, pubStages, derefInt64(returnStageID))
-	if err != nil {
-		return err
-	}
+
 	pid := participationID
+	rules, err := loadReturnRules(ctx, q, contractID, &pid)
+	if err != nil {
+		return err
+	}
+	maps := buildDeliveryStageMaps(buyerTarget, derefInt64(sourceStageID), rules)
 	return saveStageMaps(ctx, q, contractID, &pid, maps)
 }
 
@@ -248,8 +208,7 @@ func RebuildAllActiveContractStageMaps(ctx context.Context, q database.Querier) 
 	rows, err := q.Query(ctx,
 		`SELECT id FROM contracts
 		 WHERE deleted_at IS NULL AND status = 'active'
-		   AND source_pipeline_id IS NOT NULL AND buyer_pipeline_id IS NOT NULL
-		   AND source_pipeline_id > 0 AND buyer_pipeline_id > 0`)
+		   AND source_pipeline_id IS NOT NULL AND source_pipeline_id > 0`)
 	if err != nil {
 		return err
 	}
@@ -286,36 +245,8 @@ func RebuildAllActiveContractStageMaps(ctx context.Context, q database.Querier) 
 	return pRows.Err()
 }
 
-// SyncPublisherStageWithRebuild updates publisher-board placement, rebuilding stage maps once if missing.
+// SyncPublisherStageWithRebuild updates publisher-board placement when a mapped buyer stage exists.
 func SyncPublisherStageWithRebuild(ctx context.Context, q database.Querier, contractID, leadID, buyerID, buyerStageID int64) error {
-	err := SyncPublisherStage(ctx, q, contractID, leadID, buyerID, buyerStageID)
-	if err == nil {
-		return nil
-	}
-	var appErr *httpx.AppError
-	if !errors.As(err, &appErr) || appErr.Code != httpx.CodeBusinessRule {
-		return err
-	}
-	if appErr.Message != "contract stage map is not configured for this buyer stage" {
-		return err
-	}
-
-	var participationID int64
-	partErr := q.QueryRow(ctx,
-		`SELECT id FROM contract_participations
-		 WHERE contract_id = $1 AND buyer_id = $2 AND status = 'active' LIMIT 1`,
-		contractID, buyerID).Scan(&participationID)
-	if partErr == nil {
-		if rbErr := RebuildParticipationStageMaps(ctx, q, contractID, participationID); rbErr != nil {
-			return err
-		}
-	} else if errors.Is(partErr, pgx.ErrNoRows) {
-		if rbErr := RebuildContractStageMaps(ctx, q, contractID); rbErr != nil {
-			return err
-		}
-	} else {
-		return partErr
-	}
 	return SyncPublisherStage(ctx, q, contractID, leadID, buyerID, buyerStageID)
 }
 
@@ -409,9 +340,12 @@ func InitPublisherTracking(ctx context.Context, q database.Querier, contractID, 
 	return setPublisherTracking(ctx, q, leadID, pubPipelineID, pubStageID)
 }
 
-// SyncPublisherStage updates publisher-board placement when a buyer moves a contracted lead.
+// SyncPublisherStage updates publisher-board placement only when an explicit delivery map exists.
 func SyncPublisherStage(ctx context.Context, q database.Querier, contractID, leadID, buyerID, buyerStageID int64) error {
 	pubPipelineID, pubStageID, err := lookupPublisherStage(ctx, q, contractID, buyerID, buyerStageID)
+	if isStageMapMissingErr(err) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

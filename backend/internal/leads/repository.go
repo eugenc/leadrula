@@ -136,6 +136,15 @@ func (r *Repository) UpsertCustomValue(ctx context.Context, q database.Querier, 
 
 // PlaceInPipeline assigns owner + pipeline/stage + contract.
 func (r *Repository) PlaceInPipeline(ctx context.Context, q database.Querier, leadID, ownerAccountID, pipelineID, stageID int64, contractID *int64) error {
+	var ok bool
+	if err := q.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM pipeline_stages WHERE id = $1 AND pipeline_id = $2)`,
+		stageID, pipelineID).Scan(&ok); err != nil {
+		return err
+	}
+	if !ok {
+		return httpx.BusinessRule("stage does not belong to pipeline")
+	}
 	_, err := q.Exec(ctx,
 		`UPDATE leads SET owner_account_id=$2, pipeline_id=$3, stage_id=$4, contract_id=$5,
 		   position = COALESCE((SELECT MAX(position)+1 FROM leads WHERE stage_id=$4),0)

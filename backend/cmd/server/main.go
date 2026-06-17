@@ -152,6 +152,9 @@ func main() {
 	intakeH := intake.NewHandler(intakeSvc, apikeysSvc)
 
 	webhooksSvc := webhooks.NewService(pool, leadsRepo, leadsSvc, encKey, integrationsSvc)
+	if err := webhooksSvc.SyncAllSunbaseInboundWebhooks(ctx); err != nil {
+		log.Printf("warning: sync sunbase inbound webhooks: %v", err)
+	}
 	webhooksH := webhooks.NewHandler(webhooksSvc)
 	leadsSvc.SetWebhookFirer(webhooksSvc)
 	integrationsSvc.SetLeadService(leadsSvc)

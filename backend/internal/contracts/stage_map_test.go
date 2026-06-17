@@ -2,89 +2,42 @@ package contracts
 
 import "testing"
 
-func TestBuildStageMaps_byPosition(t *testing.T) {
-	buyer := []stageRow{{id: 1, stageType: "open"}, {id: 2, stageType: "won"}}
-	pub := []stageRow{{id: 10, stageType: "open"}, {id: 20, stageType: "won"}}
-	maps, err := buildStageMaps(buyer, pub, 0)
-	if err != nil {
-		t.Fatal(err)
+func TestBuildDeliveryStageMaps_entryAndReturnRoutes(t *testing.T) {
+	rules := []returnRuleStage{
+		{buyerStageID: 50, returnStageID: 500},
+		{buyerStageID: 60, returnStageID: 600},
 	}
-	if maps[1] != 10 || maps[2] != 20 {
-		t.Fatalf("maps = %v", maps)
+	maps := buildDeliveryStageMaps(10, 100, rules)
+	if maps[10] != 100 {
+		t.Fatalf("entry map = %d want 100", maps[10])
 	}
-}
-
-func TestBuildStageMaps_byType_actionStage(t *testing.T) {
-	buyer := []stageRow{
-		{id: 1, stageType: "standard"},
-		{id: 2, stageType: "action"},
-		{id: 3, stageType: "won"},
+	if maps[50] != 500 || maps[60] != 600 {
+		t.Fatalf("return route maps = %v", maps)
 	}
-	pub := []stageRow{
-		{id: 10, stageType: "standard"},
-		{id: 20, stageType: "action"},
-		{id: 30, stageType: "won"},
-	}
-	maps, err := buildStageMaps(buyer, pub, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if maps[2] != 20 {
-		t.Fatalf("action stage map = %d want 20", maps[2])
+	if len(maps) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(maps))
 	}
 }
 
-func TestBuildStageMaps_requiresWonOnBuyer(t *testing.T) {
-	buyer := []stageRow{{id: 1, stageType: "open"}}
-	pub := []stageRow{{id: 10, stageType: "open"}, {id: 20, stageType: "won"}}
-	if _, err := buildStageMaps(buyer, pub, 0); err == nil {
-		t.Fatal("expected error when buyer pipeline has no won stage")
+func TestBuildDeliveryStageMaps_mismatchedPipelinesOk(t *testing.T) {
+	// Buyer and publisher pipelines can differ; only explicit delivery + return routes are mapped.
+	maps := buildDeliveryStageMaps(42, 99, nil)
+	if len(maps) != 1 || maps[42] != 99 {
+		t.Fatalf("maps = %v want single entry 42→99", maps)
 	}
 }
 
-func TestBuildStageMaps_pubWithoutWon_usesReturnFallback(t *testing.T) {
-	buyer := []stageRow{
-		{id: 1, stageType: "action"},
-		{id: 2, stageType: "won"},
-	}
-	pub := []stageRow{
-		{id: 10, stageType: "action"},
-		{id: 11, stageType: "standard"},
-	}
-	maps, err := buildStageMaps(buyer, pub, 11)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if maps[2] != 11 {
-		t.Fatalf("buyer won maps to return stage = %d want 11", maps[2])
+func TestBuildDeliveryStageMaps_skipsZeroIDs(t *testing.T) {
+	maps := buildDeliveryStageMaps(0, 100, []returnRuleStage{{buyerStageID: 0, returnStageID: 500}})
+	if len(maps) != 0 {
+		t.Fatalf("expected empty maps, got %v", maps)
 	}
 }
 
-func TestBuildStageMaps_pubWithoutWon_usesLastStage(t *testing.T) {
-	buyer := []stageRow{
-		{id: 1, stageType: "action"},
-		{id: 2, stageType: "won"},
-	}
-	pub := []stageRow{
-		{id: 10, stageType: "action"},
-		{id: 11, stageType: "standard"},
-	}
-	maps, err := buildStageMaps(buyer, pub, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if maps[2] != 11 {
-		t.Fatalf("buyer won maps to last pub stage = %d want 11", maps[2])
-	}
-}
-
-func TestPublisherWonStage(t *testing.T) {
-	pub := []stageRow{{id: 10, stageType: "standard"}, {id: 11, stageType: "action"}}
-	id, err := publisherWonStage(pub, 99)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if id != 99 {
-		t.Fatalf("fallback = %d want 99", id)
+func TestBuildDeliveryStageMaps_returnRuleOverridesSameBuyerStage(t *testing.T) {
+	rules := []returnRuleStage{{buyerStageID: 10, returnStageID: 200}}
+	maps := buildDeliveryStageMaps(10, 100, rules)
+	if maps[10] != 200 {
+		t.Fatalf("return route should win for same buyer stage: %v", maps)
 	}
 }

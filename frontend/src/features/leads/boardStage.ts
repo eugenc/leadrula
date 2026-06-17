@@ -22,6 +22,27 @@ export function isPublisherTrackedLead(
   return lead.owner_account_id !== lead.publisher_id;
 }
 
+/** Synthetic stage id for leads whose stage is missing or not in the selected pipeline. */
+export const UNPLACED_BOARD_STAGE_ID = -1;
+
+export function groupLeadsForBoard(
+  leads: Lead[],
+  pipelineStageIds: Set<number>,
+  accountType: AccountType | undefined
+): { grouped: Record<number, Lead[]>; unplaced: Lead[] } {
+  const grouped: Record<number, Lead[]> = {};
+  const unplaced: Lead[] = [];
+  for (const l of leads) {
+    const sid = computeBoardStageId(l, accountType);
+    if (sid == null || !pipelineStageIds.has(sid)) {
+      unplaced.push(l);
+    } else {
+      (grouped[sid] ??= []).push(l);
+    }
+  }
+  return { grouped, unplaced };
+}
+
 export function isBoardDraggable(
   lead: Pick<Lead, "owner_account_id" | "publisher_id">,
   accountType: AccountType | undefined

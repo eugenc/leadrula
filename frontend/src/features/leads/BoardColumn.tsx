@@ -59,6 +59,7 @@ export function BoardColumn({
   onCardClick,
   activeDragId,
   accountType,
+  droppable = true,
 }: {
   stage: Stage;
   items: Lead[];
@@ -68,11 +69,13 @@ export function BoardColumn({
   onCardClick: (leadId: number) => void;
   activeDragId: string | null;
   accountType?: AccountType;
+  droppable?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { setNodeRef, isOver } = useDroppable({
     id: String(stage.id),
     data: { stageId: stage.id },
+    disabled: !droppable,
   });
 
   const virtualizer = useVirtualizer({

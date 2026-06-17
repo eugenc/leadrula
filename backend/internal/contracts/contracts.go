@@ -1214,9 +1214,6 @@ func (s *Service) UpdateBuyerContractDelivery(ctx context.Context, buyerID, cont
 		if err := applyBuyerStageTriggersToWon(ctx, s.pool, contractID, 0, validated.buyerPipelineID); err != nil {
 			return nil, err
 		}
-		if err := RebuildContractStageMaps(ctx, s.pool, contractID); err != nil {
-			return nil, err
-		}
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -1245,6 +1242,13 @@ func (s *Service) UpdateBuyerContractDelivery(ctx context.Context, buyerID, cont
 	}
 	if res.RowsAffected() == 0 {
 		return nil, httpx.Validation("contract compensation is not configured")
+	}
+	if validated.delivery == "leads_pipeline" {
+		if err := RebuildContractStageMaps(ctx, tx, contractID, RebuildStageMapParams{
+			BuyerTargetStageID: validated.buyerStageID,
+		}); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err

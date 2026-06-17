@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/database"
+	"github.com/echayko/leadrula/backend/internal/integrations/providers"
 	"github.com/echayko/leadrula/backend/internal/leads"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/jackc/pgx/v5"
@@ -123,12 +124,17 @@ func (s *Service) ingestPayload(ctx context.Context, wa *WebhookAuth, slug strin
 	flat := flattenPayload(raw)
 
 	var webhook Webhook
+	var providerSlug *string
 	err := s.pool.QueryRow(ctx,
-		`SELECT id, account_id, name, slug, COALESCE(secret_prefix, ''), is_active, created_at, integration_connection_id
-		 FROM webhooks WHERE id=$1 AND slug=$2 AND is_active`,
+		`SELECT w.id, w.account_id, w.name, w.slug, COALESCE(w.secret_prefix, ''), w.is_active, w.created_at,
+		        w.integration_connection_id, ip.slug
+		 FROM webhooks w
+		 LEFT JOIN integration_connections ic ON ic.id = w.integration_connection_id
+		 LEFT JOIN integration_providers ip ON ip.id = ic.provider_id
+		 WHERE w.id=$1 AND w.slug=$2 AND w.is_active`,
 		wa.WebhookID, slug).Scan(
 		&webhook.ID, &webhook.AccountID, &webhook.Name, &webhook.Slug, &webhook.SecretPrefix,
-		&webhook.IsActive, &webhook.CreatedAt, &webhook.IntegrationConnectionID)
+		&webhook.IsActive, &webhook.CreatedAt, &webhook.IntegrationConnectionID, &providerSlug)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, httpx.NotFound("webhook not found")
@@ -157,11 +163,13 @@ func (s *Service) ingestPayload(ctx context.Context, wa *WebhookAuth, slug strin
 		return nil, httpx.Validation("no matching configured actions")
 	}
 
+	isSunbaseInbound := providerSlug != nil && *providerSlug == "sunbase"
+
 	var results []ActionResult
 	var firstLeadID *int64
 	var firstEventID *int64
 	for _, action := range ready {
-		result, leadID, execErr := s.executeEvent(ctx, webhook.AccountID, action, flat, rawJSON)
+		result, leadID, execErr := s.executeEvent(ctx, webhook.AccountID, action, flat, rawJSON, isSunbaseInbound)
 		if execErr != nil {
 			if !forceProcess {
 				msg := execErr.Error()
@@ -260,7 +268,7 @@ func actionReady(ctx context.Context, s *Service, action *WebhookEvent, flat map
 	}
 }
 
-func (s *Service) executeEvent(ctx context.Context, accountID int64, event *WebhookEvent, flat map[string]any, rawJSON []byte) (*IngestResult, *int64, error) {
+func (s *Service) executeEvent(ctx context.Context, accountID int64, event *WebhookEvent, flat map[string]any, rawJSON []byte, isSunbaseInbound bool) (*IngestResult, *int64, error) {
 	maps, err := s.ListFieldMap(ctx, event.ID)
 	if err != nil {
 		return nil, nil, err
@@ -268,7 +276,7 @@ func (s *Service) executeEvent(ctx context.Context, accountID int64, event *Webh
 
 	switch event.Action {
 	case "create":
-		return s.execCreate(ctx, accountID, event, flat, rawJSON, maps)
+		return s.execCreate(ctx, accountID, event, flat, rawJSON, maps, isSunbaseInbound)
 	case "update":
 		return s.execUpdate(ctx, accountID, event, flat, maps)
 	case "delete":
@@ -280,16 +288,24 @@ func (s *Service) executeEvent(ctx context.Context, accountID int64, event *Webh
 	}
 }
 
-func (s *Service) execCreate(ctx context.Context, accountID int64, event *WebhookEvent, flat map[string]any, rawJSON []byte, maps []FieldMapEntry) (*IngestResult, *int64, error) {
+func (s *Service) execCreate(ctx context.Context, accountID int64, event *WebhookEvent, flat map[string]any, rawJSON []byte, maps []FieldMapEntry, isSunbaseInbound bool) (*IngestResult, *int64, error) {
 	builtins, customs, externalID := applyFieldMaps(flat, maps)
+	storeExternalID := externalID
+	if isSunbaseInbound && externalID != "" {
+		storeExternalID = providers.NormalizeSunbaseExternalID(externalID)
+		builtins["external_id"] = storeExternalID
+	}
 
 	if externalID != "" {
-		existing, err := s.leads.GetByExternalID(ctx, s.leads.Pool(), accountID, externalID)
+		existing, err := s.findLeadByExternalID(ctx, accountID, externalID, isSunbaseInbound)
 		if err == nil && existing != nil {
 			switch *event.DuplicateMode {
 			case "reject":
 				return nil, &existing.ID, httpx.Conflict("lead with this external_id already exists")
 			case "update":
+				if isSunbaseInbound && storeExternalID != "" {
+					builtins["external_id"] = storeExternalID
+				}
 				if err := s.applyMappedFields(ctx, s.leads.Pool(), accountID, existing.ID, flat, maps, builtins, customs); err != nil {
 					return nil, &existing.ID, err
 				}
@@ -297,6 +313,26 @@ func (s *Service) execCreate(ctx context.Context, accountID int64, event *Webhoo
 			case "duplicate":
 				// fall through to create
 			}
+		} else if err != nil {
+			var appErr *httpx.AppError
+			if !errors.As(err, &appErr) || appErr.Code != httpx.CodeNotFound {
+				return nil, nil, err
+			}
+		}
+	}
+
+	if isSunbaseInbound {
+		if lead, err := s.findSunbaseFallbackLead(ctx, accountID, builtins); err == nil && lead != nil {
+			if storeExternalID != "" {
+				if err := s.leads.SetExternalID(ctx, s.leads.Pool(), lead.ID, storeExternalID); err != nil {
+					return nil, &lead.ID, err
+				}
+				builtins["external_id"] = storeExternalID
+			}
+			if err := s.applyMappedFields(ctx, s.leads.Pool(), accountID, lead.ID, flat, maps, builtins, customs); err != nil {
+				return nil, &lead.ID, err
+			}
+			return &IngestResult{LeadID: lead.PublicID, Action: "update", Status: "updated"}, &lead.ID, nil
 		} else if err != nil {
 			var appErr *httpx.AppError
 			if !errors.As(err, &appErr) || appErr.Code != httpx.CodeNotFound {
@@ -464,6 +500,53 @@ func lookupValue(event *WebhookEvent, flat map[string]any, maps []FieldMapEntry)
 		return toText(v)
 	}
 	return ""
+}
+
+func (s *Service) findLeadByExternalID(ctx context.Context, accountID int64, externalID string, sunbase bool) (*leads.Lead, error) {
+	candidates := []string{externalID}
+	if sunbase {
+		candidates = providers.SunbaseExternalIDCandidates(externalID)
+	}
+	var lastErr error
+	for _, id := range candidates {
+		lead, err := s.leads.GetByExternalID(ctx, s.leads.Pool(), accountID, id)
+		if err == nil && lead != nil {
+			return lead, nil
+		}
+		lastErr = err
+		var appErr *httpx.AppError
+		if err != nil && (!errors.As(err, &appErr) || appErr.Code != httpx.CodeNotFound) {
+			return nil, err
+		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, httpx.NotFound("lead not found")
+}
+
+func (s *Service) findSunbaseFallbackLead(ctx context.Context, accountID int64, builtins map[string]string) (*leads.Lead, error) {
+	if phone := strings.TrimSpace(builtins["phone"]); phone != "" {
+		lead, err := s.leads.GetByPhone(ctx, s.leads.Pool(), accountID, phone)
+		if err == nil && lead != nil {
+			return lead, nil
+		}
+		var appErr *httpx.AppError
+		if err != nil && (!errors.As(err, &appErr) || appErr.Code != httpx.CodeNotFound) {
+			return nil, err
+		}
+	}
+	if email := strings.TrimSpace(builtins["email"]); email != "" {
+		lead, err := s.leads.GetByEmail(ctx, s.leads.Pool(), accountID, email)
+		if err == nil && lead != nil {
+			return lead, nil
+		}
+		var appErr *httpx.AppError
+		if err != nil && (!errors.As(err, &appErr) || appErr.Code != httpx.CodeNotFound) {
+			return nil, err
+		}
+	}
+	return nil, httpx.NotFound("lead not found")
 }
 
 func applyFieldMaps(flat map[string]any, maps []FieldMapEntry) (builtins map[string]string, customs map[int64]json.RawMessage, externalID string) {

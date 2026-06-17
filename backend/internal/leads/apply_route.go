@@ -137,6 +137,21 @@ type contractDistributionParams struct {
 	ClearPreassigned   bool
 }
 
+// resolveBuyerDestStage picks the buyer pipeline stage for contract distribution.
+// Never uses publisher route stage IDs — only participation target or first buyer stage.
+func resolveBuyerDestStage(ctx context.Context, q database.Querier, buyerStageID, buyerPipelineID int64) (int64, error) {
+	if buyerStageID != 0 {
+		return buyerStageID, nil
+	}
+	var destStage int64
+	if err := q.QueryRow(ctx,
+		`SELECT id FROM pipeline_stages WHERE pipeline_id=$1 ORDER BY position, id LIMIT 1`,
+		buyerPipelineID).Scan(&destStage); err != nil {
+		return 0, httpx.BusinessRule("target pipeline has no stages")
+	}
+	return destStage, nil
+}
+
 // ApplyContractDistribution moves a lead to a buyer via contract.
 func ApplyContractDistribution(ctx context.Context, q database.Querier, deps RouteApplyDeps, p contractDistributionParams, leadID int64) ([]notifications.EmailJob, error) {
 	if err := contracts.RequireActiveContract(ctx, q, p.ContractID); err != nil {
@@ -211,17 +226,9 @@ func ApplyContractDistribution(ctx context.Context, q database.Querier, deps Rou
 		return nil, enqueueParticipationIntegration(ctx, deps, target, lead)
 	}
 
-	var destStage int64
-	if target.BuyerStageID != 0 {
-		destStage = target.BuyerStageID
-	} else if p.TargetStageID != nil && *p.TargetStageID != 0 {
-		destStage = *p.TargetStageID
-	} else {
-		if err := q.QueryRow(ctx,
-			`SELECT id FROM pipeline_stages WHERE pipeline_id=$1 ORDER BY position, id LIMIT 1`,
-			target.BuyerPipelineID).Scan(&destStage); err != nil {
-			return nil, httpx.BusinessRule("target pipeline has no stages")
-		}
+	destStage, err := resolveBuyerDestStage(ctx, q, target.BuyerStageID, target.BuyerPipelineID)
+	if err != nil {
+		return nil, err
 	}
 	if err := deps.Repo.PlaceInPipeline(ctx, q, leadID, target.BuyerID, target.BuyerPipelineID, destStage, &contractID); err != nil {
 		return nil, err

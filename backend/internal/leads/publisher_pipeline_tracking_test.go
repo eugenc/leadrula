@@ -28,7 +28,7 @@ func TestPublisherPipelineTracking_distributeAndBuyerWon(t *testing.T) {
 	repo := NewRepository(pool)
 
 	var publisherID, buyerID, contractID, pubPipelineID, buyerPipelineID int64
-	var pubStage1, pubWon, buyerStage1, buyerWon int64
+	var pubStage1, buyerStage1, buyerWon int64
 	err := pool.QueryRow(ctx,
 		`SELECT c.publisher_id, c.buyer_id, c.id, c.source_pipeline_id, c.buyer_pipeline_id
 		 FROM contracts c
@@ -48,10 +48,6 @@ func TestPublisherPipelineTracking_distributeAndBuyerWon(t *testing.T) {
 	if err := pool.QueryRow(ctx,
 		`SELECT id FROM pipeline_stages WHERE pipeline_id = $1 ORDER BY position, id LIMIT 1`, pubPipelineID).Scan(&pubStage1); err != nil {
 		t.Fatalf("pub stage: %v", err)
-	}
-	if err := pool.QueryRow(ctx,
-		`SELECT id FROM pipeline_stages WHERE pipeline_id = $1 AND stage_type = 'won' ORDER BY position, id LIMIT 1`, pubPipelineID).Scan(&pubWon); err != nil {
-		t.Fatalf("pub won: %v", err)
 	}
 	if err := pool.QueryRow(ctx,
 		`SELECT id FROM pipeline_stages WHERE pipeline_id = $1 ORDER BY position, id LIMIT 1`, buyerPipelineID).Scan(&buyerStage1); err != nil {
@@ -114,6 +110,12 @@ func TestPublisherPipelineTracking_distributeAndBuyerWon(t *testing.T) {
 	}
 
 	var status string
+	var initialPubStage int64
+	if pubStage == nil {
+		t.Fatal("expected publisher_stage_id after distribute")
+	}
+	initialPubStage = *pubStage
+
 	if err := tx.QueryRow(ctx,
 		`SELECT owner_account_id, publisher_stage_id, status FROM leads WHERE id = $1`, leadID).
 		Scan(&ownerID, pubStage, &status); err != nil {
@@ -122,8 +124,8 @@ func TestPublisherPipelineTracking_distributeAndBuyerWon(t *testing.T) {
 	if ownerID != buyerID {
 		t.Fatal("buyer should still own lead after won")
 	}
-	if pubStage == nil || *pubStage != pubWon {
-		t.Fatalf("publisher_stage_id = %v want won stage %d", pubStage, pubWon)
+	if pubStage == nil || *pubStage != initialPubStage {
+		t.Fatalf("publisher_stage_id = %v want unchanged %d (no auto-sync)", pubStage, initialPubStage)
 	}
 	if status != "closed" {
 		t.Fatalf("status = %q want closed", status)

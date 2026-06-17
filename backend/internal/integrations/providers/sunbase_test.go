@@ -71,6 +71,39 @@ func TestDoSunbaseRequest_successWithPlainTextID(t *testing.T) {
 	}
 }
 
+func TestNormalizeSunbaseExternalID(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"a27665862c664a6e8d6bd6906ad53aa9", "a27665862c664a6e8d6bd6906ad53aa9"},
+		{"cust-4f70f8df-7639-442c-be5c-d44efa235210", "4f70f8df7639442cbe5cd44efa235210"},
+		{"4f70f8df-7639-442c-be5c-d44efa235210", "4f70f8df7639442cbe5cd44efa235210"},
+		{"", ""},
+		{"not-an-id", "not-an-id"},
+	}
+	for _, tc := range tests {
+		if got := NormalizeSunbaseExternalID(tc.in); got != tc.want {
+			t.Fatalf("NormalizeSunbaseExternalID(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestSunbaseExternalIDCandidates(t *testing.T) {
+	cust := "cust-4f70f8df-7639-442c-be5c-d44efa235210"
+	hex := "4f70f8df7639442cbe5cd44efa235210"
+	candidates := SunbaseExternalIDCandidates(cust)
+	if len(candidates) < 2 {
+		t.Fatalf("expected multiple candidates, got %v", candidates)
+	}
+	found := map[string]bool{}
+	for _, c := range candidates {
+		found[c] = true
+	}
+	if !found[cust] || !found[hex] {
+		t.Fatalf("candidates = %v, want cust and hex forms", candidates)
+	}
+}
+
 func TestParseSunbaseExternalID(t *testing.T) {
 	tests := []struct {
 		name string

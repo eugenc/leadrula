@@ -335,6 +335,77 @@ func isSunbaseCustomerID(s string) bool {
 	return sunbaseHexIDRe.MatchString(s)
 }
 
+// NormalizeSunbaseExternalID returns the canonical 32-char hex ID when the input is a valid SunBase customer ID.
+func NormalizeSunbaseExternalID(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	if hex := sunbaseIDToHex(s); hex != "" {
+		return hex
+	}
+	return s
+}
+
+// SunbaseExternalIDCandidates returns lookup variants for the same SunBase customer ID.
+func SunbaseExternalIDCandidates(raw string) []string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(v string) {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return
+		}
+		if _, ok := seen[v]; ok {
+			return
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	add(s)
+	if !isSunbaseCustomerID(s) {
+		return out
+	}
+	if hex := sunbaseIDToHex(s); hex != "" {
+		add(hex)
+		add(sunbaseHexToCust(hex))
+		add(sunbaseHexToDashed(hex))
+	}
+	return out
+}
+
+func sunbaseIDToHex(s string) string {
+	lower := strings.ToLower(strings.TrimSpace(s))
+	if strings.HasPrefix(lower, "cust-") {
+		lower = strings.TrimPrefix(lower, "cust-")
+	}
+	compact := strings.ReplaceAll(lower, "-", "")
+	if sunbaseHexIDRe.MatchString(compact) {
+		return compact
+	}
+	return ""
+}
+
+func sunbaseHexToCust(hex string) string {
+	hex = strings.ToLower(strings.ReplaceAll(hex, "-", ""))
+	if len(hex) != 32 || !sunbaseHexIDRe.MatchString(hex) {
+		return ""
+	}
+	return fmt.Sprintf("cust-%s-%s-%s-%s-%s", hex[0:8], hex[8:12], hex[12:16], hex[16:20], hex[20:32])
+}
+
+func sunbaseHexToDashed(hex string) string {
+	hex = strings.ToLower(strings.ReplaceAll(hex, "-", ""))
+	if len(hex) != 32 || !sunbaseHexIDRe.MatchString(hex) {
+		return ""
+	}
+	return fmt.Sprintf("%s-%s-%s-%s-%s", hex[0:8], hex[8:12], hex[12:16], hex[16:20], hex[20:32])
+}
+
 func anyToString(v any) string {
 	switch x := v.(type) {
 	case string:

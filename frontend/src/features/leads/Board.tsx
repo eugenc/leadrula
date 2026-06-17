@@ -49,12 +49,18 @@ import {
   PIPELINE_COLUMNS,
 } from "./leadsListColumns";
 import { useAuthStore } from "@/store/authStore";
-import { computeBoardStageId, isPublisherTrackedLead } from "./boardStage";
+import { groupLeadsForBoard, isPublisherTrackedLead, UNPLACED_BOARD_STAGE_ID } from "./boardStage";
 import type { AccountType, Lead, Stage } from "@/types";
 
-function boardStageId(lead: Lead, accountType: AccountType | undefined): number {
-  return computeBoardStageId(lead, accountType) ?? 0;
-}
+const unplacedStage: Stage = {
+  id: UNPLACED_BOARD_STAGE_ID,
+  public_id: "unplaced",
+  pipeline_id: 0,
+  name: "Unplaced",
+  position: -1,
+  color: "gray",
+  stage_type: "standard",
+};
 
 function isDragBlocked(lead: Lead, accountType: AccountType | undefined): boolean {
   return accountType === "publisher" && isPublisherTrackedLead(lead);
@@ -185,37 +191,45 @@ export function Board() {
   const rowHeight = estimateRowHeight(activeCardFields.filter((id) => id !== "name").length);
 
   const [board, setBoard] = useState<Record<number, Lead[]>>({});
-  useEffect(() => {
-    const grouped: Record<number, Lead[]> = {};
-    for (const l of leads?.items ?? []) {
-      const sid = boardStageId(l, accountType);
-      (grouped[sid] ??= []).push(l);
-    }
-    setBoard(grouped);
-  }, [leads?.items, accountType]);
-
-  const [prompt, setPrompt] = useState<{ leadId: number; stage: Stage } | null>(null);
-  const [activeDrag, setActiveDrag] = useState<Lead | null>(null);
+  const [unplacedLeads, setUnplacedLeads] = useState<Lead[]>([]);
 
   const stageList = useMemo(
     () => [...(stages ?? [])].sort((a, b) => a.position - b.position),
     [stages]
   );
 
+  const pipelineStageIds = useMemo(() => new Set(stageList.map((s) => s.id)), [stageList]);
+
+  useEffect(() => {
+    const { grouped, unplaced } = groupLeadsForBoard(leads?.items ?? [], pipelineStageIds, accountType);
+    setBoard(grouped);
+    setUnplacedLeads(unplaced);
+  }, [leads?.items, accountType, pipelineStageIds]);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
 
   function revert() {
-    const grouped: Record<number, Lead[]> = {};
-    for (const l of leads?.items ?? []) {
-      const sid = boardStageId(l, accountType);
-      (grouped[sid] ??= []).push(l);
-    }
+    const { grouped, unplaced } = groupLeadsForBoard(leads?.items ?? [], pipelineStageIds, accountType);
     setBoard(grouped);
+    setUnplacedLeads(unplaced);
   }
 
   function moveLocal(leadId: number, fromStage: number, toStage: number) {
+    if (fromStage === UNPLACED_BOARD_STAGE_ID) {
+      setUnplacedLeads((prev) => {
+        const idx = prev.findIndex((l) => l.id === leadId);
+        if (idx === -1) return prev;
+        const lead = prev[idx];
+        setBoard((b) => ({
+          ...b,
+          [toStage]: [{ ...lead, stage_id: toStage }, ...(b[toStage] ?? [])],
+        }));
+        return [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+      });
+      return;
+    }
     setBoard((prev) => {
       const fromArr = prev[fromStage] ?? [];
       const idx = fromArr.findIndex((l) => l.id === leadId);
@@ -262,7 +276,11 @@ export function Board() {
 
     const fromStage = Number(active.data.current?.stageId);
     const toStage = resolveDropStage(over);
-    if (!fromStage || !toStage || fromStage === toStage) return;
+    if (fromStage === UNPLACED_BOARD_STAGE_ID) {
+      if (!toStage || toStage === UNPLACED_BOARD_STAGE_ID) return;
+    } else if (!fromStage || !toStage || fromStage === toStage || toStage === UNPLACED_BOARD_STAGE_ID) {
+      return;
+    }
 
     const leadId = Number(active.id);
     const stage = stageList.find((s) => s.id === toStage);
@@ -375,6 +393,20 @@ export function Board() {
               accountType={accountType}
             />
           ))}
+          {unplacedLeads.length > 0 && (
+            <BoardColumn
+              key={unplacedStage.id}
+              stage={unplacedStage}
+              items={unplacedLeads}
+              customFields={customFieldsList}
+              cardFields={activeCardFields}
+              rowHeight={rowHeight}
+              onCardClick={openDetail}
+              activeDragId={activeDrag ? String(activeDrag.id) : null}
+              accountType={accountType}
+              droppable={false}
+            />
+          )}
         </div>
         <DragOverlay dropAnimation={null}>
           {activeDrag ? (

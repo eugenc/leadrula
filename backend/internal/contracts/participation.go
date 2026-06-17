@@ -553,9 +553,6 @@ func (s *Service) AcceptParticipation(ctx context.Context, buyerID, participatio
 		if err := applyBuyerStageTriggersToWon(ctx, s.pool, part.ContractID, participationID, validated.buyerPipelineID); err != nil {
 			return nil, err
 		}
-		if err := RebuildParticipationStageMaps(ctx, s.pool, part.ContractID, participationID); err != nil {
-			return nil, err
-		}
 	}
 	updated, err := scanParticipation(s.pool.QueryRow(ctx,
 		`UPDATE contract_participations SET
@@ -568,6 +565,13 @@ func (s *Service) AcceptParticipation(ctx context.Context, buyerID, participatio
 		participationID, validated.delivery, validated.buyerPipelineID, validated.buyerStageID, validated.webhookID, validated.connID))
 	if err != nil {
 		return nil, err
+	}
+	if validated.delivery == "leads_pipeline" {
+		if err := RebuildParticipationStageMaps(ctx, s.pool, part.ContractID, participationID, RebuildStageMapParams{
+			BuyerTargetStageID: validated.buyerStageID,
+		}); err != nil {
+			return nil, err
+		}
 	}
 	var pubID int64
 	var contractName string
@@ -606,11 +610,8 @@ func (s *Service) UpdateParticipationDelivery(ctx context.Context, buyerID, part
 		if err := applyBuyerStageTriggersToWon(ctx, s.pool, part.ContractID, participationID, validated.buyerPipelineID); err != nil {
 			return nil, err
 		}
-		if err := RebuildParticipationStageMaps(ctx, s.pool, part.ContractID, participationID); err != nil {
-			return nil, err
-		}
 	}
-	return scanParticipation(s.pool.QueryRow(ctx,
+	updated, err := scanParticipation(s.pool.QueryRow(ctx,
 		`UPDATE contract_participations SET
 		   delivery = $2,
 		   buyer_pipeline_id = NULLIF($3,0), buyer_target_stage_id = NULLIF($4,0),
@@ -619,6 +620,17 @@ func (s *Service) UpdateParticipationDelivery(ctx context.Context, buyerID, part
 		 WHERE id = $1
 		 RETURNING `+participationReturningCols,
 		participationID, validated.delivery, validated.buyerPipelineID, validated.buyerStageID, validated.webhookID, validated.connID))
+	if err != nil {
+		return nil, err
+	}
+	if validated.delivery == "leads_pipeline" {
+		if err := RebuildParticipationStageMaps(ctx, s.pool, part.ContractID, participationID, RebuildStageMapParams{
+			BuyerTargetStageID: validated.buyerStageID,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return updated, nil
 }
 
 func (s *Service) UpdateParticipationStatus(ctx context.Context, buyerID, participationID int64, status string) (*Participation, error) {
