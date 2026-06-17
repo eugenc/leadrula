@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import type { CustomField, Lead } from "@/types";
 import { formatMoney } from "@/lib/utils";
-import { formatCustomDateForDisplay } from "./customFieldDate";
+import { formatCustomDateForDisplay, formatDatetimeForDisplay } from "./customFieldDate";
 
 export const STATUS_LABELS: Record<string, string> = {
   review: "In Review",
@@ -192,7 +192,7 @@ export function cellValue(lead: Lead, colId: string, customFields: CustomField[]
     case "tags":
       return (lead.tags ?? []).length ? (lead.tags ?? []).join(", ") : "—";
     case "action_at":
-      return lead.action_at ? format(new Date(lead.action_at), "MMM d, h:mm a") : "—";
+      return formatDatetimeForDisplay(lead.action_at);
     case "created_at":
       return format(new Date(lead.created_at), "MMM d, yyyy");
     case "stage_entered_at":

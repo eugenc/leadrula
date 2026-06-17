@@ -57,7 +57,14 @@ export function formatCustomDate(date: Date, formatToken: string): string {
 }
 
 const DISPLAY_DATE = "MMM d, yyyy";
-const DISPLAY_DATETIME = "MMM d, h:mma";
+const DISPLAY_DATETIME = "EEE. d, h:mm a";
+
+export function formatDatetimeForDisplay(value: string | Date | null | undefined): string {
+  if (!value) return "—";
+  const d = typeof value === "string" ? new Date(value) : value;
+  if (!isValid(d)) return "—";
+  return format(d, DISPLAY_DATETIME);
+}
 
 export function formatCustomDateForDisplay(
   value: string,

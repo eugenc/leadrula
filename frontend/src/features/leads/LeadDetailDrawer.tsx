@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sheet, DrawerHeader, DrawerBody } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, InputWithOverflowTooltip, Label, Textarea, Select } from "@/components/ui/input";
@@ -37,6 +37,7 @@ import { get } from "@/lib/api";
 import type { BuyerSummary } from "@/types";
 import { effectiveFieldFormat } from "@/features/admin/customFieldConstants";
 import {
+  formatDatetimeForDisplay,
   fromNativeDatetimeLocal,
   inputModeForFormat,
   normalizeCustomDateValue,
@@ -68,6 +69,51 @@ function isoToDatetimeLocal(iso: string): string {
   const d = new Date(iso);
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function DatetimeFieldInput({
+  value,
+  onChange,
+  onBlur,
+  disabled,
+  placeholder = "Set date & time",
+  className,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onBlur?: () => void;
+  disabled?: boolean;
+  placeholder?: string;
+  className?: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const display = value ? formatDatetimeForDisplay(value) : placeholder;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => inputRef.current?.showPicker()}
+        disabled={disabled}
+        className={cn(
+          "min-w-0 flex-1 truncate text-left text-xs",
+          !value && "text-gray-400",
+          className
+        )}
+      >
+        {display}
+      </button>
+      <input
+        ref={inputRef}
+        type="datetime-local"
+        className="sr-only"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
+        disabled={disabled}
+      />
+    </>
+  );
 }
 
 function moneyOrDash(v: number | null | undefined): string {
@@ -241,13 +287,12 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
           >
             Action{overdue && " — overdue"}
           </span>
-          <Input
-            type="datetime-local"
+          <DatetimeFieldInput
             value={actionAtLocal}
-            onChange={(e) => setActionAtLocal(e.target.value)}
+            onChange={setActionAtLocal}
             onBlur={saveActionAt}
             disabled={setAction.isPending}
-            className="h-7 min-w-0 flex-1 border-0 bg-transparent px-1 py-0 text-xs shadow-none focus:ring-0"
+            className={overdue ? "font-semibold text-danger-fg" : "text-gray-700"}
           />
         </div>
       </div>
@@ -631,6 +676,17 @@ function CustomFieldValue({
   }
 
   if (type === "date" || type === "datetime") {
+    if (inputMode === "datetime-local") {
+      return (
+        <DatetimeFieldInput
+          value={val}
+          onChange={(next) => {
+            setVal(next);
+            saveDateValue(next);
+          }}
+        />
+      );
+    }
     return (
       <Input
         value={val}
