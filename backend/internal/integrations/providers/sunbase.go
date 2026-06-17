@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/echayko/leadrula/backend/internal/customfields"
 )
 
 const DefaultSunbaseEndpoint = "https://server4.sunbasedata.com/sunbase/portal/api/lead_post.jsp"
@@ -189,11 +191,38 @@ func resolveSunbaseFieldValue(e SunbaseFieldMapEntry, payload DeliveryPayload) s
 		if e.CustomFieldID != nil && payload.CustomFields != nil {
 			key := fmt.Sprintf("%d", *e.CustomFieldID)
 			if v, ok := payload.CustomFields[key]; ok {
-				return valueToQueryString(v)
+				s := valueToQueryString(v)
+				if ftype := sunbaseCustomFieldType(payload.Config, key); ftype == "date" || ftype == "datetime" {
+					s = customfields.FormatForSunbaseExport(ftype, s)
+				}
+				return s
 			}
 		}
 	}
 	return ""
+}
+
+func sunbaseCustomFieldType(config map[string]any, fieldID string) string {
+	if config == nil {
+		return ""
+	}
+	raw, ok := config["custom_field_types"]
+	if !ok {
+		return ""
+	}
+	if m, ok := raw.(map[string]string); ok {
+		return m[fieldID]
+	}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return ""
+	}
+	v, ok := m[fieldID]
+	if !ok {
+		return ""
+	}
+	s, _ := v.(string)
+	return s
 }
 
 func valueToQueryString(v any) string {

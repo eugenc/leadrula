@@ -141,6 +141,49 @@ func TestParseSunbaseExternalID(t *testing.T) {
 	}
 }
 
+func TestResolveSunbaseFieldValue_datetimeRFC3339(t *testing.T) {
+	fid := int64(42)
+	payload := DeliveryPayload{
+		CustomFields: map[string]any{
+			"42": "2026-06-08T14:30:00-04:00",
+		},
+		Config: map[string]any{
+			"custom_field_types": map[string]string{
+				"42": "datetime",
+			},
+		},
+	}
+	entry := SunbaseFieldMapEntry{
+		DestKey:       "appt_time",
+		SourceType:    "custom",
+		CustomFieldID: &fid,
+	}
+	got := resolveSunbaseFieldValue(entry, payload)
+	want := "2026-06-08T14:30"
+	if got != want {
+		t.Fatalf("resolveSunbaseFieldValue() = %q, want %q", got, want)
+	}
+}
+
+func TestResolveSunbaseFieldValue_datetimeWithoutTypeMap(t *testing.T) {
+	fid := int64(42)
+	payload := DeliveryPayload{
+		CustomFields: map[string]any{
+			"42": "2026-06-08T14:30:00-04:00",
+		},
+	}
+	entry := SunbaseFieldMapEntry{
+		DestKey:       "appt_time",
+		SourceType:    "custom",
+		CustomFieldID: &fid,
+	}
+	got := resolveSunbaseFieldValue(entry, payload)
+	want := "2026-06-08T14:30:00-04:00"
+	if got != want {
+		t.Fatalf("resolveSunbaseFieldValue() = %q, want %q", got, want)
+	}
+}
+
 func TestBuildDeliveryRequestLog_queryParams(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPost, "https://example.com/post?first_name=Eugene&dob=1988%2F22%2F12", nil)
 	if err != nil {

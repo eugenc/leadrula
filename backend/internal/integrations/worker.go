@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/echayko/leadrula/backend/internal/customfields"
 	"github.com/echayko/leadrula/backend/internal/integrations/providers"
 	"github.com/echayko/leadrula/backend/internal/leads"
 )
@@ -114,6 +115,17 @@ func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, p
 			}
 			if _, exists := dp.Config[k]; !exists {
 				dp.Config[k] = v
+			}
+		}
+		if providerSlug == "sunbase" {
+			var accountID int64
+			if err := s.pool.QueryRow(ctx, `SELECT account_id FROM integration_connections WHERE id=$1`, connID).Scan(&accountID); err == nil {
+				if types, err := customfields.FieldTypesByAccount(ctx, s.pool, accountID); err == nil && len(types) > 0 {
+					if dp.Config == nil {
+						dp.Config = map[string]any{}
+					}
+					dp.Config["custom_field_types"] = types
+				}
 			}
 		}
 		result, err = p.Deliver(ctx, credentials, dp)

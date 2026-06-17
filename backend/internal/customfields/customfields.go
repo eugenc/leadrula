@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/database"
@@ -262,4 +263,23 @@ func validType(t string) bool {
 		return true
 	}
 	return false
+}
+
+// FieldTypesByAccount returns custom field id (string) → type for an account.
+func FieldTypesByAccount(ctx context.Context, q database.Querier, accountID int64) (map[string]string, error) {
+	rows, err := q.Query(ctx, `SELECT id, type FROM custom_fields WHERE account_id = $1`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id int64
+		var ftype string
+		if err := rows.Scan(&id, &ftype); err != nil {
+			return nil, err
+		}
+		out[fmt.Sprintf("%d", id)] = ftype
+	}
+	return out, rows.Err()
 }

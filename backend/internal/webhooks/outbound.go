@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/echayko/leadrula/backend/internal/customfields"
 	"github.com/echayko/leadrula/backend/internal/database"
 	"github.com/echayko/leadrula/backend/internal/leads"
 	"github.com/echayko/leadrula/backend/internal/pipelines"
@@ -295,9 +296,11 @@ func (s *Service) FireOutbound(ctx context.Context, accountID int64, event strin
 	rows, err := s.pool.Query(ctx,
 		`SELECT t.id, t.webhook_id, t.condition_logic, t.conditions,
 		        w.outbound_format, w.outbound_payload_template, w.outbound_field_map,
-		        w.outbound_connection_id
+		        w.outbound_connection_id, ip.slug
 		 FROM webhook_outbound_triggers t
 		 JOIN webhooks w ON w.id=t.webhook_id
+		 LEFT JOIN integration_connections ic ON ic.id = w.integration_connection_id
+		 LEFT JOIN integration_providers ip ON ip.id = ic.provider_id
 		 WHERE w.account_id=$1 AND t.trigger_event=$2 AND t.is_active AND w.outbound_enabled
 		   AND w.outbound_url IS NOT NULL AND w.outbound_connection_id IS NOT NULL
 		 ORDER BY t.position, t.id`,
@@ -309,21 +312,22 @@ func (s *Service) FireOutbound(ctx context.Context, accountID int64, event strin
 	defer rows.Close()
 
 	type triggerRow struct {
-		id           int64
-		webhookID    int64
-		logic        string
-		conditions   json.RawMessage
-		format       string
-		template     string
-		fieldMap     json.RawMessage
-		connectionID int64
+		id                  int64
+		webhookID           int64
+		logic               string
+		conditions          json.RawMessage
+		format              string
+		template            string
+		fieldMap            json.RawMessage
+		connectionID        int64
+		integrationProvider *string
 	}
 
 	var triggers []triggerRow
 	for rows.Next() {
 		var tr triggerRow
 		if err := rows.Scan(&tr.id, &tr.webhookID, &tr.logic, &tr.conditions,
-			&tr.format, &tr.template, &tr.fieldMap, &tr.connectionID); err != nil {
+			&tr.format, &tr.template, &tr.fieldMap, &tr.connectionID, &tr.integrationProvider); err != nil {
 			log.Printf("webhooks: FireOutbound scan error: %v", err)
 			return
 		}
@@ -345,6 +349,7 @@ func (s *Service) FireOutbound(ctx context.Context, accountID int64, event strin
 
 	tctx := buildTemplateContext(event, lead, pctx)
 
+	var sunbaseFieldTypes map[string]string
 	firedWebhooks := map[int64]struct{}{}
 	for _, tr := range triggers {
 		if ec != nil {
@@ -370,7 +375,17 @@ func (s *Service) FireOutbound(ctx context.Context, accountID int64, event strin
 				log.Printf("webhooks: trigger %d url format with empty field map", tr.id)
 				continue
 			}
-			payload, err = buildURLPayload(event, lead, pctx, entries)
+			var fieldTypes map[string]string
+			if tr.integrationProvider != nil && *tr.integrationProvider == "sunbase" {
+				if sunbaseFieldTypes == nil {
+					sunbaseFieldTypes, err = customfields.FieldTypesByAccount(ctx, s.pool, accountID)
+					if err != nil {
+						log.Printf("webhooks: FireOutbound field types error: %v", err)
+					}
+				}
+				fieldTypes = sunbaseFieldTypes
+			}
+			payload, err = buildURLPayload(event, lead, pctx, entries, fieldTypes)
 		} else {
 			payload, err = renderTemplate(tr.template, tctx)
 		}
@@ -487,14 +502,14 @@ func parseOutboundFieldMap(raw json.RawMessage) ([]OutboundFieldMapEntry, error)
 	return entries, nil
 }
 
-func buildURLPayload(event string, l *leads.Lead, pctx PipelineContext, entries []OutboundFieldMapEntry) ([]byte, error) {
+func buildURLPayload(event string, l *leads.Lead, pctx PipelineContext, entries []OutboundFieldMapEntry, fieldTypes map[string]string) ([]byte, error) {
 	tctx := buildTemplateContext(event, l, pctx)
 	out := map[string]string{}
 	for _, e := range entries {
 		if e.DestKey == "" {
 			continue
 		}
-		v := resolveOutboundFieldValue(e, tctx, l)
+		v := resolveOutboundFieldValue(e, tctx, l, fieldTypes)
 		if v != "" {
 			out[e.DestKey] = v
 		}
@@ -502,7 +517,7 @@ func buildURLPayload(event string, l *leads.Lead, pctx PipelineContext, entries 
 	return json.Marshal(out)
 }
 
-func resolveOutboundFieldValue(e OutboundFieldMapEntry, tctx map[string]string, l *leads.Lead) string {
+func resolveOutboundFieldValue(e OutboundFieldMapEntry, tctx map[string]string, l *leads.Lead, fieldTypes map[string]string) string {
 	switch e.SourceType {
 	case "static":
 		if e.StaticValue != nil {
@@ -536,6 +551,11 @@ func resolveOutboundFieldValue(e OutboundFieldMapEntry, tctx map[string]string, 
 			if raw, ok := l.CustomValues[key]; ok {
 				var s string
 				if json.Unmarshal(raw, &s) == nil {
+					if fieldTypes != nil {
+						if ftype := fieldTypes[key]; ftype == "date" || ftype == "datetime" {
+							return customfields.FormatForSunbaseExport(ftype, s)
+						}
+					}
 					return s
 				}
 				return string(raw)

@@ -160,3 +160,18 @@ func NormalizeValue(f CustomField, raw json.RawMessage) (json.RawMessage, error)
 	formatted := FormatTime(f.Type, formatToken, t)
 	return json.Marshal(formatted)
 }
+
+// FormatForSunbaseExport parses raw and returns yyyy-MM-DD or yyyy-MM-DDTHH:mm
+// using wall-clock time from the parsed value. Returns raw unchanged if not parseable.
+func FormatForSunbaseExport(ftype, raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || (ftype != "date" && ftype != "datetime") {
+		return raw
+	}
+	formatToken := DefaultFormat(ftype)
+	t, ok := ParseFlexible(ftype, formatToken, raw)
+	if !ok {
+		return raw
+	}
+	return FormatTime(ftype, formatToken, t)
+}

@@ -3,12 +3,61 @@ package webhooks
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/database"
+	"github.com/echayko/leadrula/backend/internal/leads"
 )
+
+func TestBuildURLPayload_sunbaseDatetimeFormat(t *testing.T) {
+	fid := int64(7)
+	lead := &leads.Lead{
+		CustomValues: map[string]json.RawMessage{
+			"7": json.RawMessage(`"2026-06-08T14:30:00-04:00"`),
+		},
+	}
+	entries := []OutboundFieldMapEntry{
+		{DestKey: "appt_time", SourceType: "custom", CustomFieldID: &fid},
+	}
+	fieldTypes := map[string]string{"7": "datetime"}
+	payload, err := buildURLPayload("lead.update", lead, PipelineContext{}, entries, fieldTypes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]string
+	if err := json.Unmarshal(payload, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["appt_time"] != "2026-06-08T14:30" {
+		t.Fatalf("appt_time = %q, want 2026-06-08T14:30", out["appt_time"])
+	}
+}
+
+func TestBuildURLPayload_nonSunbaseKeepsRawDatetime(t *testing.T) {
+	fid := int64(7)
+	lead := &leads.Lead{
+		CustomValues: map[string]json.RawMessage{
+			"7": json.RawMessage(`"2026-06-08T14:30:00-04:00"`),
+		},
+	}
+	entries := []OutboundFieldMapEntry{
+		{DestKey: "appt_time", SourceType: "custom", CustomFieldID: &fid},
+	}
+	payload, err := buildURLPayload("lead.update", lead, PipelineContext{}, entries, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]string
+	if err := json.Unmarshal(payload, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["appt_time"] != "2026-06-08T14:30:00-04:00" {
+		t.Fatalf("appt_time = %q, want raw RFC3339", out["appt_time"])
+	}
+}
 
 func TestSyncOutboundSecretValue_signDisabled(t *testing.T) {
 	got, err := syncOutboundSecretValue(false, "existing-secret")
