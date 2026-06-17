@@ -83,7 +83,7 @@ func (s *Service) resolveSwitch(ctx context.Context, real *auth.Principal, claim
 		return nil, ErrNotFound
 	}
 
-	return &auth.Principal{
+	principal := &auth.Principal{
 		UserID:          real.UserID,
 		UserPublicID:    real.UserPublicID,
 		AccountID:       targetID,
@@ -91,7 +91,11 @@ func (s *Service) resolveSwitch(ctx context.Context, real *auth.Principal, claim
 		AccountType:     targetType,
 		Role:            "admin",
 		SwitchedFrom:    claims.SwitchedFrom,
-	}, nil
+	}
+	if originType == "publisher" && targetType == "buyer" {
+		principal.SwitchedFromPublisherID = originID
+	}
+	return principal, nil
 }
 
 func (s *Service) resolveImpersonation(ctx context.Context, real *auth.Principal, claims *auth.Claims) (*auth.Principal, error) {

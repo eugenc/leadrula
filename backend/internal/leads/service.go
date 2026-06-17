@@ -470,7 +470,7 @@ func (s *Service) Bulk(ctx context.Context, p *auth.Principal, bp BulkParams) (*
 }
 
 func rejectPartialBulk(p *auth.Principal, requested, affected int) error {
-	if _, scoped := p.CollaborationPublisherID(); scoped && affected != requested {
+	if _, scoped := p.OversightPublisherID(); scoped && affected != requested {
 		return httpx.Forbidden("one or more leads are not accessible")
 	}
 	return nil

@@ -26,6 +26,19 @@ SELECT id FROM (
       AND l.pipeline_id IS NOT NULL AND l.deleted_at IS NULL
 ) t WHERE id IS NOT NULL`
 
+const leadContractValidSQL = `
+SELECT EXISTS(
+  SELECT 1 FROM contracts c
+  WHERE c.id = $1 AND c.publisher_id = $2 AND c.deleted_at IS NULL AND c.status = 'active'
+    AND (
+      c.buyer_id = $3
+      OR EXISTS (
+        SELECT 1 FROM contract_participations cp
+        WHERE cp.contract_id = c.id AND cp.buyer_id = $3 AND cp.status = 'active'
+      )
+    )
+)`
+
 // AllowedPipelineIDs returns buyer pipeline ids visible to a publisher during collaboration.
 func AllowedPipelineIDs(ctx context.Context, pool *pgxpool.Pool, publisherID, buyerID int64) ([]int64, error) {
 	rows, err := pool.Query(ctx, allowedPipelineIDsSQL, publisherID, buyerID)
@@ -48,10 +61,17 @@ func (r *Repository) AllowedPipelineIDs(ctx context.Context, publisherID, buyerI
 	return AllowedPipelineIDs(ctx, r.pool, publisherID, buyerID)
 }
 
-// AppendLeadScope adds publisher collaboration filters when impersonating.
+// LeadContractAllowed reports whether the lead contract is valid for publisher oversight.
+func LeadContractAllowed(ctx context.Context, pool *pgxpool.Pool, contractID, pubID, buyerID int64) bool {
+	var valid bool
+	_ = pool.QueryRow(ctx, leadContractValidSQL, contractID, pubID, buyerID).Scan(&valid)
+	return valid
+}
+
+// AppendLeadScope adds publisher oversight filters when impersonating or switched from a publisher.
 // The first arg in args must be the buyer account id (owner_account_id).
 func AppendLeadScope(p *auth.Principal, where string, args []any) (string, []any) {
-	pubID, ok := p.CollaborationPublisherID()
+	pubID, ok := p.OversightPublisherID()
 	if !ok {
 		return where, args
 	}
@@ -60,8 +80,14 @@ func AppendLeadScope(p *auth.Principal, where string, args []any) (string, []any
 	where += fmt.Sprintf(` AND l.publisher_id = $%d AND (
 		l.contract_id IS NULL OR EXISTS (
 			SELECT 1 FROM contracts c
-			WHERE c.id = l.contract_id AND c.publisher_id = $%d AND c.buyer_id = $1
-			  AND c.status = 'active' AND c.deleted_at IS NULL
+			WHERE c.id = l.contract_id AND c.publisher_id = $%d AND c.deleted_at IS NULL AND c.status = 'active'
+			  AND (
+			    c.buyer_id = $1
+			    OR EXISTS (
+			      SELECT 1 FROM contract_participations cp
+			      WHERE cp.contract_id = c.id AND cp.buyer_id = $1 AND cp.status = 'active'
+			    )
+			  )
 		))`, pubArg, pubArg)
 	return where, args
 }

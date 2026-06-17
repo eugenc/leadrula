@@ -216,7 +216,7 @@ func (r *Repository) attachCustomValues(ctx context.Context, l *Lead) error {
 }
 
 func (r *Repository) CollaborationLeadAllowed(ctx context.Context, p *auth.Principal, l *Lead) bool {
-	pubID, ok := p.CollaborationPublisherID()
+	pubID, ok := p.OversightPublisherID()
 	if !ok {
 		return true
 	}
@@ -226,14 +226,7 @@ func (r *Repository) CollaborationLeadAllowed(ctx context.Context, p *auth.Princ
 	if l.ContractID == nil {
 		return true
 	}
-	var valid bool
-	_ = r.pool.QueryRow(ctx,
-		`SELECT EXISTS(
-			SELECT 1 FROM contracts c
-			WHERE c.id = $1 AND c.publisher_id = $2 AND c.buyer_id = $3
-			  AND c.status = 'active' AND c.deleted_at IS NULL
-		)`, *l.ContractID, pubID, p.AccountID).Scan(&valid)
-	return valid
+	return collaboration.LeadContractAllowed(ctx, r.pool, *l.ContractID, pubID, p.AccountID)
 }
 
 func (r *Repository) visible(ctx context.Context, p *auth.Principal, l *Lead) bool {

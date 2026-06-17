@@ -64,7 +64,7 @@ func NewService(pool *pgxpool.Pool, collab *collaboration.Repository) *Service {
 }
 
 func (s *Service) List(ctx context.Context, p *auth.Principal) ([]Pipeline, error) {
-	pubID, scoped := p.CollaborationPublisherID()
+	pubID, scoped := p.OversightPublisherID()
 	if scoped {
 		ids, err := s.collab.AllowedPipelineIDs(ctx, pubID, p.AccountID)
 		if err != nil {
@@ -118,7 +118,7 @@ func (s *Service) ListForAccount(ctx context.Context, accountID int64) ([]Pipeli
 
 func (s *Service) Create(ctx context.Context, p *auth.Principal, name string) (*Pipeline, error) {
 	pl := &Pipeline{}
-	pubID, scoped := p.CollaborationPublisherID()
+	pubID, scoped := p.OversightPublisherID()
 	var collabPub any
 	if scoped {
 		collabPub = pubID

@@ -18,7 +18,7 @@ func (s *Service) requirePipeline(ctx context.Context, p *auth.Principal, pipeli
 	if !owned {
 		return httpx.NotFound("pipeline not found")
 	}
-	pubID, scoped := p.CollaborationPublisherID()
+	pubID, scoped := p.OversightPublisherID()
 	if !scoped {
 		return nil
 	}

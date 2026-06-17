@@ -10,8 +10,9 @@ type Principal struct {
 	AccountPublicID string
 	AccountType     string // publisher | buyer
 	Role            string // admin | user | follower
-	Impersonator    *Principal
-	SwitchedFrom    string // origin account public_id when in a switch session
+	Impersonator             *Principal
+	SwitchedFrom             string // origin account public_id when in a switch session
+	SwitchedFromPublisherID  int64  // set when SwitchedFrom is a publisher account
 }
 
 func (p *Principal) IsAdmin() bool    { return p.Role == "admin" }
@@ -24,6 +25,18 @@ func (p *Principal) CollaborationPublisherID() (int64, bool) {
 		return 0, false
 	}
 	return p.Impersonator.AccountID, true
+}
+
+// OversightPublisherID returns the publisher account id when a publisher admin is
+// acting on a buyer account via collaboration impersonation or account switch.
+func (p *Principal) OversightPublisherID() (int64, bool) {
+	if pubID, ok := p.CollaborationPublisherID(); ok {
+		return pubID, true
+	}
+	if p != nil && p.SwitchedFromPublisherID > 0 {
+		return p.SwitchedFromPublisherID, true
+	}
+	return 0, false
 }
 
 type ctxKey int
