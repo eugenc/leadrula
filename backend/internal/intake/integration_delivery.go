@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/echayko/leadrula/backend/internal/leads"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/jackc/pgx/v5"
 )
@@ -111,14 +112,47 @@ func (s *Service) GetIntegrationDelivery(ctx context.Context, accountID, deliver
 }
 
 func (s *Service) RetryIntegrationDelivery(ctx context.Context, accountID, deliveryID int64) error {
-	var id int64
+	var leadID *int64
+	var oldPayload []byte
 	err := s.pool.QueryRow(ctx,
+		`SELECT q.lead_id, q.payload
+		 FROM integration_delivery_queue q
+		 JOIN integration_connections c ON c.id = q.connection_id
+		 WHERE q.id = $1 AND c.account_id = $2`,
+		deliveryID, accountID,
+	).Scan(&leadID, &oldPayload)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return httpx.NotFound("integration delivery not found")
+		}
+		return err
+	}
+
+	newPayload := oldPayload
+	if leadID != nil && *leadID != 0 && s.leads != nil {
+		lead, err := s.leads.GetByID(ctx, s.pool, *leadID)
+		if err != nil {
+			return err
+		}
+		if err := leads.LoadCustomValues(ctx, s.pool, lead); err != nil {
+			return err
+		}
+		rebuilt, err := leads.BuildDeliveryPayload(lead)
+		if err != nil {
+			return err
+		}
+		newPayload = mergeDeliveryConfig(rebuilt, oldPayload)
+	}
+
+	var id int64
+	err = s.pool.QueryRow(ctx,
 		`UPDATE integration_delivery_queue q
-		 SET status = 'pending', attempts = 0, next_attempt_at = now(), last_error = NULL, updated_at = now()
+		 SET status = 'pending', attempts = 0, next_attempt_at = now(), last_error = NULL,
+		     payload = $3, updated_at = now()
 		 FROM integration_connections c
 		 WHERE q.id = $1 AND q.connection_id = c.id AND c.account_id = $2
 		 RETURNING q.id`,
-		deliveryID, accountID,
+		deliveryID, accountID, newPayload,
 	).Scan(&id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -127,6 +161,21 @@ func (s *Service) RetryIntegrationDelivery(ctx context.Context, accountID, deliv
 		return err
 	}
 	return nil
+}
+
+func mergeDeliveryConfig(rebuilt, old []byte) []byte {
+	var oldMap, newMap map[string]any
+	if json.Unmarshal(old, &oldMap) != nil || json.Unmarshal(rebuilt, &newMap) != nil {
+		return rebuilt
+	}
+	if cfg, ok := oldMap["_config"]; ok {
+		newMap["_config"] = cfg
+	}
+	b, err := json.Marshal(newMap)
+	if err != nil {
+		return rebuilt
+	}
+	return b
 }
 
 func (s *Service) labelPayloadCustomFields(ctx context.Context, accountID int64, payload []byte) ([]LabeledCustomField, error) {
