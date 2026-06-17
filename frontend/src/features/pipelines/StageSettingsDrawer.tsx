@@ -15,6 +15,7 @@ import {
   actionFields,
   conditionFields,
   findField,
+  sourceFieldsForKind,
   type FieldDef,
   type FieldKind,
 } from "./ruleFieldRegistry";
@@ -68,6 +69,26 @@ const daysOf = (v: unknown) =>
   v && typeof v === "object" && "days" in v ? asNum((v as { days: unknown }).days) : asNum(v);
 const modeOf = (v: unknown) =>
   v && typeof v === "object" && "mode" in v ? asStr((v as { mode: unknown }).mode, "today") : "today";
+
+const isFromField = (v: unknown): v is { from_field: string } =>
+  !!v && typeof v === "object" && typeof (v as { from_field?: unknown }).from_field === "string";
+
+const fromFieldOf = (v: unknown) => (isFromField(v) ? v.from_field : "");
+
+const actionDateMode = (v: unknown) => (isFromField(v) ? "from_field" : modeOf(v));
+
+function defaultFromFieldValue(kind: FieldKind, lk: Lookups, excludeField: string): unknown {
+  const sources = sourceFieldsForKind(kind, lk.customFields, excludeField);
+  return { from_field: sources[0]?.field ?? "" };
+}
+
+function fieldLabel(lk: Lookups, fieldKey: string, kind?: FieldKind): string {
+  if (!fieldKey) return "—";
+  const fields = kind
+    ? sourceFieldsForKind(kind, lk.customFields)
+    : [...conditionFields("lead", lk.customFields), ...conditionFields("pipeline", lk.customFields)];
+  return findField(fields, fieldKey)?.label ?? fieldKey;
+}
 
 function defaultConditionValue(kind: FieldKind, op: RuleConditionOp, lk: Lookups): unknown {
   if (op === "empty" || op === "not_empty") return undefined;
@@ -141,7 +162,9 @@ function isCompleteCondition(c: RuleCondition): boolean {
 }
 
 function isCompleteAction(a: RuleAction): boolean {
-  return a.field !== "";
+  if (a.field === "") return false;
+  if (isFromField(a.value) && fromFieldOf(a.value) === "") return false;
+  return true;
 }
 
 function canSaveRule(value: RuleDraft): boolean {
@@ -486,6 +509,9 @@ function summarizeAction(a: RuleAction, lk: Lookups): string {
   const fields = actionFields(a.domain, lk.customFields);
   const def = findField(fields, a.field);
   const label = def?.label ?? a.field;
+  if (isFromField(a.value)) {
+    return `set ${label} ← ${fieldLabel(lk, fromFieldOf(a.value), def?.kind)}`;
+  }
   if (a.domain === "pipeline" && a.field === "stage_id") {
     return `move to ${lk.stages.find((s) => s.id === asNum(a.value))?.name ?? "stage"}`;
   }
@@ -908,6 +934,8 @@ function ActionRow({
           <ActionValue
             kind={def.kind}
             def={def}
+            domain={action.domain}
+            targetField={def.field}
             value={action.value}
             lk={lk}
             fullWidth
@@ -919,9 +947,43 @@ function ActionRow({
   );
 }
 
+function ActionFromFieldPicker({
+  kind,
+  targetField,
+  value,
+  lk,
+  onChange,
+  fullWidth,
+}: {
+  kind: FieldKind;
+  targetField: string;
+  value: unknown;
+  lk: Lookups;
+  onChange: (v: unknown) => void;
+  fullWidth: boolean;
+}) {
+  const sources = sourceFieldsForKind(kind, lk.customFields, targetField);
+  return (
+    <Select
+      value={fromFieldOf(value)}
+      onChange={(e) => onChange({ from_field: e.target.value })}
+      className={fullWidth ? "w-full" : "min-w-[130px]"}
+    >
+      {sources.length === 0 && <option value="">No compatible fields</option>}
+      {sources.map((f) => (
+        <option key={f.field} value={f.field}>
+          {f.label}
+        </option>
+      ))}
+    </Select>
+  );
+}
+
 function ActionValue({
   kind,
   def,
+  domain,
+  targetField,
   value,
   lk,
   onChange,
@@ -929,29 +991,57 @@ function ActionValue({
 }: {
   kind: FieldKind;
   def: FieldDef;
+  domain: string;
+  targetField: string;
   value: unknown;
   lk: Lookups;
   onChange: (v: unknown) => void;
   fullWidth?: boolean;
 }) {
   const fieldClass = fullWidth ? "w-full" : "min-w-[130px]";
+  const canCopyFromField = domain === "lead" && kind !== "stage";
+  const copying = isFromField(value);
+
+  const sourceToggle = canCopyFromField ? (
+    <Select
+      value={copying ? "from_field" : "fixed"}
+      onChange={(e) => {
+        if (e.target.value === "from_field") {
+          onChange(defaultFromFieldValue(kind, lk, targetField));
+        } else {
+          onChange(defaultActionValue(kind, lk));
+        }
+      }}
+      className={fullWidth ? "w-full" : "w-36"}
+    >
+      <option value="fixed">Fixed value</option>
+      <option value="from_field">Copy from field</option>
+    </Select>
+  ) : null;
 
   switch (kind) {
     case "date": {
-      const mode = modeOf(value);
+      const mode = actionDateMode(value);
       return (
         <div className={fullWidth ? "flex flex-col gap-2" : "contents"}>
           <Select
             value={mode}
             onChange={(e) => {
               const m = e.target.value;
-              onChange(m === "plus_days" ? { mode: m, days: daysOf(value) } : { mode: m });
+              if (m === "from_field") {
+                onChange(defaultFromFieldValue(kind, lk, targetField));
+              } else if (m === "plus_days") {
+                onChange({ mode: m, days: daysOf(value) });
+              } else {
+                onChange({ mode: m });
+              }
             }}
             className={fullWidth ? "w-full" : "w-36"}
           >
             <option value="today">Today</option>
             <option value="plus_days">Days from today</option>
             <option value="clear">Clear</option>
+            {canCopyFromField && <option value="from_field">Copy from field</option>}
           </Select>
           {mode === "plus_days" && (
             <Input
@@ -962,18 +1052,42 @@ function ActionValue({
               className={fullWidth ? "w-full" : "w-16"}
             />
           )}
+          {mode === "from_field" && (
+            <ActionFromFieldPicker
+              kind={kind}
+              targetField={targetField}
+              value={value}
+              lk={lk}
+              onChange={onChange}
+              fullWidth={fullWidth}
+            />
+          )}
         </div>
       );
     }
     case "status":
       return (
-        <Select value={asStr(value)} onChange={(e) => onChange(e.target.value)} className={fieldClass}>
-          {LEAD_STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {formatStatus(s)}
-            </option>
-          ))}
-        </Select>
+        <div className={fullWidth ? "flex flex-col gap-2" : "contents"}>
+          {sourceToggle}
+          {copying ? (
+            <ActionFromFieldPicker
+              kind={kind}
+              targetField={targetField}
+              value={value}
+              lk={lk}
+              onChange={onChange}
+              fullWidth={fullWidth}
+            />
+          ) : (
+            <Select value={asStr(value)} onChange={(e) => onChange(e.target.value)} className={fieldClass}>
+              {LEAD_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {formatStatus(s)}
+                </option>
+              ))}
+            </Select>
+          )}
+        </div>
       );
     case "stage":
       return (
@@ -991,89 +1105,187 @@ function ActionValue({
       );
     case "user":
       return (
-        <Select
-          value={value == null ? "" : String(asNum(value))}
-          onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
-          className={fieldClass}
-        >
-          <option value="">Unassigned</option>
-          {lk.users.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.full_name}
-            </option>
-          ))}
-        </Select>
+        <div className={fullWidth ? "flex flex-col gap-2" : "contents"}>
+          {sourceToggle}
+          {copying ? (
+            <ActionFromFieldPicker
+              kind={kind}
+              targetField={targetField}
+              value={value}
+              lk={lk}
+              onChange={onChange}
+              fullWidth={fullWidth}
+            />
+          ) : (
+            <Select
+              value={value == null ? "" : String(asNum(value))}
+              onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
+              className={fieldClass}
+            >
+              <option value="">Unassigned</option>
+              {lk.users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.full_name}
+                </option>
+              ))}
+            </Select>
+          )}
+        </div>
       );
     case "disq":
       return (
-        <Select
-          value={value == null ? "" : String(asNum(value))}
-          onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
-          className={fieldClass}
-        >
-          <option value="">Clear</option>
-          {lk.reasons.map((r) => (
-            <option key={r.id} value={r.id}>
-              {disqReasonLabel(r)}
-            </option>
-          ))}
-        </Select>
+        <div className={fullWidth ? "flex flex-col gap-2" : "contents"}>
+          {sourceToggle}
+          {copying ? (
+            <ActionFromFieldPicker
+              kind={kind}
+              targetField={targetField}
+              value={value}
+              lk={lk}
+              onChange={onChange}
+              fullWidth={fullWidth}
+            />
+          ) : (
+            <Select
+              value={value == null ? "" : String(asNum(value))}
+              onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
+              className={fieldClass}
+            >
+              <option value="">Clear</option>
+              {lk.reasons.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {disqReasonLabel(r)}
+                </option>
+              ))}
+            </Select>
+          )}
+        </div>
       );
     case "checkbox":
       return (
-        <Select
-          value={value ? "true" : "false"}
-          onChange={(e) => onChange(e.target.value === "true")}
-          className={fullWidth ? "w-full" : "w-28"}
-        >
-          <option value="true">Checked</option>
-          <option value="false">Unchecked</option>
-        </Select>
+        <div className={fullWidth ? "flex flex-col gap-2" : "contents"}>
+          {sourceToggle}
+          {copying ? (
+            <ActionFromFieldPicker
+              kind={kind}
+              targetField={targetField}
+              value={value}
+              lk={lk}
+              onChange={onChange}
+              fullWidth={fullWidth}
+            />
+          ) : (
+            <Select
+              value={value ? "true" : "false"}
+              onChange={(e) => onChange(e.target.value === "true")}
+              className={fullWidth ? "w-full" : "w-28"}
+            >
+              <option value="true">Checked</option>
+              <option value="false">Unchecked</option>
+            </Select>
+          )}
+        </div>
       );
     case "number":
       return (
-        <Input
-          type="number"
-          value={String(asNum(value))}
-          onChange={(e) => onChange(Number(e.target.value))}
-          className={fullWidth ? "w-full" : "w-24"}
-        />
+        <div className={fullWidth ? "flex flex-col gap-2" : "contents"}>
+          {sourceToggle}
+          {copying ? (
+            <ActionFromFieldPicker
+              kind={kind}
+              targetField={targetField}
+              value={value}
+              lk={lk}
+              onChange={onChange}
+              fullWidth={fullWidth}
+            />
+          ) : (
+            <Input
+              type="number"
+              value={String(asNum(value))}
+              onChange={(e) => onChange(Number(e.target.value))}
+              className={fullWidth ? "w-full" : "w-24"}
+            />
+          )}
+        </div>
       );
     case "tags":
       return (
-        <Input
-          value={Array.isArray(value) ? value.join(", ") : asStr(value)}
-          onChange={(e) =>
-            onChange(
-              e.target.value
-                .split(",")
-                .map((t) => t.trim())
-                .filter(Boolean)
-            )
-          }
-          className={fullWidth ? "w-full" : "min-w-[160px]"}
-          placeholder="tag1, tag2"
-        />
+        <div className={fullWidth ? "flex flex-col gap-2" : "contents"}>
+          {sourceToggle}
+          {copying ? (
+            <ActionFromFieldPicker
+              kind={kind}
+              targetField={targetField}
+              value={value}
+              lk={lk}
+              onChange={onChange}
+              fullWidth={fullWidth}
+            />
+          ) : (
+            <Input
+              value={Array.isArray(value) ? value.join(", ") : asStr(value)}
+              onChange={(e) =>
+                onChange(
+                  e.target.value
+                    .split(",")
+                    .map((t) => t.trim())
+                    .filter(Boolean)
+                )
+              }
+              className={fullWidth ? "w-full" : "min-w-[160px]"}
+              placeholder="tag1, tag2"
+            />
+          )}
+        </div>
       );
     default:
       if (def.options?.length) {
         return (
-          <Select value={asStr(value)} onChange={(e) => onChange(e.target.value)} className={fieldClass}>
-            {def.options.map((o) => (
-              <option key={o} value={o}>
-                {o}
-              </option>
-            ))}
-          </Select>
+          <div className={fullWidth ? "flex flex-col gap-2" : "contents"}>
+            {sourceToggle}
+            {copying ? (
+              <ActionFromFieldPicker
+                kind={kind}
+                targetField={targetField}
+                value={value}
+                lk={lk}
+                onChange={onChange}
+                fullWidth={fullWidth}
+              />
+            ) : (
+              <Select value={asStr(value)} onChange={(e) => onChange(e.target.value)} className={fieldClass}>
+                {def.options.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </div>
         );
       }
       return (
-        <Input
-          value={asStr(value)}
-          onChange={(e) => onChange(e.target.value)}
-          className={fullWidth ? "w-full" : "min-w-[140px]"}
-          placeholder="value"
-        />
+        <div className={fullWidth ? "flex flex-col gap-2" : "contents"}>
+          {sourceToggle}
+          {copying ? (
+            <ActionFromFieldPicker
+              kind={kind}
+              targetField={targetField}
+              value={value}
+              lk={lk}
+              onChange={onChange}
+              fullWidth={fullWidth}
+            />
+          ) : (
+            <Input
+              value={asStr(value)}
+              onChange={(e) => onChange(e.target.value)}
+              className={fullWidth ? "w-full" : "min-w-[140px]"}
+              placeholder="value"
+            />
+          )}
+        </div>
       );
   }
 }

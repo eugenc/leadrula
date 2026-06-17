@@ -223,7 +223,7 @@ func (s *Service) EvaluateStageRules(ctx context.Context, q database.Querier, ac
 			return err
 		}
 		for _, a := range acts {
-			if err := s.applyAction(ctx, q, accountID, userID, leadID, &currentStageID, a); err != nil {
+			if err := s.applyAction(ctx, q, accountID, userID, leadID, &currentStageID, ec, a); err != nil {
 				return err
 			}
 		}
@@ -433,7 +433,17 @@ func (s *Service) validateRuleRefs(ctx context.Context, p *auth.Principal, stage
 	if err != nil {
 		return err
 	}
+	customByKey, err := loadCustomByKey(ctx, s.pool, p.AccountID)
+	if err != nil {
+		return err
+	}
 	for _, a := range acts {
+		if srcField, isRef := actionFromFieldRef(a.Value); isRef {
+			if err := validateFromFieldRef(customByKey, a.Domain, a.Field, srcField); err != nil {
+				return err
+			}
+			continue
+		}
 		switch {
 		case a.Domain == "pipeline" && a.Field == "stage_id":
 			sid, ok := rawToInt(a.Value)
@@ -458,7 +468,7 @@ func (s *Service) validateRuleRefs(ctx context.Context, p *auth.Principal, stage
 				return httpx.Validation("invalid status for rule action")
 			}
 		case a.Domain == "lead" && a.Field == "action_at":
-			if _, err := resolveActionDateValue(a.Value); err != nil {
+			if _, err := resolveActionAtValue(a.Value); err != nil {
 				return err
 			}
 		case a.Domain == "lead" && a.Field == "disqualification_reason_id" && !isNullRaw(a.Value):

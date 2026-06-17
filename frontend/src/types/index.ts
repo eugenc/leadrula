@@ -124,6 +124,7 @@ export interface RuleAction {
   verb: "update";
   domain: RuleActionDomain;
   field: string;
+  /** Literal value, date mode object, or field copy: `{ from_field: "custom:foo" }` */
   value?: unknown;
 }
 

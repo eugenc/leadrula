@@ -140,3 +140,16 @@ export function actionFields(domain: string, customFields: CustomField[]): Field
 export function findField(fields: FieldDef[], field: string): FieldDef | undefined {
   return fields.find((f) => f.field === field);
 }
+
+/** Lead + pipeline fields that can be copied from when setting an action value. */
+export function sourceFieldsForKind(
+  kind: FieldKind,
+  customFields: CustomField[],
+  excludeField?: string
+): FieldDef[] {
+  const lead = conditionFields("lead", customFields);
+  const pipeline = conditionFields("pipeline", customFields);
+  return [...lead, ...pipeline].filter(
+    (f) => f.kind === kind && f.field !== excludeField
+  );
+}

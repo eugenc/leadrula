@@ -487,6 +487,187 @@ func isNullRaw(raw json.RawMessage) bool {
 	return len(raw) == 0 || string(raw) == "null"
 }
 
+func actionFromFieldRef(raw json.RawMessage) (field string, ok bool) {
+	var v struct {
+		FromField string `json:"from_field"`
+	}
+	if json.Unmarshal(raw, &v) != nil || v.FromField == "" {
+		return "", false
+	}
+	return v.FromField, true
+}
+
+func actionFieldKind(domain, field string, customByKey map[string]customFieldDef) (fieldKind, bool) {
+	switch domain {
+	case "lead":
+		return conditionFieldKind("lead", field, customByKey)
+	case "pipeline":
+		if field == "stage_id" {
+			return kindStage, true
+		}
+	case "user":
+		if field == "assigned_user_id" {
+			return kindUser, true
+		}
+	}
+	return "", false
+}
+
+func sourceFieldDomain(field string) string {
+	switch field {
+	case "days_in_previous_stage", "previous_stage_id":
+		return "pipeline"
+	default:
+		return "lead"
+	}
+}
+
+func loadCustomByKey(ctx context.Context, q database.Querier, accountID int64) (map[string]customFieldDef, error) {
+	customByKey := map[string]customFieldDef{}
+	rows, err := q.Query(ctx, `SELECT id, field_key, type, format FROM custom_fields WHERE account_id=$1`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var key, ftype string
+		var format *string
+		if err := rows.Scan(&id, &key, &ftype, &format); err != nil {
+			return nil, err
+		}
+		customByKey[key] = customFieldDef{id: id, kind: customFieldKind(ftype), ftype: ftype, format: format}
+	}
+	return customByKey, rows.Err()
+}
+
+// resolveActionValue expands {from_field: "..."} refs against the entry snapshot.
+// skip=true when the source is empty and the action should be skipped.
+func resolveActionValue(ec *ruleEvalContext, targetDomain, targetField string, raw json.RawMessage) (json.RawMessage, bool, error) {
+	srcField, isRef := actionFromFieldRef(raw)
+	if !isRef {
+		return raw, false, nil
+	}
+	if targetDomain != "lead" {
+		return nil, false, httpx.Validation("from_field not supported for this action domain")
+	}
+	if srcField == targetField {
+		return nil, false, httpx.Validation("source cannot equal target field")
+	}
+
+	targetKind, ok := actionFieldKind(targetDomain, targetField, ec.customByKey)
+	if !ok {
+		return nil, false, httpx.Validation("unknown action field")
+	}
+	srcDomain := sourceFieldDomain(srcField)
+	srcKind, ok := conditionFieldKind(srcDomain, srcField, ec.customByKey)
+	if !ok {
+		return nil, false, httpx.Validation("unknown source field")
+	}
+	if srcKind != targetKind {
+		return nil, false, httpx.Validation("source field kind mismatch")
+	}
+
+	switch targetKind {
+	case kindDate:
+		t := ec.dateValue(srcField)
+		if t == nil {
+			return nil, true, nil
+		}
+		if targetField == "action_at" {
+			b, err := json.Marshal(t.UTC().Format(time.RFC3339))
+			return b, false, err
+		}
+		if strings.HasPrefix(targetField, "custom:") {
+			key := strings.TrimPrefix(targetField, "custom:")
+			def, ok := ec.customByKey[key]
+			if !ok {
+				return nil, false, httpx.Validation("unknown custom field")
+			}
+			formatToken := customfields.DefaultFormat(def.ftype)
+			if def.format != nil && *def.format != "" {
+				formatToken = *def.format
+			}
+			s := customfields.FormatTime(def.ftype, formatToken, t.UTC())
+			b, err := json.Marshal(s)
+			return b, false, err
+		}
+		return nil, false, httpx.Validation("unsupported date action target")
+	case kindText:
+		s, present := ec.textValue(srcField)
+		if !present || strings.TrimSpace(s) == "" {
+			return nil, true, nil
+		}
+		b, err := json.Marshal(s)
+		return b, false, err
+	case kindNumber:
+		n, present := ec.numberValue(srcDomain, srcField)
+		if !present {
+			return nil, true, nil
+		}
+		b, err := json.Marshal(n)
+		return b, false, err
+	case kindStatus:
+		if strings.TrimSpace(ec.status) == "" {
+			return nil, true, nil
+		}
+		b, err := json.Marshal(ec.status)
+		return b, false, err
+	case kindUser:
+		if ec.assignedUser == nil {
+			return nil, true, nil
+		}
+		b, err := json.Marshal(*ec.assignedUser)
+		return b, false, err
+	case kindDisq:
+		if ec.disqReason == nil {
+			return nil, true, nil
+		}
+		b, err := json.Marshal(*ec.disqReason)
+		return b, false, err
+	case kindCheckbox:
+		b, present := ec.checkboxValue(srcField)
+		if !present {
+			return nil, true, nil
+		}
+		out, err := json.Marshal(b)
+		return out, false, err
+	case kindTags:
+		if len(ec.tags) == 0 {
+			return nil, true, nil
+		}
+		b, err := json.Marshal(ec.tags)
+		return b, false, err
+	default:
+		return nil, false, httpx.Validation("from_field not supported for this field kind")
+	}
+}
+
+func validateFromFieldRef(customByKey map[string]customFieldDef, targetDomain, targetField, srcField string) error {
+	if targetDomain != "lead" {
+		return httpx.Validation("from_field not supported for this action domain")
+	}
+	if srcField == "" {
+		return httpx.Validation("from_field required")
+	}
+	if srcField == targetField {
+		return httpx.Validation("source cannot equal target field")
+	}
+	targetKind, ok := actionFieldKind(targetDomain, targetField, customByKey)
+	if !ok {
+		return httpx.Validation("unknown action field")
+	}
+	srcDomain := sourceFieldDomain(srcField)
+	srcKind, ok := conditionFieldKind(srcDomain, srcField, customByKey)
+	if !ok {
+		return httpx.Validation("unknown source field")
+	}
+	if srcKind != targetKind {
+		return httpx.Validation("source field kind mismatch")
+	}
+	return nil
+}
+
 func resolveActionDateValue(raw json.RawMessage) (*time.Time, error) {
 	if isNullRaw(raw) {
 		return nil, nil
@@ -513,6 +694,19 @@ func resolveActionDateValue(raw json.RawMessage) (*time.Time, error) {
 	}
 }
 
+func resolveActionAtValue(raw json.RawMessage) (*time.Time, error) {
+	if isNullRaw(raw) {
+		return nil, nil
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil && s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			return &t, nil
+		}
+	}
+	return resolveActionDateValue(raw)
+}
+
 func cleanTags(tags []string) []string {
 	seen := map[string]bool{}
 	out := []string{}
@@ -531,9 +725,12 @@ func cleanTags(tags []string) []string {
 
 // applyAction performs one Update action inside the move transaction. For
 // pipeline stage moves it updates currentStageID and records history.
-func (s *Service) applyAction(ctx context.Context, q database.Querier, accountID, userID, leadID int64, currentStageID *int64, a RuleAction) error {
+func (s *Service) applyAction(ctx context.Context, q database.Querier, accountID, userID, leadID int64, currentStageID *int64, ec *ruleEvalContext, a RuleAction) error {
 	switch a.Domain {
 	case "pipeline":
+		if _, isRef := actionFromFieldRef(a.Value); isRef {
+			return httpx.Validation("from_field not supported for this action domain")
+		}
 		if a.Field != "stage_id" {
 			return httpx.Validation("unsupported pipeline action field")
 		}
@@ -557,6 +754,9 @@ func (s *Service) applyAction(ctx context.Context, q database.Querier, accountID
 		if a.Field != "assigned_user_id" {
 			return httpx.Validation("unsupported user action field")
 		}
+		if _, isRef := actionFromFieldRef(a.Value); isRef {
+			return httpx.Validation("from_field not supported for this action domain")
+		}
 		if isNullRaw(a.Value) {
 			_, err := q.Exec(ctx, `UPDATE leads SET assigned_user_id=NULL WHERE id=$1`, leadID)
 			return err
@@ -576,6 +776,14 @@ func (s *Service) applyAction(ctx context.Context, q database.Querier, accountID
 		_, err = q.Exec(ctx, `UPDATE leads SET assigned_user_id=$2 WHERE id=$1`, leadID, uid)
 		return err
 	case "lead":
+		resolved, skip, err := resolveActionValue(ec, a.Domain, a.Field, a.Value)
+		if err != nil {
+			return err
+		}
+		if skip {
+			return nil
+		}
+		a.Value = resolved
 		return applyLeadUpdate(ctx, q, accountID, leadID, a)
 	}
 	return httpx.Validation("unknown action domain")
@@ -608,7 +816,7 @@ func applyLeadUpdate(ctx context.Context, q database.Querier, accountID, leadID 
 		_, err := q.Exec(ctx, `UPDATE leads SET status=$2 WHERE id=$1`, leadID, st)
 		return err
 	case "action_at":
-		t, err := resolveActionDateValue(a.Value)
+		t, err := resolveActionAtValue(a.Value)
 		if err != nil {
 			return err
 		}
