@@ -1271,7 +1271,11 @@ export function useBuyerRoutingLog(filters: IntakeLogFilters = { status: "all", 
       normalizeQueueResponse(await get<QueueListResponse>(`/buyer/routing-log?${q}`)),
   });
 }
-export function useRoutingLog(source: "publisher" | "buyer", filters: IntakeLogFilters) {
+export function useRoutingLog(
+  source: "publisher" | "buyer",
+  filters: IntakeLogFilters,
+  enabled = true
+) {
   const q = intakeQueueQueryString(filters);
   return useQuery({
     queryKey: [source === "buyer" ? "buyer-routing-log" : "intake-queue", "log", filters],
@@ -1280,6 +1284,7 @@ export function useRoutingLog(source: "publisher" | "buyer", filters: IntakeLogF
         source === "buyer" ? `/buyer/routing-log?${q}` : `/publisher/intake-queue?${q}`;
       return normalizeQueueResponse(await get<QueueListResponse>(path));
     },
+    enabled,
   });
 }
 export function useMapQueueField() {

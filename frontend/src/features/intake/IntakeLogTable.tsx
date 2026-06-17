@@ -23,7 +23,6 @@ import { useInboundLog } from "./hooks";
 import { UnifiedInboundLogTable } from "./UnifiedInboundLogTable";
 import {
   inboundItemsToRows,
-  mergeInboundRows,
   queueItemsToRows,
   webhookDeliveriesToRows,
 } from "./inboundLog";
@@ -235,7 +234,9 @@ export function IntakeLogTable({
   const isAdmin = user?.role === "admin";
   const canReplayWebhooks = isAdmin;
 
-  const [logType, setLogType] = useState<LogTypeFilter>(initialLogType);
+  const [logType, setLogType] = useState<LogTypeFilter>(
+    source === "buyer" && initialLogType === "intake" ? "all" : initialLogType
+  );
   const [logFilter, setLogFilter] = useState<LogFilter>("all");
   const [webhookStatus, setWebhookStatus] = useState<WebhookDeliveryStatusFilter>("");
   const [webhookId, setWebhookId] = useState<number | "">("");
@@ -276,17 +277,15 @@ export function IntakeLogTable({
     limit,
   };
 
-  const showIntakeData = logType === "intake" || (logType === "all" && source === "buyer");
+  const showIntakeData = logType === "intake" && source === "publisher";
   const showWebhookData = logType === "webhooks" || (logType === "all" && source === "buyer");
   const showInboundData =
     logType === "integrations" || (logType === "all" && source === "publisher");
 
-  const intakeQuery = useRoutingLog(source, intakeFilters);
+  const intakeQuery = useRoutingLog(source, intakeFilters, showIntakeData);
   const webhookQuery = useAccountWebhookDeliveries(webhookFilters);
-  const inboundQuery = useInboundLog(inboundFilters, showInboundData, source);
 
-  const buyerAllIntakeQuery = useRoutingLog("buyer", { status: "all", page, limit });
-  const buyerAllWebhookQuery = useAccountWebhookDeliveries({ page, limit });
+  const inboundQuery = useInboundLog(inboundFilters, showInboundData, source);
 
   const { rows, total, isLoading, hasFilters, refetchWebhooks } = useMemo(() => {
     if (logType === "intake") {
@@ -333,21 +332,14 @@ export function IntakeLogTable({
       };
     }
 
-    // Buyer "All" — approximate client merge
-    const intakeRows = queueItemsToRows(buyerAllIntakeQuery.data?.items ?? []);
-    const webhookRows = webhookDeliveriesToRows(buyerAllWebhookQuery.data?.items ?? []);
-    const merged = mergeInboundRows(intakeRows, webhookRows, limit);
-    const intakeTotal = buyerAllIntakeQuery.data?.total ?? 0;
-    const webhookTotal = buyerAllWebhookQuery.data?.total ?? 0;
+    // Buyer "All" — webhooks only (no publisher source routing rows)
+    const items = webhookQuery.data?.items ?? [];
     return {
-      rows: merged,
-      total: intakeTotal + webhookTotal,
-      isLoading: buyerAllIntakeQuery.isLoading || buyerAllWebhookQuery.isLoading,
+      rows: webhookDeliveriesToRows(items),
+      total: webhookQuery.data?.total ?? 0,
+      isLoading: webhookQuery.isLoading,
       hasFilters: false,
-      refetchWebhooks: () => {
-        buyerAllIntakeQuery.refetch();
-        buyerAllWebhookQuery.refetch();
-      },
+      refetchWebhooks: () => webhookQuery.refetch(),
     };
   }, [
     logType,
@@ -358,20 +350,16 @@ export function IntakeLogTable({
     webhookQuery.isLoading,
     inboundQuery.data,
     inboundQuery.isLoading,
-    buyerAllIntakeQuery.data,
-    buyerAllIntakeQuery.isLoading,
-    buyerAllWebhookQuery.data,
-    buyerAllWebhookQuery.isLoading,
     logFilter,
     debouncedSearch,
     sourceSlug,
     webhookStatus,
     webhookId,
-    limit,
+    showIntakeData,
+    showWebhookData,
     webhookQuery,
     inboundQuery,
-    buyerAllIntakeQuery,
-    buyerAllWebhookQuery,
+    intakeQuery,
   ]);
 
   const emptyMessage =
@@ -383,7 +371,8 @@ export function IntakeLogTable({
           ? "No intake history yet."
           : emptyTitle;
 
-  const typeFilters = LOG_TYPE_FILTERS;
+  const typeFilters =
+    source === "buyer" ? LOG_TYPE_FILTERS.filter((f) => f.value !== "intake") : LOG_TYPE_FILTERS;
 
   return (
     <>
@@ -400,7 +389,7 @@ export function IntakeLogTable({
         ))}
       </div>
 
-      {logType === "intake" && (
+      {logType === "intake" && source === "publisher" && (
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <FilterInput
             value={search}

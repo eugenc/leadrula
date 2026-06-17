@@ -486,7 +486,7 @@ func (s *Service) ListRoutingLogForBuyer(ctx context.Context, buyerID int64, p L
 	}
 
 	selectQ := `SELECT COALESCE(q.id, l.id), l.id, l.first_name, l.last_name, l.phone,
-		COALESCE(q.source, l.source), COALESCE(q.raw_payload, l.raw_payload),
+		NULL::text, COALESCE(q.raw_payload, l.raw_payload),
 		l.status, l.owner_account_id, l.publisher_id, r.routed_at` + from + ` ORDER BY r.routed_at DESC`
 	if paginate {
 		offset := (page - 1) * limit
