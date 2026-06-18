@@ -25,6 +25,7 @@ func (h *Handler) RegisterPublisher(r chi.Router) {
 	r.Get("/contracts/{id}/participations", h.listParticipations)
 	r.Get("/payouts/summary", h.payoutSummary)
 	r.Get("/payouts/by-compensation", h.payoutByCompensation)
+	r.Get("/payouts/ledger", h.payoutLedger)
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireRole("admin"))
@@ -880,6 +881,19 @@ func (h *Handler) payoutByCompensation(w http.ResponseWriter, r *http.Request) {
 	}
 	if rows == nil {
 		rows = []CompensationPayoutRow{}
+	}
+	httpx.JSON(w, http.StatusOK, rows)
+}
+
+func (h *Handler) payoutLedger(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	rows, err := h.svc.ListPayoutLedger(r.Context(), p.AccountID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if rows == nil {
+		rows = []PayoutLedgerRow{}
 	}
 	httpx.JSON(w, http.StatusOK, rows)
 }

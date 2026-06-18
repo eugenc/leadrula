@@ -17,23 +17,24 @@ import (
 )
 
 type Transaction struct {
-	ID                        int64     `json:"id"`
-	PublicID                  string    `json:"public_id"`
-	BuyerID                   int64     `json:"buyer_id"`
-	LeadID                    *int64    `json:"lead_id"`
-	LeadName                  *string   `json:"lead_name,omitempty"`
-	BuyerName                 *string   `json:"buyer_name,omitempty"`
-	PublisherName             *string   `json:"publisher_name,omitempty"`
-	ContractID                *int64    `json:"contract_id"`
-	Type                      string    `json:"type"`
-	Side                      string    `json:"side,omitempty"`
-	Category                  string    `json:"category,omitempty"`
-	CounterpartyName          *string   `json:"counterparty_name,omitempty"`
-	CounterpartyAccountType   *string   `json:"counterparty_account_type,omitempty"`
-	Amount                    float64   `json:"amount"`
-	BalanceAfter              float64   `json:"balance_after"`
-	Description               string    `json:"description"`
-	CreatedAt                 time.Time `json:"created_at"`
+	ID                      int64     `json:"id"`
+	PublicID                string    `json:"public_id"`
+	BuyerID                 int64     `json:"buyer_id"`
+	LeadID                  *int64    `json:"lead_id"`
+	LeadName                *string   `json:"lead_name,omitempty"`
+	BuyerName               *string   `json:"buyer_name,omitempty"`
+	PublisherName           *string   `json:"publisher_name,omitempty"`
+	ContractID              *int64    `json:"contract_id"`
+	Type                    string    `json:"type"`
+	Side                    string    `json:"side,omitempty"`
+	Category                string    `json:"category,omitempty"`
+	CounterpartyName        *string   `json:"counterparty_name,omitempty"`
+	CounterpartyAccountType *string   `json:"counterparty_account_type,omitempty"`
+	LedgerSource            string    `json:"ledger_source,omitempty"`
+	Amount                  float64   `json:"amount"`
+	BalanceAfter            *float64  `json:"balance_after"`
+	Description             string    `json:"description"`
+	CreatedAt               time.Time `json:"created_at"`
 }
 
 type Dispute struct {
@@ -196,7 +197,7 @@ func (s *Service) creditTxn(ctx context.Context, buyerID int64, amount float64, 
 }
 
 func insertTxn(ctx context.Context, q database.Querier, buyerID int64, ttype string, amount, balanceAfter float64, desc string) (*Transaction, error) {
-	t := &Transaction{}
+	t := &Transaction{BalanceAfter: &balanceAfter}
 	err := q.QueryRow(ctx,
 		`INSERT INTO transactions(buyer_id, type, amount, balance_after, description)
 		 VALUES ($1,$2,$3,$4,$5)
@@ -230,10 +231,12 @@ func (s *Service) ListTransactions(ctx context.Context, buyerID int64, txType st
 	var out []Transaction
 	for rows.Next() {
 		var t Transaction
+		var bal float64
 		if err := rows.Scan(&t.ID, &t.PublicID, &t.BuyerID, &t.LeadID, &t.ContractID, &t.Type,
-			&t.Amount, &t.BalanceAfter, &t.Description, &t.CreatedAt, &t.LeadName, &t.BuyerName, &t.PublisherName); err != nil {
+			&t.Amount, &bal, &t.Description, &t.CreatedAt, &t.LeadName, &t.BuyerName, &t.PublisherName); err != nil {
 			return nil, err
 		}
+		t.BalanceAfter = &bal
 		out = append(out, t)
 	}
 	return out, rows.Err()
@@ -293,27 +296,84 @@ const txnCounterpartyTypeExpr = `
     WHEN ` + txnSideExpr + ` = 'purchase' THEN 'publisher'
   END`
 
-// ListPublisherTransactions lists ledger rows for a publisher: sales, purchases, and buyer prepay.
+const earningCategoryExpr = `
+  CASE ce.kind
+    WHEN 'distribute' THEN 'Sale'
+    WHEN 'return' THEN 'Return'
+    WHEN 'dispute' THEN 'Dispute'
+    WHEN 'stage' THEN 'Stage'
+    ELSE ''
+  END`
+
+const publisherTxnFilter = `
+  (
+    (` + txnSideExpr + ` = 'prepay' AND t.type IN ('topup', 'manual_invoice'))
+    OR (` + txnSideExpr + ` = 'purchase' AND t.type = 'debit')
+  )`
+
+// ListPublisherTransactions lists publisher-centric activity: lead earnings, buyer prepay, and publisher purchases.
 func (s *Service) ListPublisherTransactions(ctx context.Context, publisherID int64, filterBuyerID int64, txType string) ([]Transaction, error) {
-	q := `SELECT t.id, t.public_id, t.buyer_id, t.lead_id, t.contract_id, t.type,
-	             t.amount::float8, t.balance_after::float8, t.description, t.created_at,
-	             NULLIF(trim(coalesce(l.first_name,'') || ' ' || coalesce(l.last_name,'')), ''),
-	             NULLIF(trim(buyer.name), ''),
-	             NULLIF(COALESCE(pub_c.name, pub_l.name), ''),
-	             ` + txnSideExpr + `,
-	             ` + txnCategoryExpr + `,
-	             ` + txnCounterpartyNameExpr + `,
-	             ` + txnCounterpartyTypeExpr + `
-	      FROM transactions t
-	      LEFT JOIN leads l ON l.id = t.lead_id
-	      LEFT JOIN accounts buyer ON buyer.id = t.buyer_id
-	      LEFT JOIN contracts c ON c.id = t.contract_id
-	      LEFT JOIN accounts pub_c ON pub_c.id = c.publisher_id
-	      LEFT JOIN accounts pub_l ON pub_l.id = l.publisher_id
-	      WHERE ` + publisherTxnScope + `
-	        AND ($2 = 0 OR t.buyer_id = $2)
-	        AND ($3 = '' OR t.type = $3::txn_type)
-	      ORDER BY t.created_at DESC LIMIT 500`
+	q := `
+	  SELECT * FROM (
+	    SELECT ce.id,
+	           ''::text AS public_id,
+	           c.buyer_id,
+	           ce.lead_id,
+	           cc.contract_id,
+	           ce.kind::text AS type,
+	           ce.amount::float8,
+	           NULL::float8 AS balance_after,
+	           ''::text AS description,
+	           ce.created_at,
+	           NULLIF(trim(coalesce(l.first_name,'') || ' ' || coalesce(l.last_name,'')), ''),
+	           NULLIF(trim(buyer.name), ''),
+	           NULL::text AS publisher_name,
+	           'sale'::text AS side,
+	           ` + earningCategoryExpr + ` AS category,
+	           NULLIF(trim(buyer.name), '') AS counterparty_name,
+	           buyer.type::text AS counterparty_account_type,
+	           'earning'::text AS ledger_source
+	    FROM compensation_earnings ce
+	    JOIN contract_compensations cc ON cc.id = ce.compensation_id
+	    JOIN contracts c ON c.id = cc.contract_id AND c.publisher_id = $1 AND c.deleted_at IS NULL
+	    JOIN accounts buyer ON buyer.id = c.buyer_id
+	    LEFT JOIN leads l ON l.id = ce.lead_id
+	    WHERE ce.kind IN ('distribute', 'return', 'dispute', 'stage')
+	      AND ($2 = 0 OR c.buyer_id = $2)
+
+	    UNION ALL
+
+	    SELECT t.id,
+	           t.public_id::text,
+	           t.buyer_id,
+	           t.lead_id,
+	           t.contract_id,
+	           t.type::text,
+	           t.amount::float8,
+	           t.balance_after::float8,
+	           t.description,
+	           t.created_at,
+	           NULLIF(trim(coalesce(l.first_name,'') || ' ' || coalesce(l.last_name,'')), ''),
+	           NULLIF(trim(buyer.name), ''),
+	           NULLIF(COALESCE(pub_c.name, pub_l.name), ''),
+	           ` + txnSideExpr + `,
+	           ` + txnCategoryExpr + `,
+	           ` + txnCounterpartyNameExpr + `,
+	           ` + txnCounterpartyTypeExpr + `,
+	           'transaction'::text AS ledger_source
+	    FROM transactions t
+	    LEFT JOIN leads l ON l.id = t.lead_id
+	    LEFT JOIN accounts buyer ON buyer.id = t.buyer_id
+	    LEFT JOIN contracts c ON c.id = t.contract_id
+	    LEFT JOIN accounts pub_c ON pub_c.id = c.publisher_id
+	    LEFT JOIN accounts pub_l ON pub_l.id = l.publisher_id
+	    WHERE ` + publisherTxnScope + `
+	      AND ($2 = 0 OR t.buyer_id = $2)
+	      AND ($3 = '' OR t.type = $3::txn_type)
+	      AND ` + publisherTxnFilter + `
+	  ) combined
+	  ORDER BY created_at DESC
+	  LIMIT 500`
 	rows, err := s.pool.Query(ctx, q, publisherID, filterBuyerID, txType)
 	if err != nil {
 		return nil, err
@@ -324,7 +384,7 @@ func (s *Service) ListPublisherTransactions(ctx context.Context, publisherID int
 		var t Transaction
 		if err := rows.Scan(&t.ID, &t.PublicID, &t.BuyerID, &t.LeadID, &t.ContractID, &t.Type,
 			&t.Amount, &t.BalanceAfter, &t.Description, &t.CreatedAt, &t.LeadName, &t.BuyerName, &t.PublisherName,
-			&t.Side, &t.Category, &t.CounterpartyName, &t.CounterpartyAccountType); err != nil {
+			&t.Side, &t.Category, &t.CounterpartyName, &t.CounterpartyAccountType, &t.LedgerSource); err != nil {
 			return nil, err
 		}
 		out = append(out, t)

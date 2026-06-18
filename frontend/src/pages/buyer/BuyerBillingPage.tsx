@@ -102,7 +102,7 @@ function Transactions() {
               <TD className={t.amount < 0 ? "font-medium text-danger-fg" : "text-jade-700"}>
                 {formatMoney(t.amount)}
               </TD>
-              <TD>{formatMoney(t.balance_after)}</TD>
+              <TD>{t.balance_after != null ? formatMoney(t.balance_after) : "—"}</TD>
               <TD>{format(new Date(t.created_at), "MMM d, h:mma")}</TD>
               <TD>
                 {t.type === "debit" && !disputedTxnIds.has(t.id) && (

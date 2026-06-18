@@ -37,6 +37,7 @@ import type {
   Invoice,
   PayoutSummary,
   CompensationPayoutRow,
+  PayoutLedgerRow,
   UserRow,
   CustomField,
   DisqReason,
@@ -1485,6 +1486,15 @@ export function usePayoutByCompensation() {
   return useQuery({
     queryKey: ["payout-by-compensation"],
     queryFn: () => get<CompensationPayoutRow[]>("/publisher/payouts/by-compensation"),
+    enabled: isPublisher,
+  });
+}
+
+export function usePayoutLedger() {
+  const isPublisher = useAuthStore.getState().user?.account_type === "publisher";
+  return useQuery({
+    queryKey: ["payout-ledger"],
+    queryFn: () => get<PayoutLedgerRow[]>("/publisher/payouts/ledger"),
     enabled: isPublisher,
   });
 }

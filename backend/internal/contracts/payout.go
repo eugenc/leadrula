@@ -156,6 +156,22 @@ type CompensationPayoutRow struct {
 	InvoicePublicID       *string `json:"invoice_public_id,omitempty"`
 }
 
+type PayoutLedgerRow struct {
+	ID                   int64     `json:"id"`
+	CompensationID       int64     `json:"compensation_id"`
+	ContractID           int64     `json:"contract_id"`
+	ContractName         string    `json:"contract_name"`
+	BuyerName            string    `json:"buyer_name"`
+	BuyerKind            string    `json:"buyer_kind"`
+	Amount               float64   `json:"amount"`
+	PeriodStart          time.Time `json:"period_start"`
+	PeriodEnd            time.Time `json:"period_end"`
+	StripeTransferID     *string   `json:"stripe_transfer_id,omitempty"`
+	StripeTransferStatus string    `json:"stripe_transfer_status"`
+	InvoiceStatus        *string   `json:"invoice_status,omitempty"`
+	CreatedAt            time.Time `json:"created_at"`
+}
+
 func (s *Service) runPayoutTransfers(ctx context.Context, publisherID int64) {
 	if s.payoutTransfers == nil {
 		return
@@ -280,6 +296,49 @@ func (s *Service) PayoutByCompensation(ctx context.Context, publisherID int64) (
 			endStr := end.UTC().Format(time.RFC3339)
 			row.NextPeriodEnd = &endStr
 		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func (s *Service) ListPayoutLedger(ctx context.Context, publisherID int64) ([]PayoutLedgerRow, error) {
+	if err := s.EnsurePublisherPayoutClears(ctx, publisherID); err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT pc.id, pc.compensation_id, cc.contract_id, c.name,
+		        COALESCE(NULLIF(trim(buyer.name), ''), ''),
+		        buyer.type::text,
+		        pc.amount::float8,
+		        pc.period_start, pc.period_end,
+		        pc.stripe_transfer_id, pc.stripe_transfer_status,
+		        i.status::text,
+		        pc.created_at
+		 FROM compensation_payout_clears pc
+		 JOIN contract_compensations cc ON cc.id = pc.compensation_id
+		 JOIN contracts c ON c.id = cc.contract_id AND c.publisher_id = $1 AND c.deleted_at IS NULL
+		 JOIN accounts buyer ON buyer.id = c.buyer_id
+		 LEFT JOIN invoices i ON i.id = pc.invoice_id
+		 ORDER BY pc.created_at DESC
+		 LIMIT 500`, publisherID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PayoutLedgerRow
+	for rows.Next() {
+		var row PayoutLedgerRow
+		var cleared float64
+		if err := rows.Scan(
+			&row.ID, &row.CompensationID, &row.ContractID, &row.ContractName,
+			&row.BuyerName, &row.BuyerKind, &cleared,
+			&row.PeriodStart, &row.PeriodEnd,
+			&row.StripeTransferID, &row.StripeTransferStatus,
+			&row.InvoiceStatus, &row.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		row.Amount = -cleared
 		out = append(out, row)
 	}
 	return out, rows.Err()

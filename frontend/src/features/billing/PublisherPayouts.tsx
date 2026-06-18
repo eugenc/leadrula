@@ -1,10 +1,10 @@
 import { format } from "date-fns";
-import { usePayoutSummary, usePayoutByCompensation } from "@/features/admin/hooks";
+import { usePayoutSummary, usePayoutByCompensation, usePayoutLedger } from "@/features/admin/hooks";
 import { Card, Badge, Spinner, StatCard, EmptyState } from "@/components/ui/misc";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { formatMoney } from "@/lib/utils";
 import { PAYOUT_FREQUENCIES, PAYOUT_WEEKDAYS } from "@/features/admin/contractCompensation";
-import type { CompensationPayoutRow } from "@/types";
+import type { CompensationPayoutRow, PayoutLedgerRow } from "@/types";
 
 function payoutScheduleLabel(row: {
   payout_frequency?: string | null;
@@ -72,9 +72,42 @@ function payoutStatusVariant(
   }
 }
 
+function payoutLedgerStatusLabel(row: PayoutLedgerRow): string {
+  if (row.invoice_status === "paid") return "Paid via invoice";
+  if (row.invoice_status === "open") return "Invoice open";
+  switch (row.stripe_transfer_status) {
+    case "sent":
+      return "Paid out";
+    case "pending":
+      return "Pending connect";
+    case "failed":
+      return "Transfer failed";
+    case "skipped":
+      return "Skipped";
+    default:
+      return row.stripe_transfer_status || "—";
+  }
+}
+
+function payoutLedgerStatusVariant(
+  row: PayoutLedgerRow
+): "default" | "distributed" | "pending" | "overdue" {
+  if (row.invoice_status === "paid" || row.stripe_transfer_status === "sent") return "distributed";
+  if (row.invoice_status === "open" || row.stripe_transfer_status === "pending") return "pending";
+  if (row.stripe_transfer_status === "failed") return "overdue";
+  return "default";
+}
+
+function payoutPeriodLabel(row: PayoutLedgerRow): string {
+  const start = format(new Date(row.period_start), "MMM d");
+  const end = format(new Date(row.period_end), "MMM d, yyyy");
+  return `${start} – ${end}`;
+}
+
 export function PublisherPayouts() {
   const { data: summary, isLoading: summaryLoading } = usePayoutSummary();
   const { data: rows, isLoading: rowsLoading } = usePayoutByCompensation();
+  const { data: ledger, isLoading: ledgerLoading } = usePayoutLedger();
 
   return (
     <div className="space-y-6">
@@ -145,6 +178,46 @@ export function PublisherPayouts() {
                     {r.next_period_end
                       ? format(new Date(r.next_period_end), "MMM d, yyyy")
                       : "—"}
+                  </TD>
+                </TR>
+              ))}
+            </TBody>
+          </Table>
+        )}
+      </div>
+
+      <div>
+        <h3 className="mb-3 text-base font-semibold text-gray-800">Payout history</h3>
+        {ledgerLoading ? (
+          <Spinner className="h-6 w-6" />
+        ) : (ledger ?? []).length === 0 ? (
+          <EmptyState title="No payouts yet." />
+        ) : (
+          <Table>
+            <THead>
+              <tr>
+                <TH>Period</TH>
+                <TH>Contract</TH>
+                <TH>Buyer</TH>
+                <TH>Amount</TH>
+                <TH>Status</TH>
+                <TH>When</TH>
+              </tr>
+            </THead>
+            <TBody>
+              {(ledger ?? []).map((row) => (
+                <TR key={row.id}>
+                  <TD className="text-gray-600">{payoutPeriodLabel(row)}</TD>
+                  <TD className="font-medium text-gray-800">{row.contract_name}</TD>
+                  <TD className="capitalize text-gray-600">{row.buyer_name || row.buyer_kind}</TD>
+                  <TD className="font-medium text-danger-fg">{formatMoney(row.amount)}</TD>
+                  <TD>
+                    <Badge variant={payoutLedgerStatusVariant(row)}>
+                      {payoutLedgerStatusLabel(row)}
+                    </Badge>
+                  </TD>
+                  <TD className="text-gray-600">
+                    {format(new Date(row.created_at), "MMM d, yyyy")}
                   </TD>
                 </TR>
               ))}

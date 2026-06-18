@@ -380,3 +380,56 @@ func TestListReturnRulesForPublisher_andUpdateContractDestination(t *testing.T) 
 		t.Fatalf("restore return_stage_id: %v", err)
 	}
 }
+
+func TestFindReturnRule_prefersRuleDestinationOverParticipationDefault(t *testing.T) {
+	pool := connectContractsTestDB(t)
+	ctx := context.Background()
+
+	var contractID, buyerID, participationID, buyerStageID, ruleReturnStageID int64
+	var participationReturnStageID *int64
+	var altParticipationDefault int64
+	err := pool.QueryRow(ctx,
+		`SELECT c.id, p.buyer_id, rr.participation_id, rr.buyer_stage_id, rr.return_stage_id, p.return_stage_id,
+		        (SELECT ps.id FROM pipeline_stages ps
+		         WHERE ps.pipeline_id = c.source_pipeline_id AND ps.id <> rr.return_stage_id
+		         ORDER BY ps.position, ps.id LIMIT 1)
+		 FROM contract_return_rules rr
+		 JOIN contract_participations p ON p.id = rr.participation_id
+		 JOIN contracts c ON c.id = rr.contract_id
+		 WHERE rr.participation_id IS NOT NULL AND c.deleted_at IS NULL
+		   AND c.source_pipeline_id IS NOT NULL
+		 LIMIT 1`).Scan(
+		&contractID, &buyerID, &participationID, &buyerStageID, &ruleReturnStageID,
+		&participationReturnStageID, &altParticipationDefault)
+	if err != nil {
+		t.Skip("no participation return rule in database")
+	}
+	if altParticipationDefault == 0 {
+		t.Skip("contract publisher pipeline has only one stage")
+	}
+
+	origParticipationReturn := participationReturnStageID
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx,
+			`UPDATE contract_participations SET return_stage_id = $2 WHERE id = $1`,
+			participationID, origParticipationReturn)
+	})
+
+	if _, err := pool.Exec(ctx,
+		`UPDATE contract_participations SET return_stage_id = $2 WHERE id = $1`,
+		participationID, altParticipationDefault); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := FindReturnRule(ctx, pool, contractID, buyerID, buyerStageID)
+	if err != nil {
+		t.Fatalf("FindReturnRule: %v", err)
+	}
+	if info == nil {
+		t.Fatal("expected return rule match")
+	}
+	if info.ReturnStageID != ruleReturnStageID {
+		t.Fatalf("ReturnStageID = %d, want rule destination %d (not participation default %d)",
+			info.ReturnStageID, ruleReturnStageID, altParticipationDefault)
+	}
+}

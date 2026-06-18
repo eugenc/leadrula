@@ -721,7 +721,32 @@ export interface CompensationPayoutRow {
   invoice_public_id?: string | null;
 }
 
-export type TxnCategory = "Sale" | "Purchase" | "Topup" | "Credit" | "Refund" | "Invoice";
+export interface PayoutLedgerRow {
+  id: number;
+  compensation_id: number;
+  contract_id: number;
+  contract_name: string;
+  buyer_name: string;
+  buyer_kind: string;
+  amount: number;
+  period_start: string;
+  period_end: string;
+  stripe_transfer_id?: string | null;
+  stripe_transfer_status: string;
+  invoice_status?: string | null;
+  created_at: string;
+}
+
+export type TxnCategory =
+  | "Sale"
+  | "Return"
+  | "Dispute"
+  | "Stage"
+  | "Purchase"
+  | "Topup"
+  | "Credit"
+  | "Refund"
+  | "Invoice";
 
 export interface Transaction {
   id: number;
@@ -732,13 +757,14 @@ export interface Transaction {
   buyer_name?: string | null;
   publisher_name?: string | null;
   contract_id: number | null;
-  type: "debit" | "credit" | "dispute_credit" | "manual_invoice" | "compensation_payout" | "topup";
+  type: string;
   side?: "sale" | "purchase" | "prepay";
-  category?: TxnCategory;
+  category?: TxnCategory | string;
   counterparty_name?: string | null;
   counterparty_account_type?: string | null;
+  ledger_source?: "earning" | "transaction";
   amount: number;
-  balance_after: number;
+  balance_after?: number | null;
   description: string;
   created_at: string;
 }

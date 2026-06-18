@@ -1355,7 +1355,7 @@ func FindReturnRule(ctx context.Context, q database.Querier, contractID, buyerAc
 	var returnStageID, publisherID int64
 	err := q.QueryRow(ctx,
 		`SELECT COALESCE(p.source_pipeline_id, c.source_pipeline_id),
-		        COALESCE(p.return_stage_id, rr.return_stage_id, c.return_stage_id),
+		        COALESCE(rr.return_stage_id, p.return_stage_id, c.return_stage_id),
 		        c.publisher_id
 		 FROM contract_return_rules rr
 		 JOIN contracts c ON c.id = rr.contract_id
