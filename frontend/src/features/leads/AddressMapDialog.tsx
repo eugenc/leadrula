@@ -1,9 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/misc";
-import { fetchGoogleMapsSatelliteMap } from "@/features/integrations/hooks";
+import { fetchGoogleMapsPlaceDetails } from "@/features/integrations/hooks";
 import { errorMessage } from "@/lib/api";
+
+const ESRI_SATELLITE =
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 
 export function AddressMapDialog({
   open,
@@ -16,18 +21,17 @@ export function AddressMapDialog({
   placeId: string;
   formattedAddress: string;
 }) {
-  const [zoom, setZoom] = useState(18);
+  const mapRef = useRef<HTMLDivElement>(null);
+  const mapInstance = useRef<L.Map | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
       setError(null);
-      setZoom(18);
-      if (imageUrl) {
-        URL.revokeObjectURL(imageUrl);
-        setImageUrl(null);
+      if (mapInstance.current) {
+        mapInstance.current.remove();
+        mapInstance.current = null;
       }
       return;
     }
@@ -36,14 +40,39 @@ export function AddressMapDialog({
     setLoading(true);
     setError(null);
 
-    fetchGoogleMapsSatelliteMap(placeId, zoom)
-      .then((blob) => {
-        if (cancelled) return;
-        const url = URL.createObjectURL(blob);
-        setImageUrl((prev) => {
-          if (prev) URL.revokeObjectURL(prev);
-          return url;
+    fetchGoogleMapsPlaceDetails(placeId)
+      .then((details) => {
+        if (cancelled || !mapRef.current) return;
+        if (details.lat === 0 && details.lng === 0) {
+          setError("Location not found for this address");
+          return;
+        }
+
+        if (mapInstance.current) {
+          mapInstance.current.remove();
+          mapInstance.current = null;
+        }
+
+        const map = L.map(mapRef.current, {
+          center: [details.lat, details.lng],
+          zoom: 18,
         });
+
+        L.tileLayer(ESRI_SATELLITE, {
+          attribution: "Tiles &copy; Esri",
+          maxZoom: 19,
+        }).addTo(map);
+
+        L.circleMarker([details.lat, details.lng], {
+          radius: 8,
+          color: "#fff",
+          weight: 2,
+          fillColor: "#dc2626",
+          fillOpacity: 1,
+        }).addTo(map);
+
+        mapInstance.current = map;
+        requestAnimationFrame(() => map.invalidateSize());
       })
       .catch((err) => {
         if (!cancelled) setError(errorMessage(err));
@@ -54,14 +83,12 @@ export function AddressMapDialog({
 
     return () => {
       cancelled = true;
+      if (mapInstance.current) {
+        mapInstance.current.remove();
+        mapInstance.current = null;
+      }
     };
-  }, [open, placeId, zoom]);
-
-  useEffect(() => {
-    return () => {
-      if (imageUrl) URL.revokeObjectURL(imageUrl);
-    };
-  }, [imageUrl]);
+  }, [open, placeId]);
 
   if (!open) return null;
 
@@ -86,32 +113,8 @@ export function AddressMapDialog({
         )}
         {error ? (
           <div className="flex h-full items-center justify-center px-4 text-sm text-gray-500">{error}</div>
-        ) : imageUrl ? (
-          <img src={imageUrl} alt={formattedAddress} className="h-full w-full object-cover" />
-        ) : null}
-        {!error && (
-          <div className="absolute left-3 top-3 z-10 flex flex-col gap-1">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              className="h-7 min-w-7 px-2"
-              disabled={loading || zoom >= 20}
-              onClick={() => setZoom((z) => Math.min(20, z + 1))}
-            >
-              +
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              className="h-7 min-w-7 px-2"
-              disabled={loading || zoom <= 15}
-              onClick={() => setZoom((z) => Math.max(15, z - 1))}
-            >
-              −
-            </Button>
-          </div>
+        ) : (
+          <div ref={mapRef} className="h-full w-full" />
         )}
       </div>
     </Dialog>

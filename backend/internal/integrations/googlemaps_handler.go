@@ -2,7 +2,6 @@ package integrations
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/internal/integrations/googlemaps"
@@ -55,40 +54,4 @@ func (h *Handler) googleMapsPlaceDetails(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, details)
-}
-
-func (h *Handler) googleMapsSatelliteMap(w http.ResponseWriter, r *http.Request) {
-	p := auth.FromContext(r.Context())
-	apiKey, err := h.svc.GoogleMapsAPIKey(r.Context(), p.AccountID)
-	if err != nil {
-		httpx.WriteError(w, err)
-		return
-	}
-	placeID := r.URL.Query().Get("place_id")
-	if placeID == "" {
-		httpx.WriteError(w, httpx.Validation("place_id is required"))
-		return
-	}
-	zoom := 18
-	if z := r.URL.Query().Get("zoom"); z != "" {
-		if v, err := strconv.Atoi(z); err == nil {
-			zoom = v
-		}
-	}
-	details, err := googlemaps.PlaceDetails(r.Context(), apiKey, placeID)
-	if err != nil {
-		httpx.WriteError(w, httpx.Validation("google places details failed: "+err.Error()))
-		return
-	}
-	if details.Lat == 0 && details.Lng == 0 {
-		httpx.WriteError(w, httpx.Validation("location not found for place"))
-		return
-	}
-	img, err := googlemaps.StaticSatelliteMap(r.Context(), apiKey, details.Lat, details.Lng, zoom, 640, 400)
-	if err != nil {
-		httpx.WriteError(w, httpx.Validation("google static map failed: "+err.Error()))
-		return
-	}
-	w.Header().Set("Content-Type", "image/png")
-	_, _ = w.Write(img)
 }
