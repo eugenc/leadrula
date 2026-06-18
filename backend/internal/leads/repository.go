@@ -825,7 +825,7 @@ func (r *Repository) ClearFromPipeline(ctx context.Context, q database.Querier, 
 func (r *Repository) MoveToPublisher(ctx context.Context, q database.Querier, leadID, publisherID, pipelineID, stageID int64) error {
 	_, err := q.Exec(ctx,
 		`UPDATE leads SET owner_account_id=$2, pipeline_id=$3, stage_id=$4, contract_id=NULL, status='returned',
-		   publisher_pipeline_id=NULL, publisher_stage_id=NULL,
+		   publisher_pipeline_id=NULL, publisher_stage_id=NULL, disqualification_reason_id=NULL,
 		   position=COALESCE((SELECT MAX(position)+1 FROM leads WHERE stage_id=$4),0)
 		 WHERE id=$1`, leadID, publisherID, pipelineID, stageID)
 	return err

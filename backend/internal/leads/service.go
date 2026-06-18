@@ -218,6 +218,23 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		if err := contracts.ValidateReturnDestination(ctx, tx, returnInfo.SourcePipelineID, returnInfo.ReturnStageID); err != nil {
 			return nil, nil, err
 		}
+		if lead.ContractID != nil {
+			refunded, err := billing.ReturnCreditExists(ctx, tx, lead.OwnerAccountID, leadID, *lead.ContractID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("return rule check refund: %w", err)
+			}
+			if !refunded {
+				amt, err := billing.DistributeDebitAmount(ctx, tx, lead.OwnerAccountID, leadID, *lead.ContractID)
+				if err != nil {
+					return nil, nil, fmt.Errorf("return rule lookup debit: %w", err)
+				}
+				if amt > 0 {
+					if err := billing.Credit(ctx, tx, lead.OwnerAccountID, amt, leadID, *lead.ContractID, "lead returned"); err != nil {
+						return nil, nil, fmt.Errorf("return rule refund buyer: %w", err)
+					}
+				}
+			}
+		}
 		if err := contracts.RecordEarningReturn(ctx, tx, leadID, lead.ContractID); err != nil {
 			return nil, nil, fmt.Errorf("return rule record earning: %w", err)
 		}

@@ -53,21 +53,36 @@ func RecordEarningReturn(ctx context.Context, q database.Querier, leadID int64, 
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	var reversals []struct {
+		compID int64
+		amount float64
+	}
 	for rows.Next() {
 		var compID int64
 		var amount float64
 		if err := rows.Scan(&compID, &amount); err != nil {
+			rows.Close()
 			return err
 		}
+		reversals = append(reversals, struct {
+			compID int64
+			amount float64
+		}{compID, amount})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, r := range reversals {
 		if _, err := q.Exec(ctx,
 			`INSERT INTO compensation_earnings(compensation_id, lead_id, amount, kind)
 			 VALUES ($1,$2,$3,'return')`,
-			compID, leadID, -amount); err != nil {
+			r.compID, leadID, -r.amount); err != nil {
 			return err
 		}
 	}
-	return rows.Err()
+	return nil
 }
 
 // RecordEarningDispute reverses distribute earnings when a buyer dispute is accepted.

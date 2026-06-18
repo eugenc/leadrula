@@ -97,6 +97,63 @@ func Debit(ctx context.Context, q database.Querier, buyerID int64, amount float6
 	return err
 }
 
+// Credit refunds the buyer inside the caller's transaction (mirror of Debit).
+func Credit(ctx context.Context, q database.Querier, buyerID int64, amount float64, leadID, contractID int64, desc string) error {
+	if amount <= 0 {
+		return nil
+	}
+	if err := EnsureBalance(ctx, q, buyerID); err != nil {
+		return err
+	}
+	var balance float64
+	if err := q.QueryRow(ctx,
+		`SELECT balance::float8 FROM buyer_balances WHERE buyer_id = $1 FOR UPDATE`, buyerID).Scan(&balance); err != nil {
+		return err
+	}
+	newBal := balance + amount
+	if _, err := q.Exec(ctx,
+		`UPDATE buyer_balances SET balance = $2 WHERE buyer_id = $1`, buyerID, newBal); err != nil {
+		return err
+	}
+	_, err := q.Exec(ctx,
+		`INSERT INTO transactions(buyer_id, lead_id, contract_id, type, amount, balance_after, description)
+		 VALUES ($1, NULLIF($2,0), NULLIF($3,0), 'credit', $4, $5, $6)`,
+		buyerID, leadID, contractID, amount, newBal, desc)
+	return err
+}
+
+// DistributeDebitAmount returns the absolute value of the latest distribute debit for a lead.
+func DistributeDebitAmount(ctx context.Context, q database.Querier, buyerID, leadID, contractID int64) (float64, error) {
+	var amount *float64
+	err := q.QueryRow(ctx,
+		`SELECT ABS(amount::float8) FROM transactions
+		 WHERE buyer_id = $1 AND lead_id = $2 AND contract_id = $3 AND type = 'debit' AND amount < 0
+		 ORDER BY created_at DESC LIMIT 1`,
+		buyerID, leadID, contractID).Scan(&amount)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if amount == nil {
+		return 0, nil
+	}
+	return *amount, nil
+}
+
+// ReturnCreditExists reports whether this lead was already refunded on return.
+func ReturnCreditExists(ctx context.Context, q database.Querier, buyerID, leadID, contractID int64) (bool, error) {
+	var ok bool
+	err := q.QueryRow(ctx,
+		`SELECT EXISTS(
+		   SELECT 1 FROM transactions
+		   WHERE buyer_id = $1 AND lead_id = $2 AND contract_id = $3
+		     AND type = 'credit' AND description = 'lead returned'
+		 )`, buyerID, leadID, contractID).Scan(&ok)
+	return ok, err
+}
+
 func (s *Service) GetBalance(ctx context.Context, buyerID int64) (float64, error) {
 	if err := EnsureBalance(ctx, s.pool, buyerID); err != nil {
 		return 0, err

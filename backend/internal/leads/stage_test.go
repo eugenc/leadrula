@@ -7,6 +7,7 @@ import (
 
 	"github.com/echayko/leadrula/backend/internal/accounts"
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/billing"
 	"github.com/echayko/leadrula/backend/internal/config"
 	"github.com/echayko/leadrula/backend/internal/contracts"
 	"github.com/echayko/leadrula/backend/internal/database"
@@ -419,5 +420,126 @@ func TestValidateReturnDestination(t *testing.T) {
 	var appErr *httpx.AppError
 	if !errors.As(err, &appErr) || appErr.Code != httpx.CodeBusinessRule {
 		t.Fatalf("expected business_rule, got %v", err)
+	}
+}
+
+func TestChangeStage_returnRefundsBuyerAndReversesEarning(t *testing.T) {
+	pool := connectLeadsTestDB(t)
+	ctx := context.Background()
+	svc := newStageTestService(t, pool)
+
+	f, err := loadDisqMoveFixture(ctx, pool)
+	if err != nil {
+		t.Skip("no buyer contract lead with disqualification stage in database")
+	}
+
+	var compensationID int64
+	err = pool.QueryRow(ctx,
+		`SELECT id FROM contract_compensations WHERE contract_id = $1 LIMIT 1`,
+		f.contractID).Scan(&compensationID)
+	if err != nil {
+		t.Skip("contract has no compensation row")
+	}
+
+	var ruleID int64
+	err = pool.QueryRow(ctx,
+		`INSERT INTO contract_return_rules(contract_id, buyer_stage_id, return_stage_id)
+		 VALUES ($1,$2,$3)
+		 ON CONFLICT (contract_id, buyer_stage_id) WHERE participation_id IS NULL
+		 DO UPDATE SET return_stage_id = EXCLUDED.return_stage_id
+		 RETURNING id`,
+		f.contractID, f.disqStageID, f.returnStageID).Scan(&ruleID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM contract_return_rules WHERE id = $1`, ruleID)
+	})
+
+	const debitAmt = 25.50
+	setupTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := billing.EnsureBalance(ctx, setupTx, f.ownerAccountID); err != nil {
+		t.Fatal(err)
+	}
+	if err := billing.Debit(ctx, setupTx, f.ownerAccountID, debitAmt, f.leadID, f.contractID, "test distribute"); err != nil {
+		t.Fatal(err)
+	}
+	if err := contracts.RecordEarningDistribute(ctx, setupTx, compensationID, f.leadID, debitAmt, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := setupTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx,
+			`DELETE FROM compensation_earnings WHERE lead_id = $1 AND compensation_id = $2`,
+			f.leadID, compensationID)
+		_, _ = pool.Exec(ctx,
+			`DELETE FROM transactions WHERE lead_id = $1 AND contract_id = $2 AND description IN ('test distribute', 'lead returned')`,
+			f.leadID, f.contractID)
+	})
+
+	var balBefore float64
+	if err := pool.QueryRow(ctx,
+		`SELECT balance::float8 FROM buyer_balances WHERE buyer_id = $1`, f.ownerAccountID).Scan(&balBefore); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _ = pool.Exec(ctx,
+		`DELETE FROM transactions WHERE lead_id = $1 AND contract_id = $2 AND description = 'lead returned'`,
+		f.leadID, f.contractID)
+
+	var origOwner, origStage int64
+	var origContractID *int64
+	var origStatus string
+	var origPipelineID *int64
+	var origDisqReason *int64
+	if err := pool.QueryRow(ctx,
+		`SELECT owner_account_id, stage_id, contract_id, status::text, pipeline_id, disqualification_reason_id FROM leads WHERE id = $1`,
+		f.leadID).Scan(&origOwner, &origStage, &origContractID, &origStatus, &origPipelineID, &origDisqReason); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx,
+			`UPDATE leads SET owner_account_id=$2, stage_id=$3, contract_id=$4, status=$5::lead_status,
+			        pipeline_id=$6, disqualification_reason_id=$7 WHERE id=$1`,
+			f.leadID, origOwner, origStage, origContractID, origStatus, origPipelineID, origDisqReason)
+	})
+
+	p := &auth.Principal{AccountID: f.ownerAccountID, AccountType: "buyer", Role: "admin", UserID: 1}
+	reasonID := f.reasonID
+	updated, _, err := svc.ChangeStage(ctx, p, f.leadID, f.disqStageID, nil, &reasonID)
+	if err != nil {
+		t.Fatalf("ChangeStage: %v", err)
+	}
+	if updated.OwnerAccountID != f.publisherID {
+		t.Fatalf("owner_account_id = %d, want publisher %d", updated.OwnerAccountID, f.publisherID)
+	}
+	if updated.DisqReasonID != nil {
+		t.Fatalf("disqualification_reason_id = %v, want nil after return", updated.DisqReasonID)
+	}
+
+	var balAfter float64
+	if err := pool.QueryRow(ctx,
+		`SELECT balance::float8 FROM buyer_balances WHERE buyer_id = $1`, f.ownerAccountID).Scan(&balAfter); err != nil {
+		t.Fatal(err)
+	}
+	if balAfter != balBefore+debitAmt {
+		t.Fatalf("buyer balance = %v, want %v (refunded distribute debit)", balAfter, balBefore+debitAmt)
+	}
+
+	var returnAmt float64
+	err = pool.QueryRow(ctx,
+		`SELECT amount::float8 FROM compensation_earnings
+		 WHERE lead_id = $1 AND compensation_id = $2 AND kind = 'return'`,
+		f.leadID, compensationID).Scan(&returnAmt)
+	if err != nil {
+		t.Fatalf("return earning row: %v", err)
+	}
+	if returnAmt != -debitAmt {
+		t.Fatalf("return earning = %v, want %v", returnAmt, -debitAmt)
 	}
 }

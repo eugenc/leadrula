@@ -1,6 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  addMonths,
+  eachDayOfInterval,
+  endOfMonth,
+  endOfWeek,
+  format,
+  isSameDay,
+  isSameMonth,
+  isToday,
+  parse,
+  startOfMonth,
+  startOfWeek,
+} from "date-fns";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Dropdown } from "@/components/ui/dropdown";
-import { Input, Select } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import {
   buildDatetimeLocal,
@@ -13,83 +26,170 @@ import {
 } from "./customFieldDate";
 
 const HOURS_12 = Array.from({ length: 12 }, (_, i) => i + 1);
+const WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] as const;
 
-function DatetimeControls({
+function chipClass(active: boolean, disabled?: boolean) {
+  return cn(
+    "rounded-md border px-2 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+    active
+      ? "border-jade-500 bg-jade-500 text-white"
+      : "border-gray-100 bg-surface-card text-gray-700 hover:bg-jade-50 hover:text-jade-700"
+  );
+}
+
+function partsToDate(parts: DatetimeLocalParts): Date {
+  return parse(parts.date, "yyyy-MM-dd", new Date());
+}
+
+function DatetimePickerPanel({
   value,
   onChange,
-  onBlur,
   disabled,
   className,
 }: {
   value: string;
   onChange: (value: string) => void;
-  onBlur?: () => void;
   disabled?: boolean;
   className?: string;
 }) {
-  const parts = value ? parseDatetimeLocalParts(value) : null;
+  const parts = value ? parseDatetimeLocalParts(value) : defaultDatetimeLocalParts();
+  const selectedDate = partsToDate(parts!);
+  const [viewMonth, setViewMonth] = useState(() => startOfMonth(selectedDate));
+
+  useEffect(() => {
+    setViewMonth(startOfMonth(selectedDate));
+  }, [parts!.date]);
+
+  const calendarDays = useMemo(() => {
+    const monthStart = startOfMonth(viewMonth);
+    const monthEnd = endOfMonth(viewMonth);
+    return eachDayOfInterval({
+      start: startOfWeek(monthStart, { weekStartsOn: 0 }),
+      end: endOfWeek(monthEnd, { weekStartsOn: 0 }),
+    });
+  }, [viewMonth]);
 
   function emit(next: DatetimeLocalParts) {
     onChange(buildDatetimeLocal(next));
   }
 
   function update(patch: Partial<DatetimeLocalParts>) {
-    const base = parts ?? defaultDatetimeLocalParts();
-    emit({ ...base, ...patch });
+    emit({ ...parts!, ...patch });
+  }
+
+  function selectDay(day: Date) {
+    update({ date: format(day, "yyyy-MM-dd") });
   }
 
   return (
-    <div className={cn("flex flex-wrap items-center gap-2", className)}>
-      <Input
-        type="date"
-        value={parts?.date ?? ""}
-        onChange={(e) => update({ date: e.target.value })}
-        onBlur={onBlur}
-        disabled={disabled}
-        className="min-w-[140px] flex-1"
-      />
-      <Select
-        value={parts ? String(parts.hour12) : ""}
-        onChange={(e) => update({ hour12: Number(e.target.value) })}
-        onBlur={onBlur}
-        disabled={disabled}
-        className="w-16 shrink-0"
-        aria-label="Hour"
-      >
-        {!parts && <option value="">Hr</option>}
-        {HOURS_12.map((h) => (
-          <option key={h} value={h}>
-            {String(h).padStart(2, "0")}
-          </option>
+    <div className={cn("w-[280px]", className)}>
+      <div className="mb-3 flex items-center justify-between">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setViewMonth((m) => addMonths(m, -1))}
+          className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40"
+          aria-label="Previous month"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <span className="text-sm font-semibold text-gray-800">{format(viewMonth, "MMMM yyyy")}</span>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setViewMonth((m) => addMonths(m, 1))}
+          className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40"
+          aria-label="Next month"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="mb-1 grid grid-cols-7 gap-0.5">
+        {WEEKDAYS.map((d) => (
+          <div key={d} className="py-1 text-center text-[10px] font-medium uppercase text-gray-400">
+            {d}
+          </div>
         ))}
-      </Select>
-      <Select
-        value={parts ? String(parts.minute) : ""}
-        onChange={(e) => update({ minute: Number(e.target.value) })}
-        onBlur={onBlur}
-        disabled={disabled}
-        className="w-16 shrink-0"
-        aria-label="Minute"
-      >
-        {!parts && <option value="">Min</option>}
-        {QUARTER_MINUTES.map((m) => (
-          <option key={m} value={m}>
-            {String(m).padStart(2, "0")}
-          </option>
-        ))}
-      </Select>
-      <Select
-        value={parts?.period ?? ""}
-        onChange={(e) => update({ period: e.target.value as "AM" | "PM" })}
-        onBlur={onBlur}
-        disabled={disabled}
-        className="w-[72px] shrink-0"
-        aria-label="AM or PM"
-      >
-        {!parts && <option value="">—</option>}
-        <option value="AM">AM</option>
-        <option value="PM">PM</option>
-      </Select>
+      </div>
+
+      <div className="mb-4 grid grid-cols-7 gap-0.5">
+        {calendarDays.map((day) => {
+          const inMonth = isSameMonth(day, viewMonth);
+          const selected = isSameDay(day, selectedDate);
+          const today = isToday(day);
+          return (
+            <button
+              key={day.toISOString()}
+              type="button"
+              disabled={disabled}
+              onClick={() => selectDay(day)}
+              className={cn(
+                "h-8 rounded-md text-xs font-medium transition-colors",
+                !inMonth && "text-gray-300",
+                inMonth && !selected && "text-gray-700 hover:bg-jade-50 hover:text-jade-700",
+                selected && "bg-jade-500 text-white",
+                today && !selected && "ring-1 ring-inset ring-jade-300"
+              )}
+            >
+              {format(day, "d")}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="space-y-2 border-t border-gray-100 pt-3">
+        <div>
+          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-gray-400">Hour</p>
+          <div className="grid grid-cols-6 gap-1">
+            {HOURS_12.map((h) => (
+              <button
+                key={h}
+                type="button"
+                disabled={disabled}
+                onClick={() => update({ hour12: h })}
+                className={chipClass(parts!.hour12 === h, disabled)}
+              >
+                {String(h).padStart(2, "0")}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-gray-400">Minute</p>
+          <div className="grid grid-cols-4 gap-1">
+            {QUARTER_MINUTES.map((m) => (
+              <button
+                key={m}
+                type="button"
+                disabled={disabled}
+                onClick={() => update({ minute: m })}
+                className={chipClass(parts!.minute === m, disabled)}
+              >
+                {String(m).padStart(2, "0")}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-gray-400">Period</p>
+          <div className="grid grid-cols-2 gap-1">
+            {(["AM", "PM"] as const).map((p) => (
+              <button
+                key={p}
+                type="button"
+                disabled={disabled}
+                onClick={() => update({ period: p })}
+                className={chipClass(parts!.period === p, disabled)}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -122,10 +222,9 @@ export function DatetimeFieldInput({
 
   if (layout === "inline") {
     return (
-      <DatetimeControls
+      <DatetimePickerPanel
         value={value}
         onChange={onChange}
-        onBlur={onBlur}
         disabled={disabled}
         className={className}
       />
@@ -142,7 +241,7 @@ export function DatetimeFieldInput({
         onBlur?.();
       }}
       align="left"
-      className="min-w-[320px] p-2"
+      className="p-3"
       trigger={
         <button
           type="button"
@@ -158,11 +257,7 @@ export function DatetimeFieldInput({
         </button>
       }
     >
-      <DatetimeControls
-        value={value}
-        onChange={onChange}
-        disabled={disabled}
-      />
+      <DatetimePickerPanel value={value} onChange={onChange} disabled={disabled} />
     </Dropdown>
   );
 }
