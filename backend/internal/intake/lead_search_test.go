@@ -127,3 +127,86 @@ func TestListInboundLog_integrationSearch(t *testing.T) {
 		}
 	}
 }
+
+func TestListQueue_scopedToPublisher(t *testing.T) {
+	cfg := config.Load()
+	ctx := context.Background()
+	pool, err := database.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	svc := &Service{pool: pool}
+
+	var publisherID int64
+	err = pool.QueryRow(ctx,
+		`SELECT l.publisher_id
+		 FROM lead_intake_queue q
+		 JOIN leads l ON l.id = q.lead_id
+		 LIMIT 1`).Scan(&publisherID)
+	if err != nil {
+		t.Skip("no intake queue rows in database")
+	}
+
+	var expectedTotal int64
+	err = pool.QueryRow(ctx,
+		`SELECT COUNT(*)
+		 FROM lead_intake_queue q
+		 JOIN leads l ON l.id = q.lead_id
+		 WHERE l.publisher_id = $1`, publisherID).Scan(&expectedTotal)
+	if err != nil {
+		t.Fatalf("count queue for publisher: %v", err)
+	}
+
+	got, err := svc.ListQueue(ctx, publisherID, ListQueueParams{
+		Status: "all",
+		Page:   1,
+		Limit:  100,
+	})
+	if err != nil {
+		t.Fatalf("ListQueue: %v", err)
+	}
+	if got.Total != expectedTotal {
+		t.Fatalf("ListQueue total = %d, want %d (publisher-scoped)", got.Total, expectedTotal)
+	}
+
+	var otherPublisherID int64
+	err = pool.QueryRow(ctx,
+		`SELECT id FROM accounts WHERE account_type = 'publisher' AND id <> $1 LIMIT 1`,
+		publisherID).Scan(&otherPublisherID)
+	if err != nil {
+		t.Skip("no second publisher account to compare scoping")
+	}
+
+	other, err := svc.ListQueue(ctx, otherPublisherID, ListQueueParams{
+		Status: "all",
+		Page:   1,
+		Limit:  100,
+	})
+	if err != nil {
+		t.Fatalf("ListQueue other publisher: %v", err)
+	}
+
+	for _, it := range got.Items {
+		var owner int64
+		if err := pool.QueryRow(ctx, `SELECT publisher_id FROM leads WHERE id=$1`, it.LeadID).Scan(&owner); err != nil {
+			t.Fatalf("lead publisher_id: %v", err)
+		}
+		if owner != publisherID {
+			t.Fatalf("item lead_id=%d belongs to publisher %d, want %d", it.LeadID, owner, publisherID)
+		}
+	}
+
+	if expectedTotal > 0 && other.Total == got.Total && otherPublisherID != publisherID {
+		var otherExpected int64
+		_ = pool.QueryRow(ctx,
+			`SELECT COUNT(*)
+			 FROM lead_intake_queue q
+			 JOIN leads l ON l.id = q.lead_id
+			 WHERE l.publisher_id = $1`, otherPublisherID).Scan(&otherExpected)
+		if otherExpected != other.Total {
+			t.Fatalf("other publisher total mismatch: got %d want %d", other.Total, otherExpected)
+		}
+	}
+}

@@ -64,7 +64,7 @@ export function LogLeadSearch({
 
   return (
     <div ref={containerRef} className={`relative ${className ?? ""}`}>
-      <div className="relative max-w-sm">
+      <div className="relative w-full">
         <FilterInput
           value={value}
           onChange={(e) => onChange(e.target.value)}

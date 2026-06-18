@@ -41,7 +41,10 @@ export function RouteDestinationIntegrationsEditor({
   const [stageId, setStageId] = useState("");
 
   const available = (connections ?? []).filter(
-    (c) => c.status === "active" && !selected.some((s) => s.connection_id === c.id)
+    (c) =>
+      c.status === "active" &&
+      c.provider_slug !== "google_maps" &&
+      !selected.some((s) => s.connection_id === c.id)
   );
 
   function addConnection() {

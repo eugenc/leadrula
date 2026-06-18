@@ -50,7 +50,10 @@ export function useCreateIntegrationConnection() {
       credentials: Record<string, unknown>;
       config?: Record<string, unknown>;
     }) => post<IntegrationConnection>(`${ns()}/integrations/connections`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["integration-connections"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["integration-connections"] });
+      qc.invalidateQueries({ queryKey: ["google-maps-status"] });
+    },
   });
 }
 
@@ -96,6 +99,7 @@ export function useDeleteIntegrationConnection() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["integration-connections"] });
       qc.invalidateQueries({ queryKey: ["route-integrations"] });
+      qc.invalidateQueries({ queryKey: ["google-maps-status"] });
     },
   });
 }
@@ -138,5 +142,42 @@ export function useDetachRouteIntegration() {
       del(`${ns()}/integrations/route-integrations/${id}`),
     onSuccess: (_, v) => qc.invalidateQueries({ queryKey: ["route-integrations", v.routeId] }),
   });
+}
+
+export type GoogleMapsSuggestion = {
+  place_id: string;
+  description: string;
+  main_text?: string;
+  secondary_text?: string;
+};
+
+export type GoogleMapsPlaceDetails = {
+  place_id: string;
+  formatted_address: string;
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+  lat: number;
+  lng: number;
+};
+
+export function useGoogleMapsStatus() {
+  return useQuery({
+    queryKey: ["google-maps-status"],
+    queryFn: () => get<{ connected: boolean }>(`${ns()}/google-maps/status`),
+  });
+}
+
+export async function fetchGoogleMapsAutocomplete(input: string, sessionToken: string) {
+  const params = new URLSearchParams({ input, session_token: sessionToken });
+  const res = await get<{ suggestions: GoogleMapsSuggestion[] }>(
+    `${ns()}/google-maps/autocomplete?${params}`
+  );
+  return res.suggestions ?? [];
+}
+
+export async function fetchGoogleMapsPlaceDetails(placeId: string) {
+  return post<GoogleMapsPlaceDetails>(`${ns()}/google-maps/place-details`, { place_id: placeId });
 }
 

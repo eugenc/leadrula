@@ -63,7 +63,8 @@ func NewService(pool *pgxpool.Pool, encKey []byte, oauth OAuthConfig) *Service {
 			"hubspot":    &providers.HubSpotProvider{},
 			"zoho_crm":   &providers.ZohoCRMProvider{},
 			"salesforce": &providers.SalesforceProvider{},
-			"sunbase":    &providers.SunbaseProvider{},
+			"sunbase":      &providers.SunbaseProvider{},
+			"google_maps":  &providers.GoogleMapsProvider{},
 		},
 	}
 }
@@ -142,6 +143,20 @@ func (s *Service) CreateConnection(ctx context.Context, accountID int64, provide
 	if err := p.ValidateCredentials(ctx, credentialsRaw, config); err != nil {
 		return nil, httpx.Validation("credential validation failed: " + err.Error())
 	}
+	if providerSlug == googleMapsProviderSlug {
+		var exists bool
+		if err := s.pool.QueryRow(ctx,
+			`SELECT EXISTS(
+				SELECT 1 FROM integration_connections c
+				JOIN integration_providers p ON p.id = c.provider_id
+				WHERE c.account_id = $1 AND p.slug = $2
+			)`, accountID, googleMapsProviderSlug).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if exists {
+			return nil, httpx.Validation("disconnect existing google maps connection first")
+		}
+	}
 	var providerID int64
 	if err := s.pool.QueryRow(ctx,
 		`SELECT id FROM integration_providers WHERE slug = $1`, providerSlug).Scan(&providerID); err != nil {
@@ -218,6 +233,16 @@ func (s *Service) AttachToRoute(ctx context.Context, accountID int64, accountTyp
 	}
 	if !exists {
 		return httpx.NotFound("connection not found")
+	}
+	var providerSlug string
+	if err := s.pool.QueryRow(ctx,
+		`SELECT p.slug FROM integration_connections c
+		 JOIN integration_providers p ON p.id = c.provider_id
+		 WHERE c.id = $1 AND c.account_id = $2`, connectionID, accountID).Scan(&providerSlug); err != nil {
+		return err
+	}
+	if providerSlug == googleMapsProviderSlug {
+		return httpx.Validation("google maps cannot be attached to routes")
 	}
 	if deliveryConfig == nil {
 		deliveryConfig = map[string]any{}

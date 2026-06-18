@@ -19,6 +19,7 @@ type Lead struct {
 	City             *string         `json:"city"`
 	State            *string         `json:"state"`
 	Zip              *string         `json:"zip"`
+	AddressPlaceID   *string         `json:"address_place_id"`
 	Source           *string         `json:"source"`
 	ExternalID       *string         `json:"external_id"`
 	PipelineID           *int64 `json:"pipeline_id"`

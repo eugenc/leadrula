@@ -149,6 +149,7 @@ function AddConnectionDrawer({
   const selected = providers.find((p) => p.slug === effectiveSlug);
   const existingForSlug = connections.filter((c) => c.provider_slug === effectiveSlug);
   const isSunbase = effectiveSlug === "sunbase";
+  const isGoogleMaps = effectiveSlug === "google_maps";
   const isManage = existingForSlug.length > 0;
   const showSunbaseActive = isSunbase && sunbaseActive && activeConnection != null;
 
@@ -188,6 +189,9 @@ function AddConnectionDrawer({
         if (existing) {
           loadSunbaseConnection(existing);
         }
+      }
+      if (initialSlug === "google_maps") {
+        setName("Google Maps");
       }
     }
   }, [open, initialSlug, providers, connections]);
@@ -284,8 +288,14 @@ function AddConnectionDrawer({
       credentials = { api_key: apiKey };
       config.location_id = locationId;
     }
+    let connectionName = name;
+    if (slug === "google_maps") {
+      if (isManage) return;
+      credentials = { api_key: apiKey };
+      connectionName = "Google Maps";
+    }
     create.mutate(
-      { provider_slug: slug, name, credentials, config },
+      { provider_slug: slug, name: connectionName, credentials, config },
       {
         onSuccess: () => {
           toast.success("Connection created");
@@ -364,7 +374,8 @@ function AddConnectionDrawer({
             <Button
               disabled={
                 !slug ||
-                (!isSunbase && !name) ||
+                (!isSunbase && !isGoogleMaps && !name) ||
+                (isGoogleMaps && !apiKey.trim()) ||
                 (isSunbase && !schemaName.trim()) ||
                 create.isPending ||
                 oauth.isPending
@@ -414,7 +425,7 @@ function AddConnectionDrawer({
         )}
 
         <>
-            {!showSunbaseActive && (
+            {!showSunbaseActive && !(isGoogleMaps && isManage) && (
               <>
                 <div>
                   <Label>Provider</Label>
@@ -433,7 +444,7 @@ function AddConnectionDrawer({
                       ))}
                   </Select>
                 </div>
-                {slug !== "sunbase" && (
+                {slug !== "sunbase" && slug !== "google_maps" && (
                   <div>
                     <Label>Connection name</Label>
                     <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="My CRM" />
@@ -517,6 +528,17 @@ function AddConnectionDrawer({
                 <div>
                   <Label>Location ID</Label>
                   <Input value={locationId} onChange={(e) => setLocationId(e.target.value)} />
+                </div>
+              </>
+            )}
+            {slug === "google_maps" && (
+              <>
+                <p className="text-sm text-gray-500">
+                  Enable Places API (New) on your Google Cloud key. Restrict the key to your server IP addresses.
+                </p>
+                <div>
+                  <Label>Google Maps API key</Label>
+                  <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
                 </div>
               </>
             )}

@@ -286,11 +286,33 @@ func (s *Service) executeEvent(ctx context.Context, accountID int64, webhookName
 	}
 }
 
-func (s *Service) maybeAddInboundNote(ctx context.Context, q database.Querier, event *WebhookEvent, webhookName string, leadID int64, flat map[string]any) error {
+func (s *Service) maybeAddInboundNote(ctx context.Context, q database.Querier, event *WebhookEvent, webhookName string, leadID int64, flat map[string]any, maps []FieldMapEntry) error {
+	noteMappedKeys := map[string]struct{}{}
+	for _, m := range maps {
+		if m.TargetType != "builtin" || m.BuiltinField == nil || *m.BuiltinField != "note" {
+			continue
+		}
+		noteMappedKeys[m.SourceKey] = struct{}{}
+		v, ok := flat[m.SourceKey]
+		if !ok {
+			continue
+		}
+		body := toText(v)
+		if body == "" {
+			continue
+		}
+		if err := s.leads.AddInboundNote(ctx, q, leadID, webhookName, body); err != nil {
+			return err
+		}
+	}
 	if event.NoteSourceKey == nil || *event.NoteSourceKey == "" {
 		return nil
 	}
-	v, ok := flat[*event.NoteSourceKey]
+	key := *event.NoteSourceKey
+	if _, mapped := noteMappedKeys[key]; mapped {
+		return nil
+	}
+	v, ok := flat[key]
 	if !ok {
 		return nil
 	}
@@ -322,7 +344,7 @@ func (s *Service) execCreate(ctx context.Context, accountID int64, webhookName s
 				if err := s.applyMappedFields(ctx, s.leads.Pool(), accountID, existing.ID, flat, maps, builtins, customs); err != nil {
 					return nil, &existing.ID, err
 				}
-				if err := s.maybeAddInboundNote(ctx, s.leads.Pool(), event, webhookName, existing.ID, flat); err != nil {
+				if err := s.maybeAddInboundNote(ctx, s.leads.Pool(), event, webhookName, existing.ID, flat, maps); err != nil {
 					return nil, &existing.ID, err
 				}
 				return &IngestResult{LeadID: existing.PublicID, Action: "update", Status: "updated"}, &existing.ID, nil
@@ -348,7 +370,7 @@ func (s *Service) execCreate(ctx context.Context, accountID int64, webhookName s
 			if err := s.applyMappedFields(ctx, s.leads.Pool(), accountID, lead.ID, flat, maps, builtins, customs); err != nil {
 				return nil, &lead.ID, err
 			}
-			if err := s.maybeAddInboundNote(ctx, s.leads.Pool(), event, webhookName, lead.ID, flat); err != nil {
+			if err := s.maybeAddInboundNote(ctx, s.leads.Pool(), event, webhookName, lead.ID, flat, maps); err != nil {
 				return nil, &lead.ID, err
 			}
 			return &IngestResult{LeadID: lead.PublicID, Action: "update", Status: "updated"}, &lead.ID, nil
@@ -408,7 +430,7 @@ func (s *Service) execCreate(ctx context.Context, accountID int64, webhookName s
 		}
 	}
 
-	if err := s.maybeAddInboundNote(ctx, tx, event, webhookName, leadID, flat); err != nil {
+	if err := s.maybeAddInboundNote(ctx, tx, event, webhookName, leadID, flat, maps); err != nil {
 		return nil, &leadID, err
 	}
 
@@ -427,7 +449,7 @@ func (s *Service) execUpdate(ctx context.Context, accountID int64, webhookName s
 	if err := s.applyMappedFields(ctx, s.leads.Pool(), accountID, lead.ID, flat, maps, builtins, customs); err != nil {
 		return nil, &lead.ID, err
 	}
-	if err := s.maybeAddInboundNote(ctx, s.leads.Pool(), event, webhookName, lead.ID, flat); err != nil {
+	if err := s.maybeAddInboundNote(ctx, s.leads.Pool(), event, webhookName, lead.ID, flat, maps); err != nil {
 		return nil, &lead.ID, err
 	}
 	return &IngestResult{LeadID: lead.PublicID, Action: "update", Status: "updated"}, &lead.ID, nil
@@ -598,7 +620,7 @@ func (s *Service) applyMappedFields(ctx context.Context, q database.Querier, acc
 		if val == "" {
 			continue
 		}
-		if field == "action_at" || field == "disqualification_reason_id" || field == "tags" || leads.IsMoneyBuiltin(field) {
+		if field == "action_at" || field == "disqualification_reason_id" || field == "tags" || field == "note" || leads.IsMoneyBuiltin(field) {
 			continue
 		}
 		if err := s.leads.SetBuiltinField(ctx, q, leadID, field, val); err != nil {

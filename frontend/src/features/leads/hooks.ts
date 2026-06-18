@@ -126,7 +126,7 @@ export function useChangeStage() {
         };
       });
       qc.setQueryData(["lead", leadId], updated);
-      qc.invalidateQueries({ queryKey: ["stage-history", leadId] });
+      qc.invalidateQueries({ queryKey: ["lead-history", leadId] });
     },
   });
 }
@@ -178,7 +178,7 @@ export function useAddNote() {
 
 export function useStageHistory(leadId: number | null) {
   return useQuery({
-    queryKey: ["stage-history", leadId],
+    queryKey: ["lead-history", leadId],
     queryFn: () => get<LeadHistoryEntry[]>(`${ns()}/leads/${leadId}/stage-history`),
     enabled: !!leadId,
   });

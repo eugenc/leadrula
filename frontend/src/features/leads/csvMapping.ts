@@ -114,6 +114,7 @@ export const BUILTIN_FIELD_LABELS: Record<string, string> = {
   action_at: "Action date & time",
   external_id: "External ID",
   disqualification_reason_id: "Disqualification reason",
+  note: "Note",
 };
 
 export function builtinFieldLabel(field: string): string {

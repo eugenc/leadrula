@@ -8,6 +8,7 @@ import { useUIStore } from "@/store/uiStore";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import { effectiveFieldFormat } from "@/features/admin/customFieldConstants";
+import { AddressAutocomplete } from "./AddressAutocomplete";
 import { useCreateLead, usePipelines, useStages, useUsers, useCustomFields } from "./hooks";
 import type { CustomField } from "@/types";
 import {
@@ -17,16 +18,13 @@ import {
   toNativeDateValue,
   toNativeDatetimeLocalValue,
 } from "./customFieldDate";
+import { DatetimeFieldInput } from "./DatetimeFieldInput";
 
 const BUILTINS = [
   { key: "first_name", label: "First Name", required: true },
   { key: "last_name", label: "Last Name" },
   { key: "phone", label: "Phone" },
   { key: "email", label: "Email" },
-  { key: "address", label: "Address" },
-  { key: "city", label: "City" },
-  { key: "state", label: "State" },
-  { key: "zip", label: "Zip" },
 ] as const;
 
 interface Props {
@@ -55,6 +53,7 @@ export function NewLeadDrawer({ open, onClose }: Props) {
     zip: "",
     source: "",
   });
+  const [addressPlaceId, setAddressPlaceId] = useState("");
   const [pipelineId, setPipelineId] = useState(0);
   const [stageId, setStageId] = useState(0);
   const [assigneeId, setAssigneeId] = useState(0);
@@ -86,6 +85,7 @@ export function NewLeadDrawer({ open, onClose }: Props) {
     setAssigneeId(0);
     setTagsInput("");
     setCustomValues({});
+    setAddressPlaceId("");
   }
 
   async function handleSubmit() {
@@ -122,6 +122,7 @@ export function NewLeadDrawer({ open, onClose }: Props) {
       zip: fields.zip?.trim() || undefined,
       source: fields.source?.trim() || undefined,
     };
+    if (addressPlaceId) body.address_place_id = addressPlaceId;
     if (pipelineId && stageId) {
       body.pipeline_id = pipelineId;
       body.stage_id = stageId;
@@ -249,6 +250,20 @@ export function NewLeadDrawer({ open, onClose }: Props) {
                 />
               </div>
             ))}
+            <AddressAutocomplete
+              address={fields.address ?? ""}
+              city={fields.city ?? ""}
+              state={fields.state ?? ""}
+              zip={fields.zip ?? ""}
+              onPlainChange={(next) => {
+                setFields((prev) => ({ ...prev, ...next }));
+                setAddressPlaceId("");
+              }}
+              onSelect={(validated) => {
+                setFields((prev) => ({ ...prev, ...validated }));
+                setAddressPlaceId(validated.address_place_id);
+              }}
+            />
           </div>
         </div>
 
@@ -328,23 +343,31 @@ function CustomFieldInput({
           <option value="false">No</option>
         </Select>
       ) : field.type === "date" || field.type === "datetime" ? (
-        <Input
-          value={displayValue}
-          type={inputMode}
-          placeholder={inputMode === "text" ? formatToken : undefined}
-          onChange={(e) => {
-            const next = e.target.value;
-            if (inputMode === "text") {
-              onChange(next);
-            } else {
-              handleBlur(next);
-            }
-          }}
-          onBlur={(e) => {
-            if (inputMode === "text") handleBlur(e.target.value);
-          }}
-          className="w-full"
-        />
+        inputMode === "datetime-local" ? (
+          <DatetimeFieldInput
+            value={displayValue}
+            onChange={(next) => handleBlur(next)}
+            className="w-full text-sm"
+          />
+        ) : (
+          <Input
+            value={displayValue}
+            type={inputMode}
+            placeholder={inputMode === "text" ? formatToken : undefined}
+            onChange={(e) => {
+              const next = e.target.value;
+              if (inputMode === "text") {
+                onChange(next);
+              } else {
+                handleBlur(next);
+              }
+            }}
+            onBlur={(e) => {
+              if (inputMode === "text") handleBlur(e.target.value);
+            }}
+            className="w-full"
+          />
+        )
       ) : (
         <Input
           value={value}

@@ -152,6 +152,7 @@ export interface Lead {
   city: string | null;
   state: string | null;
   zip: string | null;
+  address_place_id: string | null;
   source: string | null;
   external_id: string | null;
   pipeline_id: number | null;

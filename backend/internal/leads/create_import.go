@@ -55,6 +55,7 @@ type CreateLeadInput struct {
 	City           string                     `json:"city"`
 	State          string                     `json:"state"`
 	Zip            string                     `json:"zip"`
+	AddressPlaceID string                     `json:"address_place_id"`
 	Source         string                     `json:"source"`
 	ExternalID     string                     `json:"external_id"`
 	CampaignName   string                     `json:"campaign_name"` // deprecated: use source
@@ -329,6 +330,9 @@ func (s *Service) insertLead(ctx context.Context, p *auth.Principal, in CreateLe
 		"first_name": in.FirstName, "last_name": in.LastName,
 		"phone": in.Phone, "email": in.Email,
 		"address": in.Address, "city": in.City, "state": in.State, "zip": in.Zip,
+	}
+	if in.AddressPlaceID != "" {
+		builtins["address_place_id"] = in.AddressPlaceID
 	}
 	if source != "" {
 		builtins["source"] = source

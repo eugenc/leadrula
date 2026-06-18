@@ -1,6 +1,7 @@
 package leads
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -91,6 +92,75 @@ func TestFilterLeadHistory_publisherSeesFullNames(t *testing.T) {
 	filtered := FilterLeadHistory(&auth.Principal{AccountType: "publisher"}, entries)
 	if filtered[0].AccountName == nil || *filtered[0].AccountName != pubName {
 		t.Fatalf("publisher view name = %v, want %q", filtered[0].AccountName, pubName)
+	}
+}
+
+func TestLeadHistory_infersAccountWhenOwnerNull(t *testing.T) {
+	pool := connectLeadsTestDB(t)
+	ctx := t.Context()
+	repo := NewRepository(pool)
+
+	var hasOwnerCol bool
+	if err := pool.QueryRow(ctx,
+		`SELECT EXISTS (
+		   SELECT 1 FROM information_schema.columns
+		   WHERE table_name = 'lead_stage_history' AND column_name = 'owner_account_id'
+		 )`).Scan(&hasOwnerCol); err != nil || !hasOwnerCol {
+		t.Skip("owner_account_id column not migrated")
+	}
+
+	var historyID, leadID int64
+	err := pool.QueryRow(ctx,
+		`SELECT h.id, h.lead_id FROM lead_stage_history h
+		 JOIN leads l ON l.id = h.lead_id
+		 WHERE l.deleted_at IS NULL
+		 LIMIT 1`).Scan(&historyID, &leadID)
+	if err != nil {
+		t.Skip("no stage history rows")
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+
+	var savedOwner *int64
+	if err := tx.QueryRow(ctx,
+		`SELECT owner_account_id FROM lead_stage_history WHERE id = $1`, historyID).Scan(&savedOwner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE lead_stage_history SET owner_account_id = NULL WHERE id = $1`, historyID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(),
+			`UPDATE lead_stage_history SET owner_account_id = $2 WHERE id = $1`, historyID, savedOwner)
+	})
+
+	entries, err := repo.LeadHistory(ctx, leadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *LeadHistoryEntry
+	for i := range entries {
+		if entries[i].Kind == "stage_change" && entries[i].ID == historyID {
+			found = &entries[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("history entry not found")
+	}
+	if found.AccountName == nil || *found.AccountName == "" {
+		t.Fatalf("expected inferred account_name, got %v", found.AccountName)
+	}
+	if found.AccountType == nil || *found.AccountType == "" {
+		t.Fatalf("expected inferred account_type, got %v", found.AccountType)
 	}
 }
 

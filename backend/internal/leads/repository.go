@@ -28,12 +28,12 @@ func (r *Repository) Pool() *pgxpool.Pool { return r.pool }
 
 var builtinFields = map[string]bool{
 	"first_name": true, "last_name": true, "phone": true, "email": true,
-	"address": true, "city": true, "state": true, "zip": true, "source": true,
+	"address": true, "city": true, "state": true, "zip": true, "address_place_id": true, "source": true,
 	"external_id": true,
 }
 
 const leadCols = `id, public_id, owner_account_id, publisher_id, contract_id,
-	first_name, last_name, phone, email, address, city, state, zip, source, external_id,
+	first_name, last_name, phone, email, address, city, state, zip, address_place_id, source, external_id,
 	cost, revenue,
 	pipeline_id, stage_id, publisher_pipeline_id, publisher_stage_id, position, assigned_user_id, preassigned_buyer_id, action_at, status,
 	disqualification_reason_id, created_at, updated_at, tags`
@@ -48,7 +48,7 @@ func boardStageSQL(accountType string) string {
 
 func listSelect(accountType string) string {
 	return `l.id, l.public_id, l.owner_account_id, l.publisher_id, l.contract_id,
-	l.first_name, l.last_name, l.phone, l.email, l.address, l.city, l.state, l.zip, l.source, l.external_id,
+	l.first_name, l.last_name, l.phone, l.email, l.address, l.city, l.state, l.zip, l.address_place_id, l.source, l.external_id,
 	l.cost, l.revenue,
 	l.pipeline_id, l.stage_id, l.publisher_pipeline_id, l.publisher_stage_id, l.position, l.assigned_user_id, l.preassigned_buyer_id, l.action_at, l.status,
 	l.disqualification_reason_id, l.created_at, l.updated_at, l.tags,
@@ -73,7 +73,7 @@ const leadNotDeleted = `deleted_at IS NULL`
 func scanLead(row pgx.Row) (*Lead, error) {
 	l := &Lead{}
 	err := row.Scan(&l.ID, &l.PublicID, &l.OwnerAccountID, &l.PublisherID, &l.ContractID,
-		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.Source, &l.ExternalID,
+		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.AddressPlaceID, &l.Source, &l.ExternalID,
 		&l.Cost, &l.Revenue,
 		&l.PipelineID, &l.StageID, &l.PublisherPipelineID, &l.PublisherStageID, &l.Position, &l.AssignedUserID, &l.PreassignedBuyerID, &l.ActionAt, &l.Status,
 		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt, &l.Tags)
@@ -333,7 +333,7 @@ const listFrom = ` FROM leads l
 func scanListLead(row pgx.Row) (*Lead, error) {
 	l := &Lead{}
 	err := row.Scan(&l.ID, &l.PublicID, &l.OwnerAccountID, &l.PublisherID, &l.ContractID,
-		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.Source, &l.ExternalID,
+		&l.FirstName, &l.LastName, &l.Phone, &l.Email, &l.Address, &l.City, &l.State, &l.Zip, &l.AddressPlaceID, &l.Source, &l.ExternalID,
 		&l.Cost, &l.Revenue,
 		&l.PipelineID, &l.StageID, &l.PublisherPipelineID, &l.PublisherStageID, &l.Position, &l.AssignedUserID, &l.PreassignedBuyerID, &l.ActionAt, &l.Status,
 		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt, &l.Tags, &l.BuyerName, &l.PreassignedBuyerName, &l.SourceName, &l.AssigneeName, &l.AssigneeAvatarURL,

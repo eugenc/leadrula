@@ -6,7 +6,7 @@ import { Avatar, Badge, Spinner } from "@/components/ui/misc";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { ActionDot } from "./ActionDot";
 import { format, isPast } from "date-fns";
-import { CircleHelp } from "lucide-react";
+import { CircleHelp, MapPin } from "lucide-react";
 import { cn, formatMoney } from "@/lib/utils";
 import { useUIStore } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
@@ -38,6 +38,12 @@ import type { BuyerSummary } from "@/types";
 import { effectiveFieldFormat } from "@/features/admin/customFieldConstants";
 import { DatetimeFieldInput } from "./DatetimeFieldInput";
 import {
+  AddressAutocomplete,
+  ValidatedAddressLink,
+  formatLeadAddress,
+} from "./AddressAutocomplete";
+import { AddressMapDialog } from "./AddressMapDialog";
+import {
   fromNativeDatetimeLocal,
   inputModeForFormat,
   normalizeCustomDateValue,
@@ -50,10 +56,6 @@ const BUILTINS: { key: keyof Lead; label: string }[] = [
   { key: "last_name", label: "Last Name" },
   { key: "phone", label: "Phone" },
   { key: "email", label: "Email" },
-  { key: "address", label: "Address" },
-  { key: "city", label: "City" },
-  { key: "state", label: "State" },
-  { key: "zip", label: "Zip" },
 ];
 
 const DRAWER_TABS = [
@@ -180,12 +182,49 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
 
   const [fields, setFields] = useState<Record<string, string>>({});
   const [actionAtLocal, setActionAtLocal] = useState("");
+  const [mapOpen, setMapOpen] = useState(false);
   useEffect(() => {
     const f: Record<string, string> = {};
     for (const b of BUILTINS) f[b.key as string] = (lead[b.key] as string) ?? "";
+    f.address = lead.address ?? "";
+    f.city = lead.city ?? "";
+    f.state = lead.state ?? "";
+    f.zip = lead.zip ?? "";
+    f.address_place_id = lead.address_place_id ?? "";
     setFields(f);
     setActionAtLocal(lead.action_at ? isoToDatetimeLocal(lead.action_at) : "");
   }, [lead]);
+
+  const formattedAddress = formatLeadAddress(lead);
+
+  function saveValidatedAddress(validated: {
+    address: string;
+    city: string;
+    state: string;
+    zip: string;
+    address_place_id: string;
+  }) {
+    setFields((prev) => ({ ...prev, ...validated }));
+    update.mutate(
+      { leadId: lead.id, body: { fields: validated } },
+      { onSuccess: () => toast.success("Saved"), onError: (e) => toast.error(errorMessage(e)) }
+    );
+  }
+
+  function saveAddressField(key: keyof typeof fields) {
+    update.mutate(
+      {
+        leadId: lead.id,
+        body: {
+          fields: {
+            [key]: fields[key],
+            address_place_id: null,
+          },
+        },
+      },
+      { onSuccess: () => toast.success("Saved"), onError: (e) => toast.error(errorMessage(e)) }
+    );
+  }
 
   function saveField(key: string) {
     update.mutate(
@@ -369,8 +408,41 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
                     />
                   </div>
                 ))}
+                {lead.address_place_id && formattedAddress && (
+                  <div>
+                    <Label>Verified address</Label>
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <MapPin className="h-3.5 w-3.5 shrink-0 text-indigo-600" />
+                      <ValidatedAddressLink
+                        formatted={formattedAddress}
+                        onClick={() => setMapOpen(true)}
+                      />
+                    </div>
+                  </div>
+                )}
+                {!lead.address_place_id && formattedAddress && (
+                  <p className="text-xs text-amber-700">
+                    Select an address from suggestions to verify and enable map.
+                  </p>
+                )}
+                <AddressAutocomplete
+                  address={fields.address ?? ""}
+                  city={fields.city ?? ""}
+                  state={fields.state ?? ""}
+                  zip={fields.zip ?? ""}
+                  disabled={update.isPending}
+                  onPlainChange={(next) => setFields((prev) => ({ ...prev, ...next }))}
+                  onFieldBlur={(key) => saveAddressField(key)}
+                  onSelect={saveValidatedAddress}
+                />
               </div>
             </div>
+            <AddressMapDialog
+              open={mapOpen}
+              onClose={() => setMapOpen(false)}
+              placeId={lead.address_place_id ?? ""}
+              formattedAddress={formattedAddress}
+            />
             {(customFields ?? []).filter((f) => f.is_active).length > 0 && (
               <div>
                 <SectionLabel className="mb-2">Custom Fields</SectionLabel>
@@ -710,10 +782,23 @@ function NotesTab({ leadId }: { leadId: number }) {
 }
 
 function accountLabel(name: string | null | undefined, type: string | null | undefined): string | null {
-  if (!name) return null;
-  if (type === "buyer") return `Buyer: ${name}`;
-  if (type === "publisher") return `Publisher: ${name}`;
-  return name;
+  if (name) {
+    if (type === "buyer") return `Buyer: ${name}`;
+    if (type === "publisher") return `Publisher: ${name}`;
+    return name;
+  }
+  if (type === "buyer") return "Buyer";
+  if (type === "publisher") return "Publisher";
+  return null;
+}
+
+function stageChangeHeadline(entry: LeadHistoryEntry): string {
+  const from = entry.from_stage_name ?? "Created";
+  const to = entry.to_stage_name?.trim();
+  if (!to) {
+    return from === "Created" ? "Created" : `${from} → (unknown stage)`;
+  }
+  return `${from} → ${to}`;
 }
 
 function transferHeadline(entry: LeadHistoryEntry): string {
@@ -737,11 +822,13 @@ function HistoryTab({ leadId }: { leadId: number }) {
       {(history ?? []).length === 0 && (
         <p className="text-sm text-gray-400">No history yet.</p>
       )}
-      {(history ?? []).map((h) => (
-        <div key={`${h.kind}-${h.id}`} className="flex items-start gap-2.5 py-1.5 text-sm text-gray-500">
+      {(history ?? []).map((h) => {
+        const kind = h.kind ?? "stage_change";
+        return (
+        <div key={`${kind}-${h.id}`} className="flex items-start gap-2.5 py-1.5 text-sm text-gray-500">
           <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-jade-300" />
           <div>
-            {h.kind === "account_transfer" ? (
+            {kind === "account_transfer" ? (
               <>
                 <div className="font-medium">{transferHeadline(h)}</div>
                 <div className="text-xs text-gray-400">
@@ -752,8 +839,19 @@ function HistoryTab({ leadId }: { leadId: number }) {
             ) : (
               <>
                 <div>
-                  {h.from_stage_name ?? "Created"} →{" "}
-                  <span className="font-medium">{h.to_stage_name}</span>
+                  {(() => {
+                    const headline = stageChangeHeadline(h);
+                    const arrowIdx = headline.indexOf(" → ");
+                    if (arrowIdx === -1) {
+                      return <span className="font-medium">{headline}</span>;
+                    }
+                    return (
+                      <>
+                        {headline.slice(0, arrowIdx + 3)}
+                        <span className="font-medium">{headline.slice(arrowIdx + 3)}</span>
+                      </>
+                    );
+                  })()}
                 </div>
                 <div className="text-xs text-gray-400">
                   {h.moved_by_name ?? "System"} · {format(new Date(h.created_at), "MMM d, h:mma")}
@@ -769,7 +867,8 @@ function HistoryTab({ leadId }: { leadId: number }) {
             )}
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

@@ -8,9 +8,9 @@ export const FEATURED_SYSTEM_INTEGRATIONS = [
 
 export type FeaturedIntegrationSlug = (typeof FEATURED_SYSTEM_INTEGRATIONS)[number];
 
-export type IntegrationCategory = "crm" | "payment";
+export type IntegrationCategory = "crm" | "payment" | "maps";
 
-export type IntegrationFilter = "all" | "crm" | "payment";
+export type IntegrationFilter = "all" | "crm" | "payment" | "maps";
 
 export const INTEGRATION_CATEGORY: Record<string, IntegrationCategory> = {
   pipedrive: "crm",
@@ -20,6 +20,7 @@ export const INTEGRATION_CATEGORY: Record<string, IntegrationCategory> = {
   salesforce: "crm",
   sunbase: "crm",
   google_calendar: "crm",
+  google_maps: "maps",
   stripe: "payment",
 };
 
@@ -32,6 +33,7 @@ export const INTEGRATION_LOGOS: Record<string, string> = {
   pipedrive: "/integrations/pipedrive.png",
   sunbase: "/integrations/sunbase.png",
   google_calendar: "/integrations/google_calendar.png",
+  google_maps: "/integrations/google_calendar.png",
 };
 
 export function integrationLogoClassName(slug: string): string {
@@ -58,6 +60,7 @@ export const INTEGRATIONS_PAGE_SIZE = 25;
 export const INTEGRATION_FILTERS: { value: IntegrationFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "crm", label: "CRM" },
+  { value: "maps", label: "Maps" },
   { value: "payment", label: "Payment" },
 ];
 

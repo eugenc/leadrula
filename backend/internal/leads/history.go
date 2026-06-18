@@ -44,11 +44,27 @@ func (r *Repository) stageHistoryEntries(ctx context.Context, leadID int64) ([]L
 		`SELECT h.id, h.from_stage_id, fs.name, h.to_stage_id, ts.name, u.full_name,
 		        h.action_at_captured, dr.label, h.created_at, oa.name, oa.type
 		 FROM lead_stage_history h
+		 JOIN leads l ON l.id = h.lead_id
 		 LEFT JOIN pipeline_stages fs ON fs.id = h.from_stage_id
 		 LEFT JOIN pipeline_stages ts ON ts.id = h.to_stage_id
 		 LEFT JOIN users u ON u.id = h.moved_by_user_id
 		 LEFT JOIN disqualification_reasons dr ON dr.id = h.disqualification_reason_id
-		 LEFT JOIN accounts oa ON oa.id = h.owner_account_id
+		 LEFT JOIN accounts oa ON oa.id = COALESCE(
+		   h.owner_account_id,
+		   (
+		     SELECT CASE
+		       WHEN re.trigger_type = 'return' THEN re.target_account_id
+		       ELSE re.target_account_id
+		     END
+		     FROM route_executions re
+		     WHERE re.lead_id = h.lead_id
+		       AND re.created_at <= h.created_at
+		       AND re.target_account_id IS NOT NULL
+		     ORDER BY re.created_at DESC, re.id DESC
+		     LIMIT 1
+		   ),
+		   l.publisher_id
+		 )
 		 WHERE h.lead_id = $1`, leadID)
 	if err != nil {
 		return nil, err

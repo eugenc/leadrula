@@ -40,11 +40,9 @@ func TestIngest_createAction_addsNoteFromPayload(t *testing.T) {
 	defer func() { _ = svc.Delete(ctx, accountID, wh.ID) }()
 
 	dupUpdate := "update"
-	noteKey := "comments"
 	event, err := svc.CreateEvent(ctx, wh.ID, CreateEventParams{
 		Action:        "create",
 		DuplicateMode: &dupUpdate,
-		NoteSourceKey: &noteKey,
 	})
 	if err != nil {
 		t.Fatalf("CreateEvent: %v", err)
@@ -52,7 +50,11 @@ func TestIngest_createAction_addsNoteFromPayload(t *testing.T) {
 
 	extField := "external_id"
 	if _, err := svc.AddFieldMap(ctx, event.ID, "uuid", "builtin", &extField, nil); err != nil {
-		t.Fatalf("AddFieldMap: %v", err)
+		t.Fatalf("AddFieldMap external_id: %v", err)
+	}
+	noteField := "note"
+	if _, err := svc.AddFieldMap(ctx, event.ID, "comments", "builtin", &noteField, nil); err != nil {
+		t.Fatalf("AddFieldMap note: %v", err)
 	}
 
 	extID := "note-test-" + suffix
@@ -119,5 +121,78 @@ func TestIngest_createAction_addsNoteFromPayload(t *testing.T) {
 	}
 	if totalNotes != 1 {
 		t.Fatalf("note count after empty payload = %d, want 1", totalNotes)
+	}
+}
+
+func TestIngest_createAction_addsNoteFromLegacyNoteSourceKey(t *testing.T) {
+	ctx := context.Background()
+	pool, err := database.Connect(ctx, "postgres://crm:crm@localhost:5432/crm?sslmode=disable")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer pool.Close()
+
+	repo := leads.NewRepository(pool)
+	svc := NewService(pool, repo, nil, testEncKey(t), nil)
+
+	var accountID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM accounts ORDER BY id LIMIT 1`).Scan(&accountID); err != nil {
+		t.Skip(err)
+	}
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	webhookName := "Legacy note test " + suffix
+	falseVal := false
+	wh, _, err := svc.Create(ctx, accountID, CreateWebhookInput{
+		Name:            webhookName,
+		Slug:            "legacy-note-test-" + suffix,
+		OutboundEnabled: &falseVal,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = svc.Delete(ctx, accountID, wh.ID) }()
+
+	dupUpdate := "update"
+	noteKey := "comments"
+	event, err := svc.CreateEvent(ctx, wh.ID, CreateEventParams{
+		Action:        "create",
+		DuplicateMode: &dupUpdate,
+		NoteSourceKey: &noteKey,
+	})
+	if err != nil {
+		t.Fatalf("CreateEvent: %v", err)
+	}
+
+	extField := "external_id"
+	if _, err := svc.AddFieldMap(ctx, event.ID, "uuid", "builtin", &extField, nil); err != nil {
+		t.Fatalf("AddFieldMap: %v", err)
+	}
+
+	extID := "legacy-note-" + suffix
+	auth := &WebhookAuth{WebhookID: wh.ID, AccountID: accountID}
+	if _, err := svc.Ingest(ctx, auth, wh.Slug, map[string]any{
+		"uuid":     extID,
+		"comments": "legacy note",
+	}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+
+	var leadID int64
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM leads WHERE owner_account_id=$1 AND external_id=$2 AND deleted_at IS NULL`,
+		accountID, extID,
+	).Scan(&leadID); err != nil {
+		t.Fatalf("lookup lead: %v", err)
+	}
+
+	var body string
+	if err := pool.QueryRow(ctx,
+		`SELECT body FROM lead_notes WHERE lead_id=$1`, leadID,
+	).Scan(&body); err != nil {
+		t.Fatalf("query note: %v", err)
+	}
+	if body != "legacy note" {
+		t.Fatalf("body = %q, want legacy note", body)
 	}
 }

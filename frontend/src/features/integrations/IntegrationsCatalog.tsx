@@ -36,6 +36,7 @@ function matchesFilter(
   if (filter === "all") return true;
   if (filter === "payment") return isPublisher && category === "payment";
   if (filter === "crm") return category === "crm";
+  if (filter === "maps") return category === "maps";
   return false;
 }
 

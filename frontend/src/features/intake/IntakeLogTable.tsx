@@ -338,30 +338,38 @@ export function IntakeLogTable({
       selectedLeadId={selectedLeadId}
       onSelectLead={handleSelectLead}
       onClear={handleClearSearch}
-      className="max-w-sm w-auto"
+      className="w-full sm:w-64 sm:shrink-0"
     />
   ) : null;
 
   const { rows, total, isLoading, hasFilters, loadError, refetchWebhooks } = useMemo(() => {
     if (logType === "intake") {
-      const items = showIntakeData ? (intakeQuery.data?.items ?? []) : [];
+      const items = showIntakeData && !intakeQuery.isError ? (intakeQuery.data?.items ?? []) : [];
+      const loading = showIntakeData && intakeQuery.isLoading;
       return {
         rows: queueItemsToRows(items),
         total: intakeQuery.data?.total ?? 0,
-        isLoading: showIntakeData && intakeQuery.isLoading,
+        isLoading: loading,
         hasFilters: logFilter !== "all" || leadSearchActive || !!sourceSlug,
-        loadError: null,
+        loadError:
+          !loading && items.length === 0 && intakeQuery.isError
+            ? errorMessage(intakeQuery.error)
+            : null,
         refetchWebhooks: () => intakeQuery.refetch(),
       };
     }
     if (logType === "webhooks") {
-      const items = webhookQuery.data?.items ?? [];
+      const items = webhookQuery.isError ? [] : (webhookQuery.data?.items ?? []);
+      const loading = webhookQuery.isLoading;
       return {
         rows: webhookDeliveriesToRows(items),
         total: webhookQuery.data?.total ?? 0,
-        isLoading: webhookQuery.isLoading,
+        isLoading: loading,
         hasFilters: webhookStatus !== "" || webhookId !== "" || leadSearchActive,
-        loadError: null,
+        loadError:
+          !loading && items.length === 0 && webhookQuery.isError
+            ? errorMessage(webhookQuery.error)
+            : null,
         refetchWebhooks: () => webhookQuery.refetch(),
       };
     }
@@ -427,8 +435,12 @@ export function IntakeLogTable({
     limit,
     intakeQuery.data,
     intakeQuery.isLoading,
+    intakeQuery.isError,
+    intakeQuery.error,
     webhookQuery.data,
     webhookQuery.isLoading,
+    webhookQuery.isError,
+    webhookQuery.error,
     inboundQuery.data,
     inboundQuery.isLoading,
     inboundQuery.isError,
@@ -468,45 +480,39 @@ export function IntakeLogTable({
 
   return (
     <>
-      <div className="mb-4 flex flex-wrap gap-2">
-        {typeFilters.map((f) => (
-          <Button
-            key={f.value}
-            size="sm"
-            variant={logType === f.value ? "primary" : "secondary"}
-            onClick={() => setLogType(f.value)}
-          >
-            {f.label}
-          </Button>
-        ))}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-2">
+          {typeFilters.map((f) => (
+            <Button
+              key={f.value}
+              size="sm"
+              variant={logType === f.value ? "primary" : "secondary"}
+              onClick={() => setLogType(f.value)}
+            >
+              {f.label}
+            </Button>
+          ))}
+        </div>
+        {leadSearch}
       </div>
 
       {logType === "intake" && source === "publisher" && (
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          {leadSearch}
-          <div className="flex flex-wrap gap-2">
-            {LOG_FILTERS.map((f) => (
-              <Button
-                key={f.value}
-                size="sm"
-                variant={logFilter === f.value ? "primary" : "secondary"}
-                onClick={() => setLogFilter(f.value)}
-              >
-                {f.label}
-              </Button>
-            ))}
-          </div>
+        <div className="mb-4 flex flex-wrap justify-end gap-2">
+          {LOG_FILTERS.map((f) => (
+            <Button
+              key={f.value}
+              size="sm"
+              variant={logFilter === f.value ? "primary" : "secondary"}
+              onClick={() => setLogFilter(f.value)}
+            >
+              {f.label}
+            </Button>
+          ))}
         </div>
       )}
 
-      {(logType === "all" || logType === "routes" || logType === "integrations") && (
-        <div className="mb-4">{leadSearch}</div>
-      )}
-
       {logType === "webhooks" && (
-        <div className="mb-4 flex flex-col gap-3">
-          {leadSearch}
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <FilterSelect
             className="h-7 min-w-[10rem] w-auto"
             value={webhookId === "" ? "" : String(webhookId)}
@@ -530,7 +536,6 @@ export function IntakeLogTable({
                 {f.label}
               </Button>
             ))}
-          </div>
           </div>
         </div>
       )}

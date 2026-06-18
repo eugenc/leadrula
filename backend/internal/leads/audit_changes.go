@@ -18,6 +18,7 @@ var builtinFieldLabels = map[string]string{
 	"city":       "City",
 	"state":      "State",
 	"zip":        "Zip",
+	"address_place_id": "Address place",
 	"source":     "Source",
 }
 

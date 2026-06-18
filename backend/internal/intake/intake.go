@@ -330,12 +330,13 @@ func (s *Service) ListQueue(ctx context.Context, publisherID int64, p ListQueueP
 		status = "pending_review"
 	}
 
-	where := "1=1"
 	args := []any{}
 	argN := func(v any) string {
 		args = append(args, v)
 		return fmt.Sprintf("$%d", len(args))
 	}
+
+	where := "l.publisher_id = " + argN(publisherID)
 
 	if status != "all" {
 		where += " AND q.status = " + argN(status) + "::intake_status"

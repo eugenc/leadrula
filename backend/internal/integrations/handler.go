@@ -42,6 +42,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/integrations/providers", h.listProviders)
 	r.Get("/integrations/connections", h.listConnections)
 	r.Get("/integrations/routes/{routeID}", h.listRouteIntegrations)
+	r.Get("/google-maps/status", h.googleMapsStatus)
+	r.Get("/google-maps/autocomplete", h.googleMapsAutocomplete)
+	r.Post("/google-maps/place-details", h.googleMapsPlaceDetails)
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireRole("admin"))
