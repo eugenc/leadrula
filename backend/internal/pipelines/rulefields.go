@@ -745,7 +745,7 @@ func (s *Service) applyAction(ctx context.Context, q database.Querier, accountID
 		if err := moveLeadStage(ctx, q, leadID, stageID); err != nil {
 			return err
 		}
-		if err := insertHistory(ctx, q, leadID, &from, stageID, userID, nil, nil); err != nil {
+		if err := insertHistory(ctx, q, leadID, &from, stageID, accountID, userID, nil, nil); err != nil {
 			return err
 		}
 		*currentStageID = stageID

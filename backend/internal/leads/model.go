@@ -80,3 +80,22 @@ type StageHistoryEntry struct {
 	DisqReason    *string    `json:"disqualification_reason"`
 	CreatedAt     time.Time  `json:"created_at"`
 }
+
+type LeadHistoryEntry struct {
+	ID        int64     `json:"id"`
+	Kind      string    `json:"kind"`
+	CreatedAt time.Time `json:"created_at"`
+
+	FromStageName *string    `json:"from_stage_name,omitempty"`
+	ToStageName   *string    `json:"to_stage_name,omitempty"`
+	MovedByName   *string    `json:"moved_by_name,omitempty"`
+	ActionAt      *time.Time `json:"action_at_captured,omitempty"`
+	DisqReason    *string    `json:"disqualification_reason,omitempty"`
+	AccountName   *string    `json:"account_name,omitempty"`
+	AccountType   *string    `json:"account_type,omitempty"`
+
+	TransferKind    *string `json:"transfer_kind,omitempty"`
+	FromAccountName *string `json:"from_account_name,omitempty"`
+	ToAccountName   *string `json:"to_account_name,omitempty"`
+	TriggerLabel    *string `json:"trigger_label,omitempty"`
+}

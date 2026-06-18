@@ -212,6 +212,23 @@ export interface StageHistoryEntry {
   created_at: string;
 }
 
+export interface LeadHistoryEntry {
+  id: number;
+  kind: "stage_change" | "account_transfer";
+  created_at: string;
+  from_stage_name?: string | null;
+  to_stage_name?: string | null;
+  moved_by_name?: string | null;
+  action_at_captured?: string | null;
+  disqualification_reason?: string | null;
+  account_name?: string | null;
+  account_type?: "buyer" | "publisher" | null;
+  transfer_kind?: "sold" | "returned" | "redistributed" | null;
+  from_account_name?: string | null;
+  to_account_name?: string | null;
+  trigger_label?: string | null;
+}
+
 export interface CustomField {
   id: number;
   name: string;
@@ -762,7 +779,7 @@ export interface Transaction {
   category?: TxnCategory | string;
   counterparty_name?: string | null;
   counterparty_account_type?: string | null;
-  ledger_source?: "earning" | "transaction";
+  ledger_source?: "earning" | "transaction" | "legacy";
   amount: number;
   balance_after?: number | null;
   description: string;

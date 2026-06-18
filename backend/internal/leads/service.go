@@ -33,6 +33,14 @@ func (s *Service) SetWebhookFirer(wf WebhookFirer) { s.webhooks = wf }
 
 func (s *Service) Repo() *Repository { return s.repo }
 
+func (s *Service) LeadHistory(ctx context.Context, p *auth.Principal, leadID int64) ([]LeadHistoryEntry, error) {
+	entries, err := s.repo.LeadHistory(ctx, leadID)
+	if err != nil {
+		return nil, err
+	}
+	return FilterLeadHistory(p, entries), nil
+}
+
 // ChangeStage moves a lead to a new stage, enforcing destination prompts and
 // applying any matching return rule. Atomic per DB spec §4.2.
 func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, newStageID int64, actionAt *time.Time, disqReasonID *int64) (*Lead, []auth.ImpersonationChange, error) {
@@ -113,7 +121,7 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 			return nil, nil, err
 		}
 	}
-	if err := s.repo.InsertStageHistory(ctx, tx, leadID, fromStage, newStageID, p.UserID, actionAt, disqReasonID); err != nil {
+	if err := s.repo.InsertStageHistory(ctx, tx, leadID, fromStage, newStageID, lead.OwnerAccountID, p.UserID, actionAt, disqReasonID); err != nil {
 		return nil, nil, err
 	}
 
@@ -240,6 +248,18 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		}
 		if err := s.repo.MoveToPublisher(ctx, tx, leadID, returnInfo.PublisherID, returnInfo.SourcePipelineID, returnInfo.ReturnStageID); err != nil {
 			return nil, nil, fmt.Errorf("return rule move to publisher: %w", err)
+		}
+		buyerID := lead.OwnerAccountID
+		pubID := returnInfo.PublisherID
+		if err := RecordRouteExecution(ctx, tx, RecordRouteExecutionParams{
+			RouteName:       "Lead returned",
+			LeadID:          leadID,
+			OwnerAccountID:  buyerID,
+			TargetAccountID: &pubID,
+			Destination:     "return",
+			TriggerType:     "return",
+		}); err != nil {
+			return nil, nil, fmt.Errorf("return rule record execution: %w", err)
 		}
 		returned, err := s.repo.GetByID(ctx, tx, leadID)
 		if err != nil {
@@ -389,6 +409,18 @@ func (s *Service) Redistribute(ctx context.Context, p *auth.Principal, leadID, c
 		return nil, err
 	}
 	if err := s.repo.SetCostAfterBuyerDistribution(ctx, tx, leadID, buyer.Type, target.RatePerLead); err != nil {
+		return nil, err
+	}
+	pubID := lead.OwnerAccountID
+	buyerID := target.BuyerID
+	if err := RecordRouteExecution(ctx, tx, RecordRouteExecutionParams{
+		RouteName:       "Re-distributed",
+		LeadID:          leadID,
+		OwnerAccountID:  pubID,
+		TargetAccountID: &buyerID,
+		Destination:     "contract",
+		TriggerType:     "redistribute",
+	}); err != nil {
 		return nil, err
 	}
 	updated, err := s.repo.GetByID(ctx, tx, leadID)

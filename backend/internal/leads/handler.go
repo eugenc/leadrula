@@ -441,7 +441,7 @@ func (h *Handler) stageHistory(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, err)
 		return
 	}
-	hist, err := h.svc.repo.StageHistory(r.Context(), id(r))
+	hist, err := h.svc.LeadHistory(r.Context(), p, id(r))
 	if err != nil {
 		httpx.WriteError(w, err)
 		return

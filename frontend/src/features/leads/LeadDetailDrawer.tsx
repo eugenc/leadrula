@@ -29,7 +29,7 @@ import {
 import { DeleteLeadConfirmDialog } from "./DeleteLeadConfirmDialog";
 import { StagePromptModal, type PromptResult } from "./StagePromptModal";
 import { stageNeedsPrompt, stagePromptMissingError } from "@/features/pipelines/stageTypes";
-import type { Lead, Stage } from "@/types";
+import type { Lead, LeadHistoryEntry, Stage } from "@/types";
 import { formatStatus, leadSourceLabel } from "./leadsListColumns";
 import { LeadTagsEditor } from "./LeadTagsEditor";
 import { useQuery } from "@tanstack/react-query";
@@ -709,27 +709,64 @@ function NotesTab({ leadId }: { leadId: number }) {
   );
 }
 
+function accountLabel(name: string | null | undefined, type: string | null | undefined): string | null {
+  if (!name) return null;
+  if (type === "buyer") return `Buyer: ${name}`;
+  if (type === "publisher") return `Publisher: ${name}`;
+  return name;
+}
+
+function transferHeadline(entry: LeadHistoryEntry): string {
+  const from = entry.from_account_name ?? "Unknown";
+  const to = entry.to_account_name ?? "Unknown";
+  switch (entry.transfer_kind) {
+    case "returned":
+      return `Returned · ${from} → ${to}`;
+    case "redistributed":
+      return `Redistributed · ${from} → ${to}`;
+    default:
+      return `Sold · ${from} → ${to}`;
+  }
+}
+
 function HistoryTab({ leadId }: { leadId: number }) {
   const { data: history } = useStageHistory(leadId);
   return (
     <div>
       <SectionLabel className="mb-2">Stage History</SectionLabel>
       {(history ?? []).length === 0 && (
-        <p className="text-sm text-gray-400">No stage changes yet.</p>
+        <p className="text-sm text-gray-400">No history yet.</p>
       )}
       {(history ?? []).map((h) => (
-        <div key={h.id} className="flex items-start gap-2.5 py-1.5 text-sm text-gray-500">
+        <div key={`${h.kind}-${h.id}`} className="flex items-start gap-2.5 py-1.5 text-sm text-gray-500">
           <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-jade-300" />
           <div>
-            <div>
-              {h.from_stage_name ?? "Created"} → <span className="font-medium">{h.to_stage_name}</span>
-            </div>
-            <div className="text-xs text-gray-400">
-              {h.moved_by_name ?? "System"} · {format(new Date(h.created_at), "MMM d, h:mma")}
-              {h.action_at_captured &&
-                ` · action ${format(new Date(h.action_at_captured), "MMM d, h:mm a")}`}
-              {h.disqualification_reason && ` · ${h.disqualification_reason}`}
-            </div>
+            {h.kind === "account_transfer" ? (
+              <>
+                <div className="font-medium">{transferHeadline(h)}</div>
+                <div className="text-xs text-gray-400">
+                  {format(new Date(h.created_at), "MMM d, h:mma")}
+                  {h.trigger_label && ` · ${h.trigger_label}`}
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  {h.from_stage_name ?? "Created"} →{" "}
+                  <span className="font-medium">{h.to_stage_name}</span>
+                </div>
+                <div className="text-xs text-gray-400">
+                  {h.moved_by_name ?? "System"} · {format(new Date(h.created_at), "MMM d, h:mma")}
+                  {h.action_at_captured &&
+                    ` · action ${format(new Date(h.action_at_captured), "MMM d, h:mm a")}`}
+                  {h.disqualification_reason && ` · ${h.disqualification_reason}`}
+                  {(() => {
+                    const label = accountLabel(h.account_name, h.account_type);
+                    return label ? ` · ${label}` : null;
+                  })()}
+                </div>
+              </>
+            )}
           </div>
         </div>
       ))}

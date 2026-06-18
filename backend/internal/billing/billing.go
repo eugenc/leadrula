@@ -309,7 +309,47 @@ const publisherTxnFilter = `
   (
     (` + txnSideExpr + ` = 'prepay' AND t.type IN ('topup', 'manual_invoice'))
     OR (` + txnSideExpr + ` = 'purchase' AND t.type = 'debit')
+    OR (` + txnSideExpr + ` = 'sale' AND t.type = 'manual_invoice')
   )`
+
+const noDistributeEarning = `
+  NOT EXISTS (
+    SELECT 1 FROM compensation_earnings ce
+    JOIN contract_compensations cc ON cc.id = ce.compensation_id
+    WHERE ce.lead_id = t.lead_id AND cc.contract_id = t.contract_id
+      AND ce.kind = 'distribute'
+  )`
+
+const noReturnEarning = `
+  NOT EXISTS (
+    SELECT 1 FROM compensation_earnings ce
+    JOIN contract_compensations cc ON cc.id = ce.compensation_id
+    WHERE ce.lead_id = t.lead_id AND cc.contract_id = t.contract_id
+      AND ce.kind = 'return'
+  )`
+
+const noDisputeEarning = `
+  NOT EXISTS (
+    SELECT 1 FROM compensation_earnings ce
+    JOIN contract_compensations cc ON cc.id = ce.compensation_id
+    WHERE ce.lead_id = orig.lead_id AND cc.contract_id = orig.contract_id
+      AND ce.kind = 'dispute'
+  )`
+
+const legacyCategoryExpr = `
+  CASE
+    WHEN t.type = 'debit' THEN 'Sale'
+    WHEN t.type = 'credit' AND t.description = 'lead returned' THEN 'Return'
+    WHEN t.type = 'dispute_credit' THEN 'Dispute'
+    ELSE ''
+  END`
+
+const legacyAmountExpr = `
+  CASE
+    WHEN t.type = 'debit' THEN ABS(t.amount::float8)
+    WHEN t.type IN ('credit', 'dispute_credit') THEN -ABS(t.amount::float8)
+    ELSE t.amount::float8
+  END`
 
 // ListPublisherTransactions lists publisher-centric activity: lead earnings, buyer prepay, and publisher purchases.
 func (s *Service) ListPublisherTransactions(ctx context.Context, publisherID int64, filterBuyerID int64, txType string) ([]Transaction, error) {
@@ -371,6 +411,75 @@ func (s *Service) ListPublisherTransactions(ctx context.Context, publisherID int
 	      AND ($2 = 0 OR t.buyer_id = $2)
 	      AND ($3 = '' OR t.type = $3::txn_type)
 	      AND ` + publisherTxnFilter + `
+
+	    UNION ALL
+
+	    SELECT t.id,
+	           t.public_id::text,
+	           t.buyer_id,
+	           t.lead_id,
+	           t.contract_id,
+	           t.type::text,
+	           ` + legacyAmountExpr + `,
+	           NULL::float8 AS balance_after,
+	           t.description,
+	           t.created_at,
+	           NULLIF(trim(coalesce(l.first_name,'') || ' ' || coalesce(l.last_name,'')), ''),
+	           NULLIF(trim(buyer.name), ''),
+	           NULLIF(COALESCE(pub_c.name, pub_l.name), ''),
+	           'sale'::text AS side,
+	           ` + legacyCategoryExpr + `,
+	           NULLIF(trim(buyer.name), '') AS counterparty_name,
+	           buyer.type::text AS counterparty_account_type,
+	           'legacy'::text AS ledger_source
+	    FROM transactions t
+	    LEFT JOIN leads l ON l.id = t.lead_id
+	    LEFT JOIN accounts buyer ON buyer.id = t.buyer_id
+	    LEFT JOIN contracts c ON c.id = t.contract_id
+	    LEFT JOIN accounts pub_c ON pub_c.id = c.publisher_id
+	    LEFT JOIN accounts pub_l ON pub_l.id = l.publisher_id
+	    WHERE c.publisher_id = $1 AND c.deleted_at IS NULL
+	      AND ($2 = 0 OR t.buyer_id = $2)
+	      AND ($3 = '' OR t.type = $3::txn_type)
+	      AND (
+	        (t.type = 'debit' AND t.amount < 0 AND t.lead_id IS NOT NULL AND ` + noDistributeEarning + `)
+	        OR (t.type = 'credit' AND t.description = 'lead returned' AND t.lead_id IS NOT NULL AND ` + noReturnEarning + `)
+	      )
+
+	    UNION ALL
+
+	    SELECT t.id,
+	           t.public_id::text,
+	           t.buyer_id,
+	           orig.lead_id,
+	           orig.contract_id,
+	           t.type::text,
+	           -ABS(t.amount::float8),
+	           NULL::float8 AS balance_after,
+	           t.description,
+	           t.created_at,
+	           NULLIF(trim(coalesce(l.first_name,'') || ' ' || coalesce(l.last_name,'')), ''),
+	           NULLIF(trim(buyer.name), ''),
+	           NULLIF(COALESCE(pub_c.name, pub_l.name), ''),
+	           'sale'::text AS side,
+	           'Dispute'::text AS category,
+	           NULLIF(trim(buyer.name), '') AS counterparty_name,
+	           buyer.type::text AS counterparty_account_type,
+	           'legacy'::text AS ledger_source
+	    FROM transactions t
+	    JOIN disputes d ON d.buyer_id = t.buyer_id AND d.status = 'accepted'
+	    JOIN transactions orig ON orig.id = d.transaction_id
+	    LEFT JOIN leads l ON l.id = orig.lead_id
+	    LEFT JOIN accounts buyer ON buyer.id = t.buyer_id
+	    LEFT JOIN contracts c ON c.id = orig.contract_id
+	    LEFT JOIN accounts pub_c ON pub_c.id = c.publisher_id
+	    LEFT JOIN accounts pub_l ON pub_l.id = l.publisher_id
+	    WHERE t.type = 'dispute_credit'
+	      AND c.publisher_id = $1 AND c.deleted_at IS NULL
+	      AND orig.lead_id IS NOT NULL
+	      AND ($2 = 0 OR t.buyer_id = $2)
+	      AND ($3 = '' OR t.type = $3::txn_type)
+	      AND ` + noDisputeEarning + `
 	  ) combined
 	  ORDER BY created_at DESC
 	  LIMIT 500`

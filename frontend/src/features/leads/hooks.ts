@@ -10,7 +10,7 @@ import type {
   Note,
   Pipeline,
   Stage,
-  StageHistoryEntry,
+  LeadHistoryEntry,
   CustomField,
   DisqReason,
   UserRow,
@@ -179,7 +179,7 @@ export function useAddNote() {
 export function useStageHistory(leadId: number | null) {
   return useQuery({
     queryKey: ["stage-history", leadId],
-    queryFn: () => get<StageHistoryEntry[]>(`${ns()}/leads/${leadId}/stage-history`),
+    queryFn: () => get<LeadHistoryEntry[]>(`${ns()}/leads/${leadId}/stage-history`),
     enabled: !!leadId,
   });
 }

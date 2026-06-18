@@ -831,40 +831,6 @@ func (r *Repository) MoveToPublisher(ctx context.Context, q database.Querier, le
 	return err
 }
 
-func (r *Repository) InsertStageHistory(ctx context.Context, q database.Querier, leadID int64, fromStage *int64, toStage int64, userID int64, actionAt *time.Time, disqReason *int64) error {
-	_, err := q.Exec(ctx,
-		`INSERT INTO lead_stage_history(lead_id, from_stage_id, to_stage_id, moved_by_user_id, action_at_captured, disqualification_reason_id)
-		 VALUES ($1,$2,$3,$4,$5,$6)`,
-		leadID, fromStage, toStage, userID, actionAt, disqReason)
-	return err
-}
-
-func (r *Repository) StageHistory(ctx context.Context, leadID int64) ([]StageHistoryEntry, error) {
-	rows, err := r.pool.Query(ctx,
-		`SELECT h.id, h.from_stage_id, fs.name, h.to_stage_id, ts.name, u.full_name,
-		        h.action_at_captured, dr.label, h.created_at
-		 FROM lead_stage_history h
-		 LEFT JOIN pipeline_stages fs ON fs.id = h.from_stage_id
-		 LEFT JOIN pipeline_stages ts ON ts.id = h.to_stage_id
-		 LEFT JOIN users u ON u.id = h.moved_by_user_id
-		 LEFT JOIN disqualification_reasons dr ON dr.id = h.disqualification_reason_id
-		 WHERE h.lead_id = $1 ORDER BY h.created_at DESC`, leadID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []StageHistoryEntry
-	for rows.Next() {
-		var e StageHistoryEntry
-		if err := rows.Scan(&e.ID, &e.FromStageID, &e.FromStageName, &e.ToStageID, &e.ToStageName,
-			&e.MovedByName, &e.ActionAt, &e.DisqReason, &e.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
-}
-
 // ── Notes & followers ─────────────────────────────────────────────
 
 func (r *Repository) ListNotes(ctx context.Context, leadID int64) ([]Note, error) {

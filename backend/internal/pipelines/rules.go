@@ -541,11 +541,11 @@ func moveLeadStage(ctx context.Context, q database.Querier, leadID, stageID int6
 	return err
 }
 
-func insertHistory(ctx context.Context, q database.Querier, leadID int64, fromStage *int64, toStage, userID int64, actionAt *time.Time, disq *int64) error {
+func insertHistory(ctx context.Context, q database.Querier, leadID int64, fromStage *int64, toStage, ownerAccountID, userID int64, actionAt *time.Time, disq *int64) error {
 	_, err := q.Exec(ctx,
-		`INSERT INTO lead_stage_history(lead_id, from_stage_id, to_stage_id, moved_by_user_id, action_at_captured, disqualification_reason_id)
-		 VALUES ($1,$2,$3,$4,$5,$6)`,
-		leadID, fromStage, toStage, userID, actionAt, disq)
+		`INSERT INTO lead_stage_history(lead_id, from_stage_id, to_stage_id, owner_account_id, moved_by_user_id, action_at_captured, disqualification_reason_id)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		leadID, fromStage, toStage, ownerAccountID, userID, actionAt, disq)
 	return err
 }
 
