@@ -534,7 +534,8 @@ function AddConnectionDrawer({
             {slug === "google_maps" && (
               <>
                 <p className="text-sm text-gray-500">
-                  Enable Places API (New) on your Google Cloud key. Restrict the key to your server IP addresses.
+                  Enable Places API (New) and Maps Static API on your Google Cloud key. Restrict the key to your
+                  server IP addresses.
                 </p>
                 <div>
                   <Label>Google Maps API key</Label>

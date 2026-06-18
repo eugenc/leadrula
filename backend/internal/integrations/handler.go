@@ -45,6 +45,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/google-maps/status", h.googleMapsStatus)
 	r.Get("/google-maps/autocomplete", h.googleMapsAutocomplete)
 	r.Post("/google-maps/place-details", h.googleMapsPlaceDetails)
+	r.Get("/google-maps/satellite-map", h.googleMapsSatelliteMap)
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireRole("admin"))

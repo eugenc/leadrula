@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { get, ns, post, del, patch } from "@/lib/api";
+import axios from "axios";
+import { ApiError, get, ns, post, del, patch, api, type ApiErrorShape } from "@/lib/api";
 import type {
   IntegrationConnection,
   IntegrationProvider,
@@ -180,5 +181,26 @@ export async function fetchGoogleMapsAutocomplete(input: string, sessionToken: s
 
 export async function fetchGoogleMapsPlaceDetails(placeId: string) {
   return post<GoogleMapsPlaceDetails>(`${ns()}/google-maps/place-details`, { place_id: placeId });
+}
+
+export async function fetchGoogleMapsSatelliteMap(placeId: string, zoom = 18) {
+  const params = new URLSearchParams({ place_id: placeId, zoom: String(zoom) });
+  try {
+    const res = await api.get(`${ns()}/google-maps/satellite-map?${params}`, { responseType: "blob" });
+    return res.data as Blob;
+  } catch (err) {
+    if (axios.isAxiosError(err) && err.response?.data instanceof Blob) {
+      const text = await err.response.data.text();
+      try {
+        const parsed = JSON.parse(text) as { error?: ApiErrorShape };
+        if (parsed.error?.message) {
+          throw new ApiError(err.response.status, parsed.error.code ?? "error", parsed.error.message);
+        }
+      } catch (parseErr) {
+        if (parseErr instanceof ApiError) throw parseErr;
+      }
+    }
+    throw err;
+  }
 }
 

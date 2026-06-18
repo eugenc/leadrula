@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -170,7 +171,69 @@ func ValidateAPIKey(ctx context.Context, apiKey string) error {
 		}
 		return err
 	}
+	_, _, err = StaticSatelliteMap(ctx, apiKey, 40.714728, -73.998672, 15, 100, 100)
+	if err != nil {
+		if strings.Contains(err.Error(), "Maps Static API") {
+			return fmt.Errorf("enable Maps Static API on your Google Cloud key")
+		}
+		return err
+	}
 	return nil
+}
+
+func StaticSatelliteMap(ctx context.Context, apiKey string, lat, lng float64, zoom, width, height int) ([]byte, string, error) {
+	if zoom < 15 {
+		zoom = 15
+	}
+	if zoom > 20 {
+		zoom = 20
+	}
+	if width <= 0 {
+		width = 640
+	}
+	if height <= 0 {
+		height = 400
+	}
+	q := url.Values{}
+	q.Set("center", fmt.Sprintf("%f,%f", lat, lng))
+	q.Set("zoom", strconv.Itoa(zoom))
+	q.Set("size", fmt.Sprintf("%dx%d", width, height))
+	q.Set("maptype", "satellite")
+	q.Set("markers", fmt.Sprintf("color:red|%f,%f", lat, lng))
+	q.Set("key", apiKey)
+	u := "https://maps.googleapis.com/maps/api/staticmap?" + q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, "", staticMapErr(resp.StatusCode, body)
+	}
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "image/jpeg"
+	}
+	return body, contentType, nil
+}
+
+func staticMapErr(status int, body []byte) error {
+	msg := trimErrBody(body)
+	lower := strings.ToLower(msg)
+	switch {
+	case status == 403 || strings.Contains(lower, "not authorized") || strings.Contains(lower, "request_denied"):
+		return fmt.Errorf("enable Maps Static API on your Google Cloud key: %s", msg)
+	case strings.Contains(lower, "static api"):
+		return fmt.Errorf("Maps Static API error: %s", msg)
+	default:
+		return fmt.Errorf("google static map returned %d: %s", status, msg)
+	}
 }
 
 func parseAddressComponents(out *ParsedAddress, components []addressComponent) {
