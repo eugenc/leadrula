@@ -14,6 +14,17 @@ interface SwitchStack {
   originRefreshToken: string;
   originUser: CurrentUser;
   originAccountName: string;
+  targetAccountId: string;
+}
+
+export interface StartSwitchParams {
+  switchedAccess: string;
+  user: CurrentUser;
+  originAccountName: string;
+  targetAccountId: string;
+  originAccessToken: string;
+  originRefreshToken: string;
+  originUser: CurrentUser;
 }
 
 interface AuthState {
@@ -31,7 +42,8 @@ interface AuthState {
   syncFromMe: (patch: Partial<CurrentUser>) => void;
   startImpersonation: (access: string, user: CurrentUser, buyerAccountName: string) => void;
   endImpersonation: () => void;
-  startSwitch: (access: string, user: CurrentUser, originAccountName: string) => void;
+  startSwitch: (params: StartSwitchParams) => void;
+  renewSwitchedSession: (switchedAccess: string, originAccess: string, originRefresh: string) => void;
   endSwitch: () => void;
   logout: () => void;
 }
@@ -78,22 +90,35 @@ export const useAuthStore = create<AuthState>()(
           impersonation: null,
         });
       },
-      startSwitch: (access, user, originAccountName) => {
-        const { accessToken, refreshToken, user: originUser } = get();
-        if (!accessToken || !refreshToken || !originUser) return;
+      startSwitch: (params) => {
         set({
           switchSession: {
-            originAccessToken: accessToken,
-            originRefreshToken: refreshToken,
-            originUser,
-            originAccountName,
+            originAccessToken: params.originAccessToken,
+            originRefreshToken: params.originRefreshToken,
+            originUser: params.originUser,
+            originAccountName: params.originAccountName,
+            targetAccountId: params.targetAccountId,
           },
-          accessToken: access,
+          accessToken: params.switchedAccess,
+          refreshToken: params.originRefreshToken,
           user: {
-            ...user,
+            ...params.user,
             is_switched: true,
-            switched_from: user.switched_from,
+            switched_from: params.user.switched_from,
           },
+        });
+      },
+      renewSwitchedSession: (switchedAccess, originAccess, originRefresh) => {
+        const sw = get().switchSession;
+        if (!sw) return;
+        set({
+          switchSession: {
+            ...sw,
+            originAccessToken: originAccess,
+            originRefreshToken: originRefresh,
+          },
+          accessToken: switchedAccess,
+          refreshToken: originRefresh,
         });
       },
       endSwitch: () => {

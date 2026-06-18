@@ -612,7 +612,7 @@ export interface QueueListResponse {
 }
 
 export interface InboundLogItem {
-  kind: "source" | "webhook" | "integration";
+  kind: "source" | "webhook" | "integration" | "route";
   direction: "inbound" | "outbound";
   id: number;
   created_at: string;
@@ -632,6 +632,13 @@ export interface InboundLogItem {
   provider_slug?: string;
   connection_name?: string;
   attempts?: number;
+  route_id?: number | null;
+  route_name?: string;
+  trigger_type?: string;
+  trigger_label?: string;
+  target_account_name?: string;
+  destination?: string;
+  branch_position?: number;
 }
 
 export interface InboundLogListResponse {

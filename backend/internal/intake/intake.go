@@ -204,7 +204,10 @@ func (s *Service) IngestFromSource(ctx context.Context, publisherID int64, slug 
 		return &IngestResult{LeadID: publicID, Status: "review"}, nil
 	}
 
-	emails, err := leads.ApplyRoute(ctx, tx, s.routeDeps(), rt, leadID)
+	emails, err := leads.ApplyRoute(ctx, tx, s.routeDeps(), rt, leadID, leads.RouteExecutionMeta{
+		TriggerType:  "source_ingest",
+		TriggerLabel: slug,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -599,7 +602,10 @@ func (s *Service) RouteFromQueue(ctx context.Context, queueID, routeID, pipeline
 			return httpx.BusinessRule("no matching route branch for this lead")
 		}
 		applied := routing.RouteForApply(rt, branch)
-		emails, err := leads.ApplyRoute(ctx, tx, s.routeDeps(), applied, leadID)
+		emails, err := leads.ApplyRoute(ctx, tx, s.routeDeps(), applied, leadID, leads.RouteExecutionMeta{
+			TriggerType: "manual",
+			ReviewerID:  reviewerID,
+		})
 		if err != nil {
 			return err
 		}
@@ -696,6 +702,17 @@ func (s *Service) RouteFromQueue(ctx context.Context, queueID, routeID, pipeline
 		return err
 	}
 	if err := s.leads.SetStatus(ctx, tx, leadID, "distributed"); err != nil {
+		return err
+	}
+	if err := leads.RecordRouteExecution(ctx, tx, leads.RecordRouteExecutionParams{
+		RouteName:       "Manual distribution",
+		LeadID:          leadID,
+		OwnerAccountID:  publisherID,
+		TargetAccountID: &buyerID,
+		Destination:     "contract",
+		TriggerType:     "legacy_buyer",
+		ReviewerID:      reviewerID,
+	}); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx,

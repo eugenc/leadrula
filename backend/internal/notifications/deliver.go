@@ -3,10 +3,12 @@ package notifications
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 
 	"github.com/echayko/leadrula/backend/internal/database"
+	"github.com/jackc/pgx/v5"
 )
 
 // DeliverParams describes one notification event.
@@ -49,10 +51,24 @@ func (s *Service) Deliver(ctx context.Context, q database.Querier, p DeliverPara
 
 	var emails []EmailJob
 	for _, uid := range p.UserIDs {
+		var userExists bool
+		if err := q.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM users WHERE id = $1)`, uid).Scan(&userExists); err != nil {
+			return nil, err
+		}
+		if !userExists {
+			log.Printf("notification skip missing user id=%d event=%s", uid, p.EventType)
+			continue
+		}
+
 		ch := accountPrefs.forEvent(p.EventType)
 		if personal {
 			userPrefs, err := s.loadUserPrefs(ctx, q, uid)
 			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					log.Printf("notification skip missing user prefs id=%d event=%s", uid, p.EventType)
+					continue
+				}
 				return nil, err
 			}
 			ch = userPrefs.forEvent(p.EventType)
@@ -68,6 +84,9 @@ func (s *Service) Deliver(ctx context.Context, q database.Querier, p DeliverPara
 			var email, name string
 			if err := q.QueryRow(ctx,
 				`SELECT email, full_name FROM users WHERE id = $1`, uid).Scan(&email, &name); err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					continue
+				}
 				return nil, err
 			}
 			if email == "" {

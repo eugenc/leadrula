@@ -1354,7 +1354,9 @@ func FindReturnRule(ctx context.Context, q database.Querier, contractID, buyerAc
 	var sourcePipelineID *int64
 	var returnStageID, publisherID int64
 	err := q.QueryRow(ctx,
-		`SELECT COALESCE(p.source_pipeline_id, c.source_pipeline_id), rr.return_stage_id, c.publisher_id
+		`SELECT COALESCE(p.source_pipeline_id, c.source_pipeline_id),
+		        COALESCE(p.return_stage_id, rr.return_stage_id, c.return_stage_id),
+		        c.publisher_id
 		 FROM contract_return_rules rr
 		 JOIN contracts c ON c.id = rr.contract_id
 		 LEFT JOIN contract_participations p ON p.id = rr.participation_id
@@ -1372,9 +1374,26 @@ func FindReturnRule(ctx context.Context, q database.Querier, contractID, buyerAc
 	if sourcePipelineID == nil || *sourcePipelineID == 0 {
 		return nil, httpx.BusinessRule("publisher pipeline is not configured on contract")
 	}
+	if returnStageID == 0 {
+		return nil, httpx.BusinessRule("return destination is misconfigured for this stage")
+	}
 	return &ReturnInfo{
 		SourcePipelineID: *sourcePipelineID,
 		ReturnStageID:    returnStageID,
 		PublisherID:      publisherID,
 	}, nil
+}
+
+// ValidateReturnDestination checks that returnStageID belongs to sourcePipelineID.
+func ValidateReturnDestination(ctx context.Context, q database.Querier, sourcePipelineID, returnStageID int64) error {
+	var ok bool
+	if err := q.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM pipeline_stages WHERE id = $1 AND pipeline_id = $2)`,
+		returnStageID, sourcePipelineID).Scan(&ok); err != nil {
+		return err
+	}
+	if !ok {
+		return httpx.BusinessRule("return destination is misconfigured for this stage")
+	}
+	return nil
 }

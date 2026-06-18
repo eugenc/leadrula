@@ -14,10 +14,28 @@ export interface IntegrationDeliveryRow {
   attempts: number;
 }
 
+export interface RouteExecutionRow {
+  id: number;
+  lead_id?: number | null;
+  first_name?: string;
+  last_name?: string;
+  status: string;
+  created_at: string;
+  route_id?: number | null;
+  route_name: string;
+  trigger_type: string;
+  trigger_label?: string;
+  target_account_name?: string;
+  destination?: string;
+  branch_position?: number;
+  error_message?: string | null;
+}
+
 export type InboundLogRow =
   | { kind: "source"; direction: "inbound"; item: QueueItem }
   | { kind: "webhook"; direction: "inbound" | "outbound"; item: WebhookDelivery }
-  | { kind: "integration"; direction: "outbound"; item: IntegrationDeliveryRow };
+  | { kind: "integration"; direction: "outbound"; item: IntegrationDeliveryRow }
+  | { kind: "route"; direction: "inbound" | "outbound"; item: RouteExecutionRow };
 
 export function queueItemToRow(item: QueueItem): InboundLogRow {
   return { kind: "source", direction: "inbound", item };
@@ -84,8 +102,34 @@ function inboundItemToIntegrationDelivery(item: InboundLogItem): IntegrationDeli
   };
 }
 
+function inboundItemToRouteExecution(item: InboundLogItem): RouteExecutionRow {
+  return {
+    id: item.id,
+    lead_id: item.lead_id,
+    first_name: item.first_name,
+    last_name: item.last_name,
+    status: item.status,
+    created_at: item.created_at,
+    route_id: item.route_id,
+    route_name: item.route_name ?? item.origin,
+    trigger_type: item.trigger_type ?? "",
+    trigger_label: item.trigger_label,
+    target_account_name: item.target_account_name,
+    destination: item.destination,
+    branch_position: item.branch_position,
+    error_message: item.error_message,
+  };
+}
+
 export function inboundItemToRow(item: InboundLogItem): InboundLogRow {
   const direction = item.direction ?? "inbound";
+  if (item.kind === "route") {
+    return {
+      kind: "route",
+      direction: direction === "outbound" ? "outbound" : "inbound",
+      item: inboundItemToRouteExecution(item),
+    };
+  }
   if (item.kind === "integration") {
     return { kind: "integration", direction: "outbound", item: inboundItemToIntegrationDelivery(item) };
   }
@@ -122,5 +166,6 @@ export function rowDirectionLabel(row: InboundLogRow): string {
 export function rowKey(row: InboundLogRow): string {
   if (row.kind === "source") return `source:${row.item.id}`;
   if (row.kind === "integration") return `integration:${row.item.id}`;
+  if (row.kind === "route") return `route:${row.item.id}`;
   return `webhook:${row.direction}:${row.item.webhook_id}:${row.item.id}`;
 }

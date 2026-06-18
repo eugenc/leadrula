@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { del, get, patch, post } from "@/lib/api";
+import { del, get, patch, post, resetSwitchExpiredNotified } from "@/lib/api";
 import { homePath } from "@/lib/homePath";
 import { useAuthStore, userFromMe } from "@/store/authStore";
 import type {
@@ -47,26 +47,28 @@ export function useSwitchAccount() {
   return useMutation({
     mutationFn: (accountId: string) =>
       post<SwitchLoginResult>("/auth/switch", { account_id: accountId }),
-    onSuccess: async (res) => {
-      const { refreshToken } = useAuthStore.getState();
-      const originUser = useAuthStore.getState().user;
-      const originName = originUser?.account_name ?? originUser?.full_name ?? "Home";
+    onSuccess: async (res, accountId) => {
+      const { accessToken, refreshToken, user: originUser } = useAuthStore.getState();
+      if (!accessToken || !refreshToken || !originUser) return;
+      const originName = originUser.account_name ?? originUser.full_name ?? "Home";
 
-      if (refreshToken) {
-        useAuthStore.getState().setTokens(res.access, refreshToken);
-      }
-
+      useAuthStore.setState({ accessToken: res.access });
       const me = await get<Me>("/auth/me");
-      startSwitch(
-        res.access,
-        {
+      startSwitch({
+        switchedAccess: res.access,
+        user: {
           ...userFromMe(me),
           is_switched: true,
           switched_from: res.user.switched_from ?? me.switched_from,
           account_name: me.account.name,
         },
-        originName
-      );
+        originAccountName: originName,
+        targetAccountId: accountId,
+        originAccessToken: accessToken,
+        originRefreshToken: refreshToken,
+        originUser,
+      });
+      resetSwitchExpiredNotified();
       qc.clear();
       navigate(homePath(me.account.type));
     },

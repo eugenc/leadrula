@@ -8,26 +8,33 @@ import (
 )
 
 type InboundLogItem struct {
-	Kind           string          `json:"kind"`
-	Direction      string          `json:"direction"`
-	ID             int64           `json:"id"`
-	CreatedAt      time.Time       `json:"created_at"`
-	Origin         string          `json:"origin"`
-	OriginSlug     string          `json:"origin_slug"`
-	LeadLabel      string          `json:"lead_label"`
-	LeadID         *int64          `json:"lead_id,omitempty"`
-	Status         string          `json:"status"`
-	UnmappedKeys   []string        `json:"unmapped_keys,omitempty"`
-	FirstName      string          `json:"first_name,omitempty"`
-	LastName       string          `json:"last_name,omitempty"`
-	Phone          *string         `json:"phone,omitempty"`
-	Source         *string         `json:"source,omitempty"`
-	RawPayload     json.RawMessage `json:"raw_payload,omitempty"`
-	WebhookID      int64           `json:"webhook_id,omitempty"`
-	ErrorMessage   *string         `json:"error_message,omitempty"`
-	ProviderSlug   string          `json:"provider_slug,omitempty"`
-	ConnectionName string          `json:"connection_name,omitempty"`
-	Attempts       int             `json:"attempts,omitempty"`
+	Kind               string          `json:"kind"`
+	Direction          string          `json:"direction"`
+	ID                 int64           `json:"id"`
+	CreatedAt          time.Time       `json:"created_at"`
+	Origin             string          `json:"origin"`
+	OriginSlug         string          `json:"origin_slug"`
+	LeadLabel          string          `json:"lead_label"`
+	LeadID             *int64          `json:"lead_id,omitempty"`
+	Status             string          `json:"status"`
+	UnmappedKeys       []string        `json:"unmapped_keys,omitempty"`
+	FirstName          string          `json:"first_name,omitempty"`
+	LastName           string          `json:"last_name,omitempty"`
+	Phone              *string         `json:"phone,omitempty"`
+	Source             *string         `json:"source,omitempty"`
+	RawPayload         json.RawMessage `json:"raw_payload,omitempty"`
+	WebhookID          int64           `json:"webhook_id,omitempty"`
+	ErrorMessage       *string         `json:"error_message,omitempty"`
+	ProviderSlug       string          `json:"provider_slug,omitempty"`
+	ConnectionName     string          `json:"connection_name,omitempty"`
+	Attempts           int             `json:"attempts,omitempty"`
+	RouteID            *int64          `json:"route_id,omitempty"`
+	RouteName          string          `json:"route_name,omitempty"`
+	TriggerType        string          `json:"trigger_type,omitempty"`
+	TriggerLabel       string          `json:"trigger_label,omitempty"`
+	TargetAccountName  string          `json:"target_account_name,omitempty"`
+	Destination        string          `json:"destination,omitempty"`
+	BranchPosition     int             `json:"branch_position,omitempty"`
 }
 
 type InboundLogListResponse struct {
@@ -38,13 +45,14 @@ type InboundLogListResponse struct {
 }
 
 type ListInboundLogParams struct {
-	Type      string
-	Status    string
-	Search    string
-	Source    string
-	WebhookID int64
-	Page      int
-	Limit     int
+	AccountType string
+	Type        string
+	Status      string
+	Search      string
+	Source      string
+	WebhookID   int64
+	Page        int
+	Limit       int
 }
 
 func (s *Service) ListInboundLog(ctx context.Context, accountID int64, p ListInboundLogParams) (*InboundLogListResponse, error) {
@@ -55,6 +63,8 @@ func (s *Service) ListInboundLog(ctx context.Context, accountID int64, p ListInb
 		return s.listInboundLogWebhooks(ctx, accountID, p)
 	case "integration":
 		return s.listInboundLogIntegrations(ctx, accountID, p)
+	case "route":
+		return s.listInboundLogRoutes(ctx, accountID, p)
 	default:
 		return s.listInboundLogAll(ctx, accountID, p)
 	}
@@ -298,9 +308,12 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 	}
 	offset := (page - 1) * limit
 
-	var total int64
-	if err := s.pool.QueryRow(ctx,
-		`SELECT
+	isPublisher := p.AccountType != "buyer"
+	routeCount := routeLogCountSQL(p.AccountType)
+
+	var countSQL string
+	if isPublisher {
+		countSQL = `SELECT
 		   (SELECT COUNT(*) FROM lead_intake_queue q JOIN leads l ON l.id = q.lead_id WHERE l.publisher_id = $1)
 		 + (SELECT COUNT(*) FROM webhook_deliveries d JOIN webhooks w ON w.id = d.webhook_id WHERE w.account_id = $1)
 		 + (SELECT COUNT(*) FROM integration_delivery_queue q
@@ -310,16 +323,37 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 		      JOIN integration_connections c ON c.id = q.connection_id
 		      JOIN webhook_outbound_triggers t ON t.id = q.webhook_trigger_id
 		      JOIN webhooks w ON w.id = t.webhook_id
-		      WHERE w.account_id = $1)`,
-		accountID).Scan(&total); err != nil {
+		      WHERE w.account_id = $1)
+		 + ` + routeCount
+	} else {
+		countSQL = `SELECT
+		   (SELECT COUNT(*) FROM webhook_deliveries d JOIN webhooks w ON w.id = d.webhook_id WHERE w.account_id = $1)
+		 + (SELECT COUNT(*) FROM integration_delivery_queue q
+		      JOIN integration_connections c ON c.id = q.connection_id
+		      WHERE c.account_id = $1 AND q.webhook_trigger_id IS NULL)
+		 + (SELECT COUNT(*) FROM integration_delivery_queue q
+		      JOIN integration_connections c ON c.id = q.connection_id
+		      JOIN webhook_outbound_triggers t ON t.id = q.webhook_trigger_id
+		      JOIN webhooks w ON w.id = t.webhook_id
+		      WHERE w.account_id = $1)
+		 + ` + routeCount
+	}
+
+	var total int64
+	if err := s.pool.QueryRow(ctx, countSQL, accountID).Scan(&total); err != nil {
 		return nil, err
 	}
 
-	rows, err := s.pool.Query(ctx,
-		`SELECT kind, direction, id, created_at, origin, origin_slug, lead_label, lead_id, status,
-		        first_name, last_name, phone, source, raw_payload, webhook_id, error_message,
-		        provider_slug, connection_name, attempts
-		 FROM (
+	nullRouteCols := `
+		     NULL::bigint AS route_id,
+		     NULL::text AS route_name,
+		     NULL::text AS trigger_type,
+		     NULL::text AS trigger_label,
+		     NULL::text AS target_account_name,
+		     NULL::text AS destination,
+		     0::int AS branch_position`
+
+	sourceUnion := `
 		   SELECT
 		     'source'::text AS kind,
 		     'inbound'::text AS direction,
@@ -339,13 +373,12 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 		     NULL::text AS error_message,
 		     ''::text AS provider_slug,
 		     ''::text AS connection_name,
-		     0::int AS attempts
+		     0::int AS attempts` + nullRouteCols + `
 		   FROM lead_intake_queue q
 		   JOIN leads l ON l.id = q.lead_id
-		   WHERE l.publisher_id = $1
+		   WHERE l.publisher_id = $1`
 
-		   UNION ALL
-
+	webhookInboundUnion := `
 		   SELECT
 		     'webhook'::text AS kind,
 		     'inbound'::text AS direction,
@@ -365,14 +398,13 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 		     d.error_message,
 		     ''::text AS provider_slug,
 		     ''::text AS connection_name,
-		     0::int AS attempts
+		     0::int AS attempts` + nullRouteCols + `
 		   FROM webhook_deliveries d
 		   JOIN webhooks w ON w.id = d.webhook_id
 		   LEFT JOIN leads l ON l.id = d.lead_id
-		   WHERE w.account_id = $1
+		   WHERE w.account_id = $1`
 
-		   UNION ALL
-
+	webhookOutboundUnion := `
 		   SELECT
 		     'webhook'::text AS kind,
 		     'outbound'::text AS direction,
@@ -392,15 +424,14 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 		     q.last_error AS error_message,
 		     'webhook'::text AS provider_slug,
 		     ''::text AS connection_name,
-		     q.attempts
+		     q.attempts` + nullRouteCols + `
 		   FROM integration_delivery_queue q
 		   JOIN webhook_outbound_triggers t ON t.id = q.webhook_trigger_id
 		   JOIN webhooks w ON w.id = t.webhook_id
 		   LEFT JOIN leads l ON l.id = q.lead_id
-		   WHERE w.account_id = $1
+		   WHERE w.account_id = $1`
 
-		   UNION ALL
-
+	integrationUnion := `
 		   SELECT
 		     'integration'::text AS kind,
 		     'outbound'::text AS direction,
@@ -420,17 +451,34 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 		     q.last_error AS error_message,
 		     p.slug AS provider_slug,
 		     c.name AS connection_name,
-		     q.attempts
+		     q.attempts` + nullRouteCols + `
 		   FROM integration_delivery_queue q
 		   JOIN integration_connections c ON c.id = q.connection_id
 		   JOIN integration_providers p ON p.id = c.provider_id
 		   LEFT JOIN leads l ON l.id = q.lead_id
 		   WHERE c.account_id = $1
-		     AND q.webhook_trigger_id IS NULL
+		     AND q.webhook_trigger_id IS NULL`
+
+	combined := webhookInboundUnion + `
+		   UNION ALL` + webhookOutboundUnion + `
+		   UNION ALL` + integrationUnion + `
+		   UNION ALL` + buildRouteLogUnionSQL(p.AccountType)
+
+	if isPublisher {
+		combined = sourceUnion + `
+		   UNION ALL` + combined
+	}
+
+	query := `SELECT kind, direction, id, created_at, origin, origin_slug, lead_label, lead_id, status,
+		        first_name, last_name, phone, source, raw_payload, webhook_id, error_message,
+		        provider_slug, connection_name, attempts,
+		        route_id, route_name, trigger_type, trigger_label, target_account_name, destination, branch_position
+		 FROM (` + combined + `
 		 ) combined
 		 ORDER BY created_at DESC
-		 LIMIT $2 OFFSET $3`,
-		accountID, limit, offset)
+		 LIMIT $2 OFFSET $3`
+
+	rows, err := s.pool.Query(ctx, query, accountID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -440,18 +488,22 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 	for rows.Next() {
 		var it InboundLogItem
 		var raw []byte
+		var routeID *int64
 		if err := rows.Scan(
 			&it.Kind, &it.Direction, &it.ID, &it.CreatedAt, &it.Origin, &it.OriginSlug,
 			&it.LeadLabel, &it.LeadID, &it.Status,
 			&it.FirstName, &it.LastName, &it.Phone, &it.Source, &raw,
 			&it.WebhookID, &it.ErrorMessage,
 			&it.ProviderSlug, &it.ConnectionName, &it.Attempts,
+			&routeID, &it.RouteName, &it.TriggerType, &it.TriggerLabel,
+			&it.TargetAccountName, &it.Destination, &it.BranchPosition,
 		); err != nil {
 			return nil, err
 		}
 		if len(raw) > 0 {
 			it.RawPayload = raw
 		}
+		it.RouteID = routeID
 		if it.Kind == "source" {
 			if err := s.enrichInboundSourceItem(ctx, accountID, &it); err != nil {
 				return nil, err

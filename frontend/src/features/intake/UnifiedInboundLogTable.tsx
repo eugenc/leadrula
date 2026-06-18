@@ -16,6 +16,8 @@ import {
   LogLeadLink,
   canReplayDelivery,
   integrationDeliveryStatusText,
+  routeDestinationLabel,
+  routeTriggerLabel,
   statusText,
   webhookDeliveryStatusText,
 } from "./logShared";
@@ -319,6 +321,86 @@ export function UnifiedInboundLogTable({
                         {d.error_message && !expandedIntegration?.last_error && (
                           <p className="mt-1 text-xs text-red-600">{d.error_message}</p>
                         )}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            }
+
+            if (row.kind === "route") {
+              const r = row.item;
+              const expandKey = `route:${r.id}`;
+              const isExpanded = expandedKey === expandKey;
+              return (
+                <Fragment key={key}>
+                  <TR>
+                    <TD className="text-xs">{format(new Date(r.created_at), "MMM d, h:mma")}</TD>
+                    <TD className="text-xs text-gray-600">Route</TD>
+                    <TD className="text-xs text-gray-600">{direction}</TD>
+                    <TD>
+                      <span className="font-medium text-gray-800">{r.route_name}</span>
+                      {r.target_account_name && (
+                        <span className="ml-1 text-xs text-gray-500">→ {r.target_account_name}</span>
+                      )}
+                    </TD>
+                    <TD>
+                      <LogLeadLink
+                        leadId={r.lead_id}
+                        firstName={r.first_name}
+                        lastName={r.last_name}
+                        onClick={openDetail}
+                      />
+                    </TD>
+                    <TD>
+                      <span className="text-sm text-gray-700 capitalize">{r.status}</span>
+                    </TD>
+                    <TD>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="shrink-0 whitespace-nowrap"
+                        onClick={() => setExpandedKey(isExpanded ? null : expandKey)}
+                      >
+                        {isExpanded ? "Hide" : "View"}
+                      </Button>
+                    </TD>
+                  </TR>
+                  {isExpanded && (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-2">
+                        <div className="space-y-2 rounded-md border border-gray-100 bg-gray-50 p-3 text-xs text-gray-700">
+                          <div>
+                            <span className="font-medium text-gray-500">Trigger: </span>
+                            {routeTriggerLabel(r.trigger_type)}
+                            {r.trigger_label ? ` (${r.trigger_label})` : ""}
+                          </div>
+                          <div>
+                            <span className="font-medium text-gray-500">Destination: </span>
+                            {routeDestinationLabel(r.destination)}
+                          </div>
+                          {r.target_account_name && (
+                            <div>
+                              <span className="font-medium text-gray-500">Buyer: </span>
+                              {r.target_account_name}
+                            </div>
+                          )}
+                          {r.branch_position != null && r.branch_position > 0 && (
+                            <div>
+                              <span className="font-medium text-gray-500">Branch: </span>
+                              {r.branch_position}
+                            </div>
+                          )}
+                          {r.route_id != null && (
+                            <div>
+                              <span className="font-medium text-gray-500">Route ID: </span>
+                              {r.route_id}
+                            </div>
+                          )}
+                          {r.error_message && (
+                            <p className="text-red-600">{r.error_message}</p>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   )}

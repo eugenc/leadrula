@@ -2,6 +2,7 @@ package leads
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/accounts"
@@ -147,7 +148,11 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 				}
 				pendingEmails = append(pendingEmails, emails...)
 			} else {
-				enqueue, emails, err := TryApplyMatchedRoute(ctx, tx, deps, rt, leadID)
+				meta := RouteExecutionMeta{TriggerType: "stage"}
+				if rt.OriginStageName != nil {
+					meta.TriggerLabel = *rt.OriginStageName
+				}
+				enqueue, emails, err := TryApplyMatchedRoute(ctx, tx, deps, rt, leadID, meta)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -169,7 +174,11 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		if rt, err := routing.MatchBuyerRouteByStage(ctx, tx, p.AccountID, *finalStageID, leadID, nil); err != nil {
 			return nil, nil, err
 		} else if rt != nil && enqueueRouteID == 0 {
-			enqueue, emails, err := TryApplyMatchedRoute(ctx, tx, deps, rt, leadID)
+			meta := RouteExecutionMeta{TriggerType: "stage"}
+			if rt.OriginStageName != nil {
+				meta.TriggerLabel = *rt.OriginStageName
+			}
+			enqueue, emails, err := TryApplyMatchedRoute(ctx, tx, deps, rt, leadID, meta)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -203,15 +212,18 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 			return nil, nil, err
 		}
 		if ri != nil {
-			if err := contracts.RecordEarningReturn(ctx, tx, leadID, lead.ContractID); err != nil {
+			if err := contracts.ValidateReturnDestination(ctx, tx, ri.SourcePipelineID, ri.ReturnStageID); err != nil {
 				return nil, nil, err
 			}
+			if err := contracts.RecordEarningReturn(ctx, tx, leadID, lead.ContractID); err != nil {
+				return nil, nil, fmt.Errorf("return rule record earning: %w", err)
+			}
 			if err := s.repo.MoveToPublisher(ctx, tx, leadID, ri.PublisherID, ri.SourcePipelineID, ri.ReturnStageID); err != nil {
-				return nil, nil, err
+				return nil, nil, fmt.Errorf("return rule move to publisher: %w", err)
 			}
 			returned, err := s.repo.GetByID(ctx, tx, leadID)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, fmt.Errorf("return rule reload lead: %w", err)
 			}
 			emails, err := s.notif.Deliver(ctx, tx, notifications.DeliverParams{
 				AccountID: ri.PublisherID,
@@ -220,7 +232,7 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 				Payload:   map[string]any{"lead_id": leadID},
 			})
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, fmt.Errorf("return rule notify: %w", err)
 			}
 			pendingEmails = append(pendingEmails, emails...)
 			updated = returned

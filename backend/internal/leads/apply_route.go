@@ -46,18 +46,31 @@ type RouteApplyDeps struct {
 }
 
 // ApplyRoute moves a lead according to route destination.
-func ApplyRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, leadID int64) ([]notifications.EmailJob, error) {
+func ApplyRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, leadID int64, meta RouteExecutionMeta) ([]notifications.EmailJob, error) {
 	switch route.Destination {
 	case "pipeline":
-		return applyPipelineRoute(ctx, q, deps.Repo, route, route.OwnerAccountID(), leadID)
+		emails, err := applyPipelineRoute(ctx, q, deps.Repo, route, route.OwnerAccountID(), leadID)
+		if err != nil {
+			return nil, err
+		}
+		if err := recordRouteFromRoute(ctx, q, route, leadID, meta, nil); err != nil {
+			return nil, err
+		}
+		return emails, nil
 	case "contract":
-		return applyContractRoute(ctx, q, deps, route, leadID)
+		return applyContractRoute(ctx, q, deps, route, leadID, meta)
 	case "webhook":
 		if err := applyWebhookDestRoute(ctx, q, deps, route, leadID); err != nil {
 			return nil, err
 		}
+		if err := recordRouteFromRoute(ctx, q, route, leadID, meta, nil); err != nil {
+			return nil, err
+		}
 		return nil, nil
 	case "integration":
+		if err := recordRouteFromRoute(ctx, q, route, leadID, meta, nil); err != nil {
+			return nil, err
+		}
 		return nil, nil
 	default:
 		return nil, httpx.BusinessRule("unsupported route destination")
@@ -96,18 +109,18 @@ func applyWebhookDestRoute(ctx context.Context, q database.Querier, deps RouteAp
 }
 
 // TryApplyMatchedRoute applies a matched route and returns whether integrations should enqueue.
-func TryApplyMatchedRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, leadID int64) (enqueueIntegrations bool, emails []notifications.EmailJob, err error) {
+func TryApplyMatchedRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, leadID int64, meta RouteExecutionMeta) (enqueueIntegrations bool, emails []notifications.EmailJob, err error) {
 	if route == nil {
 		return false, nil, nil
 	}
-	emails, err = ApplyRoute(ctx, q, deps, route, leadID)
+	emails, err = ApplyRoute(ctx, q, deps, route, leadID, meta)
 	if err != nil {
 		return false, nil, err
 	}
 	return route.Destination == "integration", emails, nil
 }
 
-func applyContractRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, leadID int64) ([]notifications.EmailJob, error) {
+func applyContractRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, leadID int64, meta RouteExecutionMeta) ([]notifications.EmailJob, error) {
 	if route.ContractID == nil {
 		return nil, httpx.BusinessRule("route missing contract")
 	}
@@ -115,6 +128,7 @@ func applyContractRoute(ctx context.Context, q database.Querier, deps RouteApply
 	if err != nil {
 		return nil, err
 	}
+	routeID := route.ID
 	return ApplyContractDistribution(ctx, q, deps, contractDistributionParams{
 		ContractID:       *route.ContractID,
 		CompensationID:   route.CompensationID,
@@ -123,7 +137,10 @@ func applyContractRoute(ctx context.Context, q database.Querier, deps RouteApply
 		RouteFieldMaps:   maps,
 		BillingLabel:     "lead routed: " + route.Name,
 		ClearPreassigned: false,
-	}, leadID)
+		RouteID:          &routeID,
+		RouteName:        route.Name,
+		BranchPosition:   route.MatchedBranchPosition,
+	}, leadID, meta)
 }
 
 type contractDistributionParams struct {
@@ -135,6 +152,9 @@ type contractDistributionParams struct {
 	RouteFieldMaps     []routing.RouteFieldMapEntry
 	BillingLabel       string
 	ClearPreassigned   bool
+	RouteID            *int64
+	RouteName          string
+	BranchPosition     int
 }
 
 // resolveBuyerDestStage picks the buyer pipeline stage for contract distribution.
@@ -153,7 +173,7 @@ func resolveBuyerDestStage(ctx context.Context, q database.Querier, buyerStageID
 }
 
 // ApplyContractDistribution moves a lead to a buyer via contract.
-func ApplyContractDistribution(ctx context.Context, q database.Querier, deps RouteApplyDeps, p contractDistributionParams, leadID int64) ([]notifications.EmailJob, error) {
+func ApplyContractDistribution(ctx context.Context, q database.Querier, deps RouteApplyDeps, p contractDistributionParams, leadID int64, meta RouteExecutionMeta) ([]notifications.EmailJob, error) {
 	if err := contracts.RequireActiveContract(ctx, q, p.ContractID); err != nil {
 		return nil, err
 	}
@@ -223,6 +243,9 @@ func ApplyContractDistribution(ctx context.Context, q database.Querier, deps Rou
 				return nil, err
 			}
 		}
+		if err := recordContractRouteExec(ctx, q, lead, p, target.BuyerID, meta); err != nil {
+			return nil, err
+		}
 		return nil, enqueueParticipationIntegration(ctx, deps, target, lead)
 	}
 
@@ -273,6 +296,9 @@ func ApplyContractDistribution(ctx context.Context, q database.Querier, deps Rou
 	if err := enqueueParticipationIntegration(ctx, deps, target, updated); err != nil {
 		return nil, err
 	}
+	if err := recordContractRouteExec(ctx, q, lead, p, target.BuyerID, meta); err != nil {
+		return nil, err
+	}
 	return emails, nil
 }
 
@@ -294,7 +320,28 @@ func TryApplyPreassignedBuyer(ctx context.Context, q database.Querier, deps Rout
 		PreassignedBuyerID: &buyerID,
 		BillingLabel:       "lead pre-assigned",
 		ClearPreassigned:   true,
-	}, leadID)
+		RouteName:          "Pre-assigned buyer",
+	}, leadID, RouteExecutionMeta{TriggerType: "preassigned"})
+}
+
+func recordContractRouteExec(ctx context.Context, q database.Querier, lead *Lead, p contractDistributionParams, targetBuyerID int64, meta RouteExecutionMeta) error {
+	routeName := p.RouteName
+	if routeName == "" {
+		routeName = p.BillingLabel
+	}
+	buyerID := targetBuyerID
+	return RecordRouteExecution(ctx, q, RecordRouteExecutionParams{
+		RouteID:         p.RouteID,
+		RouteName:       routeName,
+		LeadID:          lead.ID,
+		OwnerAccountID:  lead.PublisherID,
+		TargetAccountID: &buyerID,
+		Destination:     "contract",
+		TriggerType:     meta.TriggerType,
+		TriggerLabel:    meta.TriggerLabel,
+		BranchPosition:  p.BranchPosition,
+		ReviewerID:      meta.ReviewerID,
+	})
 }
 
 func enqueueParticipationIntegration(ctx context.Context, deps RouteApplyDeps, target *contracts.Target, lead *Lead) error {

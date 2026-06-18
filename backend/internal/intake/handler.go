@@ -180,7 +180,8 @@ func (h *Handler) listInboundLog(w http.ResponseWriter, r *http.Request) {
 		logType = "all"
 	}
 	result, err := h.svc.ListInboundLog(r.Context(), p.AccountID, ListInboundLogParams{
-		Type:      logType,
+		AccountType: p.AccountType,
+		Type:        logType,
 		Status:    q.Get("status"),
 		Search:    q.Get("q"),
 		Source:    q.Get("source"),

@@ -271,16 +271,19 @@ export function IntakeLogTable({
     limit,
   };
 
+  const inboundType = (
+    logType === "integrations" ? "integration" : logType === "routes" ? "route" : "all"
+  ) as "all" | "integration" | "route";
+
   const inboundFilters = {
-    type: (logType === "integrations" ? "integration" : "all") as "all" | "integration",
+    type: inboundType,
     page,
     limit,
   };
 
   const showIntakeData = logType === "intake" && source === "publisher";
-  const showWebhookData = logType === "webhooks" || (logType === "all" && source === "buyer");
-  const showInboundData =
-    logType === "integrations" || (logType === "all" && source === "publisher");
+  const showWebhookData = logType === "webhooks";
+  const showInboundData = logType === "integrations" || logType === "routes" || logType === "all";
 
   const intakeQuery = useRoutingLog(source, intakeFilters, showIntakeData);
   const webhookQuery = useAccountWebhookDeliveries(webhookFilters);
@@ -299,17 +302,17 @@ export function IntakeLogTable({
       };
     }
     if (logType === "webhooks") {
-      const items = showWebhookData ? (webhookQuery.data?.items ?? []) : [];
+      const items = webhookQuery.data?.items ?? [];
       return {
         rows: webhookDeliveriesToRows(items),
         total: webhookQuery.data?.total ?? 0,
-        isLoading: showWebhookData && webhookQuery.isLoading,
+        isLoading: webhookQuery.isLoading,
         hasFilters: webhookStatus !== "" || webhookId !== "",
         refetchWebhooks: () => webhookQuery.refetch(),
       };
     }
 
-    if (logType === "integrations") {
+    if (logType === "integrations" || logType === "routes" || logType === "all") {
       const items = inboundQuery.data?.items ?? [];
       return {
         rows: inboundItemsToRows(items),
@@ -320,26 +323,12 @@ export function IntakeLogTable({
       };
     }
 
-    // All
-    if (source === "publisher") {
-      const items = inboundQuery.data?.items ?? [];
-      return {
-        rows: inboundItemsToRows(items),
-        total: inboundQuery.data?.total ?? 0,
-        isLoading: inboundQuery.isLoading,
-        hasFilters: false,
-        refetchWebhooks: () => inboundQuery.refetch(),
-      };
-    }
-
-    // Buyer "All" — webhooks only (no publisher source routing rows)
-    const items = webhookQuery.data?.items ?? [];
     return {
-      rows: webhookDeliveriesToRows(items),
-      total: webhookQuery.data?.total ?? 0,
-      isLoading: webhookQuery.isLoading,
+      rows: [],
+      total: 0,
+      isLoading: false,
       hasFilters: false,
-      refetchWebhooks: () => webhookQuery.refetch(),
+      refetchWebhooks: () => undefined,
     };
   }, [
     logType,
@@ -367,9 +356,11 @@ export function IntakeLogTable({
       ? "No webhook deliveries yet."
       : logType === "integrations"
         ? "No integration deliveries yet."
-        : logType === "all"
-          ? "No intake history yet."
-          : emptyTitle;
+        : logType === "routes"
+          ? "No route executions yet."
+          : logType === "all"
+            ? "No intake history yet."
+            : emptyTitle;
 
   const typeFilters =
     source === "buyer" ? LOG_TYPE_FILTERS.filter((f) => f.value !== "intake") : LOG_TYPE_FILTERS;

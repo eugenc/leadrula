@@ -40,7 +40,8 @@ func (s *Service) applyMatchedOriginRoute(ctx context.Context, rt *routing.Route
 	defer tx.Rollback(ctx)
 
 	deps := RouteApplyDeps{Repo: s.repo, Accounts: s.accounts, Notif: s.notif, Integrations: s.integrations}
-	enqueue, emails, err := TryApplyMatchedRoute(ctx, tx, deps, rt, leadID)
+	meta := originRouteMeta(rt)
+	enqueue, emails, err := TryApplyMatchedRoute(ctx, tx, deps, rt, leadID, meta)
 	if err != nil {
 		return false
 	}
@@ -52,4 +53,23 @@ func (s *Service) applyMatchedOriginRoute(ctx context.Context, rt *routing.Route
 		TryEnqueueIntegrations(ctx, s.repo.Pool(), s.repo, s.integrations, rt.ID, leadID, rt.MatchedBranchPosition)
 	}
 	return true
+}
+
+func originRouteMeta(rt *routing.Route) RouteExecutionMeta {
+	meta := RouteExecutionMeta{}
+	switch rt.Origin {
+	case "webhook":
+		meta.TriggerType = "webhook"
+		if rt.OriginWebhookName != nil {
+			meta.TriggerLabel = *rt.OriginWebhookName
+		}
+	case "integration":
+		meta.TriggerType = "integration"
+		if rt.OriginConnectionName != nil {
+			meta.TriggerLabel = *rt.OriginConnectionName
+		}
+	default:
+		meta.TriggerType = rt.Origin
+	}
+	return meta
 }

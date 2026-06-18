@@ -5,10 +5,15 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/echayko/leadrula/backend/internal/accounts"
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/internal/config"
+	"github.com/echayko/leadrula/backend/internal/contracts"
 	"github.com/echayko/leadrula/backend/internal/database"
+	"github.com/echayko/leadrula/backend/internal/notifications"
+	"github.com/echayko/leadrula/backend/internal/pipelines"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -150,5 +155,192 @@ func TestClearFromPipeline_serviceForbiddenForNonAssignee(t *testing.T) {
 	var appErr *httpx.AppError
 	if !errors.As(err, &appErr) || appErr.Code != httpx.CodeForbidden {
 		t.Fatalf("expected forbidden, got %v", err)
+	}
+}
+
+func newStageTestService(t *testing.T, pool *pgxpool.Pool) *Service {
+	t.Helper()
+	acc := accounts.NewRepository(pool)
+	return NewService(
+		NewRepository(pool),
+		notifications.NewService(pool, acc, nil, "http://localhost"),
+		acc,
+		pipelines.NewService(pool, nil),
+		nil,
+	)
+}
+
+type disqMoveFixture struct {
+	leadID         int64
+	ownerAccountID int64
+	publisherID    int64
+	contractID     int64
+	fromStageID    int64
+	disqStageID    int64
+	reasonID       int64
+	returnStageID  int64
+	sourcePipeline int64
+}
+
+func loadDisqMoveFixture(ctx context.Context, pool *pgxpool.Pool) (*disqMoveFixture, error) {
+	f := &disqMoveFixture{}
+	err := pool.QueryRow(ctx,
+		`SELECT l.id, l.owner_account_id, c.publisher_id, l.contract_id, l.stage_id,
+		        disq.id, dr.id, c.return_stage_id, c.source_pipeline_id
+		 FROM leads l
+		 JOIN contracts c ON c.id = l.contract_id
+		 JOIN pipeline_stages cur ON cur.id = l.stage_id
+		 JOIN pipeline_stages disq ON disq.pipeline_id = l.pipeline_id AND disq.stage_type = 'disqualification'
+		 JOIN disqualification_reasons dr ON dr.stage_id = disq.id AND dr.is_active
+		 WHERE l.deleted_at IS NULL AND l.contract_id IS NOT NULL
+		   AND cur.stage_type <> 'disqualification'
+		   AND c.return_stage_id IS NOT NULL AND c.source_pipeline_id IS NOT NULL
+		 LIMIT 1`).Scan(
+		&f.leadID, &f.ownerAccountID, &f.publisherID, &f.contractID, &f.fromStageID,
+		&f.disqStageID, &f.reasonID, &f.returnStageID, &f.sourcePipeline,
+	)
+	return f, err
+}
+
+func TestChangeStage_disqualificationTriggersReturn(t *testing.T) {
+	pool := connectLeadsTestDB(t)
+	ctx := context.Background()
+	svc := newStageTestService(t, pool)
+
+	f, err := loadDisqMoveFixture(ctx, pool)
+	if err != nil {
+		t.Skip("no buyer contract lead with disqualification stage in database")
+	}
+
+	var ruleID int64
+	err = pool.QueryRow(ctx,
+		`INSERT INTO contract_return_rules(contract_id, buyer_stage_id, return_stage_id)
+		 VALUES ($1,$2,$3)
+		 ON CONFLICT (contract_id, buyer_stage_id) WHERE participation_id IS NULL
+		 DO UPDATE SET return_stage_id = EXCLUDED.return_stage_id
+		 RETURNING id`,
+		f.contractID, f.disqStageID, f.returnStageID).Scan(&ruleID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM contract_return_rules WHERE id = $1`, ruleID)
+	})
+
+	var origOwner, origStage int64
+	var origContractID *int64
+	var origStatus string
+	var origPipelineID *int64
+	if err := pool.QueryRow(ctx,
+		`SELECT owner_account_id, stage_id, contract_id, status::text, pipeline_id FROM leads WHERE id = $1`,
+		f.leadID).Scan(&origOwner, &origStage, &origContractID, &origStatus, &origPipelineID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx,
+			`UPDATE leads SET owner_account_id=$2, stage_id=$3, contract_id=$4, status=$5::lead_status, pipeline_id=$6 WHERE id=$1`,
+			f.leadID, origOwner, origStage, origContractID, origStatus, origPipelineID)
+	})
+
+	p := &auth.Principal{AccountID: f.ownerAccountID, AccountType: "buyer", Role: "admin", UserID: 1}
+	reasonID := f.reasonID
+	updated, _, err := svc.ChangeStage(ctx, p, f.leadID, f.disqStageID, nil, &reasonID)
+	if err != nil {
+		t.Fatalf("ChangeStage: %v", err)
+	}
+	if updated.OwnerAccountID != f.publisherID {
+		t.Fatalf("owner_account_id = %d, want publisher %d", updated.OwnerAccountID, f.publisherID)
+	}
+	if updated.Status != "returned" {
+		t.Fatalf("status = %q, want returned", updated.Status)
+	}
+	if updated.StageID == nil || *updated.StageID != f.returnStageID {
+		t.Fatalf("stage_id = %v, want return stage %d", updated.StageID, f.returnStageID)
+	}
+}
+
+func TestChangeStage_invalidReturnDestination(t *testing.T) {
+	pool := connectLeadsTestDB(t)
+	ctx := context.Background()
+	svc := newStageTestService(t, pool)
+
+	f, err := loadDisqMoveFixture(ctx, pool)
+	if err != nil {
+		t.Skip("no buyer contract lead with disqualification stage in database")
+	}
+
+	var wrongReturnStage int64
+	err = pool.QueryRow(ctx,
+		`SELECT ps.id FROM pipeline_stages ps
+		 WHERE ps.pipeline_id = (SELECT pipeline_id FROM leads WHERE id = $1)
+		   AND ps.id <> $2
+		 ORDER BY ps.position, ps.id LIMIT 1`,
+		f.leadID, f.disqStageID).Scan(&wrongReturnStage)
+	if err != nil {
+		t.Skip("buyer pipeline has no other stage for invalid return test")
+	}
+
+	var ruleID int64
+	err = pool.QueryRow(ctx,
+		`INSERT INTO contract_return_rules(contract_id, buyer_stage_id, return_stage_id)
+		 VALUES ($1,$2,$3)
+		 ON CONFLICT (contract_id, buyer_stage_id) WHERE participation_id IS NULL
+		 DO UPDATE SET return_stage_id = EXCLUDED.return_stage_id
+		 RETURNING id`,
+		f.contractID, f.disqStageID, wrongReturnStage).Scan(&ruleID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM contract_return_rules WHERE id = $1`, ruleID)
+	})
+
+	p := &auth.Principal{AccountID: f.ownerAccountID, AccountType: "buyer", Role: "admin", UserID: 1}
+	reasonID := f.reasonID
+	_, _, err = svc.ChangeStage(ctx, p, f.leadID, f.disqStageID, nil, &reasonID)
+	if err == nil {
+		t.Fatal("expected error for misconfigured return destination")
+	}
+	var appErr *httpx.AppError
+	if !errors.As(err, &appErr) || appErr.Code != httpx.CodeBusinessRule {
+		t.Fatalf("expected business_rule, got %v", err)
+	}
+	if appErr.Message != "return destination is misconfigured for this stage" {
+		t.Fatalf("message = %q", appErr.Message)
+	}
+}
+
+func TestValidateReturnDestination(t *testing.T) {
+	pool := connectLeadsTestDB(t)
+	ctx := context.Background()
+
+	var pipelineID, stageID int64
+	err := pool.QueryRow(ctx,
+		`SELECT pipeline_id, id FROM pipeline_stages ORDER BY pipeline_id, position, id LIMIT 1`).Scan(&pipelineID, &stageID)
+	if err != nil {
+		t.Skip("no pipeline stages in database")
+	}
+
+	if err := contracts.ValidateReturnDestination(ctx, pool, pipelineID, stageID); err != nil {
+		t.Fatalf("valid stage: %v", err)
+	}
+
+	var otherStage int64
+	err = pool.QueryRow(ctx,
+		`SELECT id FROM pipeline_stages WHERE pipeline_id <> $1 LIMIT 1`, pipelineID).Scan(&otherStage)
+	if errors.Is(err, pgx.ErrNoRows) {
+		t.Skip("need stage from another pipeline")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = contracts.ValidateReturnDestination(ctx, pool, pipelineID, otherStage)
+	if err == nil {
+		t.Fatal("expected error for stage in wrong pipeline")
+	}
+	var appErr *httpx.AppError
+	if !errors.As(err, &appErr) || appErr.Code != httpx.CodeBusinessRule {
+		t.Fatalf("expected business_rule, got %v", err)
 	}
 }

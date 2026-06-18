@@ -3,7 +3,7 @@ import { get, post } from "@/lib/api";
 import type { InboundLogListResponse, IntegrationDeliveryDetail } from "@/types";
 
 export interface InboundLogFilters {
-  type?: "all" | "source" | "webhook" | "integration";
+  type?: "all" | "source" | "webhook" | "integration" | "route";
   status?: string;
   page?: number;
   limit?: number;

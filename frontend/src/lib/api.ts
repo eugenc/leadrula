@@ -24,6 +24,12 @@ api.interceptors.request.use((cfg) => {
 });
 
 let refreshing: Promise<string | null> | null = null;
+let reswitching: Promise<string | null> | null = null;
+let switchExpiredNotified = false;
+
+export function resetSwitchExpiredNotified() {
+  switchExpiredNotified = false;
+}
 
 async function tryRefresh(): Promise<string | null> {
   const refresh = useAuthStore.getState().refreshToken;
@@ -37,6 +43,38 @@ async function tryRefresh(): Promise<string | null> {
     useAuthStore.getState().logout();
     return null;
   }
+}
+
+async function tryReswitch(): Promise<string | null> {
+  const sw = useAuthStore.getState().switchSession;
+  const targetId = sw?.targetAccountId ?? useAuthStore.getState().user?.account_id;
+  if (!sw || !targetId || !sw.originRefreshToken) return null;
+
+  try {
+    const refreshRes = await axios.post(`${baseURL}/auth/refresh`, {
+      refresh: sw.originRefreshToken,
+    });
+    const { access: originAccess, refresh: newOriginRefresh } = refreshRes.data.data;
+
+    const switchRes = await axios.post(
+      `${baseURL}/auth/switch`,
+      { account_id: targetId },
+      { headers: { Authorization: `Bearer ${originAccess}` } }
+    );
+    const { access: switchedAccess } = switchRes.data.data;
+
+    useAuthStore.getState().renewSwitchedSession(switchedAccess, originAccess, newOriginRefresh);
+    switchExpiredNotified = false;
+    return switchedAccess;
+  } catch {
+    return null;
+  }
+}
+
+function notifySwitchExpired() {
+  if (switchExpiredNotified) return;
+  switchExpiredNotified = true;
+  toast.error("Switched session expired");
 }
 
 api.interceptors.response.use(
@@ -53,8 +91,16 @@ api.interceptors.response.use(
       }
       const sw = useAuthStore.getState().switchSession;
       if (sw) {
+        if (!reswitching) reswitching = tryReswitch();
+        const newToken = await reswitching;
+        reswitching = null;
+        if (newToken) {
+          original.headers = original.headers ?? {};
+          original.headers.Authorization = `Bearer ${newToken}`;
+          return api(original);
+        }
         useAuthStore.getState().endSwitch();
-        toast.error("Switched session expired");
+        notifySwitchExpired();
         return Promise.reject(err);
       }
       if (!refreshing) refreshing = tryRefresh();

@@ -2,10 +2,11 @@ import { Button } from "@/components/ui/button";
 import { FilterSelect } from "@/components/ui/input";
 import type { WebhookDelivery } from "@/types";
 
-export type LogTypeFilter = "intake" | "webhooks" | "integrations" | "all";
+export type LogTypeFilter = "intake" | "webhooks" | "integrations" | "routes" | "all";
 
 export const LOG_TYPE_FILTERS: { value: LogTypeFilter; label: string }[] = [
   { value: "all", label: "All" },
+  { value: "routes", label: "Routes" },
   { value: "intake", label: "Sources" },
   { value: "webhooks", label: "Webhooks" },
   { value: "integrations", label: "Integrations" },
@@ -47,6 +48,34 @@ export function statusLabel(status: string) {
   if (status === "returned") return "Returned";
   if (status === "rejected") return "Rejected";
   return status;
+}
+
+export function routeTriggerLabel(triggerType: string) {
+  switch (triggerType) {
+    case "source_ingest":
+      return "Source ingest";
+    case "stage":
+      return "Stage trigger";
+    case "webhook":
+      return "Webhook origin";
+    case "integration":
+      return "Integration origin";
+    case "manual":
+      return "Manual route";
+    case "preassigned":
+      return "Pre-assigned buyer";
+    case "legacy_buyer":
+      return "Manual distribution";
+    default:
+      return triggerType || "—";
+  }
+}
+
+export function routeDestinationLabel(destination?: string) {
+  if (!destination) return "—";
+  if (destination === "contract") return "Contract";
+  if (destination === "pipeline") return "Pipeline";
+  return destination.charAt(0).toUpperCase() + destination.slice(1);
 }
 
 export function statusText(status: string) {
