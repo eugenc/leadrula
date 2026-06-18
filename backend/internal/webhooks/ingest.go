@@ -169,7 +169,7 @@ func (s *Service) ingestPayload(ctx context.Context, wa *WebhookAuth, slug strin
 	var firstLeadID *int64
 	var firstEventID *int64
 	for _, action := range ready {
-		result, leadID, execErr := s.executeEvent(ctx, webhook.AccountID, action, flat, rawJSON, isSunbaseInbound)
+		result, leadID, execErr := s.executeEvent(ctx, webhook.AccountID, webhook.Name, action, flat, rawJSON, isSunbaseInbound)
 		if execErr != nil {
 			if !forceProcess {
 				msg := execErr.Error()
@@ -228,9 +228,7 @@ func applyInboundOriginRoutes(ctx context.Context, svc inboundOriginApplier, web
 
 func (s *Service) listMatchingActions(ctx context.Context, webhookID int64, flat map[string]any) ([]*WebhookEvent, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, webhook_id, action, duplicate_mode, lookup_by, lookup_source_key,
-		        target_stage_id, target_pipeline_id, position, condition_logic, conditions, created_at
-		 FROM webhook_events WHERE webhook_id=$1 ORDER BY position, id`, webhookID)
+		`SELECT `+webhookEventCols+` FROM webhook_events WHERE webhook_id=$1 ORDER BY position, id`, webhookID)
 	if err != nil {
 		return nil, err
 	}
@@ -268,7 +266,7 @@ func actionReady(ctx context.Context, s *Service, action *WebhookEvent, flat map
 	}
 }
 
-func (s *Service) executeEvent(ctx context.Context, accountID int64, event *WebhookEvent, flat map[string]any, rawJSON []byte, isSunbaseInbound bool) (*IngestResult, *int64, error) {
+func (s *Service) executeEvent(ctx context.Context, accountID int64, webhookName string, event *WebhookEvent, flat map[string]any, rawJSON []byte, isSunbaseInbound bool) (*IngestResult, *int64, error) {
 	maps, err := s.ListFieldMap(ctx, event.ID)
 	if err != nil {
 		return nil, nil, err
@@ -276,9 +274,9 @@ func (s *Service) executeEvent(ctx context.Context, accountID int64, event *Webh
 
 	switch event.Action {
 	case "create":
-		return s.execCreate(ctx, accountID, event, flat, rawJSON, maps, isSunbaseInbound)
+		return s.execCreate(ctx, accountID, webhookName, event, flat, rawJSON, maps, isSunbaseInbound)
 	case "update":
-		return s.execUpdate(ctx, accountID, event, flat, maps)
+		return s.execUpdate(ctx, accountID, webhookName, event, flat, maps)
 	case "delete":
 		return s.execDelete(ctx, accountID, event, flat, maps)
 	case "move_stage":
@@ -288,7 +286,22 @@ func (s *Service) executeEvent(ctx context.Context, accountID int64, event *Webh
 	}
 }
 
-func (s *Service) execCreate(ctx context.Context, accountID int64, event *WebhookEvent, flat map[string]any, rawJSON []byte, maps []FieldMapEntry, isSunbaseInbound bool) (*IngestResult, *int64, error) {
+func (s *Service) maybeAddInboundNote(ctx context.Context, q database.Querier, event *WebhookEvent, webhookName string, leadID int64, flat map[string]any) error {
+	if event.NoteSourceKey == nil || *event.NoteSourceKey == "" {
+		return nil
+	}
+	v, ok := flat[*event.NoteSourceKey]
+	if !ok {
+		return nil
+	}
+	body := toText(v)
+	if body == "" {
+		return nil
+	}
+	return s.leads.AddInboundNote(ctx, q, leadID, webhookName, body)
+}
+
+func (s *Service) execCreate(ctx context.Context, accountID int64, webhookName string, event *WebhookEvent, flat map[string]any, rawJSON []byte, maps []FieldMapEntry, isSunbaseInbound bool) (*IngestResult, *int64, error) {
 	builtins, customs, externalID := applyFieldMaps(flat, maps)
 	storeExternalID := externalID
 	if isSunbaseInbound && externalID != "" {
@@ -307,6 +320,9 @@ func (s *Service) execCreate(ctx context.Context, accountID int64, event *Webhoo
 					builtins["external_id"] = storeExternalID
 				}
 				if err := s.applyMappedFields(ctx, s.leads.Pool(), accountID, existing.ID, flat, maps, builtins, customs); err != nil {
+					return nil, &existing.ID, err
+				}
+				if err := s.maybeAddInboundNote(ctx, s.leads.Pool(), event, webhookName, existing.ID, flat); err != nil {
 					return nil, &existing.ID, err
 				}
 				return &IngestResult{LeadID: existing.PublicID, Action: "update", Status: "updated"}, &existing.ID, nil
@@ -330,6 +346,9 @@ func (s *Service) execCreate(ctx context.Context, accountID int64, event *Webhoo
 				builtins["external_id"] = storeExternalID
 			}
 			if err := s.applyMappedFields(ctx, s.leads.Pool(), accountID, lead.ID, flat, maps, builtins, customs); err != nil {
+				return nil, &lead.ID, err
+			}
+			if err := s.maybeAddInboundNote(ctx, s.leads.Pool(), event, webhookName, lead.ID, flat); err != nil {
 				return nil, &lead.ID, err
 			}
 			return &IngestResult{LeadID: lead.PublicID, Action: "update", Status: "updated"}, &lead.ID, nil
@@ -389,19 +408,26 @@ func (s *Service) execCreate(ctx context.Context, accountID int64, event *Webhoo
 		}
 	}
 
+	if err := s.maybeAddInboundNote(ctx, tx, event, webhookName, leadID, flat); err != nil {
+		return nil, &leadID, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, &leadID, err
 	}
 	return &IngestResult{LeadID: publicID, Action: "create", Status: "created"}, &leadID, nil
 }
 
-func (s *Service) execUpdate(ctx context.Context, accountID int64, event *WebhookEvent, flat map[string]any, maps []FieldMapEntry) (*IngestResult, *int64, error) {
+func (s *Service) execUpdate(ctx context.Context, accountID int64, webhookName string, event *WebhookEvent, flat map[string]any, maps []FieldMapEntry) (*IngestResult, *int64, error) {
 	lead, err := s.resolveLead(ctx, accountID, event, flat, maps)
 	if err != nil {
 		return nil, nil, err
 	}
 	builtins, customs, _ := applyFieldMaps(flat, maps)
 	if err := s.applyMappedFields(ctx, s.leads.Pool(), accountID, lead.ID, flat, maps, builtins, customs); err != nil {
+		return nil, &lead.ID, err
+	}
+	if err := s.maybeAddInboundNote(ctx, s.leads.Pool(), event, webhookName, lead.ID, flat); err != nil {
 		return nil, &lead.ID, err
 	}
 	return &IngestResult{LeadID: lead.PublicID, Action: "update", Status: "updated"}, &lead.ID, nil
@@ -433,14 +459,11 @@ func (s *Service) execMoveStage(ctx context.Context, accountID int64, event *Web
 	var disqReasonID *int64
 	builtins, _, _ := applyFieldMaps(flat, maps)
 	if v, ok := builtins["action_at"]; ok && v != "" {
-		t, err := time.Parse(time.RFC3339, v)
+		parsed, err := leads.ParseActionAt(v)
 		if err != nil {
-			t, err = time.Parse("2006-01-02", v)
-			if err != nil {
-				return nil, &lead.ID, httpx.Validation("invalid action_at value")
-			}
+			return nil, &lead.ID, err
 		}
-		actionAt = &t
+		actionAt = parsed
 	}
 	if v, ok := builtins["disqualification_reason_id"]; ok && v != "" {
 		id, err := strconv.ParseInt(v, 10, 64)
@@ -584,6 +607,11 @@ func (s *Service) applyMappedFields(ctx context.Context, q database.Querier, acc
 	}
 	for fid, val := range customs {
 		if err := s.leads.UpsertCustomValue(ctx, q, leadID, fid, val); err != nil {
+			return err
+		}
+	}
+	if v, ok := builtins["action_at"]; ok && v != "" {
+		if err := leads.ApplyMappedActionAt(ctx, q, s.leads, leadID, v); err != nil {
 			return err
 		}
 	}

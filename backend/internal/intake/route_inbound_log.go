@@ -53,22 +53,30 @@ func (s *Service) listInboundLogRoutes(ctx context.Context, accountID int64, p L
 
 	vis := routeVisibilitySQL(p.AccountType, 1)
 
+	args := []any{accountID}
+	where := vis
+	where, args = appendLogLeadFilter(where, args, p.LeadID, p.Search, "e.lead_id")
+
 	var total int64
 	if err := s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM route_executions e WHERE `+vis,
-		accountID).Scan(&total); err != nil {
+		`SELECT COUNT(*) FROM route_executions e JOIN leads l ON l.id = e.lead_id WHERE `+where,
+		args...).Scan(&total); err != nil {
 		return nil, err
 	}
+
+	limitArg := len(args) + 1
+	offsetArg := len(args) + 2
+	args = append(args, limit, offset)
 
 	rows, err := s.pool.Query(ctx,
 		`SELECT`+routeLogSelectCols+`
 		 FROM route_executions e
 		 JOIN leads l ON l.id = e.lead_id
 		 LEFT JOIN accounts ta ON ta.id = e.target_account_id
-		 WHERE `+vis+`
+		 WHERE `+where+`
 		 ORDER BY e.created_at DESC
-		 LIMIT $2 OFFSET $3`,
-		accountID, limit, offset)
+		 LIMIT $`+fmt.Sprint(limitArg)+` OFFSET $`+fmt.Sprint(offsetArg),
+		args...)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +134,7 @@ func scanRouteInboundItems(rows rowScanner, viewerAccountID int64) ([]InboundLog
 	return items, rows.Err()
 }
 
-func buildRouteLogUnionSQL(accountType string) string {
+func buildRouteLogUnionSQL(accountType string, leadFilter string) string {
 	vis := routeVisibilitySQL(accountType, 1)
 	return `
 	   SELECT
@@ -165,9 +173,5 @@ func buildRouteLogUnionSQL(accountType string) string {
 	   FROM route_executions e
 	   JOIN leads l ON l.id = e.lead_id
 	   LEFT JOIN accounts ta ON ta.id = e.target_account_id
-	   WHERE ` + vis
-}
-
-func routeLogCountSQL(accountType string) string {
-	return `(SELECT COUNT(*) FROM route_executions e WHERE ` + routeVisibilitySQL(accountType, 1) + `)`
+	   WHERE ` + vis + leadFilter
 }

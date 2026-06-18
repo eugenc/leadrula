@@ -58,6 +58,11 @@ const ALIASES: Record<string, string> = {
   lead_revenue: "revenue",
   tags: "tags",
   tag: "tags",
+  action_at: "action_at",
+  actiondate: "action_at",
+  action_date: "action_at",
+  appointmenttime: "action_at",
+  appointment_time: "action_at",
 };
 
 export const MAPPING_TARGETS: { value: string; label: string }[] = [
@@ -90,6 +95,30 @@ export const MAP_BUILTIN_FIELDS = [
   "revenue",
   "tags",
 ];
+
+export const PAYLOAD_MAP_BUILTIN_FIELDS = [...MAP_BUILTIN_FIELDS, "action_at"];
+
+export const BUILTIN_FIELD_LABELS: Record<string, string> = {
+  first_name: "First name",
+  last_name: "Last name",
+  phone: "Phone",
+  email: "Email",
+  address: "Address",
+  city: "City",
+  state: "State",
+  zip: "Zip",
+  source: "Source",
+  cost: "Cost",
+  revenue: "Revenue",
+  tags: "Tags",
+  action_at: "Action date & time",
+  external_id: "External ID",
+  disqualification_reason_id: "Disqualification reason",
+};
+
+export function builtinFieldLabel(field: string): string {
+  return BUILTIN_FIELD_LABELS[field] ?? field;
+}
 
 type MappingField = { id: number; name: string; field_key?: string };
 

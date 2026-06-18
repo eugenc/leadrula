@@ -357,7 +357,7 @@ func (s *Service) ListPublisherTransactions(ctx context.Context, publisherID int
 	  SELECT * FROM (
 	    SELECT ce.id,
 	           ''::text AS public_id,
-	           c.buyer_id,
+	           COALESCE(c.buyer_id, cp.buyer_id, l.owner_account_id) AS buyer_id,
 	           ce.lead_id,
 	           cc.contract_id,
 	           ce.kind::text AS type,
@@ -376,10 +376,12 @@ func (s *Service) ListPublisherTransactions(ctx context.Context, publisherID int
 	    FROM compensation_earnings ce
 	    JOIN contract_compensations cc ON cc.id = ce.compensation_id
 	    JOIN contracts c ON c.id = cc.contract_id AND c.publisher_id = $1 AND c.deleted_at IS NULL
-	    JOIN accounts buyer ON buyer.id = c.buyer_id
-	    LEFT JOIN leads l ON l.id = ce.lead_id
+	    JOIN leads l ON l.id = ce.lead_id
+	    LEFT JOIN contract_participations cp
+	      ON cp.contract_id = c.id AND cp.buyer_id = l.owner_account_id AND cp.status = 'active'
+	    JOIN accounts buyer ON buyer.id = COALESCE(c.buyer_id, cp.buyer_id, l.owner_account_id)
 	    WHERE ce.kind IN ('distribute', 'return', 'dispute', 'stage')
-	      AND ($2 = 0 OR c.buyer_id = $2)
+	      AND ($2 = 0 OR COALESCE(c.buyer_id, cp.buyer_id, l.owner_account_id) = $2)
 
 	    UNION ALL
 

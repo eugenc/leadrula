@@ -1,5 +1,23 @@
 package billing
 
+// Production verification (run for the publisher account on Billing → Transactions):
+//
+//   SELECT COUNT(*) FROM transactions t
+//   JOIN contracts c ON c.id = t.contract_id
+//   WHERE c.publisher_id = :pub_id AND t.type = 'debit' AND t.amount < 0;
+//
+//   SELECT COUNT(*) FROM compensation_earnings ce
+//   JOIN contract_compensations cc ON cc.id = ce.compensation_id
+//   JOIN contracts c ON c.id = cc.contract_id
+//   WHERE c.publisher_id = :pub_id AND ce.kind = 'distribute';
+//
+//   SELECT COUNT(*) FROM transactions t
+//   JOIN contracts c ON c.id = t.contract_id
+//   WHERE c.publisher_id = :pub_id AND c.buyer_id IS NULL AND t.type = 'debit';
+//
+// If the first query is 0 for the viewed publisher but non-zero for another publisher,
+// sales belong to that other account — switch to the publisher on the contract.
+
 import (
 	"context"
 	"testing"
@@ -270,5 +288,56 @@ func TestListPublisherTransactions_returnsRowsForPublisherWithDebits(t *testing.
 	}
 	if !hasSale {
 		t.Fatal("expected at least one positive Sale row")
+	}
+}
+
+func TestListPublisherTransactions_openOfferEarningVisible(t *testing.T) {
+	billingSvc, _ := connectPublisherLedgerTest(t)
+	ctx := context.Background()
+
+	var publisherID, leadID int64
+	var amount float64
+	err := billingSvc.pool.QueryRow(ctx,
+		`SELECT c.publisher_id, ce.lead_id, ce.amount::float8
+		 FROM compensation_earnings ce
+		 JOIN contract_compensations cc ON cc.id = ce.compensation_id
+		 JOIN contracts c ON c.id = cc.contract_id AND c.deleted_at IS NULL
+		 WHERE c.buyer_id IS NULL AND ce.kind = 'distribute' AND ce.amount > 0
+		 LIMIT 1`).Scan(&publisherID, &leadID, &amount)
+	if err != nil {
+		t.Skip("no open-offer distribute earning in database")
+	}
+
+	txns, err := billingSvc.ListPublisherTransactions(ctx, publisherID, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sale *Transaction
+	for i := range txns {
+		if txns[i].LedgerSource == "earning" && txns[i].Category == "Sale" &&
+			txns[i].LeadID != nil && *txns[i].LeadID == leadID {
+			sale = &txns[i]
+			break
+		}
+	}
+	if sale == nil {
+		t.Fatal("expected Sale earning row for open-offer contract")
+	}
+	if sale.Amount != amount {
+		t.Fatalf("sale amount = %v, want %v", sale.Amount, amount)
+	}
+	if sale.CounterpartyName == nil || *sale.CounterpartyName == "" {
+		t.Fatal("expected counterparty buyer name on open-offer earning row")
+	}
+
+	saleCount := 0
+	for _, txn := range txns {
+		if txn.Category == "Sale" && txn.LeadID != nil && *txn.LeadID == leadID {
+			saleCount++
+		}
+	}
+	if saleCount != 1 {
+		t.Fatalf("sale row count for lead = %d, want 1 (no duplicate legacy row)", saleCount)
 	}
 }

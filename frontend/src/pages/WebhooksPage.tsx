@@ -27,7 +27,7 @@ import { CreateCustomFieldDrawer } from "@/features/admin/CreateCustomFieldDrawe
 import { BuiltinCustomFieldSelect } from "@/features/admin/BuiltinCustomFieldSelect";
 import { useCreateField } from "@/features/admin/hooks";
 import { slugFieldKey } from "@/features/admin/customFieldConstants";
-import { buildPayloadSuggestions, MAP_BUILTIN_FIELDS } from "@/features/leads/csvMapping";
+import { buildPayloadSuggestions, builtinFieldLabel, PAYLOAD_MAP_BUILTIN_FIELDS } from "@/features/leads/csvMapping";
 import { SUNBASE_URL, sunbaseFieldMap } from "@/features/integrations/sunbaseConstants";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
@@ -146,9 +146,8 @@ function InboundConditionRow({
 }
 
 const BUILTINS = [
-  ...MAP_BUILTIN_FIELDS,
+  ...PAYLOAD_MAP_BUILTIN_FIELDS,
   "external_id",
-  "action_at",
   "disqualification_reason_id",
 ];
 
@@ -982,6 +981,7 @@ function ActionDrawer({
   const [targetStageId, setTargetStageId] = useState<number | "">("");
   const [conditionLogic, setConditionLogic] = useState<"and" | "or">("and");
   const [conditions, setConditions] = useState<InboundCondition[]>([]);
+  const [noteSourceKey, setNoteSourceKey] = useState("");
   const [savedActionId, setSavedActionId] = useState<number | null>(action?.id ?? null);
 
   const pipelineId = typeof targetPipelineId === "number" ? targetPipelineId : undefined;
@@ -997,6 +997,7 @@ function ActionDrawer({
       setTargetStageId(action.target_stage_id ?? "");
       setConditionLogic(action.condition_logic ?? "and");
       setConditions(action.conditions ?? []);
+      setNoteSourceKey(action.note_source_key ?? "");
       setSavedActionId(action.id);
     } else {
       setActionType("create");
@@ -1007,6 +1008,7 @@ function ActionDrawer({
       setTargetStageId("");
       setConditionLogic("and");
       setConditions([]);
+      setNoteSourceKey("");
       setSavedActionId(null);
     }
   }, [action]);
@@ -1033,6 +1035,9 @@ function ActionDrawer({
       if (lookupSourceKey) body.lookup_source_key = lookupSourceKey;
     }
     if (actionType === "move_stage" && targetStageId) body.target_stage_id = targetStageId;
+    if (actionType === "create" || actionType === "update") {
+      body.note_source_key = noteSourceKey;
+    }
     return body;
   }
 
@@ -1170,6 +1175,24 @@ function ActionDrawer({
         {(actionType === "create" || actionType === "update") && fieldMapActionId && (
           <ActionFieldMapping webhookId={webhookId} actionId={fieldMapActionId} payload={payload} />
         )}
+        {(actionType === "create" || actionType === "update") && (
+          <div>
+            <Label>Add note from payload (optional)</Label>
+            <select
+              className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
+              value={noteSourceKey}
+              onChange={(e) => setNoteSourceKey(e.target.value)}
+            >
+              <option value="">None</option>
+              {mappableKeys.map((k) => (
+                <option key={k} value={k}>{k}</option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-400">
+              When set, a new lead note is created from this payload field on each create or update.
+            </p>
+          </div>
+        )}
         {(actionType === "create" || actionType === "update") && !fieldMapActionId && (
           <p className="text-sm text-gray-500">Save the action first, then map fields.</p>
         )}
@@ -1269,7 +1292,7 @@ function ActionFieldMapping({
             {(entries ?? []).map((e) => (
               <TR key={e.id}>
                 <TD className="font-mono text-xs">{e.source_key}</TD>
-                <TD className="text-xs">{e.target_type === "builtin" ? e.builtin_field : `custom #${e.custom_field_id}`}</TD>
+                <TD className="text-xs">{e.target_type === "builtin" ? builtinFieldLabel(e.builtin_field ?? "") : `custom #${e.custom_field_id}`}</TD>
                 <TD><IconButton variant="danger" onClick={() => remove.mutate(e.id)}><Trash2 className="h-4 w-4" /></IconButton></TD>
               </TR>
             ))}

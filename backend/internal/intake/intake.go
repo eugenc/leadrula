@@ -321,6 +321,7 @@ type ListQueueParams struct {
 	Limit  int
 	Search string
 	Source string
+	LeadID int64
 }
 
 func (s *Service) ListQueue(ctx context.Context, publisherID int64, p ListQueueParams) (*QueueListResponse, error) {
@@ -342,10 +343,12 @@ func (s *Service) ListQueue(ctx context.Context, publisherID int64, p ListQueueP
 	if p.Source != "" {
 		where += " AND q.source = " + argN(p.Source)
 	}
-	if p.Search != "" {
+	if p.LeadID > 0 {
+		where, args = appendLogLeadFilter(where, args, p.LeadID, "", "q.lead_id")
+	} else if p.Search != "" {
 		like := "%" + p.Search + "%"
 		n := argN(like)
-		where += fmt.Sprintf(" AND (l.first_name ILIKE %s OR l.last_name ILIKE %s OR l.phone ILIKE %s OR q.source ILIKE %s)", n, n, n, n)
+		where += fmt.Sprintf(" AND (l.first_name ILIKE %s OR l.last_name ILIKE %s OR TRIM(CONCAT(l.first_name, ' ', l.last_name)) ILIKE %s OR l.email ILIKE %s OR l.phone ILIKE %s OR q.source ILIKE %s)", n, n, n, n, n, n)
 	}
 
 	from := ` FROM lead_intake_queue q JOIN leads l ON l.id = q.lead_id WHERE ` + where
@@ -461,10 +464,12 @@ func (s *Service) ListRoutingLogForBuyer(ctx context.Context, buyerID int64, p L
 	case "rejected":
 		where += " AND 1=0"
 	}
-	if p.Search != "" {
+	if p.LeadID > 0 {
+		where, args = appendLogLeadFilter(where, args, p.LeadID, "", "l.id")
+	} else if p.Search != "" {
 		like := "%" + p.Search + "%"
 		n := argN(like)
-		where += fmt.Sprintf(" AND (l.first_name ILIKE %s OR l.last_name ILIKE %s OR l.phone ILIKE %s OR COALESCE(q.source, l.source) ILIKE %s)", n, n, n, n)
+		where += fmt.Sprintf(" AND (l.first_name ILIKE %s OR l.last_name ILIKE %s OR TRIM(CONCAT(l.first_name, ' ', l.last_name)) ILIKE %s OR l.email ILIKE %s OR l.phone ILIKE %s OR COALESCE(q.source, l.source) ILIKE %s)", n, n, n, n, n, n)
 	}
 
 	from := buyerRoutingFrom + where

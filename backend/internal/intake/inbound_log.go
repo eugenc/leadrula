@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -54,6 +55,7 @@ type ListInboundLogParams struct {
 	Search      string
 	Source      string
 	WebhookID   int64
+	LeadID      int64
 	Page        int
 	Limit       int
 }
@@ -80,6 +82,7 @@ func (s *Service) listInboundLogSources(ctx context.Context, accountID int64, p 
 		Limit:  p.Limit,
 		Search: p.Search,
 		Source: p.Source,
+		LeadID: p.LeadID,
 	})
 	if err != nil {
 		return nil, err
@@ -131,17 +134,25 @@ func (s *Service) listInboundLogWebhooks(ctx context.Context, accountID int64, p
 	status := p.Status
 	webhookID := p.WebhookID
 
+	args := []any{accountID, status, webhookID}
+	where := `w.account_id = $1
+		   AND ($2 = '' OR d.status = $2::webhook_delivery_status)
+		   AND ($3 = 0 OR d.webhook_id = $3)`
+	where, args = appendLogLeadFilter(where, args, p.LeadID, p.Search, "d.lead_id")
+
 	var total int64
 	if err := s.pool.QueryRow(ctx,
 		`SELECT COUNT(*)
 		 FROM webhook_deliveries d
 		 JOIN webhooks w ON w.id = d.webhook_id
-		 WHERE w.account_id = $1
-		   AND ($2 = '' OR d.status = $2::webhook_delivery_status)
-		   AND ($3 = 0 OR d.webhook_id = $3)`,
-		accountID, status, webhookID).Scan(&total); err != nil {
+		 LEFT JOIN leads l ON l.id = d.lead_id
+		 WHERE `+where, args...).Scan(&total); err != nil {
 		return nil, err
 	}
+
+	limitArg := len(args) + 1
+	offsetArg := len(args) + 2
+	args = append(args, limit, offset)
 
 	rows, err := s.pool.Query(ctx,
 		`SELECT d.id, d.webhook_id, w.name, w.slug, d.lead_id, l.public_id::text,
@@ -150,12 +161,10 @@ func (s *Service) listInboundLogWebhooks(ctx context.Context, accountID int64, p
 		 FROM webhook_deliveries d
 		 JOIN webhooks w ON w.id = d.webhook_id
 		 LEFT JOIN leads l ON l.id = d.lead_id
-		 WHERE w.account_id = $1
-		   AND ($2 = '' OR d.status = $2::webhook_delivery_status)
-		   AND ($3 = 0 OR d.webhook_id = $3)
+		 WHERE `+where+`
 		 ORDER BY d.created_at DESC
-		 LIMIT $4 OFFSET $5`,
-		accountID, status, webhookID, limit, offset)
+		 LIMIT $`+fmt.Sprint(limitArg)+` OFFSET $`+fmt.Sprint(offsetArg),
+		args...)
 	if err != nil {
 		return nil, err
 	}
@@ -197,24 +206,40 @@ func (s *Service) listInboundLogIntegrations(ctx context.Context, accountID int6
 	offset := (page - 1) * limit
 	status := p.Status
 
+	args := []any{accountID, status}
+	integrationWhere := `c.account_id = $1
+		      AND q.webhook_trigger_id IS NULL
+		      AND ($2 = '' OR q.status = $2::delivery_status)`
+	webhookWhere := `c.account_id = $1
+		      AND ($2 = '' OR d.status = $2::webhook_delivery_status)`
+
+	if clause, extra := logLeadFilterClause(3, p.LeadID, p.Search, "q.lead_id"); clause != "" {
+		args = append(args, extra...)
+		integrationWhere += clause
+		webhookWhere += strings.Replace(clause, "q.lead_id", "d.lead_id", 1)
+	}
+
 	var total int64
 	if err := s.pool.QueryRow(ctx,
 		`SELECT
 		   (SELECT COUNT(*)
 		    FROM integration_delivery_queue q
 		    JOIN integration_connections c ON c.id = q.connection_id
-		    WHERE c.account_id = $1
-		      AND q.webhook_trigger_id IS NULL
-		      AND ($2 = '' OR q.status = $2::delivery_status))
+		    LEFT JOIN leads l ON l.id = q.lead_id
+		    WHERE `+integrationWhere+`)
 		 + (SELECT COUNT(*)
 		    FROM webhook_deliveries d
 		    JOIN webhooks w ON w.id = d.webhook_id
 		    JOIN integration_connections c ON c.id = w.integration_connection_id
-		    WHERE c.account_id = $1
-		      AND ($2 = '' OR d.status = $2::webhook_delivery_status))`,
-		accountID, status).Scan(&total); err != nil {
+		    LEFT JOIN leads l ON l.id = d.lead_id
+		    WHERE `+webhookWhere+`)`,
+		args...).Scan(&total); err != nil {
 		return nil, err
 	}
+
+	limitArg := len(args) + 1
+	offsetArg := len(args) + 2
+	queryArgs := append(append([]any{}, args...), limit, offset)
 
 	rows, err := s.pool.Query(ctx,
 		`SELECT kind, direction, id, created_at, origin, origin_slug, lead_label, lead_id, status,
@@ -241,9 +266,7 @@ func (s *Service) listInboundLogIntegrations(ctx context.Context, accountID int6
 		   JOIN integration_connections c ON c.id = q.connection_id
 		   JOIN integration_providers p ON p.id = c.provider_id
 		   LEFT JOIN leads l ON l.id = q.lead_id
-		   WHERE c.account_id = $1
-		     AND q.webhook_trigger_id IS NULL
-		     AND ($2 = '' OR q.status = $2::delivery_status)
+		   WHERE `+integrationWhere+`
 
 		   UNION ALL
 
@@ -269,12 +292,11 @@ func (s *Service) listInboundLogIntegrations(ctx context.Context, accountID int6
 		   JOIN integration_connections c ON c.id = w.integration_connection_id
 		   JOIN integration_providers p ON p.id = c.provider_id
 		   LEFT JOIN leads l ON l.id = d.lead_id
-		   WHERE c.account_id = $1
-		     AND ($2 = '' OR d.status = $2::webhook_delivery_status)
+		   WHERE `+webhookWhere+`
 		 ) combined
 		 ORDER BY created_at DESC
-		 LIMIT $3 OFFSET $4`,
-		accountID, status, limit, offset)
+		 LIMIT $`+fmt.Sprint(limitArg)+` OFFSET $`+fmt.Sprint(offsetArg),
+		queryArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -312,38 +334,57 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 	offset := (page - 1) * limit
 
 	isPublisher := p.AccountType != "buyer"
-	routeCount := routeLogCountSQL(p.AccountType)
+
+	args := []any{accountID}
+	leadClauseQ, leadExtra := logLeadFilterClause(2, p.LeadID, p.Search, "q.lead_id")
+	leadClauseD, _ := logLeadFilterClause(2, p.LeadID, p.Search, "d.lead_id")
+	leadClauseE, _ := logLeadFilterClause(2, p.LeadID, p.Search, "e.lead_id")
+	if leadClauseQ != "" {
+		args = append(args, leadExtra...)
+		leadClauseD = strings.Replace(leadClauseQ, "q.lead_id", "d.lead_id", 1)
+		leadClauseE = strings.Replace(leadClauseQ, "q.lead_id", "e.lead_id", 1)
+	}
+
+	routeVis := routeVisibilitySQL(p.AccountType, 1)
+	routeCountJoin := ""
+	if leadClauseE != "" {
+		routeCountJoin = " JOIN leads l ON l.id = e.lead_id"
+	}
 
 	var countSQL string
 	if isPublisher {
 		countSQL = `SELECT
-		   (SELECT COUNT(*) FROM lead_intake_queue q JOIN leads l ON l.id = q.lead_id WHERE l.publisher_id = $1)
-		 + (SELECT COUNT(*) FROM webhook_deliveries d JOIN webhooks w ON w.id = d.webhook_id WHERE w.account_id = $1)
+		   (SELECT COUNT(*) FROM lead_intake_queue q JOIN leads l ON l.id = q.lead_id WHERE l.publisher_id = $1` + leadClauseQ + `)
+		 + (SELECT COUNT(*) FROM webhook_deliveries d JOIN webhooks w ON w.id = d.webhook_id LEFT JOIN leads l ON l.id = d.lead_id WHERE w.account_id = $1` + leadClauseD + `)
 		 + (SELECT COUNT(*) FROM integration_delivery_queue q
 		      JOIN integration_connections c ON c.id = q.connection_id
-		      WHERE c.account_id = $1 AND q.webhook_trigger_id IS NULL)
+		      LEFT JOIN leads l ON l.id = q.lead_id
+		      WHERE c.account_id = $1 AND q.webhook_trigger_id IS NULL` + leadClauseQ + `)
 		 + (SELECT COUNT(*) FROM integration_delivery_queue q
 		      JOIN integration_connections c ON c.id = q.connection_id
 		      JOIN webhook_outbound_triggers t ON t.id = q.webhook_trigger_id
 		      JOIN webhooks w ON w.id = t.webhook_id
-		      WHERE w.account_id = $1)
-		 + ` + routeCount
+		      LEFT JOIN leads l ON l.id = q.lead_id
+		      WHERE w.account_id = $1` + leadClauseQ + `)
+		 + (SELECT COUNT(*) FROM route_executions e` + routeCountJoin + ` WHERE ` + routeVis + leadClauseE + `)`
 	} else {
 		countSQL = `SELECT
-		   (SELECT COUNT(*) FROM webhook_deliveries d JOIN webhooks w ON w.id = d.webhook_id WHERE w.account_id = $1)
+		   (SELECT COUNT(*) FROM webhook_deliveries d JOIN webhooks w ON w.id = d.webhook_id LEFT JOIN leads l ON l.id = d.lead_id WHERE w.account_id = $1` + leadClauseD + `)
 		 + (SELECT COUNT(*) FROM integration_delivery_queue q
 		      JOIN integration_connections c ON c.id = q.connection_id
-		      WHERE c.account_id = $1 AND q.webhook_trigger_id IS NULL)
+		      LEFT JOIN leads l ON l.id = q.lead_id
+		      WHERE c.account_id = $1 AND q.webhook_trigger_id IS NULL` + leadClauseQ + `)
 		 + (SELECT COUNT(*) FROM integration_delivery_queue q
 		      JOIN integration_connections c ON c.id = q.connection_id
 		      JOIN webhook_outbound_triggers t ON t.id = q.webhook_trigger_id
 		      JOIN webhooks w ON w.id = t.webhook_id
-		      WHERE w.account_id = $1)
-		 + ` + routeCount
+		      LEFT JOIN leads l ON l.id = q.lead_id
+		      WHERE w.account_id = $1` + leadClauseQ + `)
+		 + (SELECT COUNT(*) FROM route_executions e` + routeCountJoin + ` WHERE ` + routeVis + leadClauseE + `)`
 	}
 
 	var total int64
-	if err := s.pool.QueryRow(ctx, countSQL, accountID).Scan(&total); err != nil {
+	if err := s.pool.QueryRow(ctx, countSQL, args...).Scan(&total); err != nil {
 		return nil, err
 	}
 
@@ -382,7 +423,7 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 		     0::int AS attempts` + nullRouteCols + `
 		   FROM lead_intake_queue q
 		   JOIN leads l ON l.id = q.lead_id
-		   WHERE l.publisher_id = $1`
+		   WHERE l.publisher_id = $1` + leadClauseQ
 
 	webhookInboundUnion := `
 		   SELECT
@@ -408,7 +449,7 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 		   FROM webhook_deliveries d
 		   JOIN webhooks w ON w.id = d.webhook_id
 		   LEFT JOIN leads l ON l.id = d.lead_id
-		   WHERE w.account_id = $1`
+		   WHERE w.account_id = $1` + leadClauseD
 
 	webhookOutboundUnion := `
 		   SELECT
@@ -435,7 +476,7 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 		   JOIN webhook_outbound_triggers t ON t.id = q.webhook_trigger_id
 		   JOIN webhooks w ON w.id = t.webhook_id
 		   LEFT JOIN leads l ON l.id = q.lead_id
-		   WHERE w.account_id = $1`
+		   WHERE w.account_id = $1` + leadClauseQ
 
 	integrationUnion := `
 		   SELECT
@@ -463,17 +504,21 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 		   JOIN integration_providers p ON p.id = c.provider_id
 		   LEFT JOIN leads l ON l.id = q.lead_id
 		   WHERE c.account_id = $1
-		     AND q.webhook_trigger_id IS NULL`
+		     AND q.webhook_trigger_id IS NULL` + leadClauseQ
 
 	combined := webhookInboundUnion + `
 		   UNION ALL` + webhookOutboundUnion + `
 		   UNION ALL` + integrationUnion + `
-		   UNION ALL` + buildRouteLogUnionSQL(p.AccountType)
+		   UNION ALL` + buildRouteLogUnionSQL(p.AccountType, leadClauseE)
 
 	if isPublisher {
 		combined = sourceUnion + `
 		   UNION ALL` + combined
 	}
+
+	limitArg := len(args) + 1
+	offsetArg := len(args) + 2
+	queryArgs := append(append([]any{}, args...), limit, offset)
 
 	query := `SELECT kind, direction, id, created_at, origin, origin_slug, lead_label, lead_id, status,
 		        first_name, last_name, phone, source, raw_payload, webhook_id, error_message,
@@ -483,9 +528,9 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 		 FROM (` + combined + `
 		 ) combined
 		 ORDER BY created_at DESC
-		 LIMIT $2 OFFSET $3`
+		 LIMIT $` + fmt.Sprint(limitArg) + ` OFFSET $` + fmt.Sprint(offsetArg)
 
-	rows, err := s.pool.Query(ctx, query, accountID, limit, offset)
+	rows, err := s.pool.Query(ctx, query, queryArgs...)
 	if err != nil {
 		return nil, err
 	}

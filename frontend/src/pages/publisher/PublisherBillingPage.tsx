@@ -122,8 +122,11 @@ function Disputes() {
 }
 
 function Transactions() {
-  const { data: txns, isLoading } = useTransactions("publisher");
+  const { data: txns, isLoading, isError, error } = useTransactions("publisher");
   if (isLoading) return <Spinner className="h-6 w-6" />;
+  if (isError) {
+    return <EmptyState title="Could not load transactions." subtitle={errorMessage(error)} />;
+  }
   if ((txns ?? []).length === 0) return <EmptyState title="No transactions." />;
   return (
     <Table>

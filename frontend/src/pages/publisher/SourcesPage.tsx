@@ -18,7 +18,7 @@ import { useCustomFields } from "@/features/leads/hooks";
 import { CreateCustomFieldDrawer } from "@/features/admin/CreateCustomFieldDrawer";
 import { BuiltinCustomFieldSelect } from "@/features/admin/BuiltinCustomFieldSelect";
 import { slugFieldKey } from "@/features/admin/customFieldConstants";
-import { buildPayloadSuggestions, MAP_BUILTIN_FIELDS } from "@/features/leads/csvMapping";
+import { buildPayloadSuggestions, builtinFieldLabel, PAYLOAD_MAP_BUILTIN_FIELDS } from "@/features/leads/csvMapping";
 import { payloadValuePreview } from "@/features/intake/payloadKeys";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
@@ -35,7 +35,7 @@ import { toast } from "@/store/toastStore";
 import { errorMessage, apiBaseURL } from "@/lib/api";
 import type { Route, RouteFieldMapEntry, Source, SourceType } from "@/types";
 
-const BUILTINS = MAP_BUILTIN_FIELDS;
+const BUILTINS = PAYLOAD_MAP_BUILTIN_FIELDS;
 
 function slugify(name: string) {
   return name
@@ -612,7 +612,7 @@ function SourceFieldMapContent({
                 {e.target_type === "ignore" ? (
                   <Badge variant="default">Ignored</Badge>
                 ) : e.target_type === "builtin" ? (
-                  <Badge variant="review">{e.builtin_field}</Badge>
+                  <Badge variant="review">{builtinFieldLabel(e.builtin_field ?? "")}</Badge>
                 ) : (
                   <Badge variant="distributed">
                     {customFieldName(e.custom_field_id) ?? `custom #${e.custom_field_id}`}

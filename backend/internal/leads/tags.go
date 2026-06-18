@@ -59,6 +59,9 @@ func parseTagStrings(in []string) []string {
 
 // ApplyMappedField applies a mapped builtin value, including money fields and tags.
 func ApplyMappedField(ctx context.Context, q database.Querier, repo *Repository, accountID, leadID int64, field string, v any) error {
+	if field == "action_at" {
+		return ApplyMappedActionAt(ctx, q, repo, leadID, v)
+	}
 	if field == "tags" {
 		return ApplyMappedTags(ctx, q, repo, accountID, leadID, v)
 	}

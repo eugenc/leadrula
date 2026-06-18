@@ -10,6 +10,7 @@ export interface InboundLogFilters {
   q?: string;
   source?: string;
   webhookId?: number;
+  leadId?: number;
 }
 
 function inboundLogQueryString(filters: InboundLogFilters): string {
@@ -19,6 +20,10 @@ function inboundLogQueryString(filters: InboundLogFilters): string {
     if (k === "type") return;
     if (k === "webhookId" && v) {
       qs.set("webhook_id", String(v));
+      return;
+    }
+    if (k === "leadId" && v) {
+      qs.set("lead_id", String(v));
       return;
     }
     if (k === "q" && v) {

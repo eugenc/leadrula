@@ -400,6 +400,8 @@ func (h *Handler) listAccountDeliveries(w http.ResponseWriter, r *http.Request) 
 	result, err := h.svc.ListAccountDeliveries(r.Context(), p.AccountID, ListAccountDeliveriesParams{
 		Status:    q.Get("status"),
 		WebhookID: int64(parseInt(q.Get("webhook_id"))),
+		Search:    q.Get("q"),
+		LeadID:    int64(parseInt(q.Get("lead_id"))),
 		Page:      int(parseInt(q.Get("page"))),
 		Limit:     int(parseInt(q.Get("limit"))),
 	})

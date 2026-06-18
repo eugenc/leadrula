@@ -186,6 +186,7 @@ func (h *Handler) listInboundLog(w http.ResponseWriter, r *http.Request) {
 		Search:    q.Get("q"),
 		Source:    q.Get("source"),
 		WebhookID: int64(parseInt(q.Get("webhook_id"))),
+		LeadID:    int64(parseInt(q.Get("lead_id"))),
 		Page:      int(parseInt(q.Get("page"))),
 		Limit:     int(parseInt(q.Get("limit"))),
 	})
@@ -205,6 +206,7 @@ func (h *Handler) listQueue(w http.ResponseWriter, r *http.Request) {
 		Limit:  int(parseInt(q.Get("limit"))),
 		Search: q.Get("q"),
 		Source: q.Get("source"),
+		LeadID: int64(parseInt(q.Get("lead_id"))),
 	})
 	if err != nil {
 		httpx.WriteError(w, err)
@@ -221,6 +223,7 @@ func (h *Handler) listRoutingLog(w http.ResponseWriter, r *http.Request) {
 		Page:   int(parseInt(q.Get("page"))),
 		Limit:  int(parseInt(q.Get("limit"))),
 		Search: q.Get("q"),
+		LeadID: int64(parseInt(q.Get("lead_id"))),
 	})
 	if err != nil {
 		httpx.WriteError(w, err)

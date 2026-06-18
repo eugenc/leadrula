@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
@@ -56,6 +58,7 @@ type WebhookEvent struct {
 	DuplicateMode     *string         `json:"duplicate_mode,omitempty"`
 	LookupBy          *string         `json:"lookup_by,omitempty"`
 	LookupSourceKey   *string         `json:"lookup_source_key,omitempty"`
+	NoteSourceKey     *string         `json:"note_source_key,omitempty"`
 	TargetStageID     *int64          `json:"target_stage_id,omitempty"`
 	TargetPipelineID  *int64          `json:"target_pipeline_id,omitempty"`
 	Position          int             `json:"position"`
@@ -114,6 +117,8 @@ type AccountDeliveryListResult struct {
 type ListAccountDeliveriesParams struct {
 	Status    string
 	WebhookID int64
+	Search    string
+	LeadID    int64
 	Page      int
 	Limit     int
 }
@@ -463,12 +468,12 @@ func (s *Service) OwnedBy(ctx context.Context, accountID, id int64) (bool, error
 	return ok, err
 }
 
-const webhookEventCols = `id, webhook_id, action, duplicate_mode, lookup_by, lookup_source_key,
+const webhookEventCols = `id, webhook_id, action, duplicate_mode, lookup_by, lookup_source_key, note_source_key,
 	target_stage_id, target_pipeline_id, position, condition_logic, conditions, created_at`
 
 func scanWebhookEvent(row interface{ Scan(...any) error }) (*WebhookEvent, error) {
 	e := &WebhookEvent{}
-	err := row.Scan(&e.ID, &e.WebhookID, &e.Action, &e.DuplicateMode, &e.LookupBy, &e.LookupSourceKey,
+	err := row.Scan(&e.ID, &e.WebhookID, &e.Action, &e.DuplicateMode, &e.LookupBy, &e.LookupSourceKey, &e.NoteSourceKey,
 		&e.TargetStageID, &e.TargetPipelineID, &e.Position, &e.ConditionLogic, &e.Conditions, &e.CreatedAt)
 	return e, err
 }
@@ -496,6 +501,7 @@ type CreateEventParams struct {
 	DuplicateMode    *string         `json:"duplicate_mode"`
 	LookupBy         *string         `json:"lookup_by"`
 	LookupSourceKey  *string         `json:"lookup_source_key"`
+	NoteSourceKey    *string         `json:"note_source_key"`
 	TargetStageID    *int64          `json:"target_stage_id"`
 	TargetPipelineID *int64          `json:"target_pipeline_id"`
 	ConditionLogic   *string         `json:"condition_logic"`
@@ -515,11 +521,11 @@ func (s *Service) CreateEvent(ctx context.Context, webhookID int64, p CreateEven
 		conds = json.RawMessage("[]")
 	}
 	return scanWebhookEvent(s.pool.QueryRow(ctx,
-		`INSERT INTO webhook_events(webhook_id, action, duplicate_mode, lookup_by, lookup_source_key,
+		`INSERT INTO webhook_events(webhook_id, action, duplicate_mode, lookup_by, lookup_source_key, note_source_key,
 		 target_stage_id, target_pipeline_id, position, condition_logic, conditions)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7, COALESCE((SELECT MAX(position)+1 FROM webhook_events WHERE webhook_id=$1), 0), $8, $9)
+		 VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8, COALESCE((SELECT MAX(position)+1 FROM webhook_events WHERE webhook_id=$1), 0), $9, $10)
 		 RETURNING `+webhookEventCols,
-		webhookID, p.Action, p.DuplicateMode, p.LookupBy, p.LookupSourceKey,
+		webhookID, p.Action, p.DuplicateMode, p.LookupBy, p.LookupSourceKey, strOrEmpty(p.NoteSourceKey),
 		p.TargetStageID, p.TargetPipelineID, logic, conds))
 }
 
@@ -528,6 +534,7 @@ type UpdateEventParams struct {
 	DuplicateMode    *string         `json:"duplicate_mode"`
 	LookupBy         *string         `json:"lookup_by"`
 	LookupSourceKey  *string         `json:"lookup_source_key"`
+	NoteSourceKey    *string         `json:"note_source_key"`
 	TargetStageID    *int64          `json:"target_stage_id"`
 	TargetPipelineID *int64          `json:"target_pipeline_id"`
 	ConditionLogic   *string         `json:"condition_logic"`
@@ -541,6 +548,7 @@ func (s *Service) UpdateEvent(ctx context.Context, webhookID, eventID int64, p U
 		   duplicate_mode = COALESCE($4, duplicate_mode),
 		   lookup_by = COALESCE($5, lookup_by),
 		   lookup_source_key = COALESCE($6, lookup_source_key),
+		   note_source_key = CASE WHEN $11::text IS NOT NULL THEN NULLIF($11::text, '') ELSE note_source_key END,
 		   target_stage_id = COALESCE($7, target_stage_id),
 		   target_pipeline_id = COALESCE($8, target_pipeline_id),
 		   condition_logic = COALESCE($9, condition_logic),
@@ -548,7 +556,8 @@ func (s *Service) UpdateEvent(ctx context.Context, webhookID, eventID int64, p U
 		 WHERE id=$1 AND webhook_id=$2
 		 RETURNING `+webhookEventCols,
 		eventID, webhookID, p.Action, p.DuplicateMode, p.LookupBy, p.LookupSourceKey,
-		p.TargetStageID, p.TargetPipelineID, p.ConditionLogic, nullableJSON(p.Conditions)))
+		p.TargetStageID, p.TargetPipelineID, p.ConditionLogic, nullableJSON(p.Conditions),
+		noteSourceKeyUpdateArg(p.NoteSourceKey)))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, httpx.NotFound("event not found")
@@ -717,17 +726,25 @@ func (s *Service) ListAccountDeliveries(ctx context.Context, accountID int64, p 
 	status := p.Status
 	webhookID := p.WebhookID
 
+	args := []any{accountID, status, webhookID}
+	where := `w.account_id = $1
+		   AND ($2 = '' OR d.status = $2::webhook_delivery_status)
+		   AND ($3 = 0 OR d.webhook_id = $3)`
+	where, args = appendWebhookLeadFilter(where, args, p.LeadID, p.Search)
+
 	var total int
 	if err := s.pool.QueryRow(ctx,
 		`SELECT COUNT(*)
 		 FROM webhook_deliveries d
 		 JOIN webhooks w ON w.id = d.webhook_id
-		 WHERE w.account_id = $1
-		   AND ($2 = '' OR d.status = $2::webhook_delivery_status)
-		   AND ($3 = 0 OR d.webhook_id = $3)`,
-		accountID, status, webhookID).Scan(&total); err != nil {
+		 LEFT JOIN leads l ON l.id = d.lead_id
+		 WHERE `+where, args...).Scan(&total); err != nil {
 		return nil, err
 	}
+
+	limitArg := len(args) + 1
+	offsetArg := len(args) + 2
+	args = append(args, limit, offset)
 
 	rows, err := s.pool.Query(ctx,
 		`SELECT d.id, d.webhook_id, w.name, w.slug, d.event_id, d.lead_id, l.public_id::text,
@@ -735,12 +752,10 @@ func (s *Service) ListAccountDeliveries(ctx context.Context, accountID int64, p 
 		 FROM webhook_deliveries d
 		 JOIN webhooks w ON w.id = d.webhook_id
 		 LEFT JOIN leads l ON l.id = d.lead_id
-		 WHERE w.account_id = $1
-		   AND ($2 = '' OR d.status = $2::webhook_delivery_status)
-		   AND ($3 = 0 OR d.webhook_id = $3)
+		 WHERE `+where+`
 		 ORDER BY d.created_at DESC
-		 LIMIT $4 OFFSET $5`,
-		accountID, status, webhookID, limit, offset)
+		 LIMIT $`+fmt.Sprint(limitArg)+` OFFSET $`+fmt.Sprint(offsetArg),
+		args...)
 	if err != nil {
 		return nil, err
 	}
@@ -821,6 +836,9 @@ type WebhookAuth struct {
 }
 
 func validateEvent(p CreateEventParams) error {
+	if p.NoteSourceKey != nil && *p.NoteSourceKey != "" && p.Action != "create" && p.Action != "update" {
+		return httpx.Validation("note_source_key only allowed for create and update actions")
+	}
 	switch p.Action {
 	case "create":
 		if p.DuplicateMode == nil {
@@ -863,6 +881,21 @@ func randString(n int) string {
 	return base64.RawURLEncoding.EncodeToString(b)[:n]
 }
 
+func strOrEmpty(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+// noteSourceKeyUpdateArg returns a non-nil *string when the client sent note_source_key (including "").
+func noteSourceKeyUpdateArg(p *string) *string {
+	if p == nil {
+		return nil
+	}
+	return p
+}
+
 func splitSecret(full string) (prefix, secret string, ok bool) {
 	for i := 0; i < len(full); i++ {
 		if full[i] == '.' {
@@ -870,4 +903,28 @@ func splitSecret(full string) (prefix, secret string, ok bool) {
 		}
 	}
 	return "", "", false
+}
+
+func appendWebhookLeadFilter(where string, args []any, leadID int64, search string) (string, []any) {
+	startArg := len(args) + 1
+	if leadID > 0 {
+		args = append(args, leadID)
+		return where + fmt.Sprintf(" AND d.lead_id = $%d", startArg), args
+	}
+	search = strings.TrimSpace(search)
+	if search == "" {
+		return where, args
+	}
+	like := "%" + search + "%"
+	args = append(args, like)
+	n := startArg
+	where += fmt.Sprintf(` AND (
+		l.first_name ILIKE $%d OR
+		l.last_name ILIKE $%d OR
+		TRIM(CONCAT(l.first_name, ' ', l.last_name)) ILIKE $%d OR
+		l.email ILIKE $%d OR
+		l.phone ILIKE $%d OR
+		l.public_id::text ILIKE $%d
+	)`, n, n, n, n, n, n)
+	return where, args
 }

@@ -1,7 +1,7 @@
 import { Label, Select } from "@/components/ui/input";
 import { ADD_CUSTOM_FIELD } from "./customFieldConstants";
 
-import { MAP_BUILTIN_FIELDS } from "@/features/leads/csvMapping";
+import { BUILTIN_FIELD_LABELS, MAP_BUILTIN_FIELDS } from "@/features/leads/csvMapping";
 
 const DEFAULT_BUILTINS = MAP_BUILTIN_FIELDS;
 
@@ -36,7 +36,7 @@ export function BuiltinCustomFieldSelect({
         <optgroup label="Built-in">
           {builtins.map((b) => (
             <option key={b} value={b}>
-              {b}
+              {BUILTIN_FIELD_LABELS[b] ?? b}
             </option>
           ))}
         </optgroup>

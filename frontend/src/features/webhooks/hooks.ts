@@ -131,12 +131,16 @@ export interface AccountWebhookDeliveriesFilters {
   webhookId?: number;
   page?: number;
   limit?: number;
+  q?: string;
+  leadId?: number;
 }
 
 function accountWebhookDeliveriesQuery(filters: AccountWebhookDeliveriesFilters) {
   const params = new URLSearchParams();
   if (filters.status) params.set("status", filters.status);
   if (filters.webhookId) params.set("webhook_id", String(filters.webhookId));
+  if (filters.q) params.set("q", filters.q);
+  if (filters.leadId) params.set("lead_id", String(filters.leadId));
   if (filters.page) params.set("page", String(filters.page));
   if (filters.limit) params.set("limit", String(filters.limit));
   const q = params.toString();

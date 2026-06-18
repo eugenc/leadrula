@@ -1231,11 +1231,16 @@ export interface IntakeLogFilters {
   limit?: number;
   q?: string;
   source?: string;
+  leadId?: number;
 }
 
 function intakeQueueQueryString(filters: IntakeLogFilters): string {
   const qs = new URLSearchParams();
   Object.entries(filters).forEach(([k, v]) => {
+    if (k === "leadId" && v) {
+      qs.set("lead_id", String(v));
+      return;
+    }
     if (v !== undefined && v !== "" && v !== 0) qs.set(k, String(v));
   });
   return qs.toString();

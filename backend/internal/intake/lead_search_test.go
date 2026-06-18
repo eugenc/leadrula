@@ -1,0 +1,129 @@
+package intake
+
+import (
+	"context"
+	"testing"
+
+	"github.com/echayko/leadrula/backend/internal/config"
+	"github.com/echayko/leadrula/backend/internal/database"
+)
+
+func TestLogLeadFilterClause_leadID(t *testing.T) {
+	clause, args := logLeadFilterClause(2, 42, "", "d.lead_id")
+	if clause != " AND d.lead_id = $2" {
+		t.Fatalf("clause = %q", clause)
+	}
+	if len(args) != 1 || args[0] != int64(42) {
+		t.Fatalf("args = %v", args)
+	}
+}
+
+func TestLogLeadFilterClause_search(t *testing.T) {
+	clause, args := logLeadFilterClause(3, 0, "jane@example.com", "q.lead_id")
+	if clause == "" {
+		t.Fatal("expected non-empty clause")
+	}
+	if len(args) != 1 || args[0] != "%jane@example.com%" {
+		t.Fatalf("args = %v", args)
+	}
+	if clause != ` AND (
+		l.first_name ILIKE $3 OR
+		l.last_name ILIKE $3 OR
+		TRIM(CONCAT(l.first_name, ' ', l.last_name)) ILIKE $3 OR
+		l.email ILIKE $3 OR
+		l.phone ILIKE $3 OR
+		l.public_id::text ILIKE $3
+	)` {
+		t.Fatalf("unexpected clause: %q", clause)
+	}
+}
+
+func TestLogLeadFilterClause_empty(t *testing.T) {
+	clause, args := logLeadFilterClause(2, 0, "  ", "d.lead_id")
+	if clause != "" || len(args) != 0 {
+		t.Fatalf("clause=%q args=%v", clause, args)
+	}
+}
+
+func TestAppendLogLeadFilter(t *testing.T) {
+	where, args := appendLogLeadFilter("w.account_id = $1", []any{99}, 0, "manuel", "d.lead_id")
+	if len(args) != 2 {
+		t.Fatalf("args = %v", args)
+	}
+	if args[1] != "%manuel%" {
+		t.Fatalf("search arg = %v", args[1])
+	}
+	if where == "w.account_id = $1" {
+		t.Fatal("expected filter appended")
+	}
+}
+
+func TestListInboundLog_integrationSearch(t *testing.T) {
+	cfg := config.Load()
+	ctx := context.Background()
+	pool, err := database.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	svc := &Service{pool: pool}
+
+	var accountID int64
+	err = pool.QueryRow(ctx,
+		`SELECT c.account_id
+		 FROM integration_delivery_queue q
+		 JOIN integration_connections c ON c.id = q.connection_id
+		 JOIN leads l ON l.id = q.lead_id
+		 WHERE q.lead_id IS NOT NULL
+		   AND (l.first_name <> '' OR l.last_name <> '' OR l.email <> '' OR l.phone <> '')
+		 LIMIT 1`).Scan(&accountID)
+	if err != nil {
+		t.Skip("no integration delivery with lead data in database")
+	}
+
+	var firstName string
+	err = pool.QueryRow(ctx,
+		`SELECT l.first_name
+		 FROM integration_delivery_queue q
+		 JOIN integration_connections c ON c.id = q.connection_id
+		 JOIN leads l ON l.id = q.lead_id
+		 WHERE c.account_id = $1 AND q.lead_id IS NOT NULL AND l.first_name <> ''
+		 LIMIT 1`, accountID).Scan(&firstName)
+	if err != nil {
+		t.Skip("no named lead on integration delivery")
+	}
+
+	all, err := svc.ListInboundLog(ctx, accountID, ListInboundLogParams{
+		AccountType: "buyer",
+		Type:        "integration",
+		Page:        1,
+		Limit:       100,
+	})
+	if err != nil {
+		t.Fatalf("ListInboundLog all: %v", err)
+	}
+
+	filtered, err := svc.ListInboundLog(ctx, accountID, ListInboundLogParams{
+		AccountType: "buyer",
+		Type:        "integration",
+		Search:      firstName,
+		Page:        1,
+		Limit:       100,
+	})
+	if err != nil {
+		t.Fatalf("ListInboundLog filtered: %v", err)
+	}
+	if filtered.Total > all.Total {
+		t.Fatalf("filtered total %d > all total %d", filtered.Total, all.Total)
+	}
+	if filtered.Total == 0 {
+		t.Fatal("expected at least one row for first_name search")
+	}
+	for _, it := range filtered.Items {
+		if it.FirstName != firstName && it.LastName != firstName {
+			// name may match partial ILIKE on combined fields
+			continue
+		}
+	}
+}

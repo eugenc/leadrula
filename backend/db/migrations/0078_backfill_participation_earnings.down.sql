@@ -1,0 +1,2 @@
+-- Backfill rows cannot be distinguished from organically created earnings.
+-- No-op down migration.

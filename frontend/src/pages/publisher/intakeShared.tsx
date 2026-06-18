@@ -13,7 +13,7 @@ import { payloadValuePreview } from "@/features/intake/payloadKeys";
 import { BuiltinCustomFieldSelect } from "@/features/admin/BuiltinCustomFieldSelect";
 import { CreateCustomFieldDrawer } from "@/features/admin/CreateCustomFieldDrawer";
 import { slugFieldKey } from "@/features/admin/customFieldConstants";
-import { buildPayloadSuggestions, MAP_BUILTIN_FIELDS } from "@/features/leads/csvMapping";
+import { buildPayloadSuggestions, PAYLOAD_MAP_BUILTIN_FIELDS } from "@/features/leads/csvMapping";
 import { Button } from "@/components/ui/button";
 import { Label, Select } from "@/components/ui/input";
 import { Dialog, FormDrawer } from "@/components/ui/dialog";
@@ -24,7 +24,7 @@ import type { QueueItem, Route } from "@/types";
 
 export { LOG_FILTERS, PAGE_SIZES, statusBadge, type LogFilter } from "@/features/intake/logShared";
 
-export const BUILTINS = MAP_BUILTIN_FIELDS;
+export const BUILTINS = PAYLOAD_MAP_BUILTIN_FIELDS;
 
 function routeLabel(rt: Route): string {
   if (rt.destination === "contract") {

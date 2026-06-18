@@ -835,7 +835,7 @@ func (r *Repository) MoveToPublisher(ctx context.Context, q database.Querier, le
 
 func (r *Repository) ListNotes(ctx context.Context, leadID int64) ([]Note, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT n.id, n.lead_id, n.user_id, COALESCE(u.full_name,''), n.body, n.created_at
+		`SELECT n.id, n.lead_id, n.user_id, COALESCE(n.author_name, u.full_name, ''), n.body, n.created_at
 		 FROM lead_notes n LEFT JOIN users u ON u.id = n.user_id
 		 WHERE n.lead_id=$1 ORDER BY n.created_at DESC`, leadID)
 	if err != nil {
@@ -860,6 +860,13 @@ func (r *Repository) AddNote(ctx context.Context, leadID, userID int64, body str
 		 RETURNING id, lead_id, user_id, body, created_at`,
 		leadID, userID, body).Scan(&n.ID, &n.LeadID, &n.UserID, &n.Body, &n.CreatedAt)
 	return n, err
+}
+
+func (r *Repository) AddInboundNote(ctx context.Context, q database.Querier, leadID int64, authorName, body string) error {
+	_, err := q.Exec(ctx,
+		`INSERT INTO lead_notes(lead_id, user_id, author_name, body) VALUES ($1, NULL, $2, $3)`,
+		leadID, authorName, body)
+	return err
 }
 
 func (r *Repository) ListFollowers(ctx context.Context, leadID int64) ([]int64, error) {

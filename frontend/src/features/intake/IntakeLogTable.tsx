@@ -7,7 +7,7 @@ import { FilterInput, FilterSelect } from "@/components/ui/input";
 import { Spinner, EmptyState, Badge } from "@/components/ui/misc";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { format } from "date-fns";
-import type { QueueItem } from "@/types";
+import type { Lead, QueueItem } from "@/types";
 import {
   LOG_FILTERS,
   LOG_TYPE_FILTERS,
@@ -15,12 +15,14 @@ import {
   WEBHOOK_DELIVERY_FILTERS,
   statusBadge,
   LogLeadLink,
+  leadDisplayName,
   type LogFilter,
   type LogTypeFilter,
   type WebhookDeliveryStatusFilter,
 } from "./logShared";
 import { useInboundLog } from "./hooks";
 import { UnifiedInboundLogTable } from "./UnifiedInboundLogTable";
+import { LogLeadSearch } from "./LogLeadSearch";
 import {
   inboundItemsToRows,
   mergeInboundRows,
@@ -245,6 +247,7 @@ export function IntakeLogTable({
   const [limit, setLimit] = useState(25);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [selectedLeadId, setSelectedLeadId] = useState<number | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -253,15 +256,20 @@ export function IntakeLogTable({
 
   useEffect(() => {
     setPage(1);
-  }, [logType, logFilter, webhookStatus, webhookId, limit, debouncedSearch, sourceSlug]);
+  }, [logType, logFilter, webhookStatus, webhookId, limit, debouncedSearch, selectedLeadId, sourceSlug]);
 
   const { data: webhooks } = useWebhooks();
+
+  const leadFilter = {
+    q: selectedLeadId ? undefined : debouncedSearch || undefined,
+    leadId: selectedLeadId ?? undefined,
+  };
 
   const intakeFilters = {
     status: logFilter,
     page,
     limit,
-    q: debouncedSearch || undefined,
+    ...leadFilter,
     source: sourceSlug,
   };
 
@@ -270,6 +278,7 @@ export function IntakeLogTable({
     webhookId: webhookId === "" ? undefined : webhookId,
     page,
     limit,
+    ...leadFilter,
   };
 
   const inboundType = (
@@ -280,6 +289,7 @@ export function IntakeLogTable({
     type: inboundType,
     page,
     limit,
+    ...leadFilter,
   };
 
   const showIntakeData = logType === "intake" && source === "publisher";
@@ -291,11 +301,46 @@ export function IntakeLogTable({
   const webhookQuery = useAccountWebhookDeliveries(webhookFilters);
   const buyerAllRoutingQuery = useRoutingLog(
     "buyer",
-    { status: "all", page, limit },
+    { status: "all", page, limit, ...leadFilter },
     showBuyerAllRouting
   );
 
   const inboundQuery = useInboundLog(inboundFilters, showInboundData, source);
+
+  const hasLeadSearch =
+    logType === "all" ||
+    logType === "routes" ||
+    logType === "integrations" ||
+    logType === "webhooks" ||
+    (logType === "intake" && source === "publisher");
+
+  const leadSearchActive = debouncedSearch !== "" || selectedLeadId != null;
+
+  function handleSearchChange(value: string) {
+    setSearch(value);
+    if (selectedLeadId) setSelectedLeadId(null);
+  }
+
+  function handleSelectLead(lead: Lead) {
+    setSelectedLeadId(lead.id);
+    setSearch(leadDisplayName(lead.first_name, lead.last_name, lead.public_id));
+  }
+
+  function handleClearSearch() {
+    setSearch("");
+    setSelectedLeadId(null);
+  }
+
+  const leadSearch = hasLeadSearch ? (
+    <LogLeadSearch
+      value={search}
+      onChange={handleSearchChange}
+      selectedLeadId={selectedLeadId}
+      onSelectLead={handleSelectLead}
+      onClear={handleClearSearch}
+      className="max-w-sm w-auto"
+    />
+  ) : null;
 
   const { rows, total, isLoading, hasFilters, loadError, refetchWebhooks } = useMemo(() => {
     if (logType === "intake") {
@@ -304,7 +349,7 @@ export function IntakeLogTable({
         rows: queueItemsToRows(items),
         total: intakeQuery.data?.total ?? 0,
         isLoading: showIntakeData && intakeQuery.isLoading,
-        hasFilters: logFilter !== "all" || debouncedSearch !== "" || !!sourceSlug,
+        hasFilters: logFilter !== "all" || leadSearchActive || !!sourceSlug,
         loadError: null,
         refetchWebhooks: () => intakeQuery.refetch(),
       };
@@ -315,7 +360,7 @@ export function IntakeLogTable({
         rows: webhookDeliveriesToRows(items),
         total: webhookQuery.data?.total ?? 0,
         isLoading: webhookQuery.isLoading,
-        hasFilters: webhookStatus !== "" || webhookId !== "",
+        hasFilters: webhookStatus !== "" || webhookId !== "" || leadSearchActive,
         loadError: null,
         refetchWebhooks: () => webhookQuery.refetch(),
       };
@@ -340,7 +385,7 @@ export function IntakeLogTable({
         rows: merged,
         total: inboundTotal + routingTotal,
         isLoading: loading,
-        hasFilters: false,
+        hasFilters: leadSearchActive,
         loadError: err
           ? errorMessage(inboundQuery.error ?? buyerAllRoutingQuery.error)
           : null,
@@ -359,7 +404,7 @@ export function IntakeLogTable({
         rows: inboundRows,
         total: inboundQuery.data?.total ?? 0,
         isLoading: loading,
-        hasFilters: false,
+        hasFilters: leadSearchActive,
         loadError:
           !loading && inboundRows.length === 0 && inboundQuery.isError
             ? errorMessage(inboundQuery.error)
@@ -394,6 +439,8 @@ export function IntakeLogTable({
     buyerAllRoutingQuery.error,
     logFilter,
     debouncedSearch,
+    selectedLeadId,
+    leadSearchActive,
     sourceSlug,
     webhookStatus,
     webhookId,
@@ -436,12 +483,7 @@ export function IntakeLogTable({
 
       {logType === "intake" && source === "publisher" && (
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <FilterInput
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, phone, source…"
-            className="max-w-sm w-auto"
-          />
+          {leadSearch}
           <div className="flex flex-wrap gap-2">
             {LOG_FILTERS.map((f) => (
               <Button
@@ -457,8 +499,14 @@ export function IntakeLogTable({
         </div>
       )}
 
+      {(logType === "all" || logType === "routes" || logType === "integrations") && (
+        <div className="mb-4">{leadSearch}</div>
+      )}
+
       {logType === "webhooks" && (
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-4 flex flex-col gap-3">
+          {leadSearch}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <FilterSelect
             className="h-7 min-w-[10rem] w-auto"
             value={webhookId === "" ? "" : String(webhookId)}
@@ -482,6 +530,7 @@ export function IntakeLogTable({
                 {f.label}
               </Button>
             ))}
+          </div>
           </div>
         </div>
       )}

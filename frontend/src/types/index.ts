@@ -542,6 +542,7 @@ export interface WebhookEvent {
   duplicate_mode?: "update" | "duplicate" | "reject" | null;
   lookup_by?: "external_id" | "public_id" | "phone" | "email" | null;
   lookup_source_key?: string | null;
+  note_source_key?: string | null;
   target_stage_id?: number | null;
   target_pipeline_id?: number | null;
   position: number;
