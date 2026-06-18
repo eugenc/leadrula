@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Sheet, DrawerHeader, DrawerBody } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, InputWithOverflowTooltip, Label, Textarea, Select } from "@/components/ui/input";
@@ -36,8 +36,8 @@ import { useQuery } from "@tanstack/react-query";
 import { get } from "@/lib/api";
 import type { BuyerSummary } from "@/types";
 import { effectiveFieldFormat } from "@/features/admin/customFieldConstants";
+import { DatetimeFieldInput } from "./DatetimeFieldInput";
 import {
-  formatDatetimeForDisplay,
   fromNativeDatetimeLocal,
   inputModeForFormat,
   normalizeCustomDateValue,
@@ -69,51 +69,6 @@ function isoToDatetimeLocal(iso: string): string {
   const d = new Date(iso);
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-function DatetimeFieldInput({
-  value,
-  onChange,
-  onBlur,
-  disabled,
-  placeholder = "Set date & time",
-  className,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  onBlur?: () => void;
-  disabled?: boolean;
-  placeholder?: string;
-  className?: string;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const display = value ? formatDatetimeForDisplay(value) : placeholder;
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => inputRef.current?.showPicker()}
-        disabled={disabled}
-        className={cn(
-          "min-w-0 flex-1 truncate text-left text-xs",
-          !value && "text-gray-400",
-          className
-        )}
-      >
-        {display}
-      </button>
-      <input
-        ref={inputRef}
-        type="datetime-local"
-        className="sr-only"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onBlur={onBlur}
-        disabled={disabled}
-      />
-    </>
-  );
 }
 
 function moneyOrDash(v: number | null | undefined): string {

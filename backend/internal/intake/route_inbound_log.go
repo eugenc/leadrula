@@ -21,7 +21,10 @@ const routeLogSelectCols = `
   COALESCE(e.branch_position, 0),
   e.owner_account_id,
   e.target_account_id,
-  COALESCE(ta.name, '')`
+  COALESCE(ta.name, ''),
+  COALESCE(e.target_pipeline_name, ''),
+  COALESCE(e.target_stage_name, ''),
+  COALESCE(e.delivery, '')`
 
 func routeVisibilitySQL(accountType string, argN int) string {
 	if accountType == "buyer" {
@@ -92,13 +95,21 @@ func scanRouteInboundItems(rows rowScanner, viewerAccountID int64) ([]InboundLog
 		var leadID int64
 		var ownerID int64
 		var targetID *int64
+		var targetPipelineName, targetStageName string
 		if err := rows.Scan(
 			&it.ID, &it.CreatedAt, &it.RouteName, &routeID, &leadID,
 			&it.FirstName, &it.LastName, &it.Phone, &it.Status,
 			&it.TriggerType, &it.TriggerLabel, &it.Destination, &it.BranchPosition,
 			&ownerID, &targetID, &it.TargetAccountName,
+			&targetPipelineName, &targetStageName, &it.Delivery,
 		); err != nil {
 			return nil, err
+		}
+		if targetPipelineName != "" {
+			it.TargetPipelineName = &targetPipelineName
+		}
+		if targetStageName != "" {
+			it.TargetStageName = &targetStageName
 		}
 		it.Kind = "route"
 		it.Direction = routeLogDirection(viewerAccountID, ownerID, targetID)
@@ -147,7 +158,10 @@ func buildRouteLogUnionSQL(accountType string) string {
 	     COALESCE(e.trigger_label, '') AS trigger_label,
 	     COALESCE(ta.name, '') AS target_account_name,
 	     e.destination,
-	     COALESCE(e.branch_position, 0) AS branch_position
+	     COALESCE(e.branch_position, 0) AS branch_position,
+	     COALESCE(e.target_pipeline_name, '') AS target_pipeline_name,
+	     COALESCE(e.target_stage_name, '') AS target_stage_name,
+	     COALESCE(e.delivery, '') AS delivery
 	   FROM route_executions e
 	   JOIN leads l ON l.id = e.lead_id
 	   LEFT JOIN accounts ta ON ta.id = e.target_account_id

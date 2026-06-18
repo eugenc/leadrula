@@ -639,6 +639,9 @@ export interface InboundLogItem {
   target_account_name?: string;
   destination?: string;
   branch_position?: number;
+  target_pipeline_name?: string | null;
+  target_stage_name?: string | null;
+  delivery?: string;
 }
 
 export interface InboundLogListResponse {

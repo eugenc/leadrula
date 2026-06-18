@@ -29,6 +29,9 @@ export interface RouteExecutionRow {
   destination?: string;
   branch_position?: number;
   error_message?: string | null;
+  target_pipeline_name?: string | null;
+  target_stage_name?: string | null;
+  delivery?: string;
 }
 
 export type InboundLogRow =
@@ -118,6 +121,9 @@ function inboundItemToRouteExecution(item: InboundLogItem): RouteExecutionRow {
     destination: item.destination,
     branch_position: item.branch_position,
     error_message: item.error_message,
+    target_pipeline_name: item.target_pipeline_name,
+    target_stage_name: item.target_stage_name,
+    delivery: item.delivery,
   };
 }
 

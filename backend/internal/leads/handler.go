@@ -2,6 +2,7 @@ package leads
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -365,6 +366,10 @@ func (h *Handler) changeStage(w http.ResponseWriter, r *http.Request) {
 	}
 	l, auditChanges, err := h.svc.ChangeStage(r.Context(), p, leadID, body.StageID, body.ActionAt, body.DisqReasonID)
 	if err != nil {
+		var appErr *httpx.AppError
+		if !errors.As(err, &appErr) {
+			log.Printf("changeStage lead=%d: %v", leadID, err)
+		}
 		httpx.WriteError(w, err)
 		return
 	}

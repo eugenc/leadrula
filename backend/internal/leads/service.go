@@ -194,7 +194,16 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		}
 	}
 
+	var returnInfo *contracts.ReturnInfo
 	if lead.ContractID != nil && finalStageID != nil {
+		var err error
+		returnInfo, err = contracts.FindReturnRule(ctx, tx, *lead.ContractID, lead.OwnerAccountID, *finalStageID)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	if lead.ContractID != nil && finalStageID != nil && returnInfo == nil {
 		if lead.OwnerAccountID != lead.PublisherID {
 			if err := contracts.SyncPublisherStageWithRebuild(ctx, tx, *lead.ContractID, leadID, lead.OwnerAccountID, *finalStageID); err != nil {
 				return nil, nil, err
@@ -205,39 +214,32 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		}
 	}
 
-	// return rule?
-	if lead.ContractID != nil {
-		ri, err := contracts.FindReturnRule(ctx, tx, *lead.ContractID, lead.OwnerAccountID, *finalStageID)
-		if err != nil {
+	if returnInfo != nil {
+		if err := contracts.ValidateReturnDestination(ctx, tx, returnInfo.SourcePipelineID, returnInfo.ReturnStageID); err != nil {
 			return nil, nil, err
 		}
-		if ri != nil {
-			if err := contracts.ValidateReturnDestination(ctx, tx, ri.SourcePipelineID, ri.ReturnStageID); err != nil {
-				return nil, nil, err
-			}
-			if err := contracts.RecordEarningReturn(ctx, tx, leadID, lead.ContractID); err != nil {
-				return nil, nil, fmt.Errorf("return rule record earning: %w", err)
-			}
-			if err := s.repo.MoveToPublisher(ctx, tx, leadID, ri.PublisherID, ri.SourcePipelineID, ri.ReturnStageID); err != nil {
-				return nil, nil, fmt.Errorf("return rule move to publisher: %w", err)
-			}
-			returned, err := s.repo.GetByID(ctx, tx, leadID)
-			if err != nil {
-				return nil, nil, fmt.Errorf("return rule reload lead: %w", err)
-			}
-			emails, err := s.notif.Deliver(ctx, tx, notifications.DeliverParams{
-				AccountID: ri.PublisherID,
-				UserIDs:   notifications.AssigneeIDs(returned.AssignedUserID),
-				EventType: "lead_returned",
-				Payload:   map[string]any{"lead_id": leadID},
-			})
-			if err != nil {
-				return nil, nil, fmt.Errorf("return rule notify: %w", err)
-			}
-			pendingEmails = append(pendingEmails, emails...)
-			updated = returned
-			finalStageID = returned.StageID
+		if err := contracts.RecordEarningReturn(ctx, tx, leadID, lead.ContractID); err != nil {
+			return nil, nil, fmt.Errorf("return rule record earning: %w", err)
 		}
+		if err := s.repo.MoveToPublisher(ctx, tx, leadID, returnInfo.PublisherID, returnInfo.SourcePipelineID, returnInfo.ReturnStageID); err != nil {
+			return nil, nil, fmt.Errorf("return rule move to publisher: %w", err)
+		}
+		returned, err := s.repo.GetByID(ctx, tx, leadID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("return rule reload lead: %w", err)
+		}
+		emails, err := s.notif.Deliver(ctx, tx, notifications.DeliverParams{
+			AccountID: returnInfo.PublisherID,
+			UserIDs:   notifications.AssigneeIDs(returned.AssignedUserID),
+			EventType: "lead_returned",
+			Payload:   map[string]any{"lead_id": leadID},
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("return rule notify: %w", err)
+		}
+		pendingEmails = append(pendingEmails, emails...)
+		updated = returned
+		finalStageID = returned.StageID
 	}
 
 	if err := tx.Commit(ctx); err != nil {

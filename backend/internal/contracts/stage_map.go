@@ -252,20 +252,22 @@ func SyncPublisherStageWithRebuild(ctx context.Context, q database.Querier, cont
 
 func lookupPublisherStage(ctx context.Context, q database.Querier, contractID, buyerID, buyerStageID int64) (int64, int64, error) {
 	var sourcePipelineID *int64
+	var participationID *int64
 	err := q.QueryRow(ctx,
-		`SELECT source_pipeline_id FROM contracts WHERE id = $1 AND deleted_at IS NULL`,
-		contractID).Scan(&sourcePipelineID)
+		`SELECT COALESCE(p.source_pipeline_id, c.source_pipeline_id), p.id
+		 FROM contracts c
+		 LEFT JOIN contract_participations p
+		   ON p.contract_id = c.id AND p.buyer_id = $2 AND p.status = 'active'
+		 WHERE c.id = $1 AND c.deleted_at IS NULL
+		 ORDER BY p.id NULLS LAST
+		 LIMIT 1`,
+		contractID, buyerID).Scan(&sourcePipelineID, &participationID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, 0, httpx.NotFound("contract not found")
 	}
 	if err != nil {
 		return 0, 0, err
 	}
-	var participationID *int64
-	_ = q.QueryRow(ctx,
-		`SELECT id FROM contract_participations
-		 WHERE contract_id = $1 AND buyer_id = $2 AND status = 'active' LIMIT 1`,
-		contractID, buyerID).Scan(&participationID)
 	if sourcePipelineID == nil || *sourcePipelineID == 0 {
 		return 0, 0, httpx.BusinessRule("publisher pipeline is not configured on contract")
 	}
@@ -348,6 +350,9 @@ func SyncPublisherStage(ctx context.Context, q database.Querier, contractID, lea
 	}
 	if err != nil {
 		return err
+	}
+	if err := ValidateReturnDestination(ctx, q, pubPipelineID, pubStageID); err != nil {
+		return nil
 	}
 	return setPublisherTracking(ctx, q, leadID, pubPipelineID, pubStageID)
 }

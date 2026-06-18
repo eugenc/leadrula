@@ -106,3 +106,64 @@ export function fromNativeDatetimeLocal(value: string, type: string, fieldFormat
   if (!isValid(d)) return value;
   return formatCustomDate(d, effectiveFieldFormat(type, fieldFormat));
 }
+
+export const QUARTER_MINUTES = [0, 15, 30, 45] as const;
+
+export type DatetimeLocalParts = {
+  date: string;
+  hour12: number;
+  minute: number;
+  period: "AM" | "PM";
+};
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+function parseDatetimeLocalString(value: string): Date | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const d = parse(trimmed, "yyyy-MM-dd'T'HH:mm", new Date());
+  if (isValid(d)) return d;
+  const iso = new Date(trimmed);
+  return isValid(iso) ? iso : null;
+}
+
+export function snapDatetimeLocalToQuarter(value: string): string {
+  const d = parseDatetimeLocalString(value);
+  if (!d) return value;
+  const total = d.getHours() * 60 + d.getMinutes();
+  const snapped = Math.round(total / 15) * 15;
+  const hours = Math.floor(snapped / 60) % 24;
+  const minutes = snapped % 60;
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(hours)}:${pad2(minutes)}`;
+}
+
+export function parseDatetimeLocalParts(value: string): DatetimeLocalParts | null {
+  const d = parseDatetimeLocalString(value);
+  if (!d) return null;
+  const hours24 = d.getHours();
+  const period: "AM" | "PM" = hours24 >= 12 ? "PM" : "AM";
+  const hour12 = hours24 % 12 || 12;
+  const minute = QUARTER_MINUTES.reduce((best, m) =>
+    Math.abs(m - d.getMinutes()) < Math.abs(best - d.getMinutes()) ? m : best
+  );
+  return {
+    date: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`,
+    hour12,
+    minute,
+    period,
+  };
+}
+
+export function buildDatetimeLocal(parts: DatetimeLocalParts): string {
+  let hours24 = parts.hour12 % 12;
+  if (parts.period === "PM") hours24 += 12;
+  return `${parts.date}T${pad2(hours24)}:${pad2(parts.minute)}`;
+}
+
+export function defaultDatetimeLocalParts(): DatetimeLocalParts {
+  const now = new Date();
+  const snapped = snapDatetimeLocalToQuarter(
+    `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}T${pad2(now.getHours())}:${pad2(now.getMinutes())}`
+  );
+  return parseDatetimeLocalParts(snapped)!;
+}

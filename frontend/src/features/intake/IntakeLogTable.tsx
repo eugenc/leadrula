@@ -23,6 +23,7 @@ import { useInboundLog } from "./hooks";
 import { UnifiedInboundLogTable } from "./UnifiedInboundLogTable";
 import {
   inboundItemsToRows,
+  mergeInboundRows,
   queueItemsToRows,
   webhookDeliveriesToRows,
 } from "./inboundLog";
@@ -284,13 +285,19 @@ export function IntakeLogTable({
   const showIntakeData = logType === "intake" && source === "publisher";
   const showWebhookData = logType === "webhooks";
   const showInboundData = logType === "integrations" || logType === "routes" || logType === "all";
+  const showBuyerAllRouting = source === "buyer" && logType === "all";
 
   const intakeQuery = useRoutingLog(source, intakeFilters, showIntakeData);
   const webhookQuery = useAccountWebhookDeliveries(webhookFilters);
+  const buyerAllRoutingQuery = useRoutingLog(
+    "buyer",
+    { status: "all", page, limit },
+    showBuyerAllRouting
+  );
 
   const inboundQuery = useInboundLog(inboundFilters, showInboundData, source);
 
-  const { rows, total, isLoading, hasFilters, refetchWebhooks } = useMemo(() => {
+  const { rows, total, isLoading, hasFilters, loadError, refetchWebhooks } = useMemo(() => {
     if (logType === "intake") {
       const items = showIntakeData ? (intakeQuery.data?.items ?? []) : [];
       return {
@@ -298,6 +305,7 @@ export function IntakeLogTable({
         total: intakeQuery.data?.total ?? 0,
         isLoading: showIntakeData && intakeQuery.isLoading,
         hasFilters: logFilter !== "all" || debouncedSearch !== "" || !!sourceSlug,
+        loadError: null,
         refetchWebhooks: () => intakeQuery.refetch(),
       };
     }
@@ -308,17 +316,54 @@ export function IntakeLogTable({
         total: webhookQuery.data?.total ?? 0,
         isLoading: webhookQuery.isLoading,
         hasFilters: webhookStatus !== "" || webhookId !== "",
+        loadError: null,
         refetchWebhooks: () => webhookQuery.refetch(),
+      };
+    }
+
+    if (logType === "all" && source === "buyer") {
+      const inboundRows = inboundQuery.isError
+        ? []
+        : inboundItemsToRows(inboundQuery.data?.items ?? []);
+      const routingRows = buyerAllRoutingQuery.isError
+        ? []
+        : queueItemsToRows(buyerAllRoutingQuery.data?.items ?? []);
+      const merged = mergeInboundRows(routingRows, inboundRows, limit);
+      const inboundTotal = inboundQuery.data?.total ?? 0;
+      const routingTotal = buyerAllRoutingQuery.data?.total ?? 0;
+      const loading = inboundQuery.isLoading || buyerAllRoutingQuery.isLoading;
+      const err =
+        !loading &&
+        merged.length === 0 &&
+        (inboundQuery.isError || buyerAllRoutingQuery.isError);
+      return {
+        rows: merged,
+        total: inboundTotal + routingTotal,
+        isLoading: loading,
+        hasFilters: false,
+        loadError: err
+          ? errorMessage(inboundQuery.error ?? buyerAllRoutingQuery.error)
+          : null,
+        refetchWebhooks: () => {
+          inboundQuery.refetch();
+          buyerAllRoutingQuery.refetch();
+        },
       };
     }
 
     if (logType === "integrations" || logType === "routes" || logType === "all") {
       const items = inboundQuery.data?.items ?? [];
+      const inboundRows = inboundItemsToRows(items);
+      const loading = inboundQuery.isLoading;
       return {
-        rows: inboundItemsToRows(items),
+        rows: inboundRows,
         total: inboundQuery.data?.total ?? 0,
-        isLoading: inboundQuery.isLoading,
+        isLoading: loading,
         hasFilters: false,
+        loadError:
+          !loading && inboundRows.length === 0 && inboundQuery.isError
+            ? errorMessage(inboundQuery.error)
+            : null,
         refetchWebhooks: () => inboundQuery.refetch(),
       };
     }
@@ -328,17 +373,25 @@ export function IntakeLogTable({
       total: 0,
       isLoading: false,
       hasFilters: false,
+      loadError: null,
       refetchWebhooks: () => undefined,
     };
   }, [
     logType,
     source,
+    limit,
     intakeQuery.data,
     intakeQuery.isLoading,
     webhookQuery.data,
     webhookQuery.isLoading,
     inboundQuery.data,
     inboundQuery.isLoading,
+    inboundQuery.isError,
+    inboundQuery.error,
+    buyerAllRoutingQuery.data,
+    buyerAllRoutingQuery.isLoading,
+    buyerAllRoutingQuery.isError,
+    buyerAllRoutingQuery.error,
     logFilter,
     debouncedSearch,
     sourceSlug,
@@ -348,6 +401,7 @@ export function IntakeLogTable({
     showWebhookData,
     webhookQuery,
     inboundQuery,
+    buyerAllRoutingQuery,
     intakeQuery,
   ]);
 
@@ -439,6 +493,7 @@ export function IntakeLogTable({
         limit={limit}
         isLoading={isLoading}
         emptyTitle={emptyMessage}
+        loadError={loadError}
         hasFilters={hasFilters}
         readOnly={readOnly}
         mappingSource={source}

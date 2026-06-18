@@ -17,6 +17,7 @@ import {
   canReplayDelivery,
   integrationDeliveryStatusText,
   routeDestinationLabel,
+  routePipelineDestinationLabel,
   routeTriggerLabel,
   statusText,
   webhookDeliveryStatusText,
@@ -30,6 +31,7 @@ interface UnifiedInboundLogTableProps {
   limit: number;
   isLoading: boolean;
   emptyTitle: string;
+  loadError?: string | null;
   hasFilters: boolean;
   readOnly?: boolean;
   mappingSource?: "publisher" | "buyer";
@@ -166,6 +168,7 @@ export function UnifiedInboundLogTable({
   limit,
   isLoading,
   emptyTitle,
+  loadError,
   hasFilters,
   readOnly = false,
   mappingSource = "publisher",
@@ -193,6 +196,10 @@ export function UnifiedInboundLogTable({
   const { data: expandedIntegration } = useIntegrationDelivery(expandedIntegrationId, mappingSource);
 
   if (isLoading) return <Spinner className="h-6 w-6" />;
+
+  if (loadError) {
+    return <EmptyState title="Could not load logs." subtitle={loadError} />;
+  }
 
   if (rows.length === 0) {
     return <EmptyState title={hasFilters ? "No results." : emptyTitle} />;
@@ -377,7 +384,12 @@ export function UnifiedInboundLogTable({
                           </div>
                           <div>
                             <span className="font-medium text-gray-500">Destination: </span>
-                            {routeDestinationLabel(r.destination)}
+                            {routePipelineDestinationLabel(
+                              r.destination,
+                              r.delivery,
+                              r.target_pipeline_name,
+                              r.target_stage_name
+                            )}
                           </div>
                           {r.target_account_name && (
                             <div>

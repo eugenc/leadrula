@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { FilterSelect } from "@/components/ui/input";
 import type { WebhookDelivery } from "@/types";
+import { pipelineStage } from "@/features/routing/routeFormatters";
 
 export type LogTypeFilter = "intake" | "webhooks" | "integrations" | "routes" | "all";
 
@@ -76,6 +77,18 @@ export function routeDestinationLabel(destination?: string) {
   if (destination === "contract") return "Contract";
   if (destination === "pipeline") return "Pipeline";
   return destination.charAt(0).toUpperCase() + destination.slice(1);
+}
+
+export function routePipelineDestinationLabel(
+  destination?: string,
+  delivery?: string,
+  pipelineName?: string | null,
+  stageName?: string | null,
+) {
+  if (destination !== "pipeline") return routeDestinationLabel(destination);
+  if (delivery === "leads") return "Pipeline (lead)";
+  if (pipelineName) return `Pipeline: ${pipelineStage(pipelineName, stageName)}`;
+  return routeDestinationLabel("pipeline");
 }
 
 export function statusText(status: string) {

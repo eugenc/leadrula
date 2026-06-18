@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Label, Select } from "@/components/ui/input";
 import type { Stage } from "@/types";
 import { useStageDisqReasons } from "./hooks";
+import { DatetimeFieldInput } from "./DatetimeFieldInput";
 
 export interface PromptResult {
   action_at?: string | null;
@@ -66,11 +67,7 @@ export function StagePromptModal({
         {needAction && (
           <div>
             <Label>Action Date &amp; Time</Label>
-            <Input
-              type="datetime-local"
-              value={actionAt}
-              onChange={(e) => setActionAt(e.target.value)}
-            />
+            <DatetimeFieldInput layout="inline" value={actionAt} onChange={setActionAt} />
             <p className="mt-1 text-xs text-gray-400">When should the next action happen?</p>
           </div>
         )}

@@ -16,16 +16,21 @@ type RouteExecutionMeta struct {
 
 // RecordRouteExecutionParams is the insert payload for route_executions.
 type RecordRouteExecutionParams struct {
-	RouteID         *int64
-	RouteName       string
-	LeadID          int64
-	OwnerAccountID  int64
-	TargetAccountID *int64
-	Destination     string
-	TriggerType     string
-	TriggerLabel    string
-	BranchPosition  int
-	ReviewerID      int64
+	RouteID             *int64
+	RouteName           string
+	LeadID              int64
+	OwnerAccountID      int64
+	TargetAccountID     *int64
+	Destination         string
+	TriggerType         string
+	TriggerLabel        string
+	BranchPosition      int
+	ReviewerID          int64
+	TargetPipelineID    *int64
+	TargetStageID       *int64
+	TargetPipelineName  *string
+	TargetStageName     *string
+	Delivery            string
 }
 
 // RecordRouteExecution inserts a successful route execution audit row.
@@ -45,10 +50,12 @@ func RecordRouteExecution(ctx context.Context, q database.Querier, p RecordRoute
 	_, err := q.Exec(ctx,
 		`INSERT INTO route_executions(
 		   route_id, route_name, lead_id, owner_account_id, target_account_id,
-		   destination, trigger_type, trigger_label, branch_position, reviewed_by)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		   destination, trigger_type, trigger_label, branch_position, reviewed_by,
+		   target_pipeline_id, target_stage_id, target_pipeline_name, target_stage_name, delivery)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
 		routeID, p.RouteName, p.LeadID, p.OwnerAccountID, p.TargetAccountID,
-		p.Destination, p.TriggerType, nullIfEmpty(p.TriggerLabel), branchPos, reviewedBy)
+		p.Destination, p.TriggerType, nullIfEmpty(p.TriggerLabel), branchPos, reviewedBy,
+		p.TargetPipelineID, p.TargetStageID, p.TargetPipelineName, p.TargetStageName, nullIfEmpty(p.Delivery))
 	return err
 }
 
@@ -58,7 +65,7 @@ func recordRouteFromRoute(ctx context.Context, q database.Querier, route *routin
 	if label == "" {
 		label = defaultTriggerLabel(route)
 	}
-	return RecordRouteExecution(ctx, q, RecordRouteExecutionParams{
+	p := RecordRouteExecutionParams{
 		RouteID:         &routeID,
 		RouteName:       route.Name,
 		LeadID:          leadID,
@@ -69,7 +76,15 @@ func recordRouteFromRoute(ctx context.Context, q database.Querier, route *routin
 		TriggerLabel:    label,
 		BranchPosition:  route.MatchedBranchPosition,
 		ReviewerID:      meta.ReviewerID,
-	})
+	}
+	if route.Destination == "pipeline" {
+		p.TargetPipelineID = route.TargetPipelineID
+		p.TargetStageID = route.TargetStageID
+		p.TargetPipelineName = route.TargetPipelineName
+		p.TargetStageName = route.TargetStageName
+		p.Delivery = route.Delivery
+	}
+	return RecordRouteExecution(ctx, q, p)
 }
 
 func defaultTriggerLabel(route *routing.Route) string {

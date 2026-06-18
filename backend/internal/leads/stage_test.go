@@ -259,6 +259,83 @@ func TestChangeStage_disqualificationTriggersReturn(t *testing.T) {
 	}
 }
 
+func TestChangeStage_skipsPublisherSyncWhenReturnRuleMatches(t *testing.T) {
+	pool := connectLeadsTestDB(t)
+	ctx := context.Background()
+	svc := newStageTestService(t, pool)
+
+	f, err := loadDisqMoveFixture(ctx, pool)
+	if err != nil {
+		t.Skip("no buyer contract lead with disqualification stage in database")
+	}
+
+	var wrongPubStage int64
+	err = pool.QueryRow(ctx,
+		`SELECT ps.id FROM pipeline_stages ps
+		 WHERE ps.pipeline_id = (SELECT pipeline_id FROM leads WHERE id = $1)
+		   AND ps.id <> $2
+		 ORDER BY ps.position, ps.id LIMIT 1`,
+		f.leadID, f.disqStageID).Scan(&wrongPubStage)
+	if err != nil {
+		t.Skip("buyer pipeline has no other stage for invalid stage map test")
+	}
+
+	var ruleID int64
+	err = pool.QueryRow(ctx,
+		`INSERT INTO contract_return_rules(contract_id, buyer_stage_id, return_stage_id)
+		 VALUES ($1,$2,$3)
+		 ON CONFLICT (contract_id, buyer_stage_id) WHERE participation_id IS NULL
+		 DO UPDATE SET return_stage_id = EXCLUDED.return_stage_id
+		 RETURNING id`,
+		f.contractID, f.disqStageID, f.returnStageID).Scan(&ruleID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM contract_return_rules WHERE id = $1`, ruleID)
+	})
+
+	var mapID int64
+	err = pool.QueryRow(ctx,
+		`INSERT INTO contract_stage_maps(contract_id, participation_id, buyer_stage_id, publisher_stage_id)
+		 VALUES ($1, NULL, $2, $3)
+		 ON CONFLICT (contract_id, participation_id, buyer_stage_id)
+		 DO UPDATE SET publisher_stage_id = EXCLUDED.publisher_stage_id
+		 RETURNING id`,
+		f.contractID, f.disqStageID, wrongPubStage).Scan(&mapID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM contract_stage_maps WHERE id = $1`, mapID)
+	})
+
+	var origOwner, origStage int64
+	var origContractID *int64
+	var origStatus string
+	var origPipelineID *int64
+	if err := pool.QueryRow(ctx,
+		`SELECT owner_account_id, stage_id, contract_id, status::text, pipeline_id FROM leads WHERE id = $1`,
+		f.leadID).Scan(&origOwner, &origStage, &origContractID, &origStatus, &origPipelineID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx,
+			`UPDATE leads SET owner_account_id=$2, stage_id=$3, contract_id=$4, status=$5::lead_status, pipeline_id=$6 WHERE id=$1`,
+			f.leadID, origOwner, origStage, origContractID, origStatus, origPipelineID)
+	})
+
+	p := &auth.Principal{AccountID: f.ownerAccountID, AccountType: "buyer", Role: "admin", UserID: 1}
+	reasonID := f.reasonID
+	updated, _, err := svc.ChangeStage(ctx, p, f.leadID, f.disqStageID, nil, &reasonID)
+	if err != nil {
+		t.Fatalf("ChangeStage with invalid stage map should skip sync and return: %v", err)
+	}
+	if updated.OwnerAccountID != f.publisherID {
+		t.Fatalf("owner_account_id = %d, want publisher %d", updated.OwnerAccountID, f.publisherID)
+	}
+}
+
 func TestChangeStage_invalidReturnDestination(t *testing.T) {
 	pool := connectLeadsTestDB(t)
 	ctx := context.Background()

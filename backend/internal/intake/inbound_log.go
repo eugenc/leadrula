@@ -35,6 +35,9 @@ type InboundLogItem struct {
 	TargetAccountName  string          `json:"target_account_name,omitempty"`
 	Destination        string          `json:"destination,omitempty"`
 	BranchPosition     int             `json:"branch_position,omitempty"`
+	TargetPipelineName *string         `json:"target_pipeline_name,omitempty"`
+	TargetStageName    *string         `json:"target_stage_name,omitempty"`
+	Delivery           string          `json:"delivery,omitempty"`
 }
 
 type InboundLogListResponse struct {
@@ -351,7 +354,10 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 		     NULL::text AS trigger_label,
 		     NULL::text AS target_account_name,
 		     NULL::text AS destination,
-		     0::int AS branch_position`
+		     0::int AS branch_position,
+		     NULL::text AS target_pipeline_name,
+		     NULL::text AS target_stage_name,
+		     NULL::text AS delivery`
 
 	sourceUnion := `
 		   SELECT
@@ -472,7 +478,8 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 	query := `SELECT kind, direction, id, created_at, origin, origin_slug, lead_label, lead_id, status,
 		        first_name, last_name, phone, source, raw_payload, webhook_id, error_message,
 		        provider_slug, connection_name, attempts,
-		        route_id, route_name, trigger_type, trigger_label, target_account_name, destination, branch_position
+		        route_id, route_name, trigger_type, trigger_label, target_account_name, destination, branch_position,
+		        target_pipeline_name, target_stage_name, delivery
 		 FROM (` + combined + `
 		 ) combined
 		 ORDER BY created_at DESC
@@ -489,6 +496,7 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 		var it InboundLogItem
 		var raw []byte
 		var routeID *int64
+		var targetPipelineName, targetStageName string
 		if err := rows.Scan(
 			&it.Kind, &it.Direction, &it.ID, &it.CreatedAt, &it.Origin, &it.OriginSlug,
 			&it.LeadLabel, &it.LeadID, &it.Status,
@@ -497,8 +505,15 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 			&it.ProviderSlug, &it.ConnectionName, &it.Attempts,
 			&routeID, &it.RouteName, &it.TriggerType, &it.TriggerLabel,
 			&it.TargetAccountName, &it.Destination, &it.BranchPosition,
+			&targetPipelineName, &targetStageName, &it.Delivery,
 		); err != nil {
 			return nil, err
+		}
+		if targetPipelineName != "" {
+			it.TargetPipelineName = &targetPipelineName
+		}
+		if targetStageName != "" {
+			it.TargetStageName = &targetStageName
 		}
 		if len(raw) > 0 {
 			it.RawPayload = raw
