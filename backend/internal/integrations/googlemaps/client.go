@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -34,6 +35,7 @@ type ParsedAddress struct {
 	City             string  `json:"city"`
 	State            string  `json:"state"`
 	Zip              string  `json:"zip"`
+	Country          string  `json:"country"`
 	Lat              float64 `json:"lat"`
 	Lng              float64 `json:"lng"`
 }
@@ -172,8 +174,46 @@ func ValidateAPIKey(ctx context.Context, apiKey string) error {
 	return nil
 }
 
+func StaticSatelliteMap(ctx context.Context, apiKey string, lat, lng float64, zoom, width, height int) ([]byte, error) {
+	if zoom < 15 {
+		zoom = 15
+	}
+	if zoom > 20 {
+		zoom = 20
+	}
+	if width <= 0 {
+		width = 640
+	}
+	if height <= 0 {
+		height = 400
+	}
+	q := url.Values{}
+	q.Set("center", fmt.Sprintf("%f,%f", lat, lng))
+	q.Set("zoom", strconv.Itoa(zoom))
+	q.Set("size", fmt.Sprintf("%dx%d", width, height))
+	q.Set("maptype", "satellite")
+	q.Set("markers", fmt.Sprintf("color:red|%f,%f", lat, lng))
+	q.Set("key", apiKey)
+	u := "https://maps.googleapis.com/maps/api/staticmap?" + q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("google static map returned %d: %s", resp.StatusCode, trimErrBody(body))
+	}
+	return body, nil
+}
+
 func parseAddressComponents(out *ParsedAddress, components []addressComponent) {
-	var streetNumber, route, city, state, zip string
+	var streetNumber, route, city, state, zip, country string
 	for _, c := range components {
 		for _, t := range c.Types {
 			switch t {
@@ -185,7 +225,15 @@ func parseAddressComponents(out *ParsedAddress, components []addressComponent) {
 				if city == "" {
 					city = c.LongText
 				}
+			case "postal_town":
+				if city == "" {
+					city = c.LongText
+				}
 			case "sublocality", "sublocality_level_1":
+				if city == "" {
+					city = c.LongText
+				}
+			case "administrative_area_level_2":
 				if city == "" {
 					city = c.LongText
 				}
@@ -193,6 +241,8 @@ func parseAddressComponents(out *ParsedAddress, components []addressComponent) {
 				state = c.ShortText
 			case "postal_code":
 				zip = c.LongText
+			case "country":
+				country = c.ShortText
 			}
 		}
 	}
@@ -207,6 +257,7 @@ func parseAddressComponents(out *ParsedAddress, components []addressComponent) {
 	out.City = city
 	out.State = state
 	out.Zip = zip
+	out.Country = country
 }
 
 func normalizePlaceID(id, fallback string) string {

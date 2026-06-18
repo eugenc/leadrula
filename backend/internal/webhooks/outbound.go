@@ -443,6 +443,7 @@ func buildTemplateContext(event string, l *leads.Lead, pctx PipelineContext) map
 	optStr("lead.city", l.City)
 	optStr("lead.state", l.State)
 	optStr("lead.zip", l.Zip)
+	optStr("lead.country", l.Country)
 	optStr("lead.source", l.Source)
 	optStr("lead.external_id", l.ExternalID)
 	m["lead.created_at"] = l.CreatedAt.String()
@@ -552,7 +553,7 @@ func resolveOutboundFieldValue(e OutboundFieldMapEntry, tctx map[string]string, 
 			if l != nil {
 				return l.LastName
 			}
-		case "phone", "email", "address", "city", "state", "zip", "source", "external_id", "status":
+		case "phone", "email", "address", "city", "state", "zip", "country", "source", "external_id", "status":
 			if l != nil {
 				return optStrVal(lFieldPtr(l, *e.BuiltinField))
 			}
@@ -599,6 +600,8 @@ func lFieldPtr(l *leads.Lead, field string) *string {
 		return l.State
 	case "zip":
 		return l.Zip
+	case "country":
+		return l.Country
 	case "source":
 		return l.Source
 	case "external_id":

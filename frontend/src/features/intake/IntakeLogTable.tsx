@@ -333,6 +333,7 @@ export function IntakeLogTable({
 
   const leadSearch = hasLeadSearch ? (
     <LogLeadSearch
+      source={source}
       value={search}
       onChange={handleSearchChange}
       selectedLeadId={selectedLeadId}
@@ -480,7 +481,7 @@ export function IntakeLogTable({
 
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 overflow-visible">
         <div className="flex flex-wrap gap-2">
           {typeFilters.map((f) => (
             <Button

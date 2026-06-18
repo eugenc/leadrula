@@ -32,6 +32,9 @@ func BuildDeliveryPayload(lead *Lead) ([]byte, error) {
 	if lead.Zip != nil {
 		p["zip"] = *lead.Zip
 	}
+	if lead.Country != nil {
+		p["country"] = *lead.Country
+	}
 	if lead.Source != nil {
 		p["source"] = *lead.Source
 	}

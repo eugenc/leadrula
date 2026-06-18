@@ -16,12 +16,17 @@ export const BUYER_ACCOUNT_NOTIFICATION_EVENTS: NotificationEventDef[] = [
   { id: "collaboration_request", label: "Collaboration requests" },
   { id: "partnership_request", label: "Partnership requests" },
   { id: "partnership_accepted", label: "Partnership accepted" },
+  { id: "contract_participation_pending", label: "Contract invitations" },
+  { id: "contract_forked", label: "Counter-offer contracts" },
 ];
 
 export const PUBLISHER_ACCOUNT_NOTIFICATION_EVENTS: NotificationEventDef[] = [
   { id: "collaboration_request", label: "Collaboration requests" },
   { id: "partnership_request", label: "Partnership requests" },
   { id: "partnership_accepted", label: "Partnership accepted" },
+  { id: "contract_participation_accepted", label: "Contract accepted" },
+  { id: "contract_participation_declined", label: "Contract declined" },
+  { id: "contract_counter_pending", label: "Contract counter-offers" },
 ];
 
 export function accountNotificationEvents(accountType: AccountType): NotificationEventDef[] {

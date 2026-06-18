@@ -190,6 +190,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
     f.city = lead.city ?? "";
     f.state = lead.state ?? "";
     f.zip = lead.zip ?? "";
+    f.country = lead.country ?? "";
     f.address_place_id = lead.address_place_id ?? "";
     setFields(f);
     setActionAtLocal(lead.action_at ? isoToDatetimeLocal(lead.action_at) : "");
@@ -202,6 +203,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
     city: string;
     state: string;
     zip: string;
+    country: string;
     address_place_id: string;
   }) {
     setFields((prev) => ({ ...prev, ...validated }));
@@ -430,6 +432,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
                   city={fields.city ?? ""}
                   state={fields.state ?? ""}
                   zip={fields.zip ?? ""}
+                  country={fields.country ?? ""}
                   disabled={update.isPending}
                   onPlainChange={(next) => setFields((prev) => ({ ...prev, ...next }))}
                   onFieldBlur={(key) => saveAddressField(key)}

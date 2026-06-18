@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Input, Label } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/misc";
@@ -16,6 +16,7 @@ export type ValidatedAddress = {
   city: string;
   state: string;
   zip: string;
+  country: string;
   address_place_id: string;
 };
 
@@ -24,6 +25,7 @@ type PlainFields = {
   city: string;
   state: string;
   zip: string;
+  country: string;
 };
 
 function newSessionToken() {
@@ -31,7 +33,7 @@ function newSessionToken() {
 }
 
 function formatAddressLine(fields: PlainFields) {
-  const parts = [fields.address, fields.city, fields.state, fields.zip].filter(Boolean);
+  const parts = [fields.address, fields.city, fields.state, fields.zip, fields.country].filter(Boolean);
   return parts.join(", ");
 }
 
@@ -40,6 +42,7 @@ export function AddressAutocomplete({
   city = "",
   state = "",
   zip = "",
+  country = "",
   onPlainChange,
   onFieldBlur,
   onSelect,
@@ -49,6 +52,7 @@ export function AddressAutocomplete({
   city?: string;
   state?: string;
   zip?: string;
+  country?: string;
   onPlainChange?: (fields: PlainFields) => void;
   onFieldBlur?: (key: keyof PlainFields) => void;
   onSelect?: (value: ValidatedAddress) => void;
@@ -67,12 +71,12 @@ export function AddressAutocomplete({
   const [selecting, setSelecting] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const displayValue = useMemo(() => formatAddressLine({ address, city, state, zip }), [address, city, state, zip]);
+  const hasParsedFields = !!(city || state || zip || country);
 
   useEffect(() => {
     if (!connected) return;
-    setQuery(displayValue);
-  }, [connected, displayValue]);
+    setQuery(address);
+  }, [connected, address]);
 
   useEffect(() => {
     if (!connected || !open) return;
@@ -115,9 +119,10 @@ export function AddressAutocomplete({
         city: details.city,
         state: details.state,
         zip: details.zip,
+        country: details.country,
         address_place_id: details.place_id,
       });
-      setQuery(formatAddressLine(details));
+      setQuery(details.address);
       setSessionToken(newSessionToken());
       setSuggestions([]);
     } finally {
@@ -144,6 +149,7 @@ export function AddressAutocomplete({
           city={city}
           state={state}
           zip={zip}
+          country={country}
           disabled={disabled}
           onChange={onPlainChange}
           onFieldBlur={onFieldBlur}
@@ -172,12 +178,12 @@ export function AddressAutocomplete({
           </div>
         )}
         {open && suggestions.length > 0 && (
-          <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-gray-100 bg-white py-1 shadow-lg">
+          <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-gray-100 bg-surface-card py-1 shadow-lg">
             {suggestions.map((item) => (
               <li key={item.place_id}>
                 <button
                   type="button"
-                  className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
+                  className="w-full px-3 py-2 text-left text-sm hover:bg-surface-hover"
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => pickSuggestion(item)}
                 >
@@ -191,11 +197,43 @@ export function AddressAutocomplete({
           </ul>
         )}
       </div>
-      {(city || state || zip) && (
-        <p className="text-xs text-gray-500">
-          {[city, state, zip].filter(Boolean).join(", ")}
-        </p>
+      {hasParsedFields && (
+        <AddressFieldsPreview city={city} state={state} zip={zip} country={country} />
       )}
+    </div>
+  );
+}
+
+function AddressFieldsPreview({
+  city,
+  state,
+  zip,
+  country,
+}: {
+  city: string;
+  state: string;
+  zip: string;
+  country: string;
+}) {
+  const items = [
+    { label: "City", value: city },
+    { label: "State", value: state },
+    { label: "Zip", value: zip },
+    { label: "Country", value: country },
+  ].filter((item) => item.value);
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="grid grid-cols-2 gap-2.5">
+      {items.map((item) => (
+        <div key={item.label}>
+          <Label>{item.label}</Label>
+          <div className="mt-1 rounded-md border border-gray-100 bg-gray-50 px-2.5 py-1.5 text-sm text-gray-700 dark:bg-gray-800/50 dark:text-gray-300">
+            {item.value}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -205,6 +243,7 @@ function PlainAddressFields({
   city,
   state,
   zip,
+  country,
   disabled,
   onChange,
   onFieldBlur,
@@ -213,12 +252,13 @@ function PlainAddressFields({
   city: string;
   state: string;
   zip: string;
+  country: string;
   disabled?: boolean;
   onChange?: (fields: PlainFields) => void;
   onFieldBlur?: (key: keyof PlainFields) => void;
 }) {
   function setField(key: keyof PlainFields, value: string) {
-    onChange?.({ address, city, state, zip, [key]: value });
+    onChange?.({ address, city, state, zip, country, [key]: value });
   }
 
   return (
@@ -259,6 +299,15 @@ function PlainAddressFields({
           onBlur={() => onFieldBlur?.("zip")}
         />
       </div>
+      <div>
+        <Label>Country</Label>
+        <Input
+          value={country}
+          disabled={disabled}
+          onChange={(e) => setField("country", e.target.value)}
+          onBlur={() => onFieldBlur?.("country")}
+        />
+      </div>
     </>
   );
 }
@@ -268,12 +317,14 @@ export function formatLeadAddress(lead: {
   city?: string | null;
   state?: string | null;
   zip?: string | null;
+  country?: string | null;
 }) {
   return formatAddressLine({
     address: lead.address ?? "",
     city: lead.city ?? "",
     state: lead.state ?? "",
     zip: lead.zip ?? "",
+    country: lead.country ?? "",
   });
 }
 

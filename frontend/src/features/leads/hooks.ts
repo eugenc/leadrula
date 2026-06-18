@@ -46,6 +46,7 @@ export interface LeadFilters {
   sort?: string;
   sort_dir?: "asc" | "desc";
   all?: boolean;
+  namespace?: "publisher" | "buyer";
 }
 
 function normalizeLeadsResponse(raw: LeadListResponse | Lead[] | undefined): LeadListResponse {
@@ -57,6 +58,7 @@ function normalizeLeadsResponse(raw: LeadListResponse | Lead[] | undefined): Lea
 function leadsQueryString(filters: LeadFilters): string {
   const qs = new URLSearchParams();
   Object.entries(filters).forEach(([k, v]) => {
+    if (k === "namespace") return;
     if (k === "all") {
       if (v) qs.set("all", "1");
       return;
@@ -74,14 +76,22 @@ function leadsQueryString(filters: LeadFilters): string {
   return qs.toString();
 }
 
-export function useLeads(filters: LeadFilters = {}) {
+function leadsBasePath(namespace?: "publisher" | "buyer"): string {
+  if (namespace === "publisher") return "/publisher";
+  if (namespace === "buyer") return "/buyer";
+  return ns();
+}
+
+export function useLeads(filters: LeadFilters = {}, options?: { enabled?: boolean }) {
   const q = leadsQueryString(filters);
+  const base = leadsBasePath(filters.namespace);
   return useQuery({
     queryKey: ["leads", filters],
     queryFn: async () =>
       normalizeLeadsResponse(
-        await get<LeadListResponse | Lead[]>(`${ns()}/leads${q ? `?${q}` : ""}`)
+        await get<LeadListResponse | Lead[]>(`${base}/leads${q ? `?${q}` : ""}`)
       ),
+    enabled: options?.enabled ?? true,
   });
 }
 

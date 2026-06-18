@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { FilterInput } from "@/components/ui/input";
-import { get, ns } from "@/lib/api";
+import { useLeads } from "@/features/leads/hooks";
 import { leadDisplayName } from "./logShared";
-import type { Lead, LeadListResponse } from "@/types";
+import type { Lead } from "@/types";
 
 function leadSecondary(lead: Lead): string {
   const parts = [lead.phone, lead.email].filter(Boolean);
@@ -12,6 +11,7 @@ function leadSecondary(lead: Lead): string {
 }
 
 export function LogLeadSearch({
+  source,
   value,
   onChange,
   selectedLeadId,
@@ -19,6 +19,7 @@ export function LogLeadSearch({
   onClear,
   className,
 }: {
+  source: "publisher" | "buyer";
   value: string;
   onChange: (value: string) => void;
   selectedLeadId: number | null;
@@ -35,19 +36,13 @@ export function LogLeadSearch({
     return () => clearTimeout(t);
   }, [value]);
 
-  const showSuggestions = open && !selectedLeadId && debouncedQuery.length > 0;
-  const { data, isFetching } = useQuery({
-    queryKey: ["log-lead-search", debouncedQuery],
-    queryFn: () => {
-      const qs = new URLSearchParams({
-        q: debouncedQuery,
-        page: "1",
-        limit: "8",
-      });
-      return get<LeadListResponse>(`${ns()}/leads?${qs}`);
-    },
-    enabled: showSuggestions,
-  });
+  const canFetch = debouncedQuery.length > 0 && !selectedLeadId;
+  const showPanel = open && canFetch;
+
+  const { data, isFetching, isError } = useLeads(
+    { q: debouncedQuery, page: 1, limit: 8, namespace: source },
+    { enabled: canFetch }
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -62,12 +57,17 @@ export function LogLeadSearch({
 
   const suggestions = data?.items ?? [];
 
+  function handleChange(next: string) {
+    setOpen(true);
+    onChange(next);
+  }
+
   return (
     <div ref={containerRef} className={`relative ${className ?? ""}`}>
       <div className="relative w-full">
         <FilterInput
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => handleChange(e.target.value)}
           onFocus={() => setOpen(true)}
           placeholder="Search lead name, phone, or email…"
           className="w-full pr-8"
@@ -87,9 +87,11 @@ export function LogLeadSearch({
           </button>
         )}
       </div>
-      {showSuggestions && (
-        <div className="absolute left-0 top-full z-50 mt-1 max-h-64 w-full min-w-[16rem] overflow-y-auto rounded-md border border-gray-100 bg-surface-card py-1 shadow-lg">
-          {isFetching && suggestions.length === 0 ? (
+      {showPanel && (
+        <div className="absolute left-0 top-full z-[100] mt-1 max-h-64 w-full min-w-[16rem] overflow-y-auto rounded-md border border-gray-100 bg-surface-card py-1 shadow-lg">
+          {isError ? (
+            <p className="px-3 py-3 text-sm text-red-500">Could not load suggestions</p>
+          ) : isFetching && suggestions.length === 0 ? (
             <p className="px-3 py-3 text-sm text-gray-400">Searching…</p>
           ) : suggestions.length === 0 ? (
             <p className="px-3 py-3 text-sm text-gray-400">No matching leads</p>

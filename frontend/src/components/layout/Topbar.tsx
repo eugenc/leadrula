@@ -67,6 +67,31 @@ function notifLabel(n: NotificationItem) {
       return `${n.payload.buyer_name ?? "Buyer"} accepted your partnership request`;
     }
   }
+  if (n.type === "contract_participation_pending") {
+    const pub = n.payload.publisher_name as string | undefined;
+    const contract = n.payload.contract_name as string | undefined;
+    if (pub && contract) return `${pub} invited you to ${contract}`;
+    if (pub) return `${pub} sent a contract invitation`;
+    return "New contract invitation";
+  }
+  if (n.type === "contract_forked") {
+    return "Counter-offer accepted — review contract";
+  }
+  if (n.type === "contract_participation_accepted") {
+    const buyer = n.payload.buyer_name as string | undefined;
+    if (buyer) return `${buyer} accepted your contract`;
+    return "Buyer accepted contract";
+  }
+  if (n.type === "contract_participation_declined") {
+    const buyer = n.payload.buyer_name as string | undefined;
+    if (buyer) return `${buyer} declined your contract`;
+    return "Buyer declined contract";
+  }
+  if (n.type === "contract_counter_pending") {
+    const buyer = n.payload.buyer_name as string | undefined;
+    if (buyer) return `${buyer} submitted a counter-offer`;
+    return "Buyer submitted a counter-offer";
+  }
   return labels[n.type] ?? n.type;
 }
 
@@ -85,6 +110,19 @@ function notifPath(n: NotificationItem, accountType: string | undefined) {
   if (n.type === "partnership_request" || n.type === "partnership_accepted") {
     if (accountType === "buyer") return "/b/publishers";
     if (accountType === "publisher") return "/p/buyers";
+  }
+  if (
+    n.type === "contract_participation_pending" ||
+    n.type === "contract_forked"
+  ) {
+    if (accountType === "buyer") return "/b/contract";
+  }
+  if (
+    n.type === "contract_participation_accepted" ||
+    n.type === "contract_participation_declined" ||
+    n.type === "contract_counter_pending"
+  ) {
+    if (accountType === "publisher") return "/p/contracts";
   }
   return null;
 }

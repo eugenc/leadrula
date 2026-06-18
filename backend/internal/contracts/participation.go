@@ -340,6 +340,7 @@ func (s *Service) AddParticipation(ctx context.Context, publisherID, contractID 
 		"contract_id":      contractID,
 		"participation_id": part.ID,
 		"contract_name":    c.Name,
+		"publisher_name":   s.publisherName(ctx, publisherID),
 	})
 	return part, nil
 }
@@ -430,6 +431,7 @@ func (s *Service) ReinviteParticipation(ctx context.Context, publisherID, partic
 		"contract_id":      part.ContractID,
 		"participation_id": participationID,
 		"contract_name":    c.Name,
+		"publisher_name":   s.publisherName(ctx, publisherID),
 	})
 	return updated, nil
 }

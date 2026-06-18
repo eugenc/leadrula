@@ -222,7 +222,7 @@ func eventLink(baseURL, accountType, eventType string) string {
 		}
 		return baseURL + "/p/buyers"
 	case "contract_participation_pending", "contract_forked":
-		return baseURL + "/b/contracts"
+		return baseURL + "/b/contract"
 	case "contract_participation_accepted", "contract_participation_declined", "contract_counter_pending":
 		return baseURL + "/p/contracts"
 	default:

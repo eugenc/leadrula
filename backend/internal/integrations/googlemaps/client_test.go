@@ -19,3 +19,13 @@ func TestParseAddressComponents(t *testing.T) {
 		t.Fatalf("city/state/zip = %q %q %q", out.City, out.State, out.Zip)
 	}
 }
+
+func TestParseAddressComponentsCountry(t *testing.T) {
+	out := &ParsedAddress{}
+	parseAddressComponents(out, []addressComponent{
+		{ShortText: "US", Types: []string{"country"}},
+	})
+	if out.Country != "US" {
+		t.Fatalf("country = %q", out.Country)
+	}
+}

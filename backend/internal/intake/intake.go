@@ -50,7 +50,7 @@ type IngestResult struct {
 	Status string `json:"status"`
 }
 
-var builtinKeys = []string{"first_name", "last_name", "phone", "email", "address", "city", "state", "zip"}
+var builtinKeys = []string{"first_name", "last_name", "phone", "email", "address", "city", "state", "zip", "country"}
 
 func flattenPayload(raw map[string]any) map[string]any {
 	sources := map[string]any{}

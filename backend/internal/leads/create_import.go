@@ -55,6 +55,7 @@ type CreateLeadInput struct {
 	City           string                     `json:"city"`
 	State          string                     `json:"state"`
 	Zip            string                     `json:"zip"`
+	Country        string                     `json:"country"`
 	AddressPlaceID string                     `json:"address_place_id"`
 	Source         string                     `json:"source"`
 	ExternalID     string                     `json:"external_id"`
@@ -272,6 +273,8 @@ func mapImportRow(row importRow, mapping []ColumnMapping, pipelineID, stageID in
 			in.State = val
 		case "zip":
 			in.Zip = val
+		case "country":
+			in.Country = val
 		case "source", "campaign_name":
 			in.Source = val
 		case "tags":
@@ -329,7 +332,7 @@ func (s *Service) insertLead(ctx context.Context, p *auth.Principal, in CreateLe
 	builtins := map[string]string{
 		"first_name": in.FirstName, "last_name": in.LastName,
 		"phone": in.Phone, "email": in.Email,
-		"address": in.Address, "city": in.City, "state": in.State, "zip": in.Zip,
+		"address": in.Address, "city": in.City, "state": in.State, "zip": in.Zip, "country": in.Country,
 	}
 	if in.AddressPlaceID != "" {
 		builtins["address_place_id"] = in.AddressPlaceID

@@ -31,10 +31,13 @@ func accountEvents(accountType string) []string {
 		return []string{
 			"dispute_update", "new_invoice", "collaboration_request",
 			"partnership_request", "partnership_accepted",
+			"contract_participation_pending", "contract_forked",
 		}
 	case "publisher":
 		return []string{
 			"collaboration_request", "partnership_request", "partnership_accepted",
+			"contract_participation_accepted", "contract_participation_declined",
+			"contract_counter_pending",
 		}
 	default:
 		return nil

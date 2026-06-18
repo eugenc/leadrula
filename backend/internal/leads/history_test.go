@@ -26,20 +26,117 @@ func TestTransferKindFromTrigger(t *testing.T) {
 	}
 }
 
-func TestFilterLeadHistory_buyerHidesPublisherNames(t *testing.T) {
-	pubName := "LeadGen Co"
-	buyerName := "Acme Solar"
+func TestFilterLeadHistory_buyerScoped(t *testing.T) {
+	pubName := "Florida Net"
+	buyerName := "Sunbright Solar USA"
+	otherBuyer := "Other Buyer"
 	pubType := "publisher"
+	buyerType := "buyer"
 	sold := "sold"
 	returned := "returned"
+	redistributed := "redistributed"
+
+	const pubID int64 = 1
+	const buyerID int64 = 99
+	const otherBuyerID int64 = 50
 
 	entries := []LeadHistoryEntry{
 		{
-			ID:          1,
-			Kind:        "stage_change",
-			CreatedAt:   time.Now(),
-			AccountName: &pubName,
-			AccountType: &pubType,
+			ID:             1,
+			Kind:           "stage_change",
+			CreatedAt:      time.Now(),
+			AccountName:    &pubName,
+			AccountType:    &pubType,
+			ownerAccountID: pubID,
+		},
+		{
+			ID:             2,
+			Kind:           "stage_change",
+			CreatedAt:      time.Now(),
+			AccountName:    &buyerName,
+			AccountType:    &buyerType,
+			ownerAccountID: buyerID,
+		},
+		{
+			ID:              3,
+			Kind:            "account_transfer",
+			CreatedAt:       time.Now(),
+			TransferKind:    &sold,
+			FromAccountName: &pubName,
+			ToAccountName:   &buyerName,
+			fromAccountID:   pubID,
+			toAccountID:     buyerID,
+		},
+		{
+			ID:              4,
+			Kind:            "account_transfer",
+			CreatedAt:       time.Now(),
+			TransferKind:    &returned,
+			FromAccountName: &buyerName,
+			ToAccountName:   &pubName,
+			fromAccountID:   buyerID,
+			toAccountID:     pubID,
+		},
+		{
+			ID:              5,
+			Kind:            "account_transfer",
+			CreatedAt:       time.Now(),
+			TransferKind:    &sold,
+			FromAccountName: &pubName,
+			ToAccountName:   &otherBuyer,
+			fromAccountID:   pubID,
+			toAccountID:     otherBuyerID,
+		},
+		{
+			ID:              6,
+			Kind:            "account_transfer",
+			CreatedAt:       time.Now(),
+			TransferKind:    &redistributed,
+			FromAccountName: &pubName,
+			ToAccountName:   &otherBuyer,
+			fromAccountID:   pubID,
+			toAccountID:     otherBuyerID,
+		},
+	}
+
+	filtered := FilterLeadHistory(&auth.Principal{AccountType: "buyer", AccountID: buyerID}, entries)
+	if len(filtered) != 3 {
+		t.Fatalf("buyer filtered len = %d, want 3", len(filtered))
+	}
+	if filtered[0].ID != 2 {
+		t.Fatalf("expected buyer stage row, got id %d", filtered[0].ID)
+	}
+	if filtered[1].ID != 3 {
+		t.Fatalf("expected sold transfer, got id %d", filtered[1].ID)
+	}
+	if filtered[1].FromAccountName == nil || *filtered[1].FromAccountName != pubName {
+		t.Fatalf("sold from = %v, want %q", filtered[1].FromAccountName, pubName)
+	}
+	if filtered[2].ID != 4 {
+		t.Fatalf("expected returned transfer, got id %d", filtered[2].ID)
+	}
+	if filtered[2].ToAccountName == nil || *filtered[2].ToAccountName != pubName {
+		t.Fatalf("return to = %v, want %q", filtered[2].ToAccountName, pubName)
+	}
+}
+
+func TestFilterLeadHistory_oversightSeesFullTrail(t *testing.T) {
+	pubName := "Florida Net"
+	buyerName := "Sunbright Solar USA"
+	pubType := "publisher"
+	sold := "sold"
+
+	const pubID int64 = 1
+	const buyerID int64 = 99
+
+	entries := []LeadHistoryEntry{
+		{
+			ID:             1,
+			Kind:           "stage_change",
+			CreatedAt:      time.Now(),
+			AccountName:    &pubName,
+			AccountType:    &pubType,
+			ownerAccountID: pubID,
 		},
 		{
 			ID:              2,
@@ -48,33 +145,25 @@ func TestFilterLeadHistory_buyerHidesPublisherNames(t *testing.T) {
 			TransferKind:    &sold,
 			FromAccountName: &pubName,
 			ToAccountName:   &buyerName,
-		},
-		{
-			ID:              3,
-			Kind:            "account_transfer",
-			CreatedAt:       time.Now(),
-			TransferKind:    &returned,
-			FromAccountName: &buyerName,
-			ToAccountName:   &pubName,
+			fromAccountID:   pubID,
+			toAccountID:     buyerID,
 		},
 	}
 
-	filtered := FilterLeadHistory(&auth.Principal{AccountType: "buyer", AccountID: 99}, entries)
-
-	if filtered[0].AccountName == nil || *filtered[0].AccountName != buyerPublisherLabel {
-		t.Fatalf("stage publisher name = %v, want %q", filtered[0].AccountName, buyerPublisherLabel)
+	p := &auth.Principal{
+		AccountType: "buyer",
+		AccountID:   buyerID,
+		Impersonator: &auth.Principal{
+			AccountType: "publisher",
+			AccountID:   pubID,
+		},
 	}
-	if filtered[1].FromAccountName == nil || *filtered[1].FromAccountName != buyerPublisherLabel {
-		t.Fatalf("sold from = %v, want %q", filtered[1].FromAccountName, buyerPublisherLabel)
+	filtered := FilterLeadHistory(p, entries)
+	if len(filtered) != 2 {
+		t.Fatalf("oversight filtered len = %d, want 2", len(filtered))
 	}
-	if filtered[1].ToAccountName == nil || *filtered[1].ToAccountName != buyerName {
-		t.Fatalf("sold to = %v, want %q", filtered[1].ToAccountName, buyerName)
-	}
-	if filtered[2].FromAccountName == nil || *filtered[2].FromAccountName != buyerName {
-		t.Fatalf("return from = %v, want %q", filtered[2].FromAccountName, buyerName)
-	}
-	if filtered[2].ToAccountName == nil || *filtered[2].ToAccountName != buyerPublisherLabel {
-		t.Fatalf("return to = %v, want %q", filtered[2].ToAccountName, buyerPublisherLabel)
+	if filtered[0].AccountName == nil || *filtered[0].AccountName != pubName {
+		t.Fatalf("oversight publisher name = %v, want %q", filtered[0].AccountName, pubName)
 	}
 }
 
@@ -82,14 +171,18 @@ func TestFilterLeadHistory_publisherSeesFullNames(t *testing.T) {
 	pubName := "LeadGen Co"
 	pubType := "publisher"
 	entries := []LeadHistoryEntry{{
-		ID:          1,
-		Kind:        "stage_change",
-		CreatedAt:   time.Now(),
-		AccountName: &pubName,
-		AccountType: &pubType,
+		ID:             1,
+		Kind:           "stage_change",
+		CreatedAt:      time.Now(),
+		AccountName:    &pubName,
+		AccountType:    &pubType,
+		ownerAccountID: 1,
 	}}
 
 	filtered := FilterLeadHistory(&auth.Principal{AccountType: "publisher"}, entries)
+	if len(filtered) != 1 {
+		t.Fatalf("publisher filtered len = %d, want 1", len(filtered))
+	}
 	if filtered[0].AccountName == nil || *filtered[0].AccountName != pubName {
 		t.Fatalf("publisher view name = %v, want %q", filtered[0].AccountName, pubName)
 	}
@@ -161,6 +254,9 @@ func TestLeadHistory_infersAccountWhenOwnerNull(t *testing.T) {
 	}
 	if found.AccountType == nil || *found.AccountType == "" {
 		t.Fatalf("expected inferred account_type, got %v", found.AccountType)
+	}
+	if found.ownerAccountID == 0 {
+		t.Fatal("expected resolved owner_account_id")
 	}
 }
 

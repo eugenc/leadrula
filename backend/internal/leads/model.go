@@ -19,6 +19,7 @@ type Lead struct {
 	City             *string         `json:"city"`
 	State            *string         `json:"state"`
 	Zip              *string         `json:"zip"`
+	Country          *string         `json:"country"`
 	AddressPlaceID   *string         `json:"address_place_id"`
 	Source           *string         `json:"source"`
 	ExternalID       *string         `json:"external_id"`
@@ -99,4 +100,8 @@ type LeadHistoryEntry struct {
 	FromAccountName *string `json:"from_account_name,omitempty"`
 	ToAccountName   *string `json:"to_account_name,omitempty"`
 	TriggerLabel    *string `json:"trigger_label,omitempty"`
+
+	ownerAccountID int64 `json:"-"`
+	fromAccountID  int64 `json:"-"`
+	toAccountID    int64 `json:"-"`
 }

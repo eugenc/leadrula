@@ -18,6 +18,7 @@ var builtinFieldLabels = map[string]string{
 	"city":       "City",
 	"state":      "State",
 	"zip":        "Zip",
+	"country":    "Country",
 	"address_place_id": "Address place",
 	"source":     "Source",
 }
@@ -85,6 +86,8 @@ func leadBuiltinValue(l *Lead, field string) string {
 		return ptrStr(l.State)
 	case "zip":
 		return ptrStr(l.Zip)
+	case "country":
+		return ptrStr(l.Country)
 	case "source":
 		return ptrStr(l.Source)
 	default:

@@ -24,7 +24,13 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	items, err := h.svc.List(r.Context(), p.UserID)
+	var items []Notification
+	var err error
+	if p.SwitchedFrom != "" || p.Impersonator != nil {
+		items, err = h.svc.ListForAccountAdmins(r.Context(), p.AccountID)
+	} else {
+		items, err = h.svc.List(r.Context(), p.UserID)
+	}
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -63,7 +69,12 @@ func (h *Handler) markRead(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusBadRequest, httpx.CodeValidation, "invalid id")
 		return
 	}
-	if err := h.svc.MarkRead(r.Context(), p.UserID, id); err != nil {
+	if p.SwitchedFrom != "" || p.Impersonator != nil {
+		err = h.svc.MarkReadForAccount(r.Context(), p.AccountID, id)
+	} else {
+		err = h.svc.MarkRead(r.Context(), p.UserID, id)
+	}
+	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}

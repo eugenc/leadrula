@@ -16,7 +16,7 @@ import (
 )
 
 var builtinKeys = []string{
-	"first_name", "last_name", "phone", "email", "address", "city", "state", "zip",
+	"first_name", "last_name", "phone", "email", "address", "city", "state", "zip", "country",
 	"source", "external_id",
 }
 

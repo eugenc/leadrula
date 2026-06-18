@@ -51,6 +51,7 @@ export function NewLeadDrawer({ open, onClose }: Props) {
     city: "",
     state: "",
     zip: "",
+    country: "",
     source: "",
   });
   const [addressPlaceId, setAddressPlaceId] = useState("");
@@ -78,6 +79,7 @@ export function NewLeadDrawer({ open, onClose }: Props) {
       city: "",
       state: "",
       zip: "",
+      country: "",
       source: "",
     });
     setPipelineId(0);
@@ -120,6 +122,7 @@ export function NewLeadDrawer({ open, onClose }: Props) {
       city: fields.city?.trim() || undefined,
       state: fields.state?.trim() || undefined,
       zip: fields.zip?.trim() || undefined,
+      country: fields.country?.trim() || undefined,
       source: fields.source?.trim() || undefined,
     };
     if (addressPlaceId) body.address_place_id = addressPlaceId;
@@ -255,6 +258,7 @@ export function NewLeadDrawer({ open, onClose }: Props) {
               city={fields.city ?? ""}
               state={fields.state ?? ""}
               zip={fields.zip ?? ""}
+              country={fields.country ?? ""}
               onPlainChange={(next) => {
                 setFields((prev) => ({ ...prev, ...next }));
                 setAddressPlaceId("");
