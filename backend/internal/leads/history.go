@@ -74,7 +74,34 @@ func (r *Repository) LeadHistory(ctx context.Context, leadID int64) ([]LeadHisto
 		out = append(out, entries...)
 	}
 	sortHistory(out)
-	return out, nil
+	return dedupeLeadCreated(out), nil
+}
+
+func dedupeLeadCreated(entries []LeadHistoryEntry) []LeadHistoryEntry {
+	var keepID int64
+	var keepAt time.Time
+	n := 0
+	for _, e := range entries {
+		if e.Kind != "lead_created" {
+			continue
+		}
+		n++
+		if n == 1 || e.CreatedAt.Before(keepAt) || (e.CreatedAt.Equal(keepAt) && e.ID < keepID) {
+			keepID = e.ID
+			keepAt = e.CreatedAt
+		}
+	}
+	if n <= 1 {
+		return entries
+	}
+	out := make([]LeadHistoryEntry, 0, len(entries)-n+1)
+	for _, e := range entries {
+		if e.Kind == "lead_created" && e.ID != keepID {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 func sortHistory(out []LeadHistoryEntry) {

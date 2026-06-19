@@ -43,6 +43,7 @@ import {
   formatLeadAddress,
 } from "./AddressAutocomplete";
 import { AddressMapDialog } from "./AddressMapDialog";
+import { useGoogleMapsStatus } from "@/features/integrations/hooks";
 import {
   fromNativeDatetimeLocal,
   inputModeForFormat,
@@ -167,6 +168,8 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   const removeLead = useDeleteLead();
   const { data: users } = useUsers();
   const { data: customFields } = useCustomFields();
+  const { data: mapsStatus } = useGoogleMapsStatus();
+  const mapsConnected = mapsStatus?.connected === true;
 
   const canEditPreassignedBuyer =
     isAdmin &&
@@ -410,7 +413,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
                     />
                   </div>
                 ))}
-                {lead.address_place_id && formattedAddress && (
+                {mapsConnected && lead.address_place_id && formattedAddress && (
                   <div>
                     <Label>Verified address</Label>
                     <div className="mt-1 flex items-center gap-1.5">
@@ -422,7 +425,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
                     </div>
                   </div>
                 )}
-                {!lead.address_place_id && formattedAddress && (
+                {mapsConnected && !lead.address_place_id && formattedAddress && (
                   <p className="text-xs text-amber-700">
                     Select an address from suggestions to verify and enable map.
                   </p>

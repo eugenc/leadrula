@@ -23,6 +23,32 @@ type ReturnOutcome struct {
 	Returned bool
 }
 
+// resolveLeadContractID returns the lead's contract_id, or the contract from its latest distribute debit.
+func resolveLeadContractID(ctx context.Context, q database.Querier, lead *Lead) (*int64, error) {
+	if lead.ContractID != nil && *lead.ContractID != 0 {
+		return lead.ContractID, nil
+	}
+	if lead.OwnerAccountID == lead.PublisherID {
+		return nil, nil
+	}
+	cid, err := billing.LatestDistributeContractID(ctx, q, lead.OwnerAccountID, lead.ID)
+	if err != nil {
+		return nil, err
+	}
+	if cid == 0 {
+		return nil, nil
+	}
+	return &cid, nil
+}
+
+func backfillSoldLeadContract(ctx context.Context, q database.Querier, leadID, contractID int64) error {
+	_, err := q.Exec(ctx,
+		`UPDATE leads SET contract_id=$2, status='distributed'::lead_status
+		 WHERE id=$1 AND contract_id IS NULL`,
+		leadID, contractID)
+	return err
+}
+
 // TryReturnLead checks whether the lead's current stage triggers a contract return
 // and moves it back to the publisher when matched.
 func TryReturnLead(ctx context.Context, q database.Querier, deps ReturnDeps, leadID int64) (*ReturnOutcome, error) {
@@ -30,8 +56,18 @@ func TryReturnLead(ctx context.Context, q database.Querier, deps ReturnDeps, lea
 	if err != nil {
 		return nil, err
 	}
-	if lead.ContractID == nil || lead.StageID == nil {
+	contractID, err := resolveLeadContractID(ctx, q, lead)
+	if err != nil {
+		return nil, err
+	}
+	if contractID == nil || lead.StageID == nil {
 		return &ReturnOutcome{Lead: lead}, nil
+	}
+	if lead.ContractID == nil {
+		if err := backfillSoldLeadContract(ctx, q, leadID, *contractID); err != nil {
+			return nil, err
+		}
+		lead.ContractID = contractID
 	}
 
 	returnInfo, err := contracts.FindReturnRule(ctx, q, *lead.ContractID, lead.OwnerAccountID, *lead.StageID)

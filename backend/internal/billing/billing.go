@@ -123,6 +123,26 @@ func Credit(ctx context.Context, q database.Querier, buyerID int64, amount float
 	return err
 }
 
+// LatestDistributeContractID returns the contract_id on the most recent distribute debit for a buyer lead.
+func LatestDistributeContractID(ctx context.Context, q database.Querier, buyerID, leadID int64) (int64, error) {
+	var contractID *int64
+	err := q.QueryRow(ctx,
+		`SELECT contract_id FROM transactions
+		 WHERE buyer_id = $1 AND lead_id = $2 AND type = 'debit' AND amount < 0 AND contract_id IS NOT NULL
+		 ORDER BY created_at DESC LIMIT 1`,
+		buyerID, leadID).Scan(&contractID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if contractID == nil || *contractID == 0 {
+		return 0, nil
+	}
+	return *contractID, nil
+}
+
 // DistributeDebitAmount returns the absolute value of the latest distribute debit for a lead.
 func DistributeDebitAmount(ctx context.Context, q database.Querier, buyerID, leadID, contractID int64) (float64, error) {
 	var amount *float64

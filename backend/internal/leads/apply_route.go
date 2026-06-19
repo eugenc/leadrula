@@ -88,8 +88,17 @@ func applyPipelineRoute(ctx context.Context, q database.Querier, deps RouteApply
 	if err != nil {
 		return nil, err
 	}
-	if err := deps.Repo.PlaceInPipeline(ctx, q, leadID, ownerAccountID, *route.TargetPipelineID, *route.TargetStageID, lead.ContractID); err != nil {
+	contractID, err := resolveLeadContractID(ctx, q, lead)
+	if err != nil {
 		return nil, err
+	}
+	if err := deps.Repo.PlaceInPipeline(ctx, q, leadID, ownerAccountID, *route.TargetPipelineID, *route.TargetStageID, contractID); err != nil {
+		return nil, err
+	}
+	if contractID != nil && lead.ContractID == nil {
+		if err := backfillSoldLeadContract(ctx, q, leadID, *contractID); err != nil {
+			return nil, err
+		}
 	}
 	if err := deps.Repo.LogPipelinePlacement(ctx, q, leadID, ActorRoute(route.Name), *route.TargetPipelineID, *route.TargetStageID); err != nil {
 		return nil, err
@@ -100,6 +109,9 @@ func applyPipelineRoute(ctx context.Context, q database.Querier, deps RouteApply
 	}
 	if out.Returned {
 		return out.Emails, nil
+	}
+	if contractID != nil {
+		return nil, deps.Repo.SetStatusWithLog(ctx, q, leadID, ActorSystem("Route"), "distributed")
 	}
 	return nil, deps.Repo.SetStatusWithLog(ctx, q, leadID, ActorSystem("Route"), "review")
 }

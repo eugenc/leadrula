@@ -74,6 +74,14 @@ func TestCredit_refundsDistributeDebit(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	gotContract, err := LatestDistributeContractID(ctx, tx, buyerID, leadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotContract != contractID {
+		t.Fatalf("LatestDistributeContractID = %d, want %d", gotContract, contractID)
+	}
+
 	var balAfter float64
 	if err := tx.QueryRow(ctx,
 		`SELECT balance::float8 FROM buyer_balances WHERE buyer_id = $1`, buyerID).Scan(&balAfter); err != nil {

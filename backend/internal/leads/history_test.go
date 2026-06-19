@@ -454,3 +454,28 @@ func TestLeadHistory_mergesStageAndTransfer(t *testing.T) {
 		}
 	}
 }
+
+func TestDedupeLeadCreated(t *testing.T) {
+	base := time.Date(2026, 6, 18, 7, 0, 0, 0, time.UTC)
+	entries := []LeadHistoryEntry{
+		{ID: 3, Kind: "lead_created", CreatedAt: base},
+		{ID: 1, Kind: "stage_change", CreatedAt: base.Add(time.Hour)},
+		{ID: 2, Kind: "lead_created", CreatedAt: base.Add(-time.Hour)},
+		{ID: 4, Kind: "lead_created", CreatedAt: base.Add(-time.Hour)},
+	}
+	out := dedupeLeadCreated(entries)
+	var created int
+	var keptID int64
+	for _, e := range out {
+		if e.Kind == "lead_created" {
+			created++
+			keptID = e.ID
+		}
+	}
+	if created != 1 {
+		t.Fatalf("want 1 lead_created, got %d", created)
+	}
+	if keptID != 2 {
+		t.Fatalf("kept earliest lead_created id = %d, want 2", keptID)
+	}
+}

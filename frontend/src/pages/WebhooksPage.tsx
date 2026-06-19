@@ -1041,6 +1041,7 @@ function ActionDrawer({
     }
   }
 
+  const saving = create.isPending || update.isPending;
   const saveDisabled =
     saving ||
     (actionType === "move_stage" && !targetStageId);
@@ -1076,8 +1077,6 @@ function ActionDrawer({
       });
     }
   }
-
-  const saving = create.isPending || update.isPending;
 
   return (
     <FormDrawer
