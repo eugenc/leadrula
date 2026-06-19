@@ -218,6 +218,7 @@ function StagesEditor({ pipelineId }: { pipelineId: number }) {
                         </Button>
                         <IconButton
                           variant="danger"
+                          disabled={deleteStage.isPending && deleteStage.variables === s.id}
                           onClick={() =>
                             deleteStage.mutate(s.id, { onError: (e) => toast.error(errorMessage(e)) })
                           }

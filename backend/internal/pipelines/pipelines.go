@@ -8,6 +8,7 @@ import (
 
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/internal/collaboration"
+	"github.com/echayko/leadrula/backend/internal/database"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -253,17 +254,91 @@ func (s *Service) DeleteStage(ctx context.Context, p *auth.Principal, stageID in
 	if err := s.requireStage(ctx, p, stageID); err != nil {
 		return err
 	}
+	if msg, err := s.stageDeleteBlocked(ctx, stageID); err != nil {
+		return err
+	} else if msg != "" {
+		return httpx.BusinessRule(msg)
+	}
 	ct, err := s.pool.Exec(ctx,
 		`DELETE FROM pipeline_stages st USING pipelines p
 		 WHERE st.id = $1 AND p.id = st.pipeline_id AND p.account_id = $2`,
 		stageID, p.AccountID)
 	if err != nil {
+		if database.IsForeignKeyViolation(err) {
+			return httpx.BusinessRule("stage is referenced elsewhere and cannot be deleted")
+		}
 		return err
 	}
 	if ct.RowsAffected() == 0 {
 		return httpx.NotFound("stage not found")
 	}
 	return nil
+}
+
+func (s *Service) stageDeleteBlocked(ctx context.Context, stageID int64) (string, error) {
+	checks := []struct {
+		query string
+		msg   string
+	}{
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM leads
+				WHERE stage_id = $1 AND deleted_at IS NULL)`,
+			"cannot delete stage with leads assigned; move leads first",
+		},
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM contracts
+				WHERE deleted_at IS NULL
+				  AND (source_stage_id = $1 OR return_stage_id = $1))`,
+			"cannot delete stage used by a contract",
+		},
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM contract_return_rules
+				WHERE buyer_stage_id = $1 OR return_stage_id = $1)`,
+			"cannot delete stage used by a contract return rule",
+		},
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM contract_participations
+				WHERE buyer_target_stage_id = $1
+				   OR source_stage_id = $1
+				   OR return_stage_id = $1)`,
+			"cannot delete stage used by a contract participation",
+		},
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM contract_compensations
+				WHERE trigger_stage_id = $1
+				   OR source_stage_id = $1
+				   OR counterparty_stage_id = $1
+				   OR return_stage_id = $1)`,
+			"cannot delete stage used by contract compensation",
+		},
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM routes
+				WHERE origin_stage_id = $1 OR target_stage_id = $1)`,
+			"cannot delete stage used by a route",
+		},
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM webhook_events
+				WHERE target_stage_id = $1)`,
+			"cannot delete stage used by a webhook",
+		},
+	}
+	for _, c := range checks {
+		var blocked bool
+		if err := s.pool.QueryRow(ctx, c.query, stageID).Scan(&blocked); err != nil {
+			return "", err
+		}
+		if blocked {
+			return c.msg, nil
+		}
+	}
+	return "", nil
 }
 
 // Reorder sets stage positions to match the given order. Uses a temporary
