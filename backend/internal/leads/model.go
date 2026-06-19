@@ -88,6 +88,13 @@ type LeadHistoryEntry struct {
 	Kind      string    `json:"kind"`
 	CreatedAt time.Time `json:"created_at"`
 
+	ActorType   string  `json:"actor_type,omitempty"`
+	ActorName   string  `json:"actor_name,omitempty"`
+	ActorDetail string  `json:"actor_detail,omitempty"`
+	Status      string  `json:"status,omitempty"`
+	Summary     string  `json:"summary,omitempty"`
+	Amount      *float64 `json:"amount,omitempty"`
+
 	FromStageName *string    `json:"from_stage_name,omitempty"`
 	ToStageName   *string    `json:"to_stage_name,omitempty"`
 	MovedByName   *string    `json:"moved_by_name,omitempty"`
@@ -101,7 +108,15 @@ type LeadHistoryEntry struct {
 	ToAccountName   *string `json:"to_account_name,omitempty"`
 	TriggerLabel    *string `json:"trigger_label,omitempty"`
 
+	FieldName  *string `json:"field_name,omitempty"`
+	FromValue  *string `json:"from_value,omitempty"`
+	ToValue    *string `json:"to_value,omitempty"`
+	PipelineName *string `json:"pipeline_name,omitempty"`
+	StageName    *string `json:"stage_name,omitempty"`
+	RouteName    *string `json:"route_name,omitempty"`
+
 	ownerAccountID int64 `json:"-"`
 	fromAccountID  int64 `json:"-"`
 	toAccountID    int64 `json:"-"`
+	buyerAccountID int64 `json:"-"`
 }

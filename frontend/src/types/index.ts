@@ -214,10 +214,41 @@ export interface StageHistoryEntry {
   created_at: string;
 }
 
+export type LeadHistoryKind =
+  | "stage_change"
+  | "account_transfer"
+  | "route_run"
+  | "purchase"
+  | "refund"
+  | "dispute_opened"
+  | "dispute_resolved"
+  | "webhook"
+  | "outbound_webhook"
+  | "integration"
+  | "lead_created"
+  | "pipeline_placed"
+  | "status_change"
+  | "field_change"
+  | "assignee_change"
+  | "tag_change"
+  | "calendar_event"
+  | "follower_added"
+  | "follower_removed"
+  | "lead_deleted"
+  | "pipeline_cleared"
+  | "imported"
+  | "note_added";
+
 export interface LeadHistoryEntry {
   id: number;
-  kind: "stage_change" | "account_transfer";
+  kind: LeadHistoryKind;
   created_at: string;
+  actor_type?: string | null;
+  actor_name?: string | null;
+  actor_detail?: string | null;
+  status?: string | null;
+  summary?: string | null;
+  amount?: number | null;
   from_stage_name?: string | null;
   to_stage_name?: string | null;
   moved_by_name?: string | null;
@@ -229,6 +260,12 @@ export interface LeadHistoryEntry {
   from_account_name?: string | null;
   to_account_name?: string | null;
   trigger_label?: string | null;
+  field_name?: string | null;
+  from_value?: string | null;
+  to_value?: string | null;
+  pipeline_name?: string | null;
+  stage_name?: string | null;
+  route_name?: string | null;
 }
 
 export interface CustomField {

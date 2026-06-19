@@ -49,7 +49,7 @@ type RouteApplyDeps struct {
 func ApplyRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, leadID int64, meta RouteExecutionMeta) ([]notifications.EmailJob, error) {
 	switch route.Destination {
 	case "pipeline":
-		emails, err := applyPipelineRoute(ctx, q, deps.Repo, route, route.OwnerAccountID(), leadID)
+		emails, err := applyPipelineRoute(ctx, q, deps, route, route.OwnerAccountID(), leadID)
 		if err != nil {
 			return nil, err
 		}
@@ -77,17 +77,31 @@ func ApplyRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, ro
 	}
 }
 
-func applyPipelineRoute(ctx context.Context, q database.Querier, repo *Repository, route *routing.Route, ownerAccountID, leadID int64) ([]notifications.EmailJob, error) {
+func applyPipelineRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, ownerAccountID, leadID int64) ([]notifications.EmailJob, error) {
 	if route.Delivery == "leads" {
-		return nil, repo.SetStatus(ctx, q, leadID, "review")
+		return nil, deps.Repo.SetStatusWithLog(ctx, q, leadID, ActorSystem("Route"), "review")
 	}
 	if route.TargetPipelineID == nil || route.TargetStageID == nil {
 		return nil, httpx.BusinessRule("route missing pipeline target")
 	}
-	if err := repo.PlaceInPipeline(ctx, q, leadID, ownerAccountID, *route.TargetPipelineID, *route.TargetStageID, nil); err != nil {
+	lead, err := deps.Repo.GetByID(ctx, q, leadID)
+	if err != nil {
 		return nil, err
 	}
-	return nil, repo.SetStatus(ctx, q, leadID, "review")
+	if err := deps.Repo.PlaceInPipeline(ctx, q, leadID, ownerAccountID, *route.TargetPipelineID, *route.TargetStageID, lead.ContractID); err != nil {
+		return nil, err
+	}
+	if err := deps.Repo.LogPipelinePlacement(ctx, q, leadID, ActorRoute(route.Name), *route.TargetPipelineID, *route.TargetStageID); err != nil {
+		return nil, err
+	}
+	out, err := TryReturnLead(ctx, q, ReturnDeps{Repo: deps.Repo, Notif: deps.Notif}, leadID)
+	if err != nil {
+		return nil, err
+	}
+	if out.Returned {
+		return out.Emails, nil
+	}
+	return nil, deps.Repo.SetStatusWithLog(ctx, q, leadID, ActorSystem("Route"), "review")
 }
 
 func applyWebhookDestRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, leadID int64) error {
@@ -235,7 +249,7 @@ func ApplyContractDistribution(ctx context.Context, q database.Querier, deps Rou
 		if err := deps.Repo.TransferOwner(ctx, q, leadID, target.BuyerID, &contractID); err != nil {
 			return nil, err
 		}
-		if err := deps.Repo.SetStatus(ctx, q, leadID, "review"); err != nil {
+		if err := deps.Repo.SetStatusWithLog(ctx, q, leadID, ActorSystem("Route"), "review"); err != nil {
 			return nil, err
 		}
 		if p.ClearPreassigned {
@@ -256,6 +270,9 @@ func ApplyContractDistribution(ctx context.Context, q database.Querier, deps Rou
 	if err := deps.Repo.PlaceInPipeline(ctx, q, leadID, target.BuyerID, target.BuyerPipelineID, destStage, &contractID); err != nil {
 		return nil, err
 	}
+	if err := deps.Repo.LogPipelinePlacement(ctx, q, leadID, ActorSystem("Route"), target.BuyerPipelineID, destStage); err != nil {
+		return nil, err
+	}
 	if err := contracts.InitPublisherTracking(ctx, q, contractID, leadID, target.BuyerID, destStage); err != nil {
 		return nil, err
 	}
@@ -272,7 +289,7 @@ func ApplyContractDistribution(ctx context.Context, q database.Querier, deps Rou
 	if err := deps.Repo.SetCostAfterBuyerDistribution(ctx, q, leadID, buyer.Type, target.RatePerLead); err != nil {
 		return nil, err
 	}
-	if err := deps.Repo.SetStatus(ctx, q, leadID, "distributed"); err != nil {
+	if err := deps.Repo.SetStatusWithLog(ctx, q, leadID, ActorSystem("Route"), "distributed"); err != nil {
 		return nil, err
 	}
 	if p.ClearPreassigned {

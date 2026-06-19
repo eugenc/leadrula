@@ -88,6 +88,8 @@ type Delivery struct {
 	EventID         *int64          `json:"event_id,omitempty"`
 	LeadID          *int64          `json:"lead_id,omitempty"`
 	LeadPublicID    *string         `json:"lead_public_id,omitempty"`
+	FirstName       string          `json:"first_name,omitempty"`
+	LastName        string          `json:"last_name,omitempty"`
 	Status          string          `json:"status"`
 	ErrorMessage    *string         `json:"error_message,omitempty"`
 	RequestPayload  json.RawMessage `json:"request_payload,omitempty"`
@@ -542,14 +544,42 @@ type UpdateEventParams struct {
 }
 
 func (s *Service) UpdateEvent(ctx context.Context, webhookID, eventID int64, p UpdateEventParams) (*WebhookEvent, error) {
+	current, err := scanWebhookEvent(s.pool.QueryRow(ctx,
+		`SELECT `+webhookEventCols+` FROM webhook_events WHERE id=$1 AND webhook_id=$2`,
+		eventID, webhookID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, httpx.NotFound("event not found")
+		}
+		return nil, err
+	}
+
+	action := current.Action
+	if p.Action != nil && *p.Action != "" {
+		action = *p.Action
+	}
+	dupMode, lookupBy, targetStageID := mergedEventFields(action, current, p)
+	if err := validateEventState(action, dupMode, lookupBy, targetStageID); err != nil {
+		return nil, err
+	}
+
 	e, err := scanWebhookEvent(s.pool.QueryRow(ctx,
 		`UPDATE webhook_events SET
 		   action = COALESCE($3, action),
-		   duplicate_mode = COALESCE($4, duplicate_mode),
-		   lookup_by = COALESCE($5, lookup_by),
+		   duplicate_mode = CASE
+		     WHEN COALESCE($3, action) = 'create' THEN COALESCE($4, duplicate_mode)
+		     ELSE NULL
+		   END,
+		   lookup_by = CASE
+		     WHEN COALESCE($3, action) = 'create' THEN NULL
+		     ELSE COALESCE($5, lookup_by)
+		   END,
 		   lookup_source_key = COALESCE($6, lookup_source_key),
 		   note_source_key = CASE WHEN $11::text IS NOT NULL THEN NULLIF($11::text, '') ELSE note_source_key END,
-		   target_stage_id = COALESCE($7, target_stage_id),
+		   target_stage_id = CASE
+		     WHEN COALESCE($3, action) = 'move_stage' THEN COALESCE($7, target_stage_id)
+		     ELSE NULL
+		   END,
 		   target_pipeline_id = COALESCE($8, target_pipeline_id),
 		   condition_logic = COALESCE($9, condition_logic),
 		   conditions = CASE WHEN $10::jsonb IS NULL THEN conditions ELSE $10::jsonb END
@@ -562,9 +592,39 @@ func (s *Service) UpdateEvent(ctx context.Context, webhookID, eventID int64, p U
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, httpx.NotFound("event not found")
 		}
+		if database.IsCheckViolation(err) {
+			return nil, httpx.Validation("invalid action field combination")
+		}
 		return nil, err
 	}
 	return e, nil
+}
+
+func mergedEventFields(action string, current *WebhookEvent, p UpdateEventParams) (dupMode, lookupBy *string, targetStageID *int64) {
+	switch action {
+	case "create":
+		dupMode = coalesceStr(p.DuplicateMode, current.DuplicateMode)
+	case "update", "delete", "move_stage":
+		lookupBy = coalesceStr(p.LookupBy, current.LookupBy)
+		if action == "move_stage" {
+			targetStageID = coalesceInt64(p.TargetStageID, current.TargetStageID)
+		}
+	}
+	return dupMode, lookupBy, targetStageID
+}
+
+func coalesceStr(p, current *string) *string {
+	if p != nil {
+		return p
+	}
+	return current
+}
+
+func coalesceInt64(p, current *int64) *int64 {
+	if p != nil {
+		return p
+	}
+	return current
 }
 
 func nullableJSON(raw json.RawMessage) any {
@@ -660,12 +720,15 @@ func (s *Service) GetDelivery(ctx context.Context, accountID, webhookID, deliver
 	}
 	d := &Delivery{}
 	err = s.pool.QueryRow(ctx,
-		`SELECT d.id, d.webhook_id, d.event_id, d.lead_id, l.public_id::text, d.status, d.error_message, d.request_payload, d.created_at
+		`SELECT d.id, d.webhook_id, d.event_id, d.lead_id, l.public_id::text,
+		        COALESCE(l.first_name, ''), COALESCE(l.last_name, ''),
+		        d.status, d.error_message, d.request_payload, d.created_at
 		 FROM webhook_deliveries d
 		 LEFT JOIN leads l ON l.id = d.lead_id
 		 WHERE d.id=$1 AND d.webhook_id=$2`,
 		deliveryID, webhookID).Scan(
-		&d.ID, &d.WebhookID, &d.EventID, &d.LeadID, &d.LeadPublicID, &d.Status, &d.ErrorMessage, &d.RequestPayload, &d.CreatedAt)
+		&d.ID, &d.WebhookID, &d.EventID, &d.LeadID, &d.LeadPublicID, &d.FirstName, &d.LastName,
+		&d.Status, &d.ErrorMessage, &d.RequestPayload, &d.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, httpx.NotFound("delivery not found")
@@ -689,7 +752,9 @@ func (s *Service) ListDeliveries(ctx context.Context, webhookID int64, page, lim
 		return nil, err
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT d.id, d.webhook_id, d.event_id, d.lead_id, l.public_id::text, d.status, d.error_message, d.created_at
+		`SELECT d.id, d.webhook_id, d.event_id, d.lead_id, l.public_id::text,
+		        COALESCE(l.first_name, ''), COALESCE(l.last_name, ''),
+		        d.status, d.error_message, d.created_at
 		 FROM webhook_deliveries d
 		 LEFT JOIN leads l ON l.id = d.lead_id
 		 WHERE d.webhook_id=$1 ORDER BY d.created_at DESC LIMIT $2 OFFSET $3`,
@@ -701,7 +766,10 @@ func (s *Service) ListDeliveries(ctx context.Context, webhookID int64, page, lim
 	var items []Delivery
 	for rows.Next() {
 		var d Delivery
-		if err := rows.Scan(&d.ID, &d.WebhookID, &d.EventID, &d.LeadID, &d.LeadPublicID, &d.Status, &d.ErrorMessage, &d.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&d.ID, &d.WebhookID, &d.EventID, &d.LeadID, &d.LeadPublicID, &d.FirstName, &d.LastName,
+			&d.Status, &d.ErrorMessage, &d.CreatedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, d)
@@ -748,6 +816,7 @@ func (s *Service) ListAccountDeliveries(ctx context.Context, accountID int64, p 
 
 	rows, err := s.pool.Query(ctx,
 		`SELECT d.id, d.webhook_id, w.name, w.slug, d.event_id, d.lead_id, l.public_id::text,
+		        COALESCE(l.first_name, ''), COALESCE(l.last_name, ''),
 		        d.status, d.error_message, d.created_at
 		 FROM webhook_deliveries d
 		 JOIN webhooks w ON w.id = d.webhook_id
@@ -766,7 +835,8 @@ func (s *Service) ListAccountDeliveries(ctx context.Context, accountID int64, p 
 		var d AccountDelivery
 		if err := rows.Scan(
 			&d.ID, &d.WebhookID, &d.WebhookName, &d.WebhookSlug,
-			&d.EventID, &d.LeadID, &d.LeadPublicID, &d.Status, &d.ErrorMessage, &d.CreatedAt,
+			&d.EventID, &d.LeadID, &d.LeadPublicID, &d.FirstName, &d.LastName,
+			&d.Status, &d.ErrorMessage, &d.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -839,21 +909,25 @@ func validateEvent(p CreateEventParams) error {
 	if p.NoteSourceKey != nil && *p.NoteSourceKey != "" && p.Action != "create" && p.Action != "update" {
 		return httpx.Validation("note_source_key only allowed for create and update actions")
 	}
-	switch p.Action {
+	return validateEventState(p.Action, p.DuplicateMode, p.LookupBy, p.TargetStageID)
+}
+
+func validateEventState(action string, duplicateMode, lookupBy *string, targetStageID *int64) error {
+	switch action {
 	case "create":
-		if p.DuplicateMode == nil {
+		if duplicateMode == nil {
 			return httpx.Validation("duplicate_mode required for create action")
 		}
-		switch *p.DuplicateMode {
+		switch *duplicateMode {
 		case "update", "duplicate", "reject":
 		default:
 			return httpx.Validation("duplicate_mode must be update, duplicate, or reject")
 		}
 	case "update", "delete", "move_stage":
-		if p.LookupBy == nil {
+		if lookupBy == nil {
 			return httpx.Validation("lookup_by required for this action")
 		}
-		switch *p.LookupBy {
+		switch *lookupBy {
 		case "external_id", "public_id", "phone", "email":
 		default:
 			return httpx.Validation("lookup_by must be external_id, public_id, phone, or email")
@@ -861,7 +935,7 @@ func validateEvent(p CreateEventParams) error {
 	default:
 		return httpx.Validation("action must be create, update, delete, or move_stage")
 	}
-	if p.Action == "move_stage" && (p.TargetStageID == nil || *p.TargetStageID == 0) {
+	if action == "move_stage" && (targetStageID == nil || *targetStageID == 0) {
 		return httpx.Validation("target_stage_id required for move_stage action")
 	}
 	return nil

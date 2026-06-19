@@ -149,6 +149,7 @@ export function useSetActionAt() {
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["lead", v.leadId] });
+      qc.invalidateQueries({ queryKey: ["lead-history", v.leadId] });
       qc.invalidateQueries({ queryKey: ["calendar"] });
     },
   });
@@ -162,6 +163,7 @@ export function useUpdateLead() {
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["lead", v.leadId] });
+      qc.invalidateQueries({ queryKey: ["lead-history", v.leadId] });
       if ("tags" in v.body) {
         qc.invalidateQueries({ queryKey: ["lead-tags"] });
       }
@@ -182,17 +184,23 @@ export function useAddNote() {
   return useMutation({
     mutationFn: ({ leadId, body }: { leadId: number; body: string }) =>
       post<Note>(`${ns()}/leads/${leadId}/notes`, { body }),
-    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ["notes", v.leadId] }),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["notes", v.leadId] });
+      qc.invalidateQueries({ queryKey: ["lead-history", v.leadId] });
+    },
   });
 }
 
-export function useStageHistory(leadId: number | null) {
+export function useLeadHistory(leadId: number | null) {
   return useQuery({
     queryKey: ["lead-history", leadId],
     queryFn: () => get<LeadHistoryEntry[]>(`${ns()}/leads/${leadId}/stage-history`),
     enabled: !!leadId,
   });
 }
+
+/** @deprecated use useLeadHistory */
+export const useStageHistory = useLeadHistory;
 
 export function useCreateLead() {
   const qc = useQueryClient();
@@ -231,6 +239,7 @@ export function useImportLeads() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["lead-tags"] });
+      qc.invalidateQueries({ queryKey: ["lead-history"] });
     },
   });
 }
@@ -240,9 +249,10 @@ export function useRedistribute() {
   return useMutation({
     mutationFn: ({ leadId, contractId }: { leadId: number; contractId: number }) =>
       post<Lead>(`${ns()}/leads/${leadId}/redistribute`, { contract_id: contractId }),
-    onSuccess: () => {
+    onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["lead"] });
+      qc.invalidateQueries({ queryKey: ["lead-history", v.leadId] });
     },
   });
 }
@@ -262,7 +272,10 @@ export function useToggleFollow() {
       follow
         ? post(`${ns()}/leads/${leadId}/followers`, { user_id: userId })
         : del(`${ns()}/leads/${leadId}/followers/${userId}`),
-    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ["followers", v.leadId] }),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["followers", v.leadId] });
+      qc.invalidateQueries({ queryKey: ["lead-history", v.leadId] });
+    },
   });
 }
 
@@ -303,9 +316,10 @@ export function useBulkLeads() {
       user_id?: number;
       contract_id?: number;
     }) => post<{ affected: number }>(`${ns()}/leads/bulk`, body),
-    onSuccess: () => {
+    onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["lead"] });
+      qc.invalidateQueries({ queryKey: ["lead-history"] });
     },
   });
 }
@@ -314,9 +328,10 @@ export function useDeleteLead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => del<{ ok: boolean }>(`${ns()}/leads/${id}`),
-    onSuccess: () => {
+    onSuccess: (_d, leadId) => {
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["lead"] });
+      qc.invalidateQueries({ queryKey: ["lead-history", leadId] });
     },
   });
 }

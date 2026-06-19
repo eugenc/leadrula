@@ -707,7 +707,7 @@ func (s *Service) RouteFromQueue(ctx context.Context, queueID, routeID, pipeline
 	if err := s.leads.SetCostAfterBuyerDistribution(ctx, tx, leadID, buyer.Type, target.RatePerLead); err != nil {
 		return err
 	}
-	if err := s.leads.SetStatus(ctx, tx, leadID, "distributed"); err != nil {
+	if err := s.leads.SetStatusWithLog(ctx, tx, leadID, leads.ActorSystem("Route"), "distributed"); err != nil {
 		return err
 	}
 	if err := leads.RecordRouteExecution(ctx, tx, leads.RecordRouteExecutionParams{

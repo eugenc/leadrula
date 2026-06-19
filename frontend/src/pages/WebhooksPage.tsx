@@ -41,9 +41,10 @@ import { Dropdown, DropdownItem, DropdownSearch } from "@/components/ui/dropdown
 import { format } from "date-fns";
 import { ArrowRightLeft, Copy, Eye, EyeOff, KeyRound, Pencil, Plus, Trash2, Zap } from "lucide-react";
 import { toast } from "@/store/toastStore";
+import { useUIStore } from "@/store/uiStore";
 import { errorMessage, apiBaseURL } from "@/lib/api";
 import type { Webhook, WebhookEvent, WebhookOutboundTrigger, OutboundTriggerEvent, OutboundFormat, OutboundMethod, OutboundFieldMapEntry, ResponseMapEntry, InboundCondition, WebhookDelivery } from "@/types";
-import { canReplayDelivery, webhookDeliveryStatusLabel } from "@/features/intake/logShared";
+import { canReplayDelivery, LogLeadLink, webhookDeliveryStatusLabel } from "@/features/intake/logShared";
 
 type MappingContext = {
   deliveryId?: number;
@@ -829,6 +830,7 @@ function WebhookDetailDrawer({
   const [showSecret, setShowSecret] = useState(false);
   const rotate = useRotateWebhookSecret();
   const replay = useReplayWebhookDelivery();
+  const openDetail = useUIStore((s) => s.openDetail);
 
   useEffect(() => {
     setSecret(initialSecret ?? null);
@@ -892,7 +894,15 @@ function WebhookDetailDrawer({
                     <TR>
                       <TD className="text-xs">{format(new Date(d.created_at), "MMM d h:mma")}</TD>
                       <TD><Badge>{webhookDeliveryStatusLabel(d.status)}</Badge></TD>
-                      <TD className="font-mono text-xs">{d.lead_public_id ?? "—"}</TD>
+                      <TD>
+                        <LogLeadLink
+                          leadId={d.lead_id}
+                          firstName={d.first_name}
+                          lastName={d.last_name}
+                          fallback={d.lead_public_id}
+                          onClick={openDetail}
+                        />
+                      </TD>
                       <TD>
                         <div className="flex justify-end gap-1">
                           <Button size="sm" variant="secondary" onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>
@@ -1019,6 +1029,22 @@ function ActionDrawer({
   const mappableKeys = payload ? mappablePayloadKeys(payload) : [];
   const fieldMapActionId = savedActionId ?? action?.id ?? null;
 
+  function onActionTypeChange(next: WebhookEvent["action"]) {
+    setActionType(next);
+    if (next === "create") {
+      setLookupBy("external_id");
+      setLookupSourceKey("");
+      setTargetStageId("");
+    } else {
+      setTargetPipelineId("");
+      if (next !== "move_stage") setTargetStageId("");
+    }
+  }
+
+  const saveDisabled =
+    saving ||
+    (actionType === "move_stage" && !targetStageId);
+
   function buildBody(): Record<string, unknown> {
     const body: Record<string, unknown> = {
       action: actionType,
@@ -1063,14 +1089,14 @@ function ActionDrawer({
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button disabled={saving} onClick={save}>{editing ? "Save" : "Create"}</Button>
+          <Button disabled={saveDisabled} onClick={save}>{editing ? "Save" : "Create"}</Button>
         </>
       }
     >
       <div className="space-y-4">
         <div>
           <Label>Action</Label>
-          <select className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm" value={actionType} onChange={(e) => setActionType(e.target.value as WebhookEvent["action"])}>
+          <select className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm" value={actionType} onChange={(e) => onActionTypeChange(e.target.value as WebhookEvent["action"])}>
             <option value="create">Create lead</option>
             <option value="update">Update lead</option>
             <option value="delete">Delete lead (soft)</option>

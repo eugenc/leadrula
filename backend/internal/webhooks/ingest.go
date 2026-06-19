@@ -281,7 +281,7 @@ func (s *Service) executeEvent(ctx context.Context, accountID int64, webhookName
 	case "delete":
 		return s.execDelete(ctx, accountID, event, flat, maps)
 	case "move_stage":
-		return s.execMoveStage(ctx, accountID, event, flat, maps)
+		return s.execMoveStage(ctx, accountID, webhookName, event, flat, maps)
 	default:
 		return nil, nil, httpx.Validation("unsupported action")
 	}
@@ -499,7 +499,7 @@ func (s *Service) execDelete(ctx context.Context, accountID int64, event *Webhoo
 	return &IngestResult{LeadID: lead.PublicID, Action: "delete", Status: "deleted"}, &lead.ID, nil
 }
 
-func (s *Service) execMoveStage(ctx context.Context, accountID int64, event *WebhookEvent, flat map[string]any, maps []FieldMapEntry) (*IngestResult, *int64, error) {
+func (s *Service) execMoveStage(ctx context.Context, accountID int64, webhookName string, event *WebhookEvent, flat map[string]any, maps []FieldMapEntry) (*IngestResult, *int64, error) {
 	lead, err := s.resolveLead(ctx, accountID, event, flat, maps)
 	if err != nil {
 		return nil, nil, err
@@ -526,7 +526,7 @@ func (s *Service) execMoveStage(ctx context.Context, accountID int64, event *Web
 		disqReasonID = &id
 	}
 
-	updated, err := s.leadSvc.ChangeStageByWebhook(ctx, accountID, lead.ID, *event.TargetStageID, actionAt, disqReasonID)
+	updated, err := s.leadSvc.ChangeStageByWebhook(ctx, accountID, lead.ID, *event.TargetStageID, actionAt, disqReasonID, webhookName)
 	if err != nil {
 		return nil, &lead.ID, err
 	}

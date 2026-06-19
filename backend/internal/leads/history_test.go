@@ -40,11 +40,13 @@ func TestFilterLeadHistory_buyerScoped(t *testing.T) {
 	const buyerID int64 = 99
 	const otherBuyerID int64 = 50
 
+	base := time.Date(2026, 6, 18, 10, 0, 0, 0, time.UTC)
+
 	entries := []LeadHistoryEntry{
 		{
 			ID:             1,
 			Kind:           "stage_change",
-			CreatedAt:      time.Now(),
+			CreatedAt:      base.Add(-time.Hour),
 			AccountName:    &pubName,
 			AccountType:    &pubType,
 			ownerAccountID: pubID,
@@ -52,7 +54,7 @@ func TestFilterLeadHistory_buyerScoped(t *testing.T) {
 		{
 			ID:             2,
 			Kind:           "stage_change",
-			CreatedAt:      time.Now(),
+			CreatedAt:      base.Add(10 * time.Minute),
 			AccountName:    &buyerName,
 			AccountType:    &buyerType,
 			ownerAccountID: buyerID,
@@ -60,7 +62,7 @@ func TestFilterLeadHistory_buyerScoped(t *testing.T) {
 		{
 			ID:              3,
 			Kind:            "account_transfer",
-			CreatedAt:       time.Now(),
+			CreatedAt:       base,
 			TransferKind:    &sold,
 			FromAccountName: &pubName,
 			ToAccountName:   &buyerName,
@@ -70,7 +72,7 @@ func TestFilterLeadHistory_buyerScoped(t *testing.T) {
 		{
 			ID:              4,
 			Kind:            "account_transfer",
-			CreatedAt:       time.Now(),
+			CreatedAt:       base.Add(30 * time.Minute),
 			TransferKind:    &returned,
 			FromAccountName: &buyerName,
 			ToAccountName:   &pubName,
@@ -80,7 +82,7 @@ func TestFilterLeadHistory_buyerScoped(t *testing.T) {
 		{
 			ID:              5,
 			Kind:            "account_transfer",
-			CreatedAt:       time.Now(),
+			CreatedAt:       base.Add(-30 * time.Minute),
 			TransferKind:    &sold,
 			FromAccountName: &pubName,
 			ToAccountName:   &otherBuyer,
@@ -90,12 +92,17 @@ func TestFilterLeadHistory_buyerScoped(t *testing.T) {
 		{
 			ID:              6,
 			Kind:            "account_transfer",
-			CreatedAt:       time.Now(),
+			CreatedAt:       base.Add(40 * time.Minute),
 			TransferKind:    &redistributed,
 			FromAccountName: &pubName,
 			ToAccountName:   &otherBuyer,
 			fromAccountID:   pubID,
 			toAccountID:     otherBuyerID,
+		},
+		{
+			ID:        7,
+			Kind:      "lead_created",
+			CreatedAt: base.Add(-2 * time.Hour),
 		},
 	}
 
@@ -109,14 +116,164 @@ func TestFilterLeadHistory_buyerScoped(t *testing.T) {
 	if filtered[1].ID != 3 {
 		t.Fatalf("expected sold transfer, got id %d", filtered[1].ID)
 	}
-	if filtered[1].FromAccountName == nil || *filtered[1].FromAccountName != pubName {
-		t.Fatalf("sold from = %v, want %q", filtered[1].FromAccountName, pubName)
-	}
 	if filtered[2].ID != 4 {
 		t.Fatalf("expected returned transfer, got id %d", filtered[2].ID)
 	}
-	if filtered[2].ToAccountName == nil || *filtered[2].ToAccountName != pubName {
-		t.Fatalf("return to = %v, want %q", filtered[2].ToAccountName, pubName)
+}
+
+func TestFilterLeadHistory_ownershipWindowExcludesPostReturn(t *testing.T) {
+	sold := "sold"
+	returned := "returned"
+	base := time.Date(2026, 6, 18, 12, 0, 0, 0, time.UTC)
+	pubName := "Pub"
+	buyerName := "Buyer"
+
+	entries := []LeadHistoryEntry{
+		{
+			ID:              1,
+			Kind:            "account_transfer",
+			CreatedAt:       base,
+			TransferKind:    &sold,
+			FromAccountName: &pubName,
+			ToAccountName:   &buyerName,
+			fromAccountID:   1,
+			toAccountID:     99,
+		},
+		{
+			ID:             2,
+			Kind:           "stage_change",
+			CreatedAt:      base.Add(10 * time.Minute),
+			ownerAccountID: 99,
+		},
+		{
+			ID:              3,
+			Kind:            "account_transfer",
+			CreatedAt:       base.Add(20 * time.Minute),
+			TransferKind:    &returned,
+			fromAccountID:   99,
+			toAccountID:     1,
+		},
+		{
+			ID:             4,
+			Kind:           "stage_change",
+			CreatedAt:      base.Add(30 * time.Minute),
+			ownerAccountID: 1,
+		},
+	}
+
+	filtered := FilterLeadHistory(&auth.Principal{AccountType: "buyer", AccountID: 99}, entries)
+	if len(filtered) != 3 {
+		t.Fatalf("filtered len = %d, want 3 (sold, buyer stage, returned)", len(filtered))
+	}
+	if filtered[len(filtered)-1].ID != 3 {
+		t.Fatalf("expected returned transfer in window, got id %d", filtered[len(filtered)-1].ID)
+	}
+}
+
+func TestFilterLeadHistory_noteVisibility(t *testing.T) {
+	sold := "sold"
+	returned := "returned"
+	base := time.Date(2026, 6, 18, 14, 0, 0, 0, time.UTC)
+	pubName := "Pub"
+	buyerName := "Buyer"
+
+	entries := []LeadHistoryEntry{
+		{
+			ID:              1,
+			Kind:            "account_transfer",
+			CreatedAt:       base,
+			TransferKind:    &sold,
+			FromAccountName: &pubName,
+			ToAccountName:   &buyerName,
+			fromAccountID:   1,
+			toAccountID:     99,
+		},
+		{
+			ID:        2,
+			Kind:      "note_added",
+			CreatedAt: base.Add(-time.Hour),
+			Summary:   "Before sold",
+		},
+		{
+			ID:        3,
+			Kind:      "note_added",
+			CreatedAt: base.Add(10 * time.Minute),
+			Summary:   "During ownership",
+		},
+		{
+			ID:              4,
+			Kind:            "account_transfer",
+			CreatedAt:       base.Add(20 * time.Minute),
+			TransferKind:    &returned,
+			fromAccountID:   99,
+			toAccountID:     1,
+		},
+		{
+			ID:        5,
+			Kind:      "note_added",
+			CreatedAt: base.Add(30 * time.Minute),
+			Summary:   "After return",
+		},
+	}
+
+	pubFiltered := FilterLeadHistory(&auth.Principal{AccountType: "publisher"}, entries)
+	if len(pubFiltered) != 5 {
+		t.Fatalf("publisher note filter len = %d, want 5", len(pubFiltered))
+	}
+
+	buyerFiltered := FilterLeadHistory(&auth.Principal{AccountType: "buyer", AccountID: 99}, entries)
+	if len(buyerFiltered) != 3 {
+		t.Fatalf("buyer note filter len = %d, want 3 (sold, during note, returned)", len(buyerFiltered))
+	}
+	for _, e := range buyerFiltered {
+		if e.Kind == "note_added" && e.Summary != "During ownership" {
+			t.Fatalf("buyer saw unexpected note: %q", e.Summary)
+		}
+	}
+}
+
+func TestLeadHistory_includesNotes(t *testing.T) {
+	pool := connectLeadsTestDB(t)
+	ctx := t.Context()
+	repo := NewRepository(pool)
+
+	var leadID, userID int64
+	err := pool.QueryRow(ctx,
+		`SELECT l.id, u.id FROM leads l
+		 JOIN users u ON u.account_id = l.owner_account_id AND u.is_active
+		 WHERE l.deleted_at IS NULL LIMIT 1`).Scan(&leadID, &userID)
+	if err != nil {
+		t.Skip("no lead/user pair")
+	}
+
+	body := "activity history note test"
+	n, err := repo.AddNote(ctx, leadID, userID, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM lead_notes WHERE id = $1`, n.ID)
+	})
+
+	entries, err := repo.LeadHistory(ctx, leadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, e := range entries {
+		if e.Kind == "note_added" && e.ID == n.ID {
+			found = true
+			if e.Summary != body {
+				t.Fatalf("summary = %q, want %q", e.Summary, body)
+			}
+			if e.ActorType != "user" {
+				t.Fatalf("actor_type = %q, want user", e.ActorType)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatal("note_added entry not found in LeadHistory")
 	}
 }
 

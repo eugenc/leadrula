@@ -16,7 +16,7 @@ import {
   useLead,
   useNotes,
   useAddNote,
-  useStageHistory,
+  useLeadHistory,
   useUpdateLead,
   useSetActionAt,
   useUsers,
@@ -817,61 +817,152 @@ function transferHeadline(entry: LeadHistoryEntry): string {
   }
 }
 
+function kindLabel(kind: LeadHistoryEntry["kind"]): string {
+  switch (kind) {
+    case "stage_change":
+      return "Stage";
+    case "account_transfer":
+      return "Transfer";
+    case "purchase":
+      return "Purchase";
+    case "refund":
+      return "Refund";
+    case "dispute_opened":
+    case "dispute_resolved":
+      return "Dispute";
+    case "webhook":
+      return "Webhook";
+    case "outbound_webhook":
+      return "Outbound";
+    case "integration":
+      return "CRM";
+    case "lead_created":
+      return "Created";
+    case "pipeline_placed":
+      return "Placement";
+    case "status_change":
+      return "Status";
+    case "field_change":
+      return "Field";
+    case "assignee_change":
+      return "Assignee";
+    case "tag_change":
+      return "Tags";
+    case "calendar_event":
+      return "Calendar";
+    case "follower_added":
+    case "follower_removed":
+      return "Follower";
+    case "lead_deleted":
+      return "Deleted";
+    case "pipeline_cleared":
+      return "Pipeline";
+    case "imported":
+      return "Import";
+    case "note_added":
+      return "Note";
+    case "route_run":
+      return "Route";
+    default:
+      return "Activity";
+  }
+}
+
+function actorTypeLabel(type: string | null | undefined): string {
+  switch (type) {
+    case "webhook":
+      return "Webhook";
+    case "integration":
+      return "CRM";
+    case "route":
+      return "Route";
+    case "user":
+      return "User";
+    default:
+      return "System";
+  }
+}
+
+function historyActorLine(entry: LeadHistoryEntry): string {
+  const name = entry.actor_name || entry.moved_by_name || "System";
+  const type = actorTypeLabel(entry.actor_type);
+  return `${name} · ${type}`;
+}
+
+function historyHeadline(entry: LeadHistoryEntry): string {
+  if (entry.summary) return entry.summary;
+  if (entry.kind === "account_transfer") return transferHeadline(entry);
+  if (entry.kind === "stage_change") return stageChangeHeadline(entry);
+  if (entry.field_name && entry.from_value != null && entry.to_value != null) {
+    return `${entry.field_name} · ${entry.from_value} → ${entry.to_value}`;
+  }
+  return kindLabel(entry.kind);
+}
+
 function HistoryTab({ leadId }: { leadId: number }) {
-  const { data: history } = useStageHistory(leadId);
+  const { data: history, isLoading, isError } = useLeadHistory(leadId);
   return (
     <div>
-      <SectionLabel className="mb-2">Stage History</SectionLabel>
-      {(history ?? []).length === 0 && (
-        <p className="text-sm text-gray-400">No history yet.</p>
+      <SectionLabel className="mb-2">Activity</SectionLabel>
+      {isLoading && (
+        <div className="flex justify-center py-6">
+          <Spinner />
+        </div>
       )}
-      {(history ?? []).map((h) => {
-        const kind = h.kind ?? "stage_change";
-        return (
-        <div key={`${kind}-${h.id}`} className="flex items-start gap-2.5 py-1.5 text-sm text-gray-500">
+      {isError && (
+        <p className="text-sm text-red-500">Could not load activity.</p>
+      )}
+      {!isLoading && !isError && (history ?? []).length === 0 && (
+        <p className="text-sm text-gray-400">No activity yet.</p>
+      )}
+      {(history ?? []).map((h) => (
+        <div key={`${h.kind}-${h.id}`} className="flex items-start gap-2.5 py-1.5 text-sm text-gray-500">
           <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-jade-300" />
-          <div>
-            {kind === "account_transfer" ? (
-              <>
-                <div className="font-medium">{transferHeadline(h)}</div>
-                <div className="text-xs text-gray-400">
-                  {format(new Date(h.created_at), "MMM d, h:mma")}
-                  {h.trigger_label && ` · ${h.trigger_label}`}
-                </div>
-              </>
+          <div className="min-w-0 flex-1">
+            <div className="mb-0.5 flex flex-wrap items-center gap-2">
+              <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                {kindLabel(h.kind)}
+              </span>
+              {h.status && h.status !== "success" && (
+                <span className="text-[10px] font-medium uppercase text-amber-600">{h.status}</span>
+              )}
+            </div>
+            {h.kind === "stage_change" ? (
+              <div>
+                {(() => {
+                  const headline = stageChangeHeadline(h);
+                  const arrowIdx = headline.indexOf(" → ");
+                  if (arrowIdx === -1) {
+                    return <span className="font-medium">{headline}</span>;
+                  }
+                  return (
+                    <>
+                      {headline.slice(0, arrowIdx + 3)}
+                      <span className="font-medium">{headline.slice(arrowIdx + 3)}</span>
+                    </>
+                  );
+                })()}
+              </div>
             ) : (
-              <>
-                <div>
-                  {(() => {
-                    const headline = stageChangeHeadline(h);
-                    const arrowIdx = headline.indexOf(" → ");
-                    if (arrowIdx === -1) {
-                      return <span className="font-medium">{headline}</span>;
-                    }
-                    return (
-                      <>
-                        {headline.slice(0, arrowIdx + 3)}
-                        <span className="font-medium">{headline.slice(arrowIdx + 3)}</span>
-                      </>
-                    );
-                  })()}
-                </div>
-                <div className="text-xs text-gray-400">
-                  {h.moved_by_name ?? "System"} · {format(new Date(h.created_at), "MMM d, h:mma")}
-                  {h.action_at_captured &&
-                    ` · action ${format(new Date(h.action_at_captured), "MMM d, h:mm a")}`}
-                  {h.disqualification_reason && ` · ${h.disqualification_reason}`}
-                  {(() => {
-                    const label = accountLabel(h.account_name, h.account_type);
-                    return label ? ` · ${label}` : null;
-                  })()}
-                </div>
-              </>
+              <div className={cn("font-medium", h.kind === "note_added" && "line-clamp-3 whitespace-pre-wrap")}>
+                {historyHeadline(h)}
+              </div>
             )}
+            <div className="text-xs text-gray-400">
+              {historyActorLine(h)} · {format(new Date(h.created_at), "MMM d, h:mma")}
+              {h.action_at_captured &&
+                ` · action ${format(new Date(h.action_at_captured), "MMM d, h:mm a")}`}
+              {h.disqualification_reason && ` · ${h.disqualification_reason}`}
+              {h.trigger_label && ` · ${h.trigger_label}`}
+              {h.actor_detail && h.kind !== "account_transfer" && ` · ${h.actor_detail}`}
+              {(() => {
+                const label = accountLabel(h.account_name, h.account_type);
+                return label ? ` · ${label}` : null;
+              })()}
+            </div>
           </div>
         </div>
-        );
-      })}
+      ))}
     </div>
   );
 }

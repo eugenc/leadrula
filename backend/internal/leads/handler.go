@@ -208,7 +208,14 @@ func (h *Handler) bulk(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	n, err := h.svc.repo.Delete(r.Context(), p, []int64{id(r)})
+	leadID := id(r)
+	before, err := h.svc.repo.Get(r.Context(), p, leadID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	_ = h.svc.repo.InsertChangeLog(r.Context(), h.svc.repo.pool, leadID, before.OwnerAccountID, ActorFromPrincipal(p), "lead_deleted", "Lead", "", "")
+	n, err := h.svc.repo.Delete(r.Context(), p, []int64{leadID})
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -335,6 +342,24 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		}
 		auth.ApplyImpersonationChanges(r, diffLeadUpdate(before, l, in, fieldNames))
 	}
+	fieldNames, err := h.svc.repo.CustomFieldNames(r.Context(), p.AccountID, customFieldIDs)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	in := leadUpdateInput{
+		Fields:                body.Fields,
+		AssignedUserID:        body.AssignedUserID,
+		ClearAssignee:         body.ClearAssignee,
+		PreassignedBuyerID:    body.PreassignedBuyerID,
+		ClearPreassignedBuyer: body.ClearPreassignedBuyer,
+		CustomValues:          body.CustomValues,
+		Tags:                  body.Tags,
+	}
+	if err := LogChangesFromUpdate(r.Context(), h.svc.repo.pool, h.svc.repo, leadID, p.AccountID, ActorFromPrincipal(p), before, l, in, fieldNames); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
 	// Fire outbound webhook trigger for lead update.
 	h.svc.fireOutbound(r.Context(), p.AccountID, "lead.update", l, PipelineContext{
 		PipelineID: l.PipelineID,
@@ -395,6 +420,10 @@ func (h *Handler) setAction(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, err)
 		return
 	}
+	if err := LogActionAtChange(r.Context(), h.svc.repo.pool, h.svc.repo, leadID, before.OwnerAccountID, ActorFromPrincipal(p), before.ActionAt, body.ActionAt); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
 	if p.Impersonator != nil {
 		auth.ApplyImpersonationChanges(r, actionAtChange(before.ActionAt, body.ActionAt))
 	}
@@ -451,6 +480,12 @@ func (h *Handler) stageHistory(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) addFollower(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
+	leadID := id(r)
+	lead, err := h.svc.repo.Get(r.Context(), p, leadID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
 	var body struct {
 		UserID int64 `json:"user_id"`
 	}
@@ -461,19 +496,30 @@ func (h *Handler) addFollower(w http.ResponseWriter, r *http.Request) {
 	if uid == 0 {
 		uid = p.UserID
 	}
-	if err := h.svc.repo.AddFollower(r.Context(), id(r), uid); err != nil {
+	if err := h.svc.repo.AddFollower(r.Context(), leadID, uid); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
+	name := userDisplayName(r.Context(), h.svc.repo.pool, uid)
+	_ = h.svc.repo.InsertChangeLog(r.Context(), h.svc.repo.pool, leadID, lead.OwnerAccountID, ActorFromPrincipal(p), "follower_added", "Follower", "", name)
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) removeFollower(w http.ResponseWriter, r *http.Request) {
-	uid, _ := strconv.ParseInt(chi.URLParam(r, "userId"), 10, 64)
-	if err := h.svc.repo.RemoveFollower(r.Context(), id(r), uid); err != nil {
+	p := auth.FromContext(r.Context())
+	leadID := id(r)
+	lead, err := h.svc.repo.Get(r.Context(), p, leadID)
+	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
+	uid, _ := strconv.ParseInt(chi.URLParam(r, "userId"), 10, 64)
+	if err := h.svc.repo.RemoveFollower(r.Context(), leadID, uid); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	name := userDisplayName(r.Context(), h.svc.repo.pool, uid)
+	_ = h.svc.repo.InsertChangeLog(r.Context(), h.svc.repo.pool, leadID, lead.OwnerAccountID, ActorFromPrincipal(p), "follower_removed", "Follower", name, "")
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

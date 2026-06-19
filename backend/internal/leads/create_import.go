@@ -222,11 +222,17 @@ func (s *Service) ImportLeads(ctx context.Context, p *auth.Principal, in ImportL
 				input.Source = "CSV upload: " + fn
 			}
 		}
-		if _, err := s.insertLead(ctx, p, input); err != nil {
+		leadID, err := s.insertLead(ctx, p, input)
+		if err != nil {
 			result.Skipped++
 			result.Errors = append(result.Errors, ImportRowError{Row: i + 1, Message: err.Error()})
 			continue
 		}
+		importLabel := "CSV import"
+		if fn := strings.TrimSpace(in.ImportFilename); fn != "" {
+			importLabel = fn
+		}
+		_ = s.repo.InsertChangeLog(ctx, s.repo.pool, leadID, p.AccountID, ActorFromPrincipal(p), "imported", "Import", "", importLabel)
 		result.Created++
 	}
 	return result, nil
@@ -392,6 +398,13 @@ func (s *Service) insertLead(ctx context.Context, p *auth.Principal, in CreateLe
 		if err := s.repo.PlaceInPipeline(ctx, tx, leadID, p.AccountID, in.PipelineID, in.StageID, nil); err != nil {
 			return 0, err
 		}
+		if err := s.repo.LogPipelinePlacement(ctx, tx, leadID, ActorFromPrincipal(p), in.PipelineID, in.StageID); err != nil {
+			return 0, err
+		}
+	}
+
+	if err := s.repo.LogLeadCreated(ctx, tx, leadID, p.AccountID, ActorFromPrincipal(p), source); err != nil {
+		return 0, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {

@@ -2,7 +2,6 @@ package leads
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/accounts"
@@ -117,11 +116,14 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		return nil, nil, err
 	}
 	if stage.StageType == pipelines.StageTypeWon {
-		if err := s.repo.SetStatus(ctx, tx, leadID, "closed"); err != nil {
+		if err := s.repo.SetStatusWithLog(ctx, tx, leadID, ActorFromPrincipal(p), "closed"); err != nil {
 			return nil, nil, err
 		}
 	}
-	if err := s.repo.InsertStageHistory(ctx, tx, leadID, fromStage, newStageID, lead.OwnerAccountID, p.UserID, actionAt, disqReasonID); err != nil {
+	if err := s.repo.InsertStageHistory(ctx, tx, leadID, stageHistoryParams{
+		FromStage: fromStage, ToStage: newStageID, OwnerAccountID: lead.OwnerAccountID,
+		UserID: p.UserID, ActionAt: actionAt, DisqReason: disqReasonID, Actor: ActorFromPrincipal(p),
+	}); err != nil {
 		return nil, nil, err
 	}
 
@@ -202,81 +204,31 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		}
 	}
 
-	var returnInfo *contracts.ReturnInfo
-	if lead.ContractID != nil && finalStageID != nil {
-		var err error
-		returnInfo, err = contracts.FindReturnRule(ctx, tx, *lead.ContractID, lead.OwnerAccountID, *finalStageID)
-		if err != nil {
-			return nil, nil, err
-		}
+	updated, err = s.repo.GetByID(ctx, tx, leadID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if updated.StageID != nil {
+		finalStageID = updated.StageID
 	}
 
-	if lead.ContractID != nil && finalStageID != nil && returnInfo == nil {
-		if lead.OwnerAccountID != lead.PublisherID {
-			if err := contracts.SyncPublisherStageWithRebuild(ctx, tx, *lead.ContractID, leadID, lead.OwnerAccountID, *finalStageID); err != nil {
+	returnOut, err := TryReturnLead(ctx, tx, ReturnDeps{Repo: s.repo, Notif: s.notif}, leadID)
+	if err != nil {
+		return nil, nil, err
+	}
+	pendingEmails = append(pendingEmails, returnOut.Emails...)
+	updated = returnOut.Lead
+	if returnOut.Returned {
+		finalStageID = updated.StageID
+	} else if updated.ContractID != nil && finalStageID != nil {
+		if updated.OwnerAccountID != updated.PublisherID {
+			if err := contracts.SyncPublisherStageWithRebuild(ctx, tx, *updated.ContractID, leadID, updated.OwnerAccountID, *finalStageID); err != nil {
 				return nil, nil, err
 			}
 		}
-		if err := contracts.TryAccrueOnBuyerStage(ctx, tx, *lead.ContractID, leadID, *finalStageID); err != nil {
+		if err := contracts.TryAccrueOnBuyerStage(ctx, tx, *updated.ContractID, leadID, *finalStageID); err != nil {
 			return nil, nil, err
 		}
-	}
-
-	if returnInfo != nil {
-		if err := contracts.ValidateReturnDestination(ctx, tx, returnInfo.SourcePipelineID, returnInfo.ReturnStageID); err != nil {
-			return nil, nil, err
-		}
-		if lead.ContractID != nil {
-			refunded, err := billing.ReturnCreditExists(ctx, tx, lead.OwnerAccountID, leadID, *lead.ContractID)
-			if err != nil {
-				return nil, nil, fmt.Errorf("return rule check refund: %w", err)
-			}
-			if !refunded {
-				amt, err := billing.DistributeDebitAmount(ctx, tx, lead.OwnerAccountID, leadID, *lead.ContractID)
-				if err != nil {
-					return nil, nil, fmt.Errorf("return rule lookup debit: %w", err)
-				}
-				if amt > 0 {
-					if err := billing.Credit(ctx, tx, lead.OwnerAccountID, amt, leadID, *lead.ContractID, "lead returned"); err != nil {
-						return nil, nil, fmt.Errorf("return rule refund buyer: %w", err)
-					}
-				}
-			}
-		}
-		if err := contracts.RecordEarningReturn(ctx, tx, leadID, lead.ContractID); err != nil {
-			return nil, nil, fmt.Errorf("return rule record earning: %w", err)
-		}
-		if err := s.repo.MoveToPublisher(ctx, tx, leadID, returnInfo.PublisherID, returnInfo.SourcePipelineID, returnInfo.ReturnStageID); err != nil {
-			return nil, nil, fmt.Errorf("return rule move to publisher: %w", err)
-		}
-		buyerID := lead.OwnerAccountID
-		pubID := returnInfo.PublisherID
-		if err := RecordRouteExecution(ctx, tx, RecordRouteExecutionParams{
-			RouteName:       "Lead returned",
-			LeadID:          leadID,
-			OwnerAccountID:  buyerID,
-			TargetAccountID: &pubID,
-			Destination:     "return",
-			TriggerType:     "return",
-		}); err != nil {
-			return nil, nil, fmt.Errorf("return rule record execution: %w", err)
-		}
-		returned, err := s.repo.GetByID(ctx, tx, leadID)
-		if err != nil {
-			return nil, nil, fmt.Errorf("return rule reload lead: %w", err)
-		}
-		emails, err := s.notif.Deliver(ctx, tx, notifications.DeliverParams{
-			AccountID: returnInfo.PublisherID,
-			UserIDs:   notifications.AssigneeIDs(returned.AssignedUserID),
-			EventType: "lead_returned",
-			Payload:   map[string]any{"lead_id": leadID},
-		})
-		if err != nil {
-			return nil, nil, fmt.Errorf("return rule notify: %w", err)
-		}
-		pendingEmails = append(pendingEmails, emails...)
-		updated = returned
-		finalStageID = returned.StageID
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -315,12 +267,31 @@ func (s *Service) ClearFromPipeline(ctx context.Context, p *auth.Principal, lead
 		return lead, nil
 	}
 
+	fromPipeline := ""
+	if lead.PipelineName != nil {
+		fromPipeline = *lead.PipelineName
+	}
+	fromStage := ""
+	if lead.StageName != nil {
+		fromStage = *lead.StageName
+	}
+	fromVal := fromPipeline
+	if fromStage != "" {
+		if fromVal != "" {
+			fromVal += " → "
+		}
+		fromVal += fromStage
+	}
+
 	tx, err := s.repo.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
 
+	if err := s.repo.InsertChangeLog(ctx, tx, leadID, lead.OwnerAccountID, ActorFromPrincipal(p), "pipeline_cleared", "Pipeline", fromVal, ""); err != nil {
+		return nil, err
+	}
 	if err := s.repo.ClearFromPipeline(ctx, tx, leadID); err != nil {
 		return nil, err
 	}
@@ -340,10 +311,25 @@ func (s *Service) ClearFromPipeline(ctx context.Context, p *auth.Principal, lead
 }
 
 // ChangeStageByWebhook moves a lead without user permission checks (inbound webhook).
-func (s *Service) ChangeStageByWebhook(ctx context.Context, accountID, leadID, newStageID int64, actionAt *time.Time, disqReasonID *int64) (*Lead, error) {
+func (s *Service) ChangeStageByWebhook(ctx context.Context, accountID, leadID, newStageID int64, actionAt *time.Time, disqReasonID *int64, webhookName string) (*Lead, error) {
 	p := &auth.Principal{AccountID: accountID, Role: "admin", UserID: 0}
-	lead, _, err := s.ChangeStage(ctx, p, leadID, newStageID, actionAt, disqReasonID)
+	lead, err := s.changeStageWithActor(ctx, p, leadID, newStageID, actionAt, disqReasonID, ActorWebhook(webhookName))
 	return lead, err
+}
+
+func (s *Service) changeStageWithActor(ctx context.Context, p *auth.Principal, leadID, newStageID int64, actionAt *time.Time, disqReasonID *int64, actor HistoryActor) (*Lead, error) {
+	lead, _, err := s.ChangeStage(ctx, p, leadID, newStageID, actionAt, disqReasonID)
+	if err != nil {
+		return nil, err
+	}
+	// Re-label the latest stage history row when webhook moved (ChangeStage used user actor).
+	if actor.Type == "webhook" && actor.Label != "" {
+		_, _ = s.repo.pool.Exec(ctx,
+			`UPDATE lead_stage_history SET actor_type=$2, actor_label=$3, moved_by_user_id=0
+			 WHERE id = (SELECT id FROM lead_stage_history WHERE lead_id=$1 ORDER BY created_at DESC, id DESC LIMIT 1)`,
+			leadID, actor.Type, actor.Label)
+	}
+	return lead, nil
 }
 
 // fireOutbound fires outbound webhooks if a firer is wired. Runs best-effort (no error return).
@@ -398,7 +384,7 @@ func (s *Service) Redistribute(ctx context.Context, p *auth.Principal, leadID, c
 	if err := contracts.CheckCap(ctx, tx, target.ID, target.CompensationID); err != nil {
 		return nil, err
 	}
-	if err := s.repo.SetStatus(ctx, tx, leadID, "distributed"); err != nil {
+	if err := s.repo.SetStatusWithLog(ctx, tx, leadID, ActorSystem("Re-distribute"), "distributed"); err != nil {
 		return nil, err
 	}
 	if err := billing.Debit(ctx, tx, target.BuyerID, target.RatePerLead, leadID, target.ID, "lead re-distributed"); err != nil {
