@@ -126,11 +126,17 @@ func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, p
 		}
 		if providerSlug == "sunbase" || providerSlug == "ghl" {
 			var accountID int64
-			if err := s.pool.QueryRow(ctx, `SELECT account_id FROM integration_connections WHERE id=$1`, connID).Scan(&accountID); err == nil {
+			var accountTimezone string
+			if err := s.pool.QueryRow(ctx,
+				`SELECT ic.account_id, COALESCE(NULLIF(a.timezone, ''), 'America/New_York')
+				 FROM integration_connections ic
+				 JOIN accounts a ON a.id = ic.account_id
+				 WHERE ic.id=$1`, connID).Scan(&accountID, &accountTimezone); err == nil {
+				if dp.Config == nil {
+					dp.Config = map[string]any{}
+				}
+				dp.Config["account_timezone"] = accountTimezone
 				if types, err := customfields.FieldTypesByAccount(ctx, s.pool, accountID); err == nil && len(types) > 0 {
-					if dp.Config == nil {
-						dp.Config = map[string]any{}
-					}
 					dp.Config["custom_field_types"] = types
 				}
 			}

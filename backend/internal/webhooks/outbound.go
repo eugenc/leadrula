@@ -12,6 +12,7 @@ import (
 	"log"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/echayko/leadrula/backend/internal/customfields"
 	"github.com/echayko/leadrula/backend/internal/database"
@@ -350,6 +351,9 @@ func (s *Service) FireOutbound(ctx context.Context, accountID int64, event strin
 	tctx := buildTemplateContext(event, lead, pctx)
 
 	var sunbaseFieldTypes map[string]string
+	var accountTimezone string
+	_ = s.pool.QueryRow(ctx,
+		`SELECT COALESCE(NULLIF(timezone, ''), 'America/New_York') FROM accounts WHERE id=$1`, accountID).Scan(&accountTimezone)
 	firedWebhooks := map[int64]struct{}{}
 	for _, tr := range triggers {
 		if ec != nil {
@@ -376,6 +380,7 @@ func (s *Service) FireOutbound(ctx context.Context, accountID int64, event strin
 				continue
 			}
 			var fieldTypes map[string]string
+			var tz string
 			if tr.integrationProvider != nil && *tr.integrationProvider == "sunbase" {
 				if sunbaseFieldTypes == nil {
 					sunbaseFieldTypes, err = customfields.FieldTypesByAccount(ctx, s.pool, accountID)
@@ -384,8 +389,9 @@ func (s *Service) FireOutbound(ctx context.Context, accountID int64, event strin
 					}
 				}
 				fieldTypes = sunbaseFieldTypes
+				tz = accountTimezone
 			}
-			payload, err = buildURLPayload(event, lead, pctx, entries, fieldTypes)
+			payload, err = buildURLPayload(event, lead, pctx, entries, fieldTypes, tz)
 		} else {
 			payload, err = renderTemplate(tr.template, tctx)
 		}
@@ -516,17 +522,20 @@ func BuildOutboundURLPayload(ctx context.Context, q database.Querier, accountID 
 	if types, err := customfields.FieldTypesByAccount(ctx, q, accountID); err == nil && len(types) > 0 {
 		fieldTypes = types
 	}
-	return buildURLPayload(event, l, PipelineContext{}, entries, fieldTypes)
+	var accountTimezone string
+	_ = q.QueryRow(ctx,
+		`SELECT COALESCE(NULLIF(timezone, ''), 'America/New_York') FROM accounts WHERE id=$1`, accountID).Scan(&accountTimezone)
+	return buildURLPayload(event, l, PipelineContext{}, entries, fieldTypes, accountTimezone)
 }
 
-func buildURLPayload(event string, l *leads.Lead, pctx PipelineContext, entries []OutboundFieldMapEntry, fieldTypes map[string]string) ([]byte, error) {
+func buildURLPayload(event string, l *leads.Lead, pctx PipelineContext, entries []OutboundFieldMapEntry, fieldTypes map[string]string, accountTimezone string) ([]byte, error) {
 	tctx := buildTemplateContext(event, l, pctx)
 	out := map[string]string{}
 	for _, e := range entries {
 		if e.DestKey == "" {
 			continue
 		}
-		v := resolveOutboundFieldValue(e, tctx, l, fieldTypes)
+		v := resolveOutboundFieldValue(e, tctx, l, fieldTypes, accountTimezone)
 		if v != "" {
 			out[e.DestKey] = v
 		}
@@ -534,7 +543,7 @@ func buildURLPayload(event string, l *leads.Lead, pctx PipelineContext, entries 
 	return json.Marshal(out)
 }
 
-func resolveOutboundFieldValue(e OutboundFieldMapEntry, tctx map[string]string, l *leads.Lead, fieldTypes map[string]string) string {
+func resolveOutboundFieldValue(e OutboundFieldMapEntry, tctx map[string]string, l *leads.Lead, fieldTypes map[string]string, accountTimezone string) string {
 	switch e.SourceType {
 	case "static":
 		if e.StaticValue != nil {
@@ -560,6 +569,10 @@ func resolveOutboundFieldValue(e OutboundFieldMapEntry, tctx map[string]string, 
 		case "public_id":
 			if l != nil {
 				return l.PublicID
+			}
+		case "action_at":
+			if l != nil && l.ActionAt != nil && accountTimezone != "" {
+				return customfields.FormatForSunbaseExportInTimezone("datetime", l.ActionAt.Format(time.RFC3339), accountTimezone)
 			}
 		}
 	case "custom":

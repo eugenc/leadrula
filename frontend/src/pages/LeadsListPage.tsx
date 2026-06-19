@@ -12,6 +12,7 @@ import { DeleteLeadConfirmDialog } from "@/features/leads/DeleteLeadConfirmDialo
 import { LeadTagBadges } from "@/features/leads/LeadTagsEditor";
 import { LeadsColumnPicker } from "@/features/leads/LeadsColumnPicker";
 import { LeadFilterBuilder } from "@/features/leads/LeadFilterBuilder";
+import { LeadSearchInput } from "@/features/leads/LeadSearchInput";
 import { LeadViewsMenu } from "@/features/leads/LeadViewsMenu";
 import { NewLeadDrawer } from "@/features/leads/NewLeadDrawer";
 import { ImportLeadsModal } from "@/features/leads/ImportLeadsModal";
@@ -27,7 +28,7 @@ import {
 import { useContracts } from "@/features/admin/hooks";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Badge, Spinner, EmptyState } from "@/components/ui/misc";
-import { FilterSelect, Input } from "@/components/ui/input";
+import { FilterSelect } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Dropdown, DropdownItem } from "@/components/ui/dropdown";
@@ -275,12 +276,13 @@ export function LeadsListPage() {
           <Button variant="outline" size="sm" onClick={() => setFiltersExpanded((e) => !e)}>
             {filtersExpanded ? "Hide filters" : "Edit filters"}
           </Button>
-          <Input
-            type="search"
+          <LeadSearchInput
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, email, phone, address, buyer, or status…"
-            className="h-7 w-72 text-sm"
+            onChange={setSearch}
+            className="w-72"
+            inputClassName="h-7 text-sm"
+            leadFilters={bulkListFilters}
+            onSelectLead={(lead) => openDetail(lead.id)}
           />
           <div className="ml-auto flex items-center gap-2">
             {canCreate && (

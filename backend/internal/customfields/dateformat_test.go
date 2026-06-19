@@ -24,3 +24,11 @@ func TestFormatForSunbaseExport(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatForSunbaseExportInTimezone(t *testing.T) {
+	got := FormatForSunbaseExportInTimezone("datetime", "2026-06-19T23:00:00Z", "America/New_York")
+	want := "2026-06-19T19:00"
+	if got != want {
+		t.Fatalf("FormatForSunbaseExportInTimezone() = %q, want %q", got, want)
+	}
+}

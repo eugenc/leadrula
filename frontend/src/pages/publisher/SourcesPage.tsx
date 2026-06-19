@@ -29,7 +29,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { Switch, Spinner, EmptyState, Badge } from "@/components/ui/misc";
 import { FormDrawer } from "@/components/ui/dialog";
 import { format } from "date-fns";
-import { ArrowRightLeft, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { ArrowRightLeft, Copy, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { IntakeLogSection } from "@/features/intake/IntakeLogTable";
 import { toast } from "@/store/toastStore";
 import { errorMessage, apiBaseURL } from "@/lib/api";
@@ -620,9 +620,13 @@ function SourceFieldMapContent({
               </span>
               <div className="flex items-center gap-2">
                 {e.target_type !== "ignore" && (
-                  <Button size="sm" variant="secondary" onClick={() => prefillMapping(e.source_key)}>
-                    Map to another field
-                  </Button>
+                  <IconButton
+                    aria-label="Map to another field"
+                    title="Map to another field"
+                    onClick={() => prefillMapping(e.source_key)}
+                  >
+                    <Copy className="h-4 w-4" />
+                  </IconButton>
                 )}
                 {e.target_type === "ignore" && (
                   <Button size="sm" variant="secondary" onClick={() => prefillMapping(e.source_key)}>

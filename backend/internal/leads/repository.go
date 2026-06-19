@@ -456,7 +456,7 @@ const leadStatusSearchLabel = `CASE l.status
 	WHEN 'distributed' THEN 'distributed'
 	WHEN 'returned' THEN 'returned'
 	WHEN 'closed' THEN 'closed'
-	ELSE l.status
+	ELSE l.status::text
 END`
 
 func appendLeadSearch(where string, args []any, term string) (string, []any) {
@@ -480,9 +480,8 @@ func appendLeadSearch(where string, args []any, term string) (string, []any) {
 		l.zip ILIKE $%d OR
 		concat_ws(' ', l.address, l.city, l.state, l.zip) ILIKE $%d OR
 		ba.name ILIKE $%d OR
-		l.status ILIKE $%d OR
 		(%s) ILIKE $%d
-	)`, n, n, n, n, n, n, n, n, n, n, n, n, n, leadStatusSearchLabel, n)
+	)`, n, n, n, n, n, n, n, n, n, n, n, n, leadStatusSearchLabel, n)
 	return where, args
 }
 

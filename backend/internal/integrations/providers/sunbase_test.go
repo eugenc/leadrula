@@ -173,10 +173,13 @@ func TestResolveSunbaseFieldValue_actionAt(t *testing.T) {
 		BuiltinField: &bf,
 	}
 	payload := DeliveryPayload{
-		ActionAt: "2026-06-08T14:30:00-04:00",
+		ActionAt: "2026-06-19T23:00:00Z",
+		Config: map[string]any{
+			"account_timezone": "America/New_York",
+		},
 	}
 	got := resolveSunbaseFieldValue(entry, payload)
-	want := "2026-06-08T14:30"
+	want := "2026-06-19T19:00"
 	if got != want {
 		t.Fatalf("resolveSunbaseFieldValue() = %q, want %q", got, want)
 	}

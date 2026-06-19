@@ -161,6 +161,8 @@ func NormalizeValue(f CustomField, raw json.RawMessage) (json.RawMessage, error)
 	return json.Marshal(formatted)
 }
 
+const defaultSunbaseTimezone = "America/New_York"
+
 // FormatForSunbaseExport parses raw and returns yyyy-MM-DD or yyyy-MM-DDTHH:mm
 // using wall-clock time from the parsed value. Returns raw unchanged if not parseable.
 func FormatForSunbaseExport(ftype, raw string) string {
@@ -174,4 +176,27 @@ func FormatForSunbaseExport(ftype, raw string) string {
 		return raw
 	}
 	return FormatTime(ftype, formatToken, t)
+}
+
+// FormatForSunbaseExportInTimezone parses raw and returns yyyy-MM-DD or yyyy-MM-DDTHH:mm
+// using wall-clock time in timezone. Returns raw unchanged if not parseable.
+func FormatForSunbaseExportInTimezone(ftype, raw, timezone string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || (ftype != "date" && ftype != "datetime") {
+		return raw
+	}
+	timezone = strings.TrimSpace(timezone)
+	if timezone == "" {
+		timezone = defaultSunbaseTimezone
+	}
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		loc, _ = time.LoadLocation(defaultSunbaseTimezone)
+	}
+	formatToken := DefaultFormat(ftype)
+	t, ok := ParseFlexible(ftype, formatToken, raw)
+	if !ok {
+		return raw
+	}
+	return FormatTime(ftype, formatToken, t.In(loc))
 }

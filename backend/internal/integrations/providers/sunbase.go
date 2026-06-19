@@ -209,7 +209,7 @@ func resolveSunbaseFieldValue(e SunbaseFieldMapEntry, payload DeliveryPayload) s
 			if payload.ActionAt == "" {
 				return ""
 			}
-			return customfields.FormatForSunbaseExport("datetime", payload.ActionAt)
+			return customfields.FormatForSunbaseExportInTimezone("datetime", payload.ActionAt, sunbaseAccountTimezone(payload.Config))
 		case "lead_id", "public_id":
 			return payload.LeadID
 		case "external_id":
@@ -230,6 +230,16 @@ func resolveSunbaseFieldValue(e SunbaseFieldMapEntry, payload DeliveryPayload) s
 				return s
 			}
 		}
+	}
+	return ""
+}
+
+func sunbaseAccountTimezone(config map[string]any) string {
+	if config == nil {
+		return ""
+	}
+	if v, ok := config["account_timezone"].(string); ok {
+		return v
 	}
 	return ""
 }

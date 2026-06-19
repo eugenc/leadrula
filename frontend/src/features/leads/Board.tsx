@@ -23,6 +23,7 @@ import { LeadCard } from "./LeadCard";
 import { LeadsColumnPicker } from "./LeadsColumnPicker";
 import { StagePromptModal, type PromptResult } from "./StagePromptModal";
 import { LeadFilterBuilder } from "./LeadFilterBuilder";
+import { LeadSearchInput } from "./LeadSearchInput";
 import { LeadViewsMenu } from "./LeadViewsMenu";
 import {
   useSavedLeadViews,
@@ -34,7 +35,7 @@ import {
   type FilterCondition,
   type SavedLeadView,
 } from "./leadsViews";
-import { FilterSelect, Input } from "@/components/ui/input";
+import { FilterSelect } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Spinner, EmptyState } from "@/components/ui/misc";
 import { useUIStore } from "@/store/uiStore";
@@ -329,12 +330,13 @@ export function Board() {
             </option>
           ))}
         </FilterSelect>
-        <Input
-          type="search"
-          placeholder="Search name, email, phone, address, buyer, or status…"
+        <LeadSearchInput
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="h-7 w-72 text-sm"
+          onChange={setSearchTerm}
+          className="w-72"
+          inputClassName="h-7 text-sm"
+          leadFilters={leadFilters}
+          onSelectLead={(lead) => openDetail(lead.id)}
         />
         <LeadViewsMenu
           placement="board"

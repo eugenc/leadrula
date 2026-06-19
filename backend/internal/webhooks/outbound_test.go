@@ -23,7 +23,7 @@ func TestBuildURLPayload_sunbaseDatetimeFormat(t *testing.T) {
 		{DestKey: "appt_time", SourceType: "custom", CustomFieldID: &fid},
 	}
 	fieldTypes := map[string]string{"7": "datetime"}
-	payload, err := buildURLPayload("lead.update", lead, PipelineContext{}, entries, fieldTypes)
+	payload, err := buildURLPayload("lead.update", lead, PipelineContext{}, entries, fieldTypes, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,6 +33,27 @@ func TestBuildURLPayload_sunbaseDatetimeFormat(t *testing.T) {
 	}
 	if out["appt_time"] != "2026-06-08T14:30" {
 		t.Fatalf("appt_time = %q, want 2026-06-08T14:30", out["appt_time"])
+	}
+}
+
+func TestBuildURLPayload_actionAtSunbaseTimezone(t *testing.T) {
+	actionAt := time.Date(2026, 6, 19, 23, 0, 0, 0, time.UTC)
+	bf := "action_at"
+	lead := &leads.Lead{ActionAt: &actionAt}
+	entries := []OutboundFieldMapEntry{
+		{DestKey: "appt_time", SourceType: "builtin", BuiltinField: &bf},
+	}
+	fieldTypes := map[string]string{}
+	payload, err := buildURLPayload("lead.update", lead, PipelineContext{}, entries, fieldTypes, "America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]string
+	if err := json.Unmarshal(payload, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["appt_time"] != "2026-06-19T19:00" {
+		t.Fatalf("appt_time = %q, want 2026-06-19T19:00", out["appt_time"])
 	}
 }
 
@@ -46,7 +67,7 @@ func TestBuildURLPayload_nonSunbaseKeepsRawDatetime(t *testing.T) {
 	entries := []OutboundFieldMapEntry{
 		{DestKey: "appt_time", SourceType: "custom", CustomFieldID: &fid},
 	}
-	payload, err := buildURLPayload("lead.update", lead, PipelineContext{}, entries, nil)
+	payload, err := buildURLPayload("lead.update", lead, PipelineContext{}, entries, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
