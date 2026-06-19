@@ -189,9 +189,11 @@ func FormatForSunbaseExportInTimezone(ftype, raw, timezone string) string {
 	if timezone == "" {
 		timezone = defaultSunbaseTimezone
 	}
-	loc, err := time.LoadLocation(timezone)
-	if err != nil {
-		loc, _ = time.LoadLocation(defaultSunbaseTimezone)
+	loc := time.UTC
+	if l, err := time.LoadLocation(timezone); err == nil {
+		loc = l
+	} else if l, err := time.LoadLocation(defaultSunbaseTimezone); err == nil {
+		loc = l
 	}
 	formatToken := DefaultFormat(ftype)
 	t, ok := ParseFlexible(ftype, formatToken, raw)

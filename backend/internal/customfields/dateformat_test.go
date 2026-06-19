@@ -26,9 +26,25 @@ func TestFormatForSunbaseExport(t *testing.T) {
 }
 
 func TestFormatForSunbaseExportInTimezone(t *testing.T) {
-	got := FormatForSunbaseExportInTimezone("datetime", "2026-06-19T23:00:00Z", "America/New_York")
-	want := "2026-06-19T19:00"
-	if got != want {
-		t.Fatalf("FormatForSunbaseExportInTimezone() = %q, want %q", got, want)
+	tests := []struct {
+		ftype    string
+		raw      string
+		timezone string
+		want     string
+	}{
+		{"datetime", "2026-06-19T23:00:00Z", "America/New_York", "2026-06-19T19:00"},
+		{"datetime", "2026-06-19T23:00:00Z", "", "2026-06-19T19:00"},
+		// Unknown zone falls back to defaultSunbaseTimezone when tzdata is available.
+		{"datetime", "2026-06-08T14:30:00Z", "Invalid/Zone", "2026-06-08T10:30"},
+		{"datetime", "2026-06-08T14:30:00Z", "America/Chicago", "2026-06-08T09:30"},
+		{"datetime", "not-a-date", "America/New_York", "not-a-date"},
+		{"datetime", "", "America/New_York", ""},
+	}
+	for _, tc := range tests {
+		got := FormatForSunbaseExportInTimezone(tc.ftype, tc.raw, tc.timezone)
+		if got != tc.want {
+			t.Errorf("FormatForSunbaseExportInTimezone(%q, %q, %q) = %q, want %q",
+				tc.ftype, tc.raw, tc.timezone, got, tc.want)
+		}
 	}
 }

@@ -124,7 +124,9 @@ function IntegrationDeliveryExpand({ detail }: { detail: IntegrationDeliveryDeta
           return (
             <div key={attempt.attempt_number} className="space-y-2">
               <p className="text-xs font-medium text-gray-500">
-                Attempt {attempt.attempt_number} — {attempt.status}
+                Attempt {attempt.attempt_number}
+                {attempt.created_at ? ` — ${format(new Date(attempt.created_at), "MMM d, h:mma")}` : ""}
+                — {attempt.status}
                 {attempt.http_status != null && attempt.http_status > 0 ? ` — HTTP ${attempt.http_status}` : ""}
                 {attempt.duration_ms != null ? ` — ${attempt.duration_ms}ms` : ""}
               </p>
