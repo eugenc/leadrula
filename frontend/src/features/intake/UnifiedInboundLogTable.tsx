@@ -227,8 +227,13 @@ export function UnifiedInboundLogTable({
             if (row.kind === "source") {
               const q = row.item;
               const unmapped = q.unmapped_keys?.length ?? 0;
+              const canOpenDrawer = q.status === "pending_review" || unmapped > 0;
               return (
-                <TR key={key} onClick={() => setDrawerItem(q)} className="cursor-pointer">
+                <TR
+                  key={key}
+                  onClick={() => canOpenDrawer && setDrawerItem(q)}
+                  className={canOpenDrawer ? "cursor-pointer" : undefined}
+                >
                   <TD className="text-xs">{format(new Date(q.created_at), "MMM d, h:mma")}</TD>
                   <TD className="text-xs text-gray-600">Source</TD>
                   <TD className="text-xs text-gray-600">{direction}</TD>

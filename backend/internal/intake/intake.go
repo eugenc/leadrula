@@ -799,11 +799,6 @@ func (s *Service) MapField(ctx context.Context, publisherID, queueID int64, sour
 			return nil, err
 		}
 		if src != nil {
-			if _, err := tx.Exec(ctx,
-				`DELETE FROM routing_source_field_map WHERE source_id=$1 AND source_key=$2`,
-				src.ID, sourceKey); err != nil {
-				return nil, err
-			}
 			var insertBuiltin *string
 			var insertCustom *int64
 			if targetType == "ignore" {
@@ -813,11 +808,7 @@ func (s *Service) MapField(ctx context.Context, publisherID, queueID int64, sour
 				insertBuiltin = builtinField
 				insertCustom = customFieldID
 			}
-			_, err = tx.Exec(ctx,
-				`INSERT INTO routing_source_field_map(source_id, source_key, target_type, builtin_field, custom_field_id)
-				 VALUES ($1,$2,$3,$4,$5)`,
-				src.ID, sourceKey, targetType, insertBuiltin, insertCustom)
-			if err != nil {
+			if _, err := routing.InsertSourceFieldMapEntry(ctx, tx, src.ID, sourceKey, targetType, insertBuiltin, insertCustom); err != nil {
 				return nil, err
 			}
 		}

@@ -11,6 +11,7 @@ import { useCreateField } from "@/features/admin/hooks";
 import { CreateCustomFieldDrawer } from "@/features/admin/CreateCustomFieldDrawer";
 import { ADD_CUSTOM_FIELD, slugFieldKey } from "@/features/admin/customFieldConstants";
 import { SUNBASE_OUTBOUND_BUILTINS } from "@/features/integrations/sunbaseConstants";
+import { builtinFieldLabel } from "@/features/leads/csvMapping";
 import { errorMessage } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
@@ -136,7 +137,7 @@ export function SunbaseFieldMapSection({
                     >
                       {SUNBASE_OUTBOUND_BUILTINS.map((b) => (
                         <option key={b} value={b}>
-                          {b}
+                          {builtinFieldLabel(b)}
                         </option>
                       ))}
                     </Select>

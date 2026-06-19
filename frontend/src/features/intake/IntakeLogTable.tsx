@@ -265,7 +265,8 @@ export function IntakeLogTable({
     leadId: selectedLeadId ?? undefined,
   };
 
-  const intakeFilters = {
+  const sourceInboundFilters = {
+    type: "source" as const,
     status: logFilter,
     page,
     limit,
@@ -297,7 +298,7 @@ export function IntakeLogTable({
   const showInboundData = logType === "integrations" || logType === "routes" || logType === "all";
   const showBuyerAllRouting = source === "buyer" && logType === "all";
 
-  const intakeQuery = useRoutingLog(source, intakeFilters, showIntakeData);
+  const sourceInboundQuery = useInboundLog(sourceInboundFilters, showIntakeData, source);
   const webhookQuery = useAccountWebhookDeliveries(webhookFilters);
   const buyerAllRoutingQuery = useRoutingLog(
     "buyer",
@@ -345,18 +346,19 @@ export function IntakeLogTable({
 
   const { rows, total, isLoading, hasFilters, loadError, refetchWebhooks } = useMemo(() => {
     if (logType === "intake") {
-      const items = showIntakeData && !intakeQuery.isError ? (intakeQuery.data?.items ?? []) : [];
-      const loading = showIntakeData && intakeQuery.isLoading;
+      const items = showIntakeData && !sourceInboundQuery.isError ? (sourceInboundQuery.data?.items ?? []) : [];
+      const inboundRows = inboundItemsToRows(items);
+      const loading = showIntakeData && sourceInboundQuery.isLoading;
       return {
-        rows: queueItemsToRows(items),
-        total: intakeQuery.data?.total ?? 0,
+        rows: inboundRows,
+        total: sourceInboundQuery.data?.total ?? 0,
         isLoading: loading,
         hasFilters: logFilter !== "all" || leadSearchActive || !!sourceSlug,
         loadError:
-          !loading && items.length === 0 && intakeQuery.isError
-            ? errorMessage(intakeQuery.error)
+          !loading && inboundRows.length === 0 && sourceInboundQuery.isError
+            ? errorMessage(sourceInboundQuery.error)
             : null,
-        refetchWebhooks: () => intakeQuery.refetch(),
+        refetchWebhooks: () => sourceInboundQuery.refetch(),
       };
     }
     if (logType === "webhooks") {
@@ -434,10 +436,10 @@ export function IntakeLogTable({
     logType,
     source,
     limit,
-    intakeQuery.data,
-    intakeQuery.isLoading,
-    intakeQuery.isError,
-    intakeQuery.error,
+    sourceInboundQuery.data,
+    sourceInboundQuery.isLoading,
+    sourceInboundQuery.isError,
+    sourceInboundQuery.error,
     webhookQuery.data,
     webhookQuery.isLoading,
     webhookQuery.isError,
@@ -462,7 +464,7 @@ export function IntakeLogTable({
     webhookQuery,
     inboundQuery,
     buyerAllRoutingQuery,
-    intakeQuery,
+    sourceInboundQuery,
   ]);
 
   const emptyMessage =

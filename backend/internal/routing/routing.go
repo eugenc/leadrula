@@ -252,6 +252,60 @@ func SourceFieldMap(ctx context.Context, q database.Querier, sourceID int64) ([]
 	return out, rows.Err()
 }
 
+// InsertSourceFieldMapEntry adds a source payload field mapping.
+// One source_key may map to multiple targets; ignore clears all other mappings for that key.
+func InsertSourceFieldMapEntry(ctx context.Context, q database.Querier, sourceID int64, sourceKey, targetType string, builtinField *string, customFieldID *int64) (*SourceFieldMapEntry, error) {
+	if targetType == "ignore" {
+		if _, err := q.Exec(ctx,
+			`DELETE FROM routing_source_field_map WHERE source_id=$1 AND source_key=$2`,
+			sourceID, sourceKey); err != nil {
+			return nil, err
+		}
+	} else {
+		if _, err := q.Exec(ctx,
+			`DELETE FROM routing_source_field_map WHERE source_id=$1 AND source_key=$2 AND target_type='ignore'`,
+			sourceID, sourceKey); err != nil {
+			return nil, err
+		}
+		var exists bool
+		var err error
+		if targetType == "builtin" {
+			err = q.QueryRow(ctx,
+				`SELECT EXISTS(
+				   SELECT 1 FROM routing_source_field_map
+				   WHERE source_id=$1 AND source_key=$2 AND target_type='builtin' AND builtin_field=$3
+				 )`, sourceID, sourceKey, *builtinField).Scan(&exists)
+		} else {
+			err = q.QueryRow(ctx,
+				`SELECT EXISTS(
+				   SELECT 1 FROM routing_source_field_map
+				   WHERE source_id=$1 AND source_key=$2 AND target_type='custom' AND custom_field_id=$3
+				 )`, sourceID, sourceKey, *customFieldID).Scan(&exists)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			return nil, httpx.Validation("this source key is already mapped to that field")
+		}
+	}
+
+	e := &SourceFieldMapEntry{}
+	err := q.QueryRow(ctx,
+		`INSERT INTO routing_source_field_map(source_id, source_key, target_type, builtin_field, custom_field_id)
+		 VALUES ($1,$2,$3,$4,$5)
+		 RETURNING id, source_id, source_key, target_type, builtin_field, custom_field_id, created_at`,
+		sourceID, sourceKey, targetType, builtinField, customFieldID).Scan(
+		&e.ID, &e.SourceID, &e.SourceKey, &e.TargetType, &e.BuiltinField, &e.CustomFieldID, &e.CreatedAt)
+	if err != nil {
+		if database.IsCheckViolation(err) {
+			return nil, httpx.Validation("provide builtin_field for builtin target, custom_field_id for custom target, or neither for ignore")
+		}
+		return nil, err
+	}
+	return e, nil
+}
+
 // RouteForSource finds the first matching active route whose origin is the given source.
 func RouteForSource(ctx context.Context, q database.Querier, sourceID, leadID int64, payloadFlat map[string]any) (*Route, error) {
 	routes, err := listRoutesForSource(ctx, q, sourceID)
@@ -538,25 +592,7 @@ func (s *Service) AddSourceFieldMap(ctx context.Context, publisherID, sourceID i
 		builtinField = nil
 		customFieldID = nil
 	}
-	if _, err := s.pool.Exec(ctx,
-		`DELETE FROM routing_source_field_map WHERE source_id=$1 AND source_key=$2`,
-		sourceID, sourceKey); err != nil {
-		return nil, err
-	}
-	e := &SourceFieldMapEntry{}
-	err = s.pool.QueryRow(ctx,
-		`INSERT INTO routing_source_field_map(source_id, source_key, target_type, builtin_field, custom_field_id)
-		 VALUES ($1,$2,$3,$4,$5)
-		 RETURNING id, source_id, source_key, target_type, builtin_field, custom_field_id, created_at`,
-		sourceID, sourceKey, targetType, builtinField, customFieldID).Scan(
-		&e.ID, &e.SourceID, &e.SourceKey, &e.TargetType, &e.BuiltinField, &e.CustomFieldID, &e.CreatedAt)
-	if err != nil {
-		if database.IsCheckViolation(err) {
-			return nil, httpx.Validation("provide builtin_field for builtin target, custom_field_id for custom target, or neither for ignore")
-		}
-		return nil, err
-	}
-	return e, nil
+	return InsertSourceFieldMapEntry(ctx, s.pool, sourceID, sourceKey, targetType, builtinField, customFieldID)
 }
 
 func (s *Service) DeleteSourceFieldMap(ctx context.Context, id int64) error {

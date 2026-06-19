@@ -76,22 +76,138 @@ func (s *Service) ListInboundLog(ctx context.Context, accountID int64, p ListInb
 }
 
 func (s *Service) listInboundLogSources(ctx context.Context, accountID int64, p ListInboundLogParams) (*InboundLogListResponse, error) {
-	q, err := s.ListQueue(ctx, accountID, ListQueueParams{
-		Status: firstOr(p.Status, "all"),
-		Page:   p.Page,
-		Limit:  p.Limit,
-		Search: p.Search,
-		Source: p.Source,
-		LeadID: p.LeadID,
-	})
+	limit := p.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	page := p.Page
+	if page < 1 {
+		page = 1
+	}
+	offset := (page - 1) * limit
+	status := firstOr(p.Status, "all")
+	includeRoutes := status == "all" || status == "routed"
+
+	args := []any{accountID}
+	queueWhere := "l.publisher_id = $1"
+	routeWhere := "e.owner_account_id = $1 AND e.trigger_type = 'source_ingest'"
+
+	if status != "all" {
+		args = append(args, status)
+		queueWhere += fmt.Sprintf(" AND q.status = $%d::intake_status", len(args))
+	}
+	if p.Source != "" {
+		args = append(args, p.Source)
+		n := len(args)
+		queueWhere += fmt.Sprintf(" AND q.source = $%d", n)
+		routeWhere += fmt.Sprintf(" AND e.trigger_label = $%d", n)
+	}
+	if clause, extra := logLeadFilterClause(len(args)+1, p.LeadID, p.Search, "q.lead_id"); clause != "" {
+		args = append(args, extra...)
+		queueWhere += clause
+		routeWhere += strings.Replace(clause, "q.lead_id", "e.lead_id", 1)
+	}
+
+	countSQL := `(SELECT COUNT(*) FROM lead_intake_queue q JOIN leads l ON l.id = q.lead_id WHERE ` + queueWhere + `)`
+	if includeRoutes {
+		countSQL += ` + (SELECT COUNT(*) FROM route_executions e JOIN leads l ON l.id = e.lead_id WHERE ` + routeWhere + `)`
+	}
+
+	var total int64
+	if err := s.pool.QueryRow(ctx, `SELECT `+countSQL, args...).Scan(&total); err != nil {
+		return nil, err
+	}
+
+	queueSelect := `
+	   SELECT
+	     'queue'::text AS src_kind,
+	     q.id,
+	     q.created_at,
+	     COALESCE(q.source, '') AS origin,
+	     COALESCE(q.source, '') AS origin_slug,
+	     TRIM(CONCAT(l.first_name, ' ', l.last_name)) AS lead_label,
+	     q.lead_id,
+	     q.status::text AS status,
+	     l.first_name,
+	     l.last_name,
+	     l.phone,
+	     q.source,
+	     q.raw_payload
+	   FROM lead_intake_queue q
+	   JOIN leads l ON l.id = q.lead_id
+	   WHERE ` + queueWhere
+
+	combined := queueSelect
+	if includeRoutes {
+		routeSelect := `
+	   SELECT
+	     'route'::text AS src_kind,
+	     e.id,
+	     e.created_at,
+	     COALESCE(e.trigger_label, '') AS origin,
+	     COALESCE(e.trigger_label, '') AS origin_slug,
+	     TRIM(CONCAT(l.first_name, ' ', l.last_name)) AS lead_label,
+	     e.lead_id,
+	     CASE WHEN e.status = 'success' THEN 'routed' ELSE e.status::text END AS status,
+	     l.first_name,
+	     l.last_name,
+	     l.phone,
+	     NULL::text AS source,
+	     NULL::jsonb AS raw_payload
+	   FROM route_executions e
+	   JOIN leads l ON l.id = e.lead_id
+	   WHERE ` + routeWhere
+		combined += `
+		   UNION ALL` + routeSelect
+	}
+
+	limitArg := len(args) + 1
+	offsetArg := len(args) + 2
+	queryArgs := append(append([]any{}, args...), limit, offset)
+
+	query := `SELECT src_kind, id, created_at, origin, origin_slug, lead_label, lead_id, status,
+		        first_name, last_name, phone, source, raw_payload
+		 FROM (` + combined + `
+		 ) combined
+		 ORDER BY created_at DESC
+		 LIMIT $` + fmt.Sprint(limitArg) + ` OFFSET $` + fmt.Sprint(offsetArg)
+
+	rows, err := s.pool.Query(ctx, query, queryArgs...)
 	if err != nil {
 		return nil, err
 	}
-	items := make([]InboundLogItem, 0, len(q.Items))
-	for _, it := range q.Items {
-		items = append(items, queueItemToInbound(it))
+	defer rows.Close()
+
+	var items []InboundLogItem
+	for rows.Next() {
+		var it InboundLogItem
+		var srcKind string
+		var leadID int64
+		var raw []byte
+		if err := rows.Scan(
+			&srcKind, &it.ID, &it.CreatedAt, &it.Origin, &it.OriginSlug,
+			&it.LeadLabel, &leadID, &it.Status,
+			&it.FirstName, &it.LastName, &it.Phone, &it.Source, &raw,
+		); err != nil {
+			return nil, err
+		}
+		it.Kind = "source"
+		it.Direction = "inbound"
+		it.LeadID = &leadID
+		if len(raw) > 0 {
+			it.RawPayload = raw
+		}
+		if srcKind == "queue" {
+			if err := s.enrichInboundSourceItem(ctx, accountID, &it); err != nil {
+				return nil, err
+			}
+		}
+		items = append(items, it)
 	}
-	return &InboundLogListResponse{Items: items, Total: q.Total, Page: q.Page, Limit: q.Limit}, nil
+	if items == nil {
+		items = []InboundLogItem{}
+	}
+	return &InboundLogListResponse{Items: items, Total: total, Page: page, Limit: limit}, rows.Err()
 }
 
 func queueItemToInbound(it QueueItem) InboundLogItem {

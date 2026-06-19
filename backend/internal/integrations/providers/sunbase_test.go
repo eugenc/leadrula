@@ -165,6 +165,23 @@ func TestResolveSunbaseFieldValue_datetimeRFC3339(t *testing.T) {
 	}
 }
 
+func TestResolveSunbaseFieldValue_actionAt(t *testing.T) {
+	bf := "action_at"
+	entry := SunbaseFieldMapEntry{
+		DestKey:      "appt_time",
+		SourceType:   "builtin",
+		BuiltinField: &bf,
+	}
+	payload := DeliveryPayload{
+		ActionAt: "2026-06-08T14:30:00-04:00",
+	}
+	got := resolveSunbaseFieldValue(entry, payload)
+	want := "2026-06-08T14:30"
+	if got != want {
+		t.Fatalf("resolveSunbaseFieldValue() = %q, want %q", got, want)
+	}
+}
+
 func TestResolveSunbaseFieldValue_datetimeWithoutTypeMap(t *testing.T) {
 	fid := int64(42)
 	payload := DeliveryPayload{

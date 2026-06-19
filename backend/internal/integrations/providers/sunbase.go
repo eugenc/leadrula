@@ -205,6 +205,11 @@ func resolveSunbaseFieldValue(e SunbaseFieldMapEntry, payload DeliveryPayload) s
 			return payload.Zip
 		case "source":
 			return payload.Source
+		case "action_at":
+			if payload.ActionAt == "" {
+				return ""
+			}
+			return customfields.FormatForSunbaseExport("datetime", payload.ActionAt)
 		case "lead_id", "public_id":
 			return payload.LeadID
 		case "external_id":

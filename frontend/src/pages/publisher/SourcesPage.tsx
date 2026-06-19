@@ -51,8 +51,7 @@ function sourceFieldKeySets(entries: { source_key: string; target_type: string }
   const mappedKeys = new Set(
     entries.filter((e) => e.target_type !== "ignore").map((e) => e.source_key)
   );
-  const handledKeys = new Set([...ignoredKeys, ...mappedKeys]);
-  return { ignoredKeys, mappedKeys, handledKeys };
+  return { ignoredKeys, mappedKeys };
 }
 
 export function SourcesPage() {
@@ -367,11 +366,11 @@ function SourceFieldMapContent({
 
   const payload = sample?.payload ?? null;
   const mappableKeys = payload ? mappablePayloadKeys(payload) : [];
-  const { ignoredKeys, mappedKeys, handledKeys } = useMemo(
+  const { ignoredKeys, mappedKeys } = useMemo(
     () => sourceFieldKeySets(entries ?? []),
     [entries]
   );
-  const unmappedKeys = mappableKeys.filter((k) => !handledKeys.has(k));
+  const unmappedKeys = mappableKeys.filter((k) => !mappedKeys.has(k) && !ignoredKeys.has(k));
 
   const suggestions = useMemo(
     () => buildPayloadSuggestions(unmappedKeys, customFields ?? []),
@@ -620,6 +619,11 @@ function SourceFieldMapContent({
                 )}
               </span>
               <div className="flex items-center gap-2">
+                {e.target_type !== "ignore" && (
+                  <Button size="sm" variant="secondary" onClick={() => prefillMapping(e.source_key)}>
+                    Map to another field
+                  </Button>
+                )}
                 {e.target_type === "ignore" && (
                   <Button size="sm" variant="secondary" onClick={() => prefillMapping(e.source_key)}>
                     Map
