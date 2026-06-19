@@ -38,6 +38,15 @@ func BuildDeliveryPayload(lead *Lead) ([]byte, error) {
 	if lead.Source != nil {
 		p["source"] = *lead.Source
 	}
+	if lead.PipelineID != nil {
+		p["pipeline_id"] = *lead.PipelineID
+	}
+	if lead.StageID != nil {
+		p["stage_id"] = *lead.StageID
+	}
+	if lead.ActionAt != nil {
+		p["action_at"] = lead.ActionAt.Format("2006-01-02T15:04:05Z07:00")
+	}
 	customs := map[string]any{}
 	for k, v := range lead.CustomValues {
 		var decoded any

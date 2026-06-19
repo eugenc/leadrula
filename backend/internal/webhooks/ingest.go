@@ -164,12 +164,13 @@ func (s *Service) ingestPayload(ctx context.Context, wa *WebhookAuth, slug strin
 	}
 
 	isSunbaseInbound := providerSlug != nil && *providerSlug == "sunbase"
+	isGHLInbound := providerSlug != nil && *providerSlug == "ghl"
 
 	var results []ActionResult
 	var firstLeadID *int64
 	var firstEventID *int64
 	for _, action := range ready {
-		result, leadID, execErr := s.executeEvent(ctx, webhook.AccountID, webhook.Name, action, flat, rawJSON, isSunbaseInbound)
+		result, leadID, execErr := s.executeEvent(ctx, webhook.AccountID, webhook.Name, action, flat, rawJSON, isSunbaseInbound, isGHLInbound)
 		if execErr != nil {
 			if !forceProcess {
 				msg := execErr.Error()
@@ -266,7 +267,7 @@ func actionReady(ctx context.Context, s *Service, action *WebhookEvent, flat map
 	}
 }
 
-func (s *Service) executeEvent(ctx context.Context, accountID int64, webhookName string, event *WebhookEvent, flat map[string]any, rawJSON []byte, isSunbaseInbound bool) (*IngestResult, *int64, error) {
+func (s *Service) executeEvent(ctx context.Context, accountID int64, webhookName string, event *WebhookEvent, flat map[string]any, rawJSON []byte, isSunbaseInbound, isGHLInbound bool) (*IngestResult, *int64, error) {
 	maps, err := s.ListFieldMap(ctx, event.ID)
 	if err != nil {
 		return nil, nil, err
@@ -274,7 +275,7 @@ func (s *Service) executeEvent(ctx context.Context, accountID int64, webhookName
 
 	switch event.Action {
 	case "create":
-		return s.execCreate(ctx, accountID, webhookName, event, flat, rawJSON, maps, isSunbaseInbound)
+		return s.execCreate(ctx, accountID, webhookName, event, flat, rawJSON, maps, isSunbaseInbound, isGHLInbound)
 	case "update":
 		return s.execUpdate(ctx, accountID, webhookName, event, flat, maps)
 	case "delete":
@@ -323,7 +324,7 @@ func (s *Service) maybeAddInboundNote(ctx context.Context, q database.Querier, e
 	return s.leads.AddInboundNote(ctx, q, leadID, webhookName, body)
 }
 
-func (s *Service) execCreate(ctx context.Context, accountID int64, webhookName string, event *WebhookEvent, flat map[string]any, rawJSON []byte, maps []FieldMapEntry, isSunbaseInbound bool) (*IngestResult, *int64, error) {
+func (s *Service) execCreate(ctx context.Context, accountID int64, webhookName string, event *WebhookEvent, flat map[string]any, rawJSON []byte, maps []FieldMapEntry, isSunbaseInbound, isGHLInbound bool) (*IngestResult, *int64, error) {
 	builtins, customs, externalID := applyFieldMaps(flat, maps)
 	storeExternalID := externalID
 	if isSunbaseInbound && externalID != "" {
@@ -354,6 +355,36 @@ func (s *Service) execCreate(ctx context.Context, accountID int64, webhookName s
 		} else if err != nil {
 			var appErr *httpx.AppError
 			if !errors.As(err, &appErr) || appErr.Code != httpx.CodeNotFound {
+				return nil, nil, err
+			}
+		}
+	}
+
+	if isGHLInbound {
+		if lead, err := s.findGHLFallbackLead(ctx, accountID, flat, builtins); err == nil && lead != nil {
+			contactID := ghlInboundContactID(flat)
+			if contactID != "" {
+				if err := s.leads.SetExternalID(ctx, s.leads.Pool(), lead.ID, contactID); err != nil {
+					return nil, &lead.ID, err
+				}
+				builtins["external_id"] = contactID
+			}
+			if err := s.applyMappedFields(ctx, s.leads.Pool(), accountID, lead.ID, flat, maps, builtins, customs); err != nil {
+				return nil, &lead.ID, err
+			}
+			if err := s.maybeAddInboundNote(ctx, s.leads.Pool(), event, webhookName, lead.ID, flat, maps); err != nil {
+				return nil, &lead.ID, err
+			}
+			return &IngestResult{LeadID: lead.PublicID, Action: "update", Status: "updated"}, &lead.ID, nil
+		} else if err != nil {
+			var appErr *httpx.AppError
+			if errors.As(err, &appErr) && appErr.Code == httpx.CodeNotFound {
+				if v, ok := flat["lead_id"]; ok && v != nil {
+					if id := strings.TrimSpace(toText(v)); id != "" && id != "null" {
+						return nil, nil, httpx.NotFound("lead not found for lead_id")
+					}
+				}
+			} else {
 				return nil, nil, err
 			}
 		}
@@ -582,6 +613,51 @@ func (s *Service) findSunbaseFallbackLead(ctx context.Context, accountID int64, 
 		}
 	}
 	if email := strings.TrimSpace(builtins["email"]); email != "" {
+		lead, err := s.leads.GetByEmail(ctx, s.leads.Pool(), accountID, email)
+		if err == nil && lead != nil {
+			return lead, nil
+		}
+		var appErr *httpx.AppError
+		if err != nil && (!errors.As(err, &appErr) || appErr.Code != httpx.CodeNotFound) {
+			return nil, err
+		}
+	}
+	return nil, httpx.NotFound("lead not found")
+}
+
+func (s *Service) findGHLFallbackLead(ctx context.Context, accountID int64, flat map[string]any, builtins map[string]string) (*leads.Lead, error) {
+	if v, ok := flat["lead_id"]; ok && v != nil {
+		if id := strings.TrimSpace(toText(v)); id != "" && id != "null" {
+			lead, err := s.leads.GetByPublicID(ctx, s.leads.Pool(), accountID, id)
+			if err == nil && lead != nil {
+				return lead, nil
+			}
+			var appErr *httpx.AppError
+			if err != nil && (!errors.As(err, &appErr) || appErr.Code != httpx.CodeNotFound) {
+				return nil, err
+			}
+			return nil, httpx.NotFound("lead not found for lead_id")
+		}
+	}
+	phone := strings.TrimSpace(builtins["phone"])
+	if phone == "" {
+		phone = strings.TrimSpace(toText(flat["phone"]))
+	}
+	if phone != "" {
+		lead, err := s.leads.GetByPhone(ctx, s.leads.Pool(), accountID, phone)
+		if err == nil && lead != nil {
+			return lead, nil
+		}
+		var appErr *httpx.AppError
+		if err != nil && (!errors.As(err, &appErr) || appErr.Code != httpx.CodeNotFound) {
+			return nil, err
+		}
+	}
+	email := strings.TrimSpace(builtins["email"])
+	if email == "" {
+		email = strings.TrimSpace(toText(flat["email"]))
+	}
+	if email != "" {
 		lead, err := s.leads.GetByEmail(ctx, s.leads.Pool(), accountID, email)
 		if err == nil && lead != nil {
 			return lead, nil

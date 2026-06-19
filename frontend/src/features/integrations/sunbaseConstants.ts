@@ -14,6 +14,7 @@ export const SUNBASE_OUTBOUND_BUILTINS = [
   "zip",
   "source",
   "external_id",
+  "lead_id",
   "public_id",
   "status",
   "cost",

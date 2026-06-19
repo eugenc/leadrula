@@ -39,7 +39,7 @@ export function SunbaseFieldMapSection({
   entries: OutboundFieldMapEntry[];
   onChange: (entries: OutboundFieldMapEntry[]) => void;
 }) {
-  const { data: customFields = [], isLoading, isError, error } = useCustomFields();
+  const { data: customFields, isLoading, isError, error } = useCustomFields();
   const createField = useCreateField();
   const accountType = useAuthStore((s) => s.user?.account_type);
   const fieldsPath = accountType === "publisher" ? "/p/fields" : "/b/fields";
@@ -47,7 +47,7 @@ export function SunbaseFieldMapSection({
   const [createFieldOpen, setCreateFieldOpen] = useState(false);
   const [createForRowIdx, setCreateForRowIdx] = useState<number | null>(null);
 
-  const activeCustomFields = customFields.filter((f) => f.is_active !== false);
+  const activeCustomFields = (customFields ?? []).filter((f) => f.is_active !== false);
 
   function addRow() {
     onChange([...entries, { dest_key: "", source_type: "builtin", builtin_field: "last_name" }]);

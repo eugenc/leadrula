@@ -128,6 +128,48 @@ func TestListInboundLog_integrationSearch(t *testing.T) {
 	}
 }
 
+func TestListInboundLog_allPublisher(t *testing.T) {
+	cfg := config.Load()
+	ctx := context.Background()
+	pool, err := database.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { pool.Close() })
+
+	rows, err := pool.Query(ctx, `SELECT id, name FROM accounts WHERE type = 'publisher' ORDER BY id`)
+	if err != nil {
+		t.Fatalf("query publishers: %v", err)
+	}
+	defer rows.Close()
+
+	svc := &Service{pool: pool}
+	var count int
+	for rows.Next() {
+		var accountID int64
+		var name string
+		if err := rows.Scan(&accountID, &name); err != nil {
+			t.Fatalf("scan publisher: %v", err)
+		}
+		count++
+		_, err = svc.ListInboundLog(ctx, accountID, ListInboundLogParams{
+			AccountType: "publisher",
+			Type:        "all",
+			Page:        1,
+			Limit:       25,
+		})
+		if err != nil {
+			t.Fatalf("ListInboundLog all publisher account %d (%s): %v", accountID, name, err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("publishers rows: %v", err)
+	}
+	if count == 0 {
+		t.Skip("no publisher accounts in database")
+	}
+}
+
 func TestListQueue_scopedToPublisher(t *testing.T) {
 	cfg := config.Load()
 	ctx := context.Background()

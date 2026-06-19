@@ -1,105 +1,129 @@
 package providers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
-	"net/http"
-	"time"
 )
-
-const ghlBaseURL = "https://rest.gohighlevel.com/v1"
 
 type GHLProvider struct{}
 
 func (p *GHLProvider) Slug() string { return "ghl" }
 
 func (p *GHLProvider) Deliver(ctx context.Context, credentials []byte, payload DeliveryPayload) (*DeliveryResult, error) {
-	var creds struct {
-		APIKey string `json:"api_key"`
-	}
-	if err := json.Unmarshal(credentials, &creds); err != nil {
-		return nil, fmt.Errorf("invalid ghl credentials: %w", err)
-	}
-	locationID, _ := payload.Config["location_id"].(string)
-	if locationID == "" {
-		return nil, fmt.Errorf("location_id required in delivery config")
-	}
-	contact := map[string]any{
-		"firstName":  payload.FirstName,
-		"lastName":   payload.LastName,
-		"phone":      payload.Phone,
-		"email":      payload.Email,
-		"address1":   payload.Address,
-		"city":       payload.City,
-		"state":      payload.State,
-		"postalCode": payload.Zip,
-		"source":     payload.Source,
-		"locationId": locationID,
-		"tags":       []string{"leadrula"},
-	}
-	for k, v := range payload.CustomFields {
-		contact[k] = v
-	}
-	body, _ := json.Marshal(contact)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ghlBaseURL+"/contacts/", bytes.NewReader(body))
+	cfg, err := ParseGHLConfig(payload.Config)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+creds.APIKey)
-	req.Header.Set("Content-Type", "application/json")
-	result, err := executeHTTP(req, body, AnyMapToMapped(contact))
+
+	if cfg.DeliveryMode == "webhook" {
+		body := buildGHLWebhookPayload(cfg, payload)
+		return ghlDeliverWebhook(ctx, cfg.WebhookURL, body)
+	}
+
+	token, err := ParseGHLCredentials(credentials)
 	if err != nil {
-		return result, fmt.Errorf("ghl returned %d", result.HTTPStatus)
+		return nil, err
 	}
-	var ghlResult struct {
-		Contact struct {
-			ID string `json:"id"`
-		} `json:"contact"`
+
+	contactID, result, err := ghlUpsertContact(ctx, token, cfg, payload)
+	if err != nil {
+		return result, err
 	}
-	_ = json.Unmarshal(result.Raw, &ghlResult)
-	pipelineID, hasPipeline := payload.Config["pipeline_id"].(string)
-	stageID, hasStage := payload.Config["stage_id"].(string)
-	if hasPipeline && hasStage && ghlResult.Contact.ID != "" {
-		_ = createGHLOpportunity(ctx, creds.APIKey, locationID, ghlResult.Contact.ID, pipelineID, stageID, payload)
+
+	if cfg.CreateOpportunity {
+		ghlPipelineID, ghlStageID, err := resolveGHLStage(cfg.PipelineStageMap, payload.PipelineID, payload.StageID)
+		if err != nil {
+			return result, err
+		}
+		oppResult, err := ghlCreateOpportunity(ctx, token, cfg, contactID, ghlPipelineID, ghlStageID, payload)
+		if err != nil {
+			if oppResult != nil {
+				result.HTTPStatus = oppResult.HTTPStatus
+				result.Raw = oppResult.Raw
+				result.Request = oppResult.Request
+			}
+			return result, err
+		}
+		result.HTTPStatus = oppResult.HTTPStatus
+		result.Raw = oppResult.Raw
 	}
-	result.ExternalID = ghlResult.Contact.ID
+
+	if cfg.CreateAppointment {
+		apptResult, err := ghlCreateAppointment(ctx, token, cfg, contactID, payload)
+		if err != nil {
+			if apptResult != nil {
+				result.HTTPStatus = apptResult.HTTPStatus
+				result.Raw = apptResult.Raw
+				result.Request = apptResult.Request
+			}
+			return result, err
+		}
+		result.HTTPStatus = apptResult.HTTPStatus
+		result.Raw = apptResult.Raw
+	}
+
+	result.ExternalID = contactID
 	return result, nil
 }
 
-func createGHLOpportunity(ctx context.Context, apiKey, locationID, contactID, pipelineID, stageID string, payload DeliveryPayload) error {
-	opp := map[string]any{
-		"pipelineId":      pipelineID,
-		"locationId":        locationID,
-		"name":              payload.FirstName + " " + payload.LastName,
-		"pipelineStageId":   stageID,
-		"contactId":         contactID,
-		"status":            "open",
-		"source":            payload.Source,
-	}
-	body, _ := json.Marshal(opp)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, ghlBaseURL+"/opportunities/", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+func (p *GHLProvider) ValidateCredentials(ctx context.Context, credentials []byte, config map[string]any) error {
+	cfg, err := ParseGHLConfig(config)
 	if err != nil {
 		return err
 	}
-	resp.Body.Close()
+	if cfg.DeliveryMode == "webhook" {
+		return nil
+	}
+	if _, err := ParseGHLCredentials(credentials); err != nil {
+		return err
+	}
 	return nil
 }
 
-func (p *GHLProvider) ValidateCredentials(ctx context.Context, credentials []byte, config map[string]any) error {
-	var creds struct {
-		APIKey string `json:"api_key"`
+func (p *GHLProvider) TestConnection(ctx context.Context, credentials []byte, config map[string]any) error {
+	cfg, err := ParseGHLConfig(config)
+	if err != nil {
+		return err
 	}
-	if err := json.Unmarshal(credentials, &creds); err != nil || creds.APIKey == "" {
-		return fmt.Errorf("api_key is required")
+	if cfg.DeliveryMode == "webhook" {
+		return ghlTestWebhook(ctx, cfg)
 	}
-	if _, ok := config["location_id"]; !ok {
-		return fmt.Errorf("location_id is required in config")
+	token, err := ParseGHLCredentials(credentials)
+	if err != nil {
+		return err
 	}
-	return nil
+	return ghlTestConnection(ctx, token, cfg.LocationID)
+}
+
+func ValidateGHLConfigJSON(config map[string]any) error {
+	_, err := ParseGHLConfig(config)
+	return err
+}
+
+func MergeGHLConfigDefaults(config map[string]any) map[string]any {
+	if config == nil {
+		config = map[string]any{}
+	}
+	if _, ok := config["delivery_mode"]; !ok {
+		config["delivery_mode"] = "api"
+	}
+	loc, _ := config["location_id"].(string)
+	defaults := DefaultGHLConnectionConfig(loc)
+	for k, v := range defaults {
+		if _, ok := config[k]; !ok {
+			config[k] = v
+		}
+	}
+	if _, ok := config["create_contact"]; !ok {
+		config["create_contact"] = true
+	}
+	return config
+}
+
+func GHLConfigFromJSON(raw json.RawMessage) map[string]any {
+	out := map[string]any{}
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &out)
+	}
+	return MergeGHLConfigDefaults(out)
 }

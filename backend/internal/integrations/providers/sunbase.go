@@ -157,6 +157,9 @@ func buildSunbaseParams(schemaName string, entries []SunbaseFieldMapEntry, paylo
 		vals.Set("last_name", payload.LastName)
 		delete(skipped, "last_name")
 	}
+	if vals.Get("lead_id") == "" && strings.TrimSpace(payload.LeadID) != "" {
+		vals.Set("lead_id", payload.LeadID)
+	}
 	return vals, skipped
 }
 
@@ -202,6 +205,8 @@ func resolveSunbaseFieldValue(e SunbaseFieldMapEntry, payload DeliveryPayload) s
 			return payload.Zip
 		case "source":
 			return payload.Source
+		case "lead_id", "public_id":
+			return payload.LeadID
 		case "external_id":
 			if payload.Config != nil {
 				if v, ok := payload.Config["external_id"].(string); ok {

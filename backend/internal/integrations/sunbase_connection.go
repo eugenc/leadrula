@@ -147,13 +147,20 @@ func (s *Service) UpdateSunbaseConnection(
 }
 
 func (s *Service) TestConnection(ctx context.Context, providerSlug string, credentialsRaw json.RawMessage, config map[string]any) error {
-	if providerSlug != "sunbase" {
-		return httpx.Validation("test connection only supported for sunbase")
-	}
 	if _, ok := s.providers[providerSlug]; !ok {
 		return httpx.Validation("unknown provider: " + providerSlug)
 	}
-	return (&providers.SunbaseProvider{}).TestConnection(ctx, credentialsRaw, config)
+	switch providerSlug {
+	case "sunbase":
+		return (&providers.SunbaseProvider{}).TestConnection(ctx, credentialsRaw, config)
+	case "ghl":
+		if config != nil {
+			config = providers.MergeGHLConfigDefaults(config)
+		}
+		return (&providers.GHLProvider{}).TestConnection(ctx, credentialsRaw, config)
+	default:
+		return httpx.Validation("test connection only supported for sunbase and ghl")
+	}
 }
 
 func (s *Service) FinalizeSunbaseConnection(ctx context.Context, connectionID int64, config map[string]any) error {

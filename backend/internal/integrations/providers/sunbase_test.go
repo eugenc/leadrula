@@ -184,6 +184,13 @@ func TestResolveSunbaseFieldValue_datetimeWithoutTypeMap(t *testing.T) {
 	}
 }
 
+func TestBuildSunbaseParams_leadIDDefault(t *testing.T) {
+	vals, _ := buildSunbaseParams("test", nil, DeliveryPayload{LeadID: "uuid-abc"})
+	if vals.Get("lead_id") != "uuid-abc" {
+		t.Fatalf("lead_id = %q", vals.Get("lead_id"))
+	}
+}
+
 func TestBuildSunbaseParams_skippedEmptyFields(t *testing.T) {
 	fid := int64(22)
 	payload := DeliveryPayload{

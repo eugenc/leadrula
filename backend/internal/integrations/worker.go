@@ -98,7 +98,7 @@ func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, p
 		return
 	}
 
-	if leadID != 0 && providerSlug == "sunbase" {
+	if leadID != 0 && (providerSlug == "sunbase" || providerSlug == "ghl") {
 		repo := leads.NewRepository(s.pool)
 		if refreshed, err := leads.RefreshDeliveryPayload(ctx, s.pool, repo, leadID, payload); err == nil {
 			payload = refreshed
@@ -124,7 +124,7 @@ func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, p
 				dp.Config[k] = v
 			}
 		}
-		if providerSlug == "sunbase" {
+		if providerSlug == "sunbase" || providerSlug == "ghl" {
 			var accountID int64
 			if err := s.pool.QueryRow(ctx, `SELECT account_id FROM integration_connections WHERE id=$1`, connID).Scan(&accountID); err == nil {
 				if types, err := customfields.FieldTypesByAccount(ctx, s.pool, accountID); err == nil && len(types) > 0 {

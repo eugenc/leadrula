@@ -12,6 +12,14 @@ import {
 } from "@/features/integrations/constants";
 import { SunbaseFieldMapSection } from "@/features/integrations/SunbaseFieldMapSection";
 import { SunbaseInboundEndpointSection } from "@/features/integrations/SunbaseInboundEndpointSection";
+import { GhlInboundEndpointSection } from "@/features/integrations/GhlInboundEndpointSection";
+import { GhlConnectionSettings } from "@/features/integrations/GhlConnectionSettings";
+import {
+  DEFAULT_GHL_CONFIG,
+  normalizeGhlConfig,
+  isGhlWebhookMode,
+  type GHLConfig,
+} from "@/features/integrations/ghlConstants";
 import {
   SUNBASE_URL,
   sunbaseFieldMap,
@@ -32,9 +40,15 @@ import {
   useTestIntegrationConnection,
   useUpdateIntegrationConnection,
   useSunbaseConnectionDetail,
+  useGhlConnectionDetail,
+  useGhlPipelines,
+  useGhlCalendars,
+  useFetchGhlMetadata,
+  type GhlMetadataPreview,
 } from "@/features/integrations/hooks";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
+import { Spinner } from "@/components/ui/misc";
 import type { IntegrationConnection, IntegrationProvider, OutboundFieldMapEntry, SunbaseInboundWebhook } from "@/types";
 
 export function IntegrationsConnectionsTab() {
@@ -128,6 +142,7 @@ function AddConnectionDrawer({
   const [slug, setSlug] = useState("");
   const [name, setName] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [pitToken, setPitToken] = useState("");
   const [locationId, setLocationId] = useState("");
   const [apiDomain, setApiDomain] = useState("com");
 
@@ -135,13 +150,17 @@ function AddConnectionDrawer({
   const [schemaName, setSchemaName] = useState("");
   const [fieldMap, setFieldMap] = useState<OutboundFieldMapEntry[]>(sunbaseFieldMap(""));
   const [sunbaseActive, setSunbaseActive] = useState(false);
+  const [ghlActive, setGhlActive] = useState(false);
+  const [ghlConfig, setGhlConfig] = useState<GHLConfig>(DEFAULT_GHL_CONFIG(""));
   const [activeConnection, setActiveConnection] = useState<IntegrationConnection | null>(null);
   const [inboundWebhook, setInboundWebhook] = useState<SunbaseInboundWebhook | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [ghlMetadataPreview, setGhlMetadataPreview] = useState<GhlMetadataPreview | null>(null);
 
   const create = useCreateIntegrationConnection();
   const update = useUpdateIntegrationConnection();
   const testConn = useTestIntegrationConnection();
+  const fetchGhlMetadata = useFetchGhlMetadata();
   const oauth = useOAuthConnect();
   const remove = useDeleteIntegrationConnection();
 
@@ -149,18 +168,33 @@ function AddConnectionDrawer({
   const selected = providers.find((p) => p.slug === effectiveSlug);
   const existingForSlug = connections.filter((c) => c.provider_slug === effectiveSlug);
   const isSunbase = effectiveSlug === "sunbase";
+  const isGhl = effectiveSlug === "ghl";
   const isGoogleMaps = effectiveSlug === "google_maps";
   const isManage = existingForSlug.length > 0;
   const showSunbaseActive = isSunbase && sunbaseActive && activeConnection != null;
+  const showGhlActive = isGhl && ghlActive && activeConnection != null;
 
   const detailId = showSunbaseActive ? activeConnection.id : null;
+  const ghlDetailId = showGhlActive ? activeConnection.id : null;
   const { data: sunbaseDetail } = useSunbaseConnectionDetail(detailId);
+  const { data: ghlDetail } = useGhlConnectionDetail(ghlDetailId);
+  const { data: ghlPipelinesData, isLoading: ghlPipelinesLoading } = useGhlPipelines(ghlDetailId);
+  const { data: ghlCalendarsData, isLoading: ghlCalendarsLoading } = useGhlCalendars(ghlDetailId);
+
+  const ghlPipelines =
+    ghlPipelinesData?.pipelines ?? ghlMetadataPreview?.pipelines ?? [];
+  const ghlCalendars =
+    ghlCalendarsData?.calendars ?? ghlMetadataPreview?.calendars ?? [];
+  const ghlPipelinesBusy = showGhlActive ? ghlPipelinesLoading : fetchGhlMetadata.isPending;
+  const ghlCalendarsBusy = showGhlActive ? ghlCalendarsLoading : fetchGhlMetadata.isPending;
 
   const drawerTitle = showSunbaseActive
     ? "SunBase connected"
-    : isManage && selected
-      ? `Manage ${selected.name}`
-      : "Add Integration";
+    : showGhlActive
+      ? "GoHighLevel connected"
+      : isManage && selected
+        ? `Manage ${selected.name}`
+        : "Add Integration";
 
   const accountType = useAuthStore((s) => s.user?.account_type);
   const webhooksPath = accountType === "publisher" ? "/p/webhooks" : "/b/webhooks";
@@ -170,14 +204,18 @@ function AddConnectionDrawer({
       setSlug("");
       setName("");
       setApiKey("");
+      setPitToken("");
       setLocationId("");
       setEndpointUrl(SUNBASE_URL);
       setSchemaName("");
       setFieldMap(sunbaseFieldMap(""));
       setSunbaseActive(false);
+      setGhlActive(false);
+      setGhlConfig(DEFAULT_GHL_CONFIG(""));
       setActiveConnection(null);
       setInboundWebhook(null);
       setShowAdvanced(false);
+      setGhlMetadataPreview(null);
       return;
     }
     if (initialSlug) {
@@ -190,11 +228,22 @@ function AddConnectionDrawer({
           loadSunbaseConnection(existing);
         }
       }
+      if (initialSlug === "ghl") {
+        const existing = connections.find((c) => c.provider_slug === "ghl");
+        if (existing) {
+          loadGhlConnection(existing);
+        }
+      }
       if (initialSlug === "google_maps") {
         setName("Google Maps");
       }
     }
   }, [open, initialSlug, providers, connections]);
+
+  useEffect(() => {
+    if (showGhlActive) return;
+    setGhlMetadataPreview(null);
+  }, [pitToken, locationId, showGhlActive]);
 
   useEffect(() => {
     if (schemaName) {
@@ -207,6 +256,12 @@ function AddConnectionDrawer({
       setInboundWebhook(sunbaseDetail.inbound_webhook);
     }
   }, [sunbaseDetail]);
+
+  useEffect(() => {
+    if (ghlDetail?.inbound_webhook) {
+      setInboundWebhook(ghlDetail.inbound_webhook);
+    }
+  }, [ghlDetail]);
 
   function loadSunbaseConnection(conn: IntegrationConnection) {
     setActiveConnection(conn);
@@ -223,6 +278,83 @@ function AddConnectionDrawer({
       if (schemaEntry?.static_value) setSchemaName(schemaEntry.static_value);
     }
     if (conn.inbound_webhook) setInboundWebhook(conn.inbound_webhook);
+  }
+
+  function loadGhlConnection(conn: IntegrationConnection) {
+    setActiveConnection(conn);
+    setGhlActive(true);
+    setSunbaseActive(false);
+    setName(conn.name);
+    const cfg = (conn.config ?? {}) as GHLConfig;
+    setLocationId(cfg.location_id ?? "");
+    setGhlConfig(normalizeGhlConfig({
+      ...DEFAULT_GHL_CONFIG(cfg.location_id ?? ""),
+      ...cfg,
+      create_contact: true,
+    }));
+    if (conn.inbound_webhook) setInboundWebhook(conn.inbound_webhook);
+  }
+
+  const ghlWebhookMode = isGhlWebhookMode(ghlConfig);
+
+  function runTestGhlConnection() {
+    if (ghlWebhookMode) {
+      if (!ghlConfig.webhook_url?.trim()) {
+        toast.error("GHL automation webhook URL is required");
+        return;
+      }
+      testConn.mutate(
+        {
+          provider_slug: "ghl",
+          credentials: {},
+          config: normalizeGhlConfig({ ...ghlConfig, create_contact: true }),
+        },
+        {
+          onSuccess: (res) => {
+            if (res.ok) toast.success("Webhook test sent");
+            else toast.error(res.message ?? "Connection failed");
+          },
+          onError: (e) => toast.error(errorMessage(e)),
+        }
+      );
+      return;
+    }
+    if (!pitToken.trim()) {
+      toast.error("Enter a Private Integration Token to test");
+      return;
+    }
+    if (!locationId.trim()) {
+      toast.error("Location ID is required");
+      return;
+    }
+    testConn.mutate(
+      {
+        provider_slug: "ghl",
+        credentials: { private_integration_token: pitToken.trim() },
+        config: { ...ghlConfig, location_id: locationId.trim() },
+      },
+      {
+        onSuccess: (res) => {
+          if (!res.ok) {
+            toast.error(res.message ?? "Connection failed");
+            return;
+          }
+          toast.success("Connection successful");
+          fetchGhlMetadata.mutate(
+            {
+              credentials: { private_integration_token: pitToken.trim() },
+              config: { location_id: locationId.trim() },
+            },
+            {
+              onSuccess: (data) => setGhlMetadataPreview(data),
+              onError: (e) =>
+                toast.error(`Connected but failed to load GHL metadata: ${errorMessage(e)}`),
+            }
+          );
+        },
+        onError: (e) => toast.error(errorMessage(e)),
+      }
+    );
   }
 
   function runTestConnection() {
@@ -282,12 +414,68 @@ function AddConnectionDrawer({
       );
       return;
     }
+    if (slug === "ghl") {
+      if (ghlWebhookMode) {
+        if (!ghlConfig.webhook_url?.trim()) {
+          toast.error("GHL automation webhook URL is required");
+          return;
+        }
+        const config = normalizeGhlConfig({ ...ghlConfig, create_contact: true });
+        create.mutate(
+          {
+            provider_slug: "ghl",
+            name,
+            credentials: {},
+            config,
+          },
+          {
+            onSuccess: (conn) => {
+              setActiveConnection(conn);
+              setGhlActive(true);
+              setGhlConfig(normalizeGhlConfig({ ...config, ...(conn.config as GHLConfig) }));
+              if (conn.inbound_webhook) setInboundWebhook(conn.inbound_webhook);
+              toast.success("GoHighLevel connected");
+            },
+            onError: (e) => toast.error(errorMessage(e)),
+          }
+        );
+        return;
+      }
+      if (!pitToken.trim()) {
+        toast.error("Private Integration Token is required");
+        return;
+      }
+      if (!locationId.trim()) {
+        toast.error("Location ID is required");
+        return;
+      }
+      const config = normalizeGhlConfig({
+        ...DEFAULT_GHL_CONFIG(locationId.trim()),
+        ...ghlConfig,
+        location_id: locationId.trim(),
+      });
+      create.mutate(
+        {
+          provider_slug: "ghl",
+          name,
+          credentials: { private_integration_token: pitToken.trim() },
+          config,
+        },
+        {
+          onSuccess: (conn) => {
+            setActiveConnection(conn);
+            setGhlActive(true);
+            setGhlConfig(normalizeGhlConfig({ ...config, ...(conn.config as GHLConfig) }));
+            if (conn.inbound_webhook) setInboundWebhook(conn.inbound_webhook);
+            toast.success("GoHighLevel connected");
+          },
+          onError: (e) => toast.error(errorMessage(e)),
+        }
+      );
+      return;
+    }
     let credentials: Record<string, unknown> = {};
     const config: Record<string, unknown> = {};
-    if (slug === "ghl") {
-      credentials = { api_key: apiKey };
-      config.location_id = locationId;
-    }
     let connectionName = name;
     if (slug === "google_maps") {
       if (isManage) return;
@@ -300,6 +488,33 @@ function AddConnectionDrawer({
         onSuccess: () => {
           toast.success("Connection created");
           onClose();
+        },
+        onError: (e) => toast.error(errorMessage(e)),
+      }
+    );
+  }
+
+  function saveGhlChanges() {
+    if (!activeConnection) return;
+    const config = normalizeGhlConfig({
+      ...ghlConfig,
+      ...(ghlWebhookMode ? {} : { location_id: locationId.trim() }),
+      create_contact: true,
+    });
+    update.mutate(
+      {
+        id: activeConnection.id,
+        credentials:
+          !ghlWebhookMode && pitToken.trim()
+            ? { private_integration_token: pitToken.trim() }
+            : undefined,
+        config,
+      },
+      {
+        onSuccess: (conn) => {
+          setActiveConnection(conn);
+          if (conn.inbound_webhook) setInboundWebhook(conn.inbound_webhook);
+          toast.success("Saved");
         },
         onError: (e) => toast.error(errorMessage(e)),
       }
@@ -331,6 +546,7 @@ function AddConnectionDrawer({
         toast.success("Disconnected");
         if (activeConnection?.id === id) {
           setSunbaseActive(false);
+          setGhlActive(false);
           setActiveConnection(null);
           setInboundWebhook(null);
         }
@@ -347,6 +563,7 @@ function AddConnectionDrawer({
       open={open}
       onClose={onClose}
       title={drawerTitle}
+      width={720}
       footer={
         showSunbaseActive ? (
           <>
@@ -366,6 +583,24 @@ function AddConnectionDrawer({
               Save changes
             </Button>
           </>
+        ) : showGhlActive ? (
+          <>
+            {activeConnection && (
+              <Button
+                variant="secondary"
+                disabled={remove.isPending}
+                onClick={() => disconnect(activeConnection.id, true)}
+              >
+                Disconnect
+              </Button>
+            )}
+            <Button variant="secondary" onClick={onClose}>
+              Done
+            </Button>
+            <Button disabled={update.isPending} onClick={saveGhlChanges}>
+              Save changes
+            </Button>
+          </>
         ) : (
           <>
             <Button variant="secondary" onClick={onClose}>
@@ -376,7 +611,18 @@ function AddConnectionDrawer({
                 !slug ||
                 (!isSunbase && !isGoogleMaps && !name) ||
                 (isGoogleMaps && !apiKey.trim()) ||
-                (isSunbase && !schemaName.trim()) ||
+                (isGhl &&
+                  !ghlWebhookMode &&
+                  !pitToken.trim() &&
+                  !showGhlActive) ||
+                (isGhl &&
+                  !ghlWebhookMode &&
+                  !locationId.trim() &&
+                  !showGhlActive) ||
+                (isGhl &&
+                  ghlWebhookMode &&
+                  !ghlConfig.webhook_url?.trim() &&
+                  !showGhlActive) ||
                 create.isPending ||
                 oauth.isPending
               }
@@ -399,7 +645,9 @@ function AddConnectionDrawer({
           <SunbaseInboundEndpointSection inbound={inboundWebhook} />
         )}
 
-        {isManage && !showSunbaseActive && (
+        {showGhlActive && inboundWebhook && <GhlInboundEndpointSection inbound={inboundWebhook} />}
+
+        {isManage && !showSunbaseActive && !showGhlActive && (
           <div className="space-y-2 border-b border-gray-100 pb-4">
             <p className="text-sm font-semibold text-gray-800">Connected</p>
             {existingForSlug.map((c) => (
@@ -407,7 +655,10 @@ function AddConnectionDrawer({
                 <button
                   type="button"
                   className="text-left text-sm text-indigo-600 hover:underline"
-                  onClick={() => isSunbase && loadSunbaseConnection(c)}
+                  onClick={() => {
+                    if (c.provider_slug === "sunbase") loadSunbaseConnection(c);
+                    if (c.provider_slug === "ghl") loadGhlConnection(c);
+                  }}
                 >
                   {c.name}
                 </button>
@@ -425,7 +676,7 @@ function AddConnectionDrawer({
         )}
 
         <>
-            {!showSunbaseActive && !(isGoogleMaps && isManage) && (
+            {!showSunbaseActive && !showGhlActive && !(isGoogleMaps && isManage) && (
               <>
                 <div>
                   <Label>Provider</Label>
@@ -519,17 +770,43 @@ function AddConnectionDrawer({
               </div>
             )}
 
-            {slug === "ghl" && (
-              <>
-                <div>
-                  <Label>API key</Label>
-                  <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-                </div>
-                <div>
-                  <Label>Location ID</Label>
-                  <Input value={locationId} onChange={(e) => setLocationId(e.target.value)} />
-                </div>
-              </>
+            {(slug === "ghl" || showGhlActive) && (
+              <div className="space-y-3">
+                <GhlConnectionSettings
+                  config={ghlConfig}
+                  onChange={setGhlConfig}
+                  ghlPipelines={ghlPipelines}
+                  ghlCalendars={ghlCalendars}
+                  ghlPipelinesLoading={ghlPipelinesBusy}
+                  ghlCalendarsLoading={ghlCalendarsBusy}
+                  apiAuth={
+                    ghlWebhookMode
+                      ? undefined
+                      : {
+                          pitToken,
+                          onPitTokenChange: setPitToken,
+                          locationId,
+                          onLocationIdChange: setLocationId,
+                          pitPlaceholder: showGhlActive ? "Leave blank to keep current token" : undefined,
+                        }
+                  }
+                  onTestConnection={runTestGhlConnection}
+                  testConnectionDisabled={
+                    ghlWebhookMode
+                      ? !ghlConfig.webhook_url?.trim() || testConn.isPending
+                      : !pitToken.trim() ||
+                        !locationId.trim() ||
+                        testConn.isPending ||
+                        fetchGhlMetadata.isPending
+                  }
+                  testConnectionPending={
+                    testConn.isPending || (!ghlWebhookMode && fetchGhlMetadata.isPending)
+                  }
+                  testConnectionLoadingLabel={
+                    !ghlWebhookMode && fetchGhlMetadata.isPending ? "Loading GHL data…" : "Testing…"
+                  }
+                />
+              </div>
             )}
             {slug === "google_maps" && (
               <>

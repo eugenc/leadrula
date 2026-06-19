@@ -1029,6 +1029,15 @@ export interface SunbaseConnectionDetail {
   };
 }
 
+export interface GhlConnectionDetail {
+  connection: IntegrationConnection;
+  inbound_webhook?: SunbaseInboundWebhook;
+  webhook_ids?: {
+    inbound: number;
+    inbound_webhook_slug?: string;
+  };
+}
+
 export interface RouteIntegration {
   id: number;
   route_id: number;

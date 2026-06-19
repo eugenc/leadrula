@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/integrations/providers"
 	"github.com/echayko/leadrula/backend/internal/webhooks"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/go-chi/chi/v5"
@@ -20,22 +21,33 @@ type WebhookSunbaseService interface {
 	DeleteSunbaseWebhooks(ctx context.Context, accountID int64, ids webhooks.SunbaseWebhookIDs)
 }
 
+type WebhookGHLService interface {
+	ProvisionGHLWebhooks(ctx context.Context, accountID int64, connectionID int64, connectionPublicID, connectionName string) (*webhooks.GHLWebhookIDs, error)
+	SyncGHLInboundEvent(ctx context.Context, inboundWebhookID int64) error
+	DeleteGHLWebhooks(ctx context.Context, accountID int64, ids webhooks.GHLWebhookIDs)
+}
+
 type Handler struct {
 	svc        *Service
 	webhooks   WebhookSunbaseService
+	ghlHooks   WebhookGHLService
 	namespace  string
 	appBaseURL string
 	apiBaseURL string
 }
 
 func NewHandler(svc *Service, webhooksSvc WebhookSunbaseService, namespace, appBaseURL, apiBaseURL string) *Handler {
-	return &Handler{
+	h := &Handler{
 		svc:        svc,
 		webhooks:   webhooksSvc,
 		namespace:  namespace,
 		appBaseURL: appBaseURL,
 		apiBaseURL: apiBaseURL,
 	}
+	if ghl, ok := webhooksSvc.(WebhookGHLService); ok {
+		h.ghlHooks = ghl
+	}
+	return h
 }
 
 func (h *Handler) RegisterRoutes(r chi.Router) {
@@ -51,8 +63,12 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Use(auth.RequireRole("admin"))
 		r.Post("/integrations/connections", h.createConnection)
 		r.Post("/integrations/connections/test", h.testConnection)
+		r.Post("/integrations/ghl/metadata", h.postGHLMetadata)
 		r.Patch("/integrations/connections/{id}", h.patchConnection)
 		r.Get("/integrations/connections/{id}/sunbase", h.getSunbaseDetail)
+		r.Get("/integrations/connections/{id}/ghl", h.getGHLDetail)
+		r.Get("/integrations/connections/{id}/ghl/pipelines", h.getGHLPipelines)
+		r.Get("/integrations/connections/{id}/ghl/calendars", h.getGHLCalendars)
 		r.Delete("/integrations/connections/{id}", h.deleteConnection)
 		r.Post("/integrations/routes/{routeID}/attach", h.attachToRoute)
 		r.Delete("/integrations/route-integrations/{id}", h.detachFromRoute)
@@ -93,6 +109,10 @@ func (h *Handler) createConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.ProviderSlug == "sunbase" {
 		h.createSunbaseConnection(w, r, p.AccountID, body.Name, body.Credentials, body.Config)
+		return
+	}
+	if body.ProviderSlug == "ghl" {
+		h.createGHLConnection(w, r, p.AccountID, body.Name, body.Credentials, body.Config)
 		return
 	}
 	conn, err := h.svc.CreateConnection(r.Context(), p.AccountID, body.ProviderSlug, body.Name, body.Credentials, body.Config)
@@ -169,6 +189,26 @@ func (h *Handler) testConnection(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func (h *Handler) postGHLMetadata(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Credentials json.RawMessage `json:"credentials"`
+		Config      map[string]any  `json:"config"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	if body.Config != nil && providers.ParseGHLDeliveryModeFromConfig(body.Config) == "webhook" {
+		httpx.WriteError(w, httpx.Validation("metadata not available in webhook delivery mode"))
+		return
+	}
+	data, err := h.svc.GHLMetadataFromCredentials(r.Context(), body.Credentials, body.Config)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, data)
+}
+
 func (h *Handler) patchConnection(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
@@ -184,27 +224,131 @@ func (h *Handler) patchConnection(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, err)
 		return
 	}
-	if existing.ProviderSlug != "sunbase" {
-		httpx.WriteError(w, httpx.Validation("patch only supported for sunbase connections"))
+	if existing.ProviderSlug == "sunbase" {
+		var syncOutbound func(ctx context.Context, ids webhooks.SunbaseWebhookIDs, endpointURL string, fieldMap json.RawMessage) error
+		var syncInbound func(ctx context.Context, ids webhooks.SunbaseWebhookIDs) error
+		if h.webhooks != nil {
+			syncOutbound = func(ctx context.Context, ids webhooks.SunbaseWebhookIDs, endpointURL string, fieldMap json.RawMessage) error {
+				return h.webhooks.SyncSunbaseOutboundWebhooks(ctx, p.AccountID, ids, endpointURL, fieldMap)
+			}
+			syncInbound = func(ctx context.Context, ids webhooks.SunbaseWebhookIDs) error {
+				return h.webhooks.SyncSunbaseInboundEvent(ctx, ids.Inbound)
+			}
+		}
+		conn, err := h.svc.UpdateSunbaseConnection(r.Context(), p.AccountID, id, body.Credentials, body.Config, syncOutbound, syncInbound)
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		ids := webhooks.ParseSunbaseWebhookIDs(conn.Config)
+		httpx.JSON(w, http.StatusOK, h.sunbaseResponse(conn, &ids))
 		return
 	}
-	var syncOutbound func(ctx context.Context, ids webhooks.SunbaseWebhookIDs, endpointURL string, fieldMap json.RawMessage) error
-	var syncInbound func(ctx context.Context, ids webhooks.SunbaseWebhookIDs) error
-	if h.webhooks != nil {
-		syncOutbound = func(ctx context.Context, ids webhooks.SunbaseWebhookIDs, endpointURL string, fieldMap json.RawMessage) error {
-			return h.webhooks.SyncSunbaseOutboundWebhooks(ctx, p.AccountID, ids, endpointURL, fieldMap)
+	if existing.ProviderSlug == "ghl" {
+		conn, err := h.svc.UpdateGHLConnection(r.Context(), p.AccountID, id, body.Credentials, body.Config)
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
 		}
-		syncInbound = func(ctx context.Context, ids webhooks.SunbaseWebhookIDs) error {
-			return h.webhooks.SyncSunbaseInboundEvent(ctx, ids.Inbound)
-		}
+		httpx.JSON(w, http.StatusOK, h.ghlResponse(conn))
+		return
 	}
-	conn, err := h.svc.UpdateSunbaseConnection(r.Context(), p.AccountID, id, body.Credentials, body.Config, syncOutbound, syncInbound)
+	httpx.WriteError(w, httpx.Validation("patch only supported for sunbase and ghl connections"))
+}
+
+func (h *Handler) createGHLConnection(w http.ResponseWriter, r *http.Request, accountID int64, name string, credentials json.RawMessage, config map[string]any) {
+	if config == nil {
+		config = map[string]any{}
+	}
+	config = providers.MergeGHLConfigDefaults(config)
+	if err := providers.ValidateGHLConfigJSON(config); err != nil {
+		httpx.WriteError(w, httpx.Validation(err.Error()))
+		return
+	}
+	if name == "" {
+		name = "GoHighLevel"
+	}
+	conn, err := h.svc.CreateConnection(r.Context(), accountID, "ghl", name, credentials, config)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
-	ids := webhooks.ParseSunbaseWebhookIDs(conn.Config)
-	httpx.JSON(w, http.StatusOK, h.sunbaseResponse(conn, &ids))
+	if h.ghlHooks == nil {
+		httpx.JSON(w, http.StatusCreated, h.ghlResponse(conn))
+		return
+	}
+	ids, err := h.ghlHooks.ProvisionGHLWebhooks(
+		r.Context(), accountID, conn.ID, conn.PublicID, conn.Name,
+	)
+	if err != nil {
+		_ = h.svc.DeleteConnection(r.Context(), accountID, conn.ID)
+		httpx.WriteError(w, wrapGHLProvisionErr("provision webhooks", err))
+		return
+	}
+	if err := h.ghlHooks.SyncGHLInboundEvent(r.Context(), ids.Inbound); err != nil {
+		h.ghlHooks.DeleteGHLWebhooks(r.Context(), accountID, *ids)
+		_ = h.svc.DeleteConnection(r.Context(), accountID, conn.ID)
+		httpx.WriteError(w, wrapGHLProvisionErr("sync inbound webhook", err))
+		return
+	}
+	merged := webhooks.MergeGHLConfig(config, ids)
+	if err := h.svc.FinalizeGHLConnection(r.Context(), conn.ID, merged); err != nil {
+		h.ghlHooks.DeleteGHLWebhooks(r.Context(), accountID, *ids)
+		_ = h.svc.DeleteConnection(r.Context(), accountID, conn.ID)
+		httpx.WriteError(w, wrapGHLProvisionErr("finalize connection", err))
+		return
+	}
+	conn.Config = merged
+	httpx.JSON(w, http.StatusCreated, h.ghlResponse(conn))
+}
+
+func (h *Handler) getGHLDetail(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	conn, err := h.svc.GetConnection(r.Context(), p.AccountID, id)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if conn.ProviderSlug != "ghl" {
+		httpx.WriteError(w, httpx.Validation("not a ghl connection"))
+		return
+	}
+	detail := GHLDetailFromConnection(conn, h.apiBaseURL)
+	httpx.JSON(w, http.StatusOK, detail)
+}
+
+func (h *Handler) getGHLPipelines(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	data, err := h.svc.GHLMetadata(r.Context(), p.AccountID, id, "pipelines")
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, data)
+}
+
+func (h *Handler) getGHLCalendars(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	data, err := h.svc.GHLMetadata(r.Context(), p.AccountID, id, "calendars")
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, data)
+}
+
+func (h *Handler) ghlResponse(conn *Connection) GHLConnectionResponse {
+	resp := GHLConnectionResponse{Connection: *conn}
+	if conn.Status == "active" {
+		ids := webhooks.ParseGHLWebhookIDs(conn.Config)
+		if ids.InboundSlug != "" {
+			resp.InboundWebhook = BuildGHLInboundWebhookInfo(h.apiBaseURL, ids.Inbound, ids.InboundSlug)
+		}
+	}
+	return resp
 }
 
 func (h *Handler) getSunbaseDetail(w http.ResponseWriter, r *http.Request) {
@@ -227,9 +371,17 @@ func (h *Handler) deleteConnection(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if h.webhooks != nil {
-		if conn, err := h.svc.GetConnection(r.Context(), p.AccountID, id); err == nil && conn.ProviderSlug == "sunbase" {
-			ids := webhooks.ParseSunbaseWebhookIDs(conn.Config)
-			h.webhooks.DeleteSunbaseWebhooks(r.Context(), p.AccountID, ids)
+		if conn, err := h.svc.GetConnection(r.Context(), p.AccountID, id); err == nil {
+			switch conn.ProviderSlug {
+			case "sunbase":
+				ids := webhooks.ParseSunbaseWebhookIDs(conn.Config)
+				h.webhooks.DeleteSunbaseWebhooks(r.Context(), p.AccountID, ids)
+			case "ghl":
+				if h.ghlHooks != nil {
+					ids := webhooks.ParseGHLWebhookIDs(conn.Config)
+					h.ghlHooks.DeleteGHLWebhooks(r.Context(), p.AccountID, ids)
+				}
+			}
 		}
 	}
 	if err := h.svc.DeleteConnection(r.Context(), p.AccountID, id); err != nil {

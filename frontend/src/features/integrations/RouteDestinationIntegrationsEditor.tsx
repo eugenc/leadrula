@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useIntegrationConnections } from "@/features/integrations/hooks";
 import { Button } from "@/components/ui/button";
-import { Label, Select, Input } from "@/components/ui/input";
+import { Label, Select } from "@/components/ui/input";
 import type { IntegrationConnection } from "@/types";
 
 export type RouteDestinationIntegrationSelection = {
@@ -13,16 +13,12 @@ export type RouteDestinationIntegrationSelection = {
 };
 
 export function buildIntegrationDeliveryConfig(
-  conn: IntegrationConnection | undefined,
-  pipelineId: string,
-  stageId: string
+  conn: IntegrationConnection | undefined
 ): Record<string, unknown> {
   const delivery_config: Record<string, unknown> = {};
   if (conn?.provider_slug === "ghl" && conn.config?.location_id) {
     delivery_config.location_id = conn.config.location_id;
   }
-  if (pipelineId) delivery_config.pipeline_id = pipelineId;
-  if (stageId) delivery_config.stage_id = stageId;
   return delivery_config;
 }
 
@@ -37,8 +33,6 @@ export function RouteDestinationIntegrationsEditor({
 }) {
   const { data: connections } = useIntegrationConnections();
   const [connectionId, setConnectionId] = useState(0);
-  const [pipelineId, setPipelineId] = useState("");
-  const [stageId, setStageId] = useState("");
 
   const available = (connections ?? []).filter(
     (c) =>
@@ -56,12 +50,10 @@ export function RouteDestinationIntegrationsEditor({
         connection_id: connectionId,
         connection_name: conn?.name,
         provider_slug: conn?.provider_slug,
-        delivery_config: buildIntegrationDeliveryConfig(conn, pipelineId, stageId),
+        delivery_config: buildIntegrationDeliveryConfig(conn),
       },
     ]);
     setConnectionId(0);
-    setPipelineId("");
-    setStageId("");
   }
 
   function removeConnection(connectionIdToRemove: number) {
@@ -112,20 +104,6 @@ export function RouteDestinationIntegrationsEditor({
               </option>
             ))}
           </Select>
-          <div className="grid grid-cols-2 gap-2">
-            <Input
-              placeholder="Pipeline ID (optional)"
-              value={pipelineId}
-              disabled={disabled}
-              onChange={(e) => setPipelineId(e.target.value)}
-            />
-            <Input
-              placeholder="Stage ID (optional)"
-              value={stageId}
-              disabled={disabled}
-              onChange={(e) => setStageId(e.target.value)}
-            />
-          </div>
           <Button size="sm" disabled={disabled || !connectionId} onClick={addConnection}>
             Add integration
           </Button>

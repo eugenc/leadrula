@@ -6,6 +6,7 @@ import type {
   IntegrationProvider,
   RouteIntegration,
   SunbaseConnectionDetail,
+  GhlConnectionDetail,
 } from "@/types";
 
 export function useOAuthConnect() {
@@ -90,6 +91,50 @@ export function useSunbaseConnectionDetail(id: number | null) {
     queryKey: ["sunbase-connection", id],
     queryFn: () => get<SunbaseConnectionDetail>(`${ns()}/integrations/connections/${id}/sunbase`),
     enabled: id != null,
+  });
+}
+
+export function useGhlConnectionDetail(id: number | null) {
+  return useQuery({
+    queryKey: ["ghl-connection", id],
+    queryFn: () => get<GhlConnectionDetail>(`${ns()}/integrations/connections/${id}/ghl`),
+    enabled: id != null,
+  });
+}
+
+export function useGhlPipelines(connectionId: number | null) {
+  return useQuery({
+    queryKey: ["ghl-pipelines", connectionId],
+    queryFn: () =>
+      get<{ pipelines: { id: string; name: string; stages?: { id: string; name: string }[] }[] }>(
+        `${ns()}/integrations/connections/${connectionId}/ghl/pipelines`
+      ),
+    enabled: connectionId != null,
+  });
+}
+
+export function useGhlCalendars(connectionId: number | null) {
+  return useQuery({
+    queryKey: ["ghl-calendars", connectionId],
+    queryFn: () =>
+      get<{ calendars: { id: string; name: string }[] }>(
+        `${ns()}/integrations/connections/${connectionId}/ghl/calendars`
+      ),
+    enabled: connectionId != null,
+  });
+}
+
+export type GhlMetadataPreview = {
+  pipelines: { id: string; name: string; stages?: { id: string; name: string }[] }[];
+  calendars: { id: string; name: string }[];
+};
+
+export function useFetchGhlMetadata() {
+  return useMutation({
+    mutationFn: (body: {
+      credentials: { private_integration_token: string };
+      config: { location_id: string };
+    }) => post<GhlMetadataPreview>(`${ns()}/integrations/ghl/metadata`, body),
   });
 }
 

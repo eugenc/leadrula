@@ -113,6 +113,7 @@ export const BUILTIN_FIELD_LABELS: Record<string, string> = {
   tags: "Tags",
   action_at: "Action date & time",
   external_id: "External ID",
+  lead_id: "Lead ID",
   disqualification_reason_id: "Disqualification reason",
   note: "Note",
 };

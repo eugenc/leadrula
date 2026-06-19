@@ -388,17 +388,17 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 		return nil, err
 	}
 
-	nullRouteCols := `
+	nullRouteCols := `,
 		     NULL::bigint AS route_id,
-		     NULL::text AS route_name,
-		     NULL::text AS trigger_type,
-		     NULL::text AS trigger_label,
-		     NULL::text AS target_account_name,
-		     NULL::text AS destination,
+		     ''::text AS route_name,
+		     ''::text AS trigger_type,
+		     ''::text AS trigger_label,
+		     ''::text AS target_account_name,
+		     ''::text AS destination,
 		     0::int AS branch_position,
-		     NULL::text AS target_pipeline_name,
-		     NULL::text AS target_stage_name,
-		     NULL::text AS delivery`
+		     ''::text AS target_pipeline_name,
+		     ''::text AS target_stage_name,
+		     ''::text AS delivery`
 
 	sourceUnion := `
 		   SELECT
