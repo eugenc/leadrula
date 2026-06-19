@@ -3,6 +3,7 @@ package integrations
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"time"
 
@@ -26,7 +27,19 @@ func (s *Service) RunWorker(ctx context.Context) {
 	}
 }
 
+func (s *Service) reclaimStaleProcessingJobs(ctx context.Context) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE integration_delivery_queue
+		SET status = 'pending', next_attempt_at = now(), updated_at = now()
+		WHERE status = 'processing'
+		  AND updated_at < now() - interval '2 minutes'`)
+	return err
+}
+
 func (s *Service) processJobs(ctx context.Context) error {
+	if err := s.reclaimStaleProcessingJobs(ctx); err != nil {
+		log.Printf("integrations worker: reclaim stale processing: %v", err)
+	}
 	rows, err := s.pool.Query(ctx, `
 		UPDATE integration_delivery_queue
 		SET status = 'processing', attempts = attempts + 1, updated_at = now()
@@ -58,6 +71,12 @@ func (s *Service) processJobs(ctx context.Context) error {
 }
 
 func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, payload json.RawMessage, attempts int, triggerID *int64) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.markFailed(ctx, jobID, attempts, fmt.Sprintf("worker panic: %v", r))
+		}
+	}()
+
 	start := time.Now()
 
 	var encCredentials []byte
@@ -188,10 +207,12 @@ func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, p
 }
 
 func (s *Service) markSuccess(ctx context.Context, jobID int64, externalID string) {
-	_, _ = s.pool.Exec(ctx,
+	if _, err := s.pool.Exec(ctx,
 		`UPDATE integration_delivery_queue
 		 SET status = 'success', external_id = $2, delivered_at = now(), updated_at = now()
-		 WHERE id = $1`, jobID, externalID)
+		 WHERE id = $1`, jobID, externalID); err != nil {
+		log.Printf("integrations worker: markSuccess job %d: %v", jobID, err)
+	}
 }
 
 func (s *Service) markFailed(ctx context.Context, jobID int64, attempts int, errMsg string) {
@@ -200,14 +221,18 @@ func (s *Service) markFailed(ctx context.Context, jobID int64, attempts int, err
 	if attempts-1 < len(backoff) {
 		next = time.Now().Add(backoff[attempts-1])
 	}
-	_, _ = s.pool.Exec(ctx,
+	if _, err := s.pool.Exec(ctx,
 		`UPDATE integration_delivery_queue
 		 SET status = CASE WHEN attempts >= max_attempts THEN 'dead'::delivery_status ELSE 'pending'::delivery_status END,
 		     next_attempt_at = $2, last_error = $3, updated_at = now()
-		 WHERE id = $1`, jobID, next, errMsg)
-	_, _ = s.pool.Exec(ctx,
+		 WHERE id = $1`, jobID, next, errMsg); err != nil {
+		log.Printf("integrations worker: markFailed job %d: %v", jobID, err)
+	}
+	if _, err := s.pool.Exec(ctx,
 		`UPDATE integration_connections SET last_error = $2 WHERE id = (
-			SELECT connection_id FROM integration_delivery_queue WHERE id = $1)`, jobID, errMsg)
+			SELECT connection_id FROM integration_delivery_queue WHERE id = $1)`, jobID, errMsg); err != nil {
+		log.Printf("integrations worker: markFailed connection update job %d: %v", jobID, err)
+	}
 }
 
 func (s *Service) logAttempt(ctx context.Context, jobID int64, attempt int, status string, httpStatus int, req, resp []byte, duration int, errMsg string) {
