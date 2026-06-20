@@ -16,7 +16,9 @@ import { FormDrawer } from "@/components/ui/dialog";
 import { cn, formatMoney, resolveBuyerTxnCategory } from "@/lib/utils";
 import { format } from "date-fns";
 import { toast } from "@/store/toastStore";
+import { useUIStore } from "@/store/uiStore";
 import { errorMessage } from "@/lib/api";
+import { LogLeadLink } from "@/features/intake/logShared";
 import type { Dispute, Transaction } from "@/types";
 
 type BillingTab = "transactions" | "invoices" | "disputes" | "payments";
@@ -71,6 +73,7 @@ function Transactions() {
   const { data: txns, isLoading } = useTransactions("buyer");
   const { data: disputes } = useDisputes("buyer");
   const [disputing, setDisputing] = useState<Transaction | null>(null);
+  const openDetail = useUIStore((s) => s.openDetail);
 
   const disputedTxnIds = new Set((disputes ?? []).map((d) => d.transaction_id));
 
@@ -98,7 +101,9 @@ function Transactions() {
             <TR key={t.id}>
               <TD className="font-medium text-gray-800">{typeLabel}</TD>
               <TD className="font-medium text-gray-800">{t.publisher_name ?? "—"}</TD>
-              <TD>{t.lead_name ?? "—"}</TD>
+              <TD>
+                <LogLeadLink leadId={t.lead_id} fallback={t.lead_name} onClick={openDetail} />
+              </TD>
               <TD className={t.amount < 0 ? "font-medium text-danger-fg" : "text-jade-700"}>
                 {formatMoney(t.amount)}
               </TD>

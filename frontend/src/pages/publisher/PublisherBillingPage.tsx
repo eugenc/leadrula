@@ -10,7 +10,9 @@ import { Spinner, EmptyState } from "@/components/ui/misc";
 import { cn, formatMoney, resolveTxnCategory } from "@/lib/utils";
 import { format } from "date-fns";
 import { toast } from "@/store/toastStore";
+import { useUIStore } from "@/store/uiStore";
 import { errorMessage } from "@/lib/api";
+import { LogLeadLink } from "@/features/intake/logShared";
 import type { Transaction } from "@/types";
 
 function formatAccountName(
@@ -151,6 +153,7 @@ function Transactions() {
 }
 
 function TransactionRow({ t }: { t: Transaction }) {
+  const openDetail = useUIStore((s) => s.openDetail);
   const typeLabel = resolveTxnCategory(t);
   return (
     <TR>
@@ -159,7 +162,9 @@ function TransactionRow({ t }: { t: Transaction }) {
         {formatAccountName(t.counterparty_name, t.buyer_name)}
       </TD>
       <TD className="text-gray-600">{formatAccountType(t.counterparty_account_type)}</TD>
-      <TD>{t.lead_name ?? "—"}</TD>
+      <TD>
+        <LogLeadLink leadId={t.lead_id} fallback={t.lead_name} onClick={openDetail} />
+      </TD>
       <TD className={t.amount < 0 ? "font-medium text-danger-fg" : "text-jade-700"}>
         {formatMoney(t.amount)}
       </TD>
