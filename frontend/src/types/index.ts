@@ -277,6 +277,13 @@ export interface CustomField {
   options: string[];
   position: number;
   is_active: boolean;
+  folder_id?: number | null;
+}
+
+export interface CustomFieldFolder {
+  id: number;
+  name: string;
+  position: number;
 }
 
 export interface DisqReason {

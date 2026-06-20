@@ -12,6 +12,7 @@ import type {
   Stage,
   LeadHistoryEntry,
   CustomField,
+  CustomFieldFolder,
   DisqReason,
   UserRow,
   Me,
@@ -282,6 +283,13 @@ export function useToggleFollow() {
 // shared reference data
 export function useCustomFields() {
   return useQuery({ queryKey: ["custom-fields"], queryFn: () => get<CustomField[]>(`${ns()}/custom-fields`) });
+}
+
+export function useCustomFieldFolders() {
+  return useQuery({
+    queryKey: ["custom-field-folders"],
+    queryFn: () => get<CustomFieldFolder[]>(`${ns()}/custom-field-folders`),
+  });
 }
 
 export function useStageDisqReasons(stageId: number | null) {

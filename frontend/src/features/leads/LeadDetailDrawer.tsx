@@ -6,7 +6,7 @@ import { Avatar, Badge, Spinner } from "@/components/ui/misc";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { ActionDot } from "./ActionDot";
 import { format, isPast } from "date-fns";
-import { CircleHelp, MapPin } from "lucide-react";
+import { CircleHelp, MapPin, ChevronDown, ChevronRight } from "lucide-react";
 import { cn, formatMoney } from "@/lib/utils";
 import { useUIStore } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
@@ -21,6 +21,7 @@ import {
   useSetActionAt,
   useUsers,
   useCustomFields,
+  useCustomFieldFolders,
   useDeleteLead,
   useChangeStage,
   usePipelines,
@@ -35,13 +36,15 @@ import {
   stageNeedsPrompt,
   stagePromptMissingError,
 } from "@/features/pipelines/stageTypes";
-import type { Lead, LeadHistoryEntry, Stage } from "@/types";
+import type { CustomField, Lead, LeadHistoryEntry, Stage } from "@/types";
 import { formatStatus, leadSourceLabel } from "./leadsListColumns";
 import { LeadTagsEditor } from "./LeadTagsEditor";
 import { useQuery } from "@tanstack/react-query";
 import { get } from "@/lib/api";
 import type { BuyerSummary } from "@/types";
 import { effectiveFieldFormat } from "@/features/admin/customFieldConstants";
+import { groupCustomFieldsByFolder } from "@/features/admin/customFieldLayout";
+import { useFolderCollapse } from "./customFieldFolderCollapse";
 import { DatetimeFieldInput } from "./DatetimeFieldInput";
 import {
   AddressAutocomplete,
@@ -173,6 +176,8 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   const removeLead = useDeleteLead();
   const { data: users } = useUsers();
   const { data: customFields } = useCustomFields();
+  const { data: customFieldFolders } = useCustomFieldFolders();
+  const { collapsed, toggle: toggleFolder } = useFolderCollapse(user?.account_id);
   const { data: mapsStatus } = useGoogleMapsStatus();
   const mapsConnected = mapsStatus?.connected === true;
 
@@ -454,28 +459,13 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
               placeId={lead.address_place_id ?? ""}
               formattedAddress={formattedAddress}
             />
-            {(customFields ?? []).filter((f) => f.is_active).length > 0 && (
-              <div>
-                <SectionLabel className="mb-2">Custom Fields</SectionLabel>
-                <div className="flex flex-col gap-2.5">
-                  {(customFields ?? [])
-                    .filter((f) => f.is_active)
-                    .map((f) => (
-                      <div key={f.id}>
-                        <Label>{f.name}</Label>
-                        <CustomFieldValue
-                          leadId={lead.id}
-                          fieldId={f.id}
-                          type={f.type}
-                          format={f.format}
-                          options={f.options}
-                          value={lead.custom_values?.[String(f.id)]}
-                        />
-                      </div>
-                    ))}
-                </div>
-              </div>
-            )}
+            <CustomFieldsSection
+              lead={lead}
+              customFields={customFields}
+              folders={customFieldFolders}
+              collapsed={collapsed}
+              onToggleFolder={toggleFolder}
+            />
             <RedistributeBox lead={lead} />
           </div>
         )}
@@ -659,6 +649,75 @@ function LeadPipelineFields({ lead }: { lead: Lead }) {
         }}
       />
     </>
+  );
+}
+
+function CustomFieldsSection({
+  lead,
+  customFields,
+  folders,
+  collapsed,
+  onToggleFolder,
+}: {
+  lead: Lead;
+  customFields: CustomField[] | undefined;
+  folders: { id: number; name: string; position: number }[] | undefined;
+  collapsed: Record<string, boolean>;
+  onToggleFolder: (folderId: number) => void;
+}) {
+  const activeFields = (customFields ?? []).filter((f) => f.is_active);
+  if (activeFields.length === 0) return null;
+  const grouped = groupCustomFieldsByFolder(folders ?? [], activeFields);
+
+  const renderField = (f: CustomField) => (
+    <div key={f.id}>
+      <Label>{f.name}</Label>
+      <CustomFieldValue
+        leadId={lead.id}
+        fieldId={f.id}
+        type={f.type}
+        format={f.format}
+        options={f.options}
+        value={lead.custom_values?.[String(f.id)]}
+      />
+    </div>
+  );
+
+  return (
+    <div>
+      <SectionLabel className="mb-2">Custom Fields</SectionLabel>
+      <div className="flex flex-col gap-3">
+        {grouped.folders
+          .filter((g) => g.fields.length > 0)
+          .map((g) => {
+            const isCollapsed = !!collapsed[g.folder.id];
+            return (
+              <div key={g.folder.id} className="rounded-md border border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => onToggleFolder(g.folder.id)}
+                  className="flex w-full items-center gap-1.5 px-2.5 py-2 text-left text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  {isCollapsed ? (
+                    <ChevronRight className="h-4 w-4 text-gray-400" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 text-gray-400" />
+                  )}
+                  {g.folder.name}
+                </button>
+                {!isCollapsed && (
+                  <div className="flex flex-col gap-2.5 border-t border-gray-100 px-2.5 py-2.5">
+                    {g.fields.map(renderField)}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        {grouped.unassigned.length > 0 && (
+          <div className="flex flex-col gap-2.5">{grouped.unassigned.map(renderField)}</div>
+        )}
+      </div>
+    </div>
   );
 }
 

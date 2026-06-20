@@ -16,13 +16,18 @@ func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/custom-fields", h.listFields)
+	r.Get("/custom-field-folders", h.listFolders)
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireRole("admin"))
 		r.Post("/custom-fields", h.createField)
 		r.Post("/custom-fields/import", h.importFields)
+		r.Post("/custom-fields/layout", h.saveLayout)
 		r.Patch("/custom-fields/{id}", h.updateField)
 		r.Delete("/custom-fields/{id}", h.deleteField)
+		r.Post("/custom-field-folders", h.createFolder)
+		r.Patch("/custom-field-folders/{id}", h.updateFolder)
+		r.Delete("/custom-field-folders/{id}", h.deleteFolder)
 	})
 }
 
@@ -94,6 +99,71 @@ func (h *Handler) updateField(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteField(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	if err := h.svc.DeleteField(r.Context(), p.AccountID, idParam(r)); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) listFolders(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	items, err := h.svc.ListFolders(r.Context(), p.AccountID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, items)
+}
+
+func (h *Handler) createFolder(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		Name string `json:"name"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	f, err := h.svc.CreateFolder(r.Context(), p.AccountID, body.Name)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, f)
+}
+
+func (h *Handler) updateFolder(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		Name     *string `json:"name"`
+		Position *int    `json:"position"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	f, err := h.svc.UpdateFolder(r.Context(), p.AccountID, idParam(r), body.Name, body.Position)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, f)
+}
+
+func (h *Handler) deleteFolder(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	if err := h.svc.DeleteFolder(r.Context(), p.AccountID, idParam(r)); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) saveLayout(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body Layout
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	if err := h.svc.SaveLayout(r.Context(), p.AccountID, body); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}

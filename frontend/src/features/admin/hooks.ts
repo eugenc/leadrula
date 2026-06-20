@@ -40,6 +40,7 @@ import type {
   PayoutLedgerRow,
   UserRow,
   CustomField,
+  CustomFieldFolder,
   DisqReason,
   Stage,
 } from "@/types";
@@ -189,6 +190,43 @@ export function useUpdateField() {
 export function useDeleteField() {
   const inv = useInvalidate(["custom-fields"]);
   return useMutation({ mutationFn: (id: number) => del(`${ns()}/custom-fields/${id}`), onSuccess: inv });
+}
+
+// ── Custom field folders ──────────────────────────────────────────
+export function useCreateCustomFieldFolder() {
+  const inv = useInvalidate(["custom-field-folders"]);
+  return useMutation({
+    mutationFn: (name: string) => post<CustomFieldFolder>(`${ns()}/custom-field-folders`, { name }),
+    onSuccess: inv,
+  });
+}
+export function useUpdateCustomFieldFolder() {
+  const inv = useInvalidate(["custom-field-folders"]);
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: { name?: string; position?: number } }) =>
+      patch<CustomFieldFolder>(`${ns()}/custom-field-folders/${id}`, body),
+    onSuccess: inv,
+  });
+}
+export function useDeleteCustomFieldFolder() {
+  const inv = useInvalidate(["custom-field-folders", "custom-fields"]);
+  return useMutation({
+    mutationFn: (id: number) => del(`${ns()}/custom-field-folders/${id}`),
+    onSuccess: inv,
+  });
+}
+
+export interface CustomFieldLayoutPayload {
+  folders: { id: number; position: number }[];
+  fields: { id: number; folder_id: number | null; position: number }[];
+}
+export function useSaveCustomFieldLayout() {
+  const inv = useInvalidate(["custom-field-folders", "custom-fields"]);
+  return useMutation({
+    mutationFn: (body: CustomFieldLayoutPayload) =>
+      post<{ ok: boolean }>(`${ns()}/custom-fields/layout`, body),
+    onSuccess: inv,
+  });
 }
 
 export const CUSTOM_FIELD_IMPORT_BATCH_SIZE = 1000;

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useCustomFields } from "@/features/leads/hooks";
 import { useCreateField, useUpdateField, useDeleteField } from "@/features/admin/hooks";
 import { ImportCustomFieldsModal } from "@/features/admin/ImportCustomFieldsModal";
+import { CustomFieldFoldersTab } from "@/features/admin/CustomFieldFoldersTab";
 import {
   CUSTOM_FIELD_TYPES,
   defaultFormatForType,
@@ -20,6 +21,7 @@ import { FormDrawer } from "@/components/ui/dialog";
 import { Plus, Trash2, Upload } from "lucide-react";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import type { CustomField } from "@/types";
 
 type FieldForm = { name: string; field_key: string; type: string; format: string; options: string };
@@ -47,6 +49,7 @@ export function CustomFieldsPage() {
   const create = useCreateField();
   const update = useUpdateField();
   const remove = useDeleteField();
+  const [tab, setTab] = useState<"fields" | "folders">("fields");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [editing, setEditing] = useState<CustomField | null>(null);
@@ -121,18 +124,38 @@ export function CustomFieldsPage() {
     <>
       <PageHeader
         action={
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setImportOpen(true)}>
-              <Upload className="h-4 w-4" /> Import CSV
-            </Button>
-            <Button onClick={openCreate}>
-              <Plus className="h-4 w-4" /> New Field
-            </Button>
-          </div>
+          tab === "fields" ? (
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setImportOpen(true)}>
+                <Upload className="h-4 w-4" /> Import CSV
+              </Button>
+              <Button onClick={openCreate}>
+                <Plus className="h-4 w-4" /> New Field
+              </Button>
+            </div>
+          ) : undefined
         }
       />
       <PageBody>
-        {isLoading ? (
+        <div className="mb-4 flex border-b border-gray-100">
+          {(["fields", "folders"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={cn(
+                "-mb-px border-b-2 px-4 py-2 text-base font-semibold capitalize transition-colors",
+                tab === t ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400 hover:text-gray-600"
+              )}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+
+        {tab === "folders" && <CustomFieldFoldersTab />}
+
+        {tab === "fields" &&
+          (isLoading ? (
           <Spinner className="h-6 w-6" />
         ) : (
           <Table>
@@ -177,7 +200,7 @@ export function CustomFieldsPage() {
               ))}
             </TBody>
           </Table>
-        )}
+          ))}
 
         <FormDrawer
           open={drawerOpen}

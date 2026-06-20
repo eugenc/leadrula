@@ -25,10 +25,16 @@ type CustomField struct {
 	Options   json.RawMessage `json:"options"`
 	Position  int             `json:"position"`
 	IsActive  bool            `json:"is_active"`
+	FolderID  *int64          `json:"folder_id"`
 	CreatedAt time.Time       `json:"created_at"`
 }
 
-const customFieldCols = `id, public_id, account_id, name, field_key, type, format, options, position, is_active, created_at`
+const customFieldCols = `id, public_id, account_id, name, field_key, type, format, options, position, is_active, folder_id, created_at`
+
+func scanField(row pgx.Row, f *CustomField) error {
+	return row.Scan(&f.ID, &f.PublicID, &f.AccountID, &f.Name, &f.FieldKey, &f.Type,
+		&f.Format, &f.Options, &f.Position, &f.IsActive, &f.FolderID, &f.CreatedAt)
+}
 
 type Service struct {
 	pool *pgxpool.Pool
@@ -48,7 +54,7 @@ func (s *Service) ListFields(ctx context.Context, accountID int64) ([]CustomFiel
 	var out []CustomField
 	for rows.Next() {
 		var f CustomField
-		if err := rows.Scan(&f.ID, &f.PublicID, &f.AccountID, &f.Name, &f.FieldKey, &f.Type, &f.Format, &f.Options, &f.Position, &f.IsActive, &f.CreatedAt); err != nil {
+		if err := scanField(rows, &f); err != nil {
 			return nil, err
 		}
 		out = append(out, f)
@@ -68,12 +74,11 @@ func (s *Service) CreateField(ctx context.Context, accountID int64, name, fieldK
 		return nil, err
 	}
 	f := &CustomField{}
-	err = s.pool.QueryRow(ctx,
+	err = scanField(s.pool.QueryRow(ctx,
 		`INSERT INTO custom_fields(account_id, name, field_key, type, format, options, position)
 		 VALUES ($1,$2,$3,$4,$5,$6, COALESCE((SELECT MAX(position)+1 FROM custom_fields WHERE account_id=$1),0))
 		 RETURNING `+customFieldCols,
-		accountID, name, fieldKey, ftype, resolvedFormat, options).Scan(
-		&f.ID, &f.PublicID, &f.AccountID, &f.Name, &f.FieldKey, &f.Type, &f.Format, &f.Options, &f.Position, &f.IsActive, &f.CreatedAt)
+		accountID, name, fieldKey, ftype, resolvedFormat, options), f)
 	if err != nil {
 		if database.IsUniqueViolation(err) {
 			return nil, httpx.Conflict("field_key already exists")
@@ -123,7 +128,7 @@ func (s *Service) UpdateField(ctx context.Context, accountID, id int64, name, fi
 		formatArg = *format
 	}
 	f := &CustomField{}
-	err = tx.QueryRow(ctx,
+	err = scanField(tx.QueryRow(ctx,
 		`UPDATE custom_fields SET
 		   name = COALESCE($3, name),
 		   field_key = COALESCE($4, field_key),
@@ -133,8 +138,7 @@ func (s *Service) UpdateField(ctx context.Context, accountID, id int64, name, fi
 		   is_active = COALESCE($8, is_active)
 		 WHERE id = $1 AND account_id = $2
 		 RETURNING `+customFieldCols,
-		id, accountID, name, fieldKey, optArg, formatArg, position, isActive).Scan(
-		&f.ID, &f.PublicID, &f.AccountID, &f.Name, &f.FieldKey, &f.Type, &f.Format, &f.Options, &f.Position, &f.IsActive, &f.CreatedAt)
+		id, accountID, name, fieldKey, optArg, formatArg, position, isActive), f)
 	if err != nil {
 		if database.IsUniqueViolation(err) {
 			return nil, httpx.Conflict("field_key already exists")

@@ -187,10 +187,9 @@ func (s *Service) ImportFields(ctx context.Context, accountID int64, in ImportFi
 
 func (s *Service) fieldByKey(ctx context.Context, accountID int64, fieldKey string) (*CustomField, error) {
 	f := &CustomField{}
-	err := s.pool.QueryRow(ctx,
+	err := scanField(s.pool.QueryRow(ctx,
 		`SELECT `+customFieldCols+` FROM custom_fields WHERE account_id = $1 AND field_key = $2`,
-		accountID, fieldKey).Scan(
-		&f.ID, &f.PublicID, &f.AccountID, &f.Name, &f.FieldKey, &f.Type, &f.Format, &f.Options, &f.Position, &f.IsActive, &f.CreatedAt)
+		accountID, fieldKey), f)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
