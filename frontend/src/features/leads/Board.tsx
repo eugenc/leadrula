@@ -92,7 +92,10 @@ export function Board() {
   const { data: pipelines, isLoading: plLoading } = usePipelines();
   const [pipelineId, setPipelineId] = useState<number | undefined>();
   useEffect(() => {
-    if (!pipelineId && pipelines && pipelines.length) setPipelineId(pipelines[0].id);
+    if (!pipelines?.length) return;
+    if (!pipelineId || !pipelines.some((p) => p.id === pipelineId)) {
+      setPipelineId(pipelines[0].id);
+    }
   }, [pipelines, pipelineId]);
 
   const { data: apiViews, isLoading: viewsLoading } = useSavedLeadViews("board");
@@ -106,6 +109,11 @@ export function Board() {
   const prevActiveId = useRef<string | null>(null);
   const uiHydrated = useRef(false);
   const [uiReady, setUiReady] = useState(false);
+
+  useEffect(() => {
+    uiHydrated.current = false;
+    setUiReady(false);
+  }, [user?.account_id]);
 
   const [conditions, setConditions] = useState<FilterCondition[]>([]);
   const [cardFields, setCardFields] = useState<string[]>(DEFAULT_BOARD_CARD_FIELDS);

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { queryClient } from "@/lib/queryClient";
 import type { AccountType, CurrentUser, Role } from "@/types";
 
 interface ImpersonationStack {
@@ -79,6 +80,7 @@ export const useAuthStore = create<AuthState>()(
           refreshToken: null,
           user: { ...user, impersonating: true, buyer_account_name: buyerAccountName },
         });
+        queryClient.clear();
       },
       endImpersonation: () => {
         const imp = get().impersonation;
@@ -89,6 +91,7 @@ export const useAuthStore = create<AuthState>()(
           user: imp.publisherUser,
           impersonation: null,
         });
+        queryClient.clear();
       },
       startSwitch: (params) => {
         set({
