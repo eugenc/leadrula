@@ -329,6 +329,13 @@ func setPublisherTracking(ctx context.Context, q database.Querier, leadID, pubPi
 	return err
 }
 
+func clearPublisherTracking(ctx context.Context, q database.Querier, leadID int64) error {
+	_, err := q.Exec(ctx,
+		`UPDATE leads SET publisher_pipeline_id = NULL, publisher_stage_id = NULL WHERE id = $1`,
+		leadID)
+	return err
+}
+
 // InitPublisherTracking sets publisher-board placement when a lead is distributed to a buyer.
 // When no stage map exists yet, falls back to the contract distribute-from stage (source_stage_id).
 func InitPublisherTracking(ctx context.Context, q database.Querier, contractID, leadID, buyerID, buyerStageID int64) error {
@@ -343,10 +350,11 @@ func InitPublisherTracking(ctx context.Context, q database.Querier, contractID, 
 }
 
 // SyncPublisherStage updates publisher-board placement only when an explicit delivery map exists.
+// When no map exists, clears publisher tracking so distributed leads leave the publisher board.
 func SyncPublisherStage(ctx context.Context, q database.Querier, contractID, leadID, buyerID, buyerStageID int64) error {
 	pubPipelineID, pubStageID, err := lookupPublisherStage(ctx, q, contractID, buyerID, buyerStageID)
 	if isStageMapMissingErr(err) {
-		return nil
+		return clearPublisherTracking(ctx, q, leadID)
 	}
 	if err != nil {
 		return err

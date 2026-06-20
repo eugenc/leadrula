@@ -44,11 +44,6 @@ type Service struct {
 	encKey    []byte
 	oauth     OAuthConfig
 	providers map[string]providers.Provider
-	leadSvc   originRouteApplier
-}
-
-type originRouteApplier interface {
-	TryApplyConnectionOriginRoute(ctx context.Context, accountID, connectionID, leadID int64, payloadFlat map[string]any) bool
 }
 
 func NewService(pool *pgxpool.Pool, encKey []byte, oauth OAuthConfig) *Service {
@@ -68,9 +63,6 @@ func NewService(pool *pgxpool.Pool, encKey []byte, oauth OAuthConfig) *Service {
 		},
 	}
 }
-
-// SetLeadService wires origin-route application after integration callbacks.
-func (s *Service) SetLeadService(svc originRouteApplier) { s.leadSvc = svc }
 
 func (s *Service) ListProviders(ctx context.Context) ([]map[string]any, error) {
 	rows, err := s.pool.Query(ctx,

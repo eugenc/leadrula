@@ -159,7 +159,6 @@ func main() {
 	}
 	webhooksH := webhooks.NewHandler(webhooksSvc)
 	leadsSvc.SetWebhookFirer(webhooksSvc)
-	integrationsSvc.SetLeadService(leadsSvc)
 
 	oversightH := oversight.NewHandler(accountsRepo, accountsSvc, leadsRepo, pipelinesSvc, billingSvc, calSvc, collabSvc, partnersSvc, partnersSvc)
 

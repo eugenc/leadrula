@@ -110,11 +110,9 @@ func TestPublisherPipelineTracking_distributeAndBuyerWon(t *testing.T) {
 	}
 
 	var status string
-	var initialPubStage int64
 	if pubStage == nil {
 		t.Fatal("expected publisher_stage_id after distribute")
 	}
-	initialPubStage = *pubStage
 
 	if err := tx.QueryRow(ctx,
 		`SELECT owner_account_id, publisher_stage_id, status FROM leads WHERE id = $1`, leadID).
@@ -124,8 +122,8 @@ func TestPublisherPipelineTracking_distributeAndBuyerWon(t *testing.T) {
 	if ownerID != buyerID {
 		t.Fatal("buyer should still own lead after won")
 	}
-	if pubStage == nil || *pubStage != initialPubStage {
-		t.Fatalf("publisher_stage_id = %v want unchanged %d (no auto-sync)", pubStage, initialPubStage)
+	if pubStage != nil {
+		t.Fatalf("publisher_stage_id = %v want cleared (nil) after sync with no stage map", *pubStage)
 	}
 	if status != "closed" {
 		t.Fatalf("status = %q want closed", status)

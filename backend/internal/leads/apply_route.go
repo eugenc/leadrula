@@ -49,6 +49,13 @@ type RouteApplyDeps struct {
 func ApplyRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, leadID int64, meta RouteExecutionMeta) ([]notifications.EmailJob, error) {
 	switch route.Destination {
 	case "pipeline":
+		skip, err := leadAlreadyAtPipelineTarget(ctx, q, deps.Repo, route, leadID)
+		if err != nil {
+			return nil, err
+		}
+		if skip {
+			return nil, nil
+		}
 		emails, err := applyPipelineRoute(ctx, q, deps, route, route.OwnerAccountID(), leadID)
 		if err != nil {
 			return nil, err
@@ -114,6 +121,17 @@ func applyPipelineRoute(ctx context.Context, q database.Querier, deps RouteApply
 		return nil, deps.Repo.SetStatusWithLog(ctx, q, leadID, ActorSystem("Route"), "distributed")
 	}
 	return nil, deps.Repo.SetStatusWithLog(ctx, q, leadID, ActorSystem("Route"), "review")
+}
+
+func leadAlreadyAtPipelineTarget(ctx context.Context, q database.Querier, repo *Repository, route *routing.Route, leadID int64) (bool, error) {
+	if route.TargetStageID == nil {
+		return false, nil
+	}
+	lead, err := repo.GetByID(ctx, q, leadID)
+	if err != nil {
+		return false, err
+	}
+	return lead.StageID != nil && *lead.StageID == *route.TargetStageID, nil
 }
 
 func applyWebhookDestRoute(ctx context.Context, q database.Querier, deps RouteApplyDeps, route *routing.Route, leadID int64) error {

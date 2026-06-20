@@ -7,6 +7,7 @@ import (
 
 	"github.com/echayko/leadrula/backend/internal/config"
 	"github.com/echayko/leadrula/backend/internal/database"
+	"github.com/echayko/leadrula/backend/internal/routing"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/jackc/pgx/v5"
 )
@@ -243,5 +244,38 @@ func TestDiagnosticSunbrightBoardLeads(t *testing.T) {
 	t.Logf("Sunbright (account %d): %d in pipeline, %d mismatched stage, %d board-visible", accountID, total, mismatched, onBoard)
 	if mismatched > 0 {
 		t.Fatalf("%d Sunbright leads still have stage_id outside their pipeline; run migration 0073", mismatched)
+	}
+}
+
+func TestLeadAlreadyAtPipelineTarget(t *testing.T) {
+	pool := connectLeadsTestDB(t)
+	ctx := context.Background()
+	repo := NewRepository(pool)
+
+	var leadID, stageID int64
+	err := pool.QueryRow(ctx,
+		`SELECT l.id, l.stage_id FROM leads l
+		 WHERE l.stage_id IS NOT NULL AND l.deleted_at IS NULL LIMIT 1`).Scan(&leadID, &stageID)
+	if err != nil {
+		t.Skip("no lead with stage")
+	}
+
+	route := &routing.Route{TargetStageID: &stageID}
+	skip, err := leadAlreadyAtPipelineTarget(ctx, pool, repo, route, leadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !skip {
+		t.Fatal("expected skip when lead already at target stage")
+	}
+
+	other := stageID + 999999
+	route.TargetStageID = &other
+	skip, err = leadAlreadyAtPipelineTarget(ctx, pool, repo, route, leadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skip {
+		t.Fatal("expected no skip when target stage differs")
 	}
 }
