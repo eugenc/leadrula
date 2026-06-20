@@ -4,20 +4,24 @@ import {
   Droppable,
   Draggable,
   type DropResult,
+  type DraggableProvidedDragHandleProps,
 } from "@hello-pangea/dnd";
-import { GripVertical, Plus, Trash2, FolderOpen } from "lucide-react";
+import { GripVertical, Lock, Trash2 } from "lucide-react";
 import { useCustomFields, useCustomFieldFolders } from "@/features/leads/hooks";
 import {
-  useCreateCustomFieldFolder,
   useUpdateCustomFieldFolder,
   useDeleteCustomFieldFolder,
   useSaveCustomFieldLayout,
 } from "@/features/admin/hooks";
 import {
+  applyContactSystemDrag,
   applyDrag,
+  applyFolderDrag,
   buildLayoutPayload,
+  CONTACT_SYSTEM_DROPPABLE,
   folderDroppableId,
   groupCustomFieldsByFolder,
+  splitFolderGroups,
   UNASSIGNED_DROPPABLE,
   type GroupedFields,
 } from "@/features/admin/customFieldLayout";
@@ -25,52 +29,76 @@ import { DeletePipelineResourceConfirmDialog } from "@/features/pipelines/Delete
 import { Card, Spinner, EmptyState } from "@/components/ui/misc";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { IconButton } from "@/components/layout/IconButton";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
-import type { CustomField } from "@/types";
+import type { CustomField, CustomFieldFolder } from "@/types";
+import {
+  contactBuiltinOrderFromFolder,
+  isContactFolder,
+  orderedLockedContactSystemFields,
+  orderedReorderableContactSystemFields,
+  type ContactFieldKey,
+} from "@/features/leads/contactSection";
 
 export function CustomFieldFoldersTab() {
   const { data: folders, isLoading: foldersLoading } = useCustomFieldFolders();
   const { data: fields, isLoading: fieldsLoading } = useCustomFields();
-  const createFolder = useCreateCustomFieldFolder();
   const updateFolder = useUpdateCustomFieldFolder();
   const deleteFolder = useDeleteCustomFieldFolder();
   const saveLayout = useSaveCustomFieldLayout();
 
-  const [newFolderName, setNewFolderName] = useState("");
   const [folderToDelete, setFolderToDelete] = useState<{ id: number; name: string } | null>(null);
 
   const serverGrouped = useMemo(
     () => groupCustomFieldsByFolder(folders ?? [], (fields ?? []).filter((f) => f.is_active)),
     [folders, fields]
   );
-  // Optimistic copy so cross-folder drags don't snap back while the save is in flight.
-  const [draft, setDraft] = useState<GroupedFields | null>(null);
-  useEffect(() => setDraft(null), [serverGrouped]);
-  const view = draft ?? serverGrouped;
+  const serverContactOrder = useMemo(() => {
+    const contact = serverGrouped.folders.find((g) => isContactFolder(g.folder));
+    return contactBuiltinOrderFromFolder(contact?.folder);
+  }, [serverGrouped]);
 
-  function onDragEnd(result: DropResult) {
-    const next = applyDrag(view, result);
-    if (!next) return;
-    setDraft(next);
-    saveLayout.mutate(buildLayoutPayload(next), {
+  const [draft, setDraft] = useState<GroupedFields | null>(null);
+  const [contactOrderDraft, setContactOrderDraft] = useState<ContactFieldKey[] | null>(null);
+  useEffect(() => {
+    setDraft(null);
+    setContactOrderDraft(null);
+  }, [serverGrouped, serverContactOrder.join(",")]);
+
+  const view = draft ?? serverGrouped;
+  const contactOrder = contactOrderDraft ?? serverContactOrder;
+  const { contact: contactGroup, others: otherFolderGroups } = splitFolderGroups(view);
+  function save(nextGrouped: GroupedFields, nextContactOrder: ContactFieldKey[]) {
+    saveLayout.mutate(buildLayoutPayload(nextGrouped, nextContactOrder), {
       onError: (e) => {
         toast.error(errorMessage(e));
         setDraft(null);
+        setContactOrderDraft(null);
       },
     });
   }
 
-  function addFolder() {
-    const name = newFolderName.trim();
-    if (!name) return;
-    createFolder.mutate(name, {
-      onSuccess: () => setNewFolderName(""),
-      onError: (e) => toast.error(errorMessage(e)),
-    });
+  function onDragEnd(result: DropResult) {
+    if (result.type === "contact-system") {
+      const nextOrder = applyContactSystemDrag(contactOrder, result);
+      if (!nextOrder) return;
+      setContactOrderDraft(nextOrder);
+      save(view, nextOrder);
+      return;
+    }
+    if (result.type === "folder") {
+      const next = applyFolderDrag(view, result);
+      if (!next) return;
+      setDraft(next);
+      save(next, contactOrder);
+      return;
+    }
+    const next = applyDrag(view, result);
+    if (!next) return;
+    setDraft(next);
+    save(next, contactOrder);
   }
 
   if (foldersLoading || fieldsLoading) return <Spinner className="h-6 w-6" />;
@@ -80,67 +108,41 @@ export function CustomFieldFoldersTab() {
   return (
     <>
       <Card className="p-4">
-        <div className="mb-4 flex gap-2">
-          <Input
-            value={newFolderName}
-            onChange={(e) => setNewFolderName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && addFolder()}
-            placeholder="New folder name"
-            className="h-9 max-w-xs text-sm"
-          />
-          <Button onClick={addFolder} disabled={!newFolderName.trim() || createFolder.isPending}>
-            <Plus className="h-4 w-4" /> Add Folder
-          </Button>
-        </div>
-
         <DragDropContext onDragEnd={onDragEnd}>
+          {contactGroup && (
+            <div className="mb-4">
+              <FolderHeading folder={contactGroup.folder} />
+              <ContactSystemFieldList order={contactOrder} />
+              <FieldDropList
+                droppableId={folderDroppableId(contactGroup.folder.id)}
+                fields={contactGroup.fields}
+                emptyHint="Drag fields here"
+              />
+            </div>
+          )}
+
           <Droppable droppableId="folder-list" type="folder">
             {(provided) => (
-              <div ref={provided.innerRef} {...provided.droppableProps} className="space-y-3">
-                {view.folders.map((group, index) => (
+              <div ref={provided.innerRef} {...provided.droppableProps} className="space-y-4">
+                {otherFolderGroups.map((group, index) => (
                   <Draggable key={group.folder.id} draggableId={`folder-${group.folder.id}`} index={index}>
                     {(drag, snapshot) => (
                       <div
                         ref={drag.innerRef}
                         {...drag.draggableProps}
-                        className={cn(
-                          "rounded-lg border border-gray-200 bg-white",
-                          snapshot.isDragging && "shadow-md"
-                        )}
+                        className={cn(snapshot.isDragging && "rounded-lg bg-surface-card shadow-md")}
                       >
-                        <div className="flex items-center gap-2 border-b border-gray-100 px-2 py-2">
-                          <span
-                            {...drag.dragHandleProps}
-                            className="cursor-grab px-1 text-gray-400 hover:text-gray-600"
-                          >
-                            <GripVertical className="h-4 w-4" />
-                          </span>
-                          <FolderOpen className="h-4 w-4 shrink-0 text-gray-400" />
-                          <Input
-                            defaultValue={group.folder.name}
-                            key={group.folder.name}
-                            className="h-8 flex-1 text-sm font-medium"
-                            onBlur={(e) => {
-                              const name = e.target.value.trim();
-                              if (!name) {
-                                e.target.value = group.folder.name;
-                                return;
-                              }
-                              if (name !== group.folder.name) {
-                                updateFolder.mutate(
-                                  { id: group.folder.id, body: { name } },
-                                  { onError: (err) => toast.error(errorMessage(err)) }
-                                );
-                              }
-                            }}
-                          />
-                          <IconButton
-                            variant="danger"
-                            onClick={() => setFolderToDelete({ id: group.folder.id, name: group.folder.name })}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </IconButton>
-                        </div>
+                        <FolderHeading
+                          folder={group.folder}
+                          dragHandleProps={drag.dragHandleProps}
+                          onRename={(name) =>
+                            updateFolder.mutate(
+                              { id: group.folder.id, body: { name } },
+                              { onError: (err) => toast.error(errorMessage(err)) }
+                            )
+                          }
+                          onDelete={() => setFolderToDelete({ id: group.folder.id, name: group.folder.name })}
+                        />
                         <FieldDropList
                           droppableId={folderDroppableId(group.folder.id)}
                           fields={group.fields}
@@ -157,7 +159,7 @@ export function CustomFieldFoldersTab() {
 
           <div className="mt-4">
             <SectionLabel className="mb-2">Unassigned</SectionLabel>
-            <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50">
+            <div className="rounded-lg border border-dashed border-gray-200 bg-surface-app">
               <FieldDropList
                 droppableId={UNASSIGNED_DROPPABLE}
                 fields={view.unassigned}
@@ -197,6 +199,113 @@ export function CustomFieldFoldersTab() {
   );
 }
 
+function FolderHeading({
+  folder,
+  dragHandleProps,
+  onRename,
+  onDelete,
+}: {
+  folder: CustomFieldFolder;
+  dragHandleProps?: DraggableProvidedDragHandleProps | null;
+  onRename?: (name: string) => void;
+  onDelete?: () => void;
+}) {
+  const contact = isContactFolder(folder);
+  const [editing, setEditing] = useState(false);
+  const submit = (value: string) => {
+    const name = value.trim();
+    setEditing(false);
+    if (name && name !== folder.name && onRename) onRename(name);
+  };
+  return (
+    <div className="mb-2 flex items-center gap-1.5">
+      {dragHandleProps ? (
+        <span {...dragHandleProps} className="cursor-grab text-gray-400 hover:text-gray-600">
+          <GripVertical className="h-4 w-4" />
+        </span>
+      ) : (
+        <span className="h-4 w-4 shrink-0" aria-hidden />
+      )}
+      {contact ? (
+        <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">Contact</span>
+      ) : editing ? (
+        <Input
+          autoFocus
+          defaultValue={folder.name}
+          className="h-7 max-w-xs text-sm"
+          onBlur={(e) => submit(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            else if (e.key === "Escape") setEditing(false);
+          }}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="text-xs font-semibold uppercase tracking-wide text-gray-400 hover:text-gray-600"
+        >
+          {folder.name}
+        </button>
+      )}
+      {!contact && onDelete && (
+        <IconButton variant="danger" className="ml-auto" onClick={onDelete}>
+          <Trash2 className="h-4 w-4" />
+        </IconButton>
+      )}
+    </div>
+  );
+}
+
+function ContactSystemFieldList({ order }: { order: ContactFieldKey[] }) {
+  const lockedFields = orderedLockedContactSystemFields();
+  const reorderableFields = orderedReorderableContactSystemFields(order);
+  return (
+    <div className="min-h-12 space-y-1.5 p-2">
+      {lockedFields.map((f) => (
+        <div
+          key={f.key}
+          className="flex items-center gap-2 rounded-md border border-gray-200 bg-surface-card px-2 py-1.5 text-sm opacity-60"
+        >
+          <Lock className="h-4 w-4 shrink-0 text-gray-400" />
+          <span className="text-gray-800">{f.label}</span>
+          <span className="ml-auto font-mono text-xs text-gray-400">{f.key}</span>
+        </div>
+      ))}
+      <Droppable droppableId={CONTACT_SYSTEM_DROPPABLE} type="contact-system">
+        {(provided) => (
+          <div ref={provided.innerRef} {...provided.droppableProps} className="space-y-1.5">
+            {reorderableFields.map((f, index) => (
+              <Draggable key={f.key} draggableId={`contact-system-${f.key}`} index={index}>
+                {(drag, dragSnapshot) => (
+                  <div
+                    ref={drag.innerRef}
+                    {...drag.draggableProps}
+                    className={cn(
+                      "flex items-center gap-2 rounded-md border border-gray-200 bg-surface-card px-2 py-1.5 text-sm",
+                      dragSnapshot.isDragging && "shadow-sm"
+                    )}
+                  >
+                    <span
+                      {...drag.dragHandleProps}
+                      className="cursor-grab text-gray-400 hover:text-gray-600"
+                    >
+                      <GripVertical className="h-4 w-4" />
+                    </span>
+                    <span className="text-gray-800">{f.label}</span>
+                    <span className="ml-auto font-mono text-xs text-gray-400">{f.key}</span>
+                  </div>
+                )}
+              </Draggable>
+            ))}
+            {provided.placeholder}
+          </div>
+        )}
+      </Droppable>
+    </div>
+  );
+}
+
 function FieldDropList({
   droppableId,
   fields,
@@ -227,7 +336,7 @@ function FieldDropList({
                   ref={drag.innerRef}
                   {...drag.draggableProps}
                   className={cn(
-                    "flex items-center gap-2 rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm",
+                    "flex items-center gap-2 rounded-md border border-gray-200 bg-surface-card px-2 py-1.5 text-sm",
                     dragSnapshot.isDragging && "shadow-sm"
                   )}
                 >

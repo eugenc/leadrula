@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useCustomFields } from "@/features/leads/hooks";
-import { useCreateField, useUpdateField, useDeleteField } from "@/features/admin/hooks";
+import { useCreateField, useUpdateField, useDeleteField, useCreateCustomFieldFolder } from "@/features/admin/hooks";
 import { ImportCustomFieldsModal } from "@/features/admin/ImportCustomFieldsModal";
 import { CustomFieldFoldersTab } from "@/features/admin/CustomFieldFoldersTab";
 import {
@@ -10,7 +10,6 @@ import {
   formatPresetsForType,
   slugFieldKey,
 } from "@/features/admin/customFieldConstants";
-import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
@@ -25,6 +24,8 @@ import { cn } from "@/lib/utils";
 import type { CustomField } from "@/types";
 
 type FieldForm = { name: string; field_key: string; type: string; format: string; options: string };
+
+const tabActionsClass = "flex items-center gap-2 pb-2";
 
 const emptyForm = (): FieldForm => ({
   name: "",
@@ -49,7 +50,9 @@ export function CustomFieldsPage() {
   const create = useCreateField();
   const update = useUpdateField();
   const remove = useDeleteField();
+  const createFolder = useCreateCustomFieldFolder();
   const [tab, setTab] = useState<"fields" | "folders">("fields");
+  const [newFolderName, setNewFolderName] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [editing, setEditing] = useState<CustomField | null>(null);
@@ -120,12 +123,35 @@ export function CustomFieldsPage() {
   const saving = create.isPending || update.isPending;
   const canSubmit = !!form.name && !!form.field_key;
 
+  function addFolder() {
+    const name = newFolderName.trim();
+    if (!name) return;
+    createFolder.mutate(name, {
+      onSuccess: () => setNewFolderName(""),
+      onError: (err) => toast.error(errorMessage(err)),
+    });
+  }
+
   return (
     <>
-      <PageHeader
-        action={
-          tab === "fields" ? (
-            <div className="flex gap-2">
+      <PageBody>
+        <div className="mb-4 flex items-center justify-between border-b border-gray-100">
+          <div className="flex">
+            {(["fields", "folders"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={cn(
+                  "-mb-px border-b-2 px-4 py-2 text-base font-semibold capitalize transition-colors",
+                  tab === t ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400 hover:text-gray-600"
+                )}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          {tab === "fields" && (
+            <div className={tabActionsClass}>
               <Button variant="outline" onClick={() => setImportOpen(true)}>
                 <Upload className="h-4 w-4" /> Import CSV
               </Button>
@@ -133,23 +159,21 @@ export function CustomFieldsPage() {
                 <Plus className="h-4 w-4" /> New Field
               </Button>
             </div>
-          ) : undefined
-        }
-      />
-      <PageBody>
-        <div className="mb-4 flex border-b border-gray-100">
-          {(["fields", "folders"] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={cn(
-                "-mb-px border-b-2 px-4 py-2 text-base font-semibold capitalize transition-colors",
-                tab === t ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400 hover:text-gray-600"
-              )}
-            >
-              {t}
-            </button>
-          ))}
+          )}
+          {tab === "folders" && (
+            <div className={tabActionsClass}>
+              <Input
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addFolder()}
+                placeholder="New folder name"
+                className="h-8 w-48 text-sm"
+              />
+              <Button disabled={!newFolderName.trim() || createFolder.isPending} onClick={addFolder}>
+                <Plus className="h-4 w-4" /> New Folder
+              </Button>
+            </div>
+          )}
         </div>
 
         {tab === "folders" && <CustomFieldFoldersTab />}

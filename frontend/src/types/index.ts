@@ -284,6 +284,9 @@ export interface CustomFieldFolder {
   id: number;
   name: string;
   position: number;
+  is_system?: boolean;
+  system_key?: string | null;
+  contact_builtin_order?: string[] | null;
 }
 
 export interface DisqReason {

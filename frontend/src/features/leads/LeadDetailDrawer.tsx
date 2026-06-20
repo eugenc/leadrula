@@ -1,12 +1,21 @@
-import { useEffect, useState } from "react";
-import { Sheet, DrawerHeader, DrawerBody, FormDrawer } from "@/components/ui/dialog";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  Sheet,
+  DrawerBody,
+  FormDrawer,
+  drawerTitleClass,
+  drawerSubtitleClass,
+  formFieldClass,
+} from "@/components/ui/dialog";
+import { IconButton } from "@/components/layout/IconButton";
 import { Button } from "@/components/ui/button";
 import { Input, InputWithOverflowTooltip, Label, Textarea, Select } from "@/components/ui/input";
-import { Avatar, Badge, Spinner } from "@/components/ui/misc";
+import { Badge, Spinner } from "@/components/ui/misc";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { ActionDot } from "./ActionDot";
 import { format, isPast } from "date-fns";
-import { CircleHelp, MapPin, ChevronDown, ChevronRight } from "lucide-react";
+import { CircleHelp, Copy, MapPin, ChevronDown, ChevronRight, X } from "lucide-react";
+import { stageColorBorder, stageColorFill } from "@/features/pipelines/stageColors";
 import { cn, formatMoney } from "@/lib/utils";
 import { useUIStore } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
@@ -14,7 +23,6 @@ import { toast } from "@/store/toastStore";
 import { errorMessage, apiError } from "@/lib/api";
 import {
   useLead,
-  useNotes,
   useAddNote,
   useLeadHistory,
   useUpdateLead,
@@ -36,7 +44,7 @@ import {
   stageNeedsPrompt,
   stagePromptMissingError,
 } from "@/features/pipelines/stageTypes";
-import type { CustomField, Lead, LeadHistoryEntry, Stage } from "@/types";
+import type { CustomField, CustomFieldFolder, Lead, LeadHistoryEntry, Stage } from "@/types";
 import { formatStatus, leadSourceLabel } from "./leadsListColumns";
 import { LeadTagsEditor } from "./LeadTagsEditor";
 import { useQuery } from "@tanstack/react-query";
@@ -44,6 +52,7 @@ import { get } from "@/lib/api";
 import type { BuyerSummary } from "@/types";
 import { effectiveFieldFormat } from "@/features/admin/customFieldConstants";
 import { groupCustomFieldsByFolder } from "@/features/admin/customFieldLayout";
+import { isContactFolder, resolveContactBuiltinOrder, type ContactFieldKey } from "./contactSection";
 import { useFolderCollapse } from "./customFieldFolderCollapse";
 import { DatetimeFieldInput } from "./DatetimeFieldInput";
 import {
@@ -69,10 +78,16 @@ const BUILTINS: { key: keyof Lead; label: string }[] = [
   { key: "email", label: "Email" },
 ];
 
+function copyText(text: string, label: string) {
+  navigator.clipboard.writeText(text).then(
+    () => toast.success(label),
+    () => toast.error("Could not copy to clipboard")
+  );
+}
+
 const DRAWER_TABS = [
   { id: "details", label: "Details" },
-  { id: "notes", label: "Notes" },
-  { id: "history", label: "History" },
+  { id: "activity", label: "Activity" },
   { id: "profit", label: "Profit" },
 ] as const;
 
@@ -150,7 +165,7 @@ export function LeadDetailDrawer() {
   const { data: lead, isLoading, isError } = useLead(leadId);
 
   return (
-    <Sheet open={!!leadId} onClose={close}>
+    <Sheet open={!!leadId} onClose={close} width={560}>
       {isError ? (
         <div className="px-6 py-20 text-center text-sm text-gray-400">
           This lead is no longer available.
@@ -172,29 +187,14 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   const [tab, setTab] = useState<DrawerTab>("details");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const update = useUpdateLead();
-  const setAction = useSetActionAt();
   const removeLead = useDeleteLead();
-  const { data: users } = useUsers();
   const { data: customFields } = useCustomFields();
   const { data: customFieldFolders } = useCustomFieldFolders();
   const { collapsed, toggle: toggleFolder } = useFolderCollapse(user?.account_id);
   const { data: mapsStatus } = useGoogleMapsStatus();
   const mapsConnected = mapsStatus?.connected === true;
 
-  const canEditPreassignedBuyer =
-    isAdmin &&
-    user?.account_type === "publisher" &&
-    lead.status === "review" &&
-    !lead.contract_id &&
-    lead.owner_account_id === lead.publisher_id;
-  const { data: buyers } = useQuery({
-    queryKey: ["buyers"],
-    queryFn: () => get<BuyerSummary[]>("/publisher/buyers"),
-    enabled: canEditPreassignedBuyer,
-  });
-
   const [fields, setFields] = useState<Record<string, string>>({});
-  const [actionAtLocal, setActionAtLocal] = useState("");
   const [mapOpen, setMapOpen] = useState(false);
   useEffect(() => {
     const f: Record<string, string> = {};
@@ -206,7 +206,6 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
     f.country = lead.country ?? "";
     f.address_place_id = lead.address_place_id ?? "";
     setFields(f);
-    setActionAtLocal(lead.action_at ? isoToDatetimeLocal(lead.action_at) : "");
   }, [lead]);
 
   const formattedAddress = formatLeadAddress(lead);
@@ -248,18 +247,6 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
     );
   }
 
-  function saveActionAt() {
-    const prev = lead.action_at ? isoToDatetimeLocal(lead.action_at) : "";
-    if (actionAtLocal === prev) return;
-    const payload = actionAtLocal ? new Date(actionAtLocal).toISOString() : null;
-    setAction.mutate(
-      { leadId: lead.id, action_at: payload },
-      { onSuccess: () => toast.success("Saved"), onError: (e) => toast.error(errorMessage(e)) }
-    );
-  }
-
-  const overdue = lead.action_at && isPast(new Date(lead.action_at));
-
   async function handleDeleteLead() {
     try {
       await removeLead.mutateAsync(lead.id);
@@ -273,46 +260,15 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
 
   return (
     <div className="flex h-full flex-col">
-      <DrawerHeader
-        title={`${lead.first_name} ${lead.last_name}`}
-        subtitle={`${leadSourceLabel(lead)} · ${formatStatus(lead.status)}`}
-        detail={lead.public_id}
-        onClose={onClose}
-      />
+      <LeadHeader lead={lead} onClose={onClose} />
 
-      <div className="border-b border-gray-100 px-5 py-2">
-        <div
-          className={cn(
-            "flex items-center gap-2 rounded-md border px-2.5 py-1.5",
-            overdue ? "border-danger-border bg-danger-bg" : "border-gray-100 bg-gray-100"
-          )}
-        >
-          {lead.action_at && <ActionDot actionAt={lead.action_at} variant="dot" />}
-          <span
-            className={cn(
-              "shrink-0 text-xs",
-              overdue ? "font-semibold text-danger-fg" : "text-gray-700"
-            )}
-          >
-            Action Date & Time{overdue && " — overdue"}
-          </span>
-          <DatetimeFieldInput
-            value={actionAtLocal}
-            onChange={setActionAtLocal}
-            onBlur={saveActionAt}
-            disabled={setAction.isPending}
-            className={overdue ? "font-semibold text-danger-fg" : "text-gray-700"}
-          />
-        </div>
-      </div>
-
-      <div className="flex border-b border-gray-100 px-5">
+      <div className="flex border-b border-gray-100 px-5 py-[10px]">
         {DRAWER_TABS.map(({ id, label }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
             className={cn(
-              "-mb-px border-b-2 px-2.5 py-1.5 text-sm font-semibold transition-colors",
+              "-mb-px border-b-2 px-2.5 py-1.5 text-base font-semibold transition-colors",
               tab === id ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400 hover:text-gray-600"
             )}
           >
@@ -324,153 +280,27 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
       <DrawerBody>
         {tab === "details" && (
           <div className="flex flex-col gap-4">
-            <div>
-              <SectionLabel className="mb-2">Lead</SectionLabel>
-              <div className="flex flex-col gap-2.5">
-                {user?.role === "admin" ? (
-                  <div>
-                    <Label>Assigned To</Label>
-                    <Select
-                      value={lead.assigned_user_id ?? ""}
-                      onChange={(e) =>
-                        update.mutate({
-                          leadId: lead.id,
-                          body: e.target.value
-                            ? { assigned_user_id: Number(e.target.value) }
-                            : { clear_assignee: true },
-                        })
-                      }
-                    >
-                      <option value="">Unassigned</option>
-                      {(users ?? []).filter((u) => u.status === "active").map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {u.full_name}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                ) : (
-                  <div>
-                    <Label>Assigned To</Label>
-                    <div className="mt-1 flex items-center gap-2 text-sm text-gray-700">
-                      {lead.assignee_name ? (
-                        <>
-                          <Avatar
-                            name={lead.assignee_name}
-                            src={lead.assignee_avatar_url}
-                            variant="card"
-                          />
-                          {lead.assignee_name}
-                        </>
-                      ) : (
-                        "Unassigned"
-                      )}
-                    </div>
-                  </div>
-                )}
-                {canEditPreassignedBuyer ? (
-                  <div>
-                    <Label>Buyer</Label>
-                    <Select
-                      value={lead.preassigned_buyer_id ?? ""}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        update.mutate(
-                          {
-                            leadId: lead.id,
-                            body: val
-                              ? { preassigned_buyer_id: Number(val) }
-                              : { clear_preassigned_buyer: true },
-                          },
-                          {
-                            onSuccess: () => toast.success("Saved"),
-                            onError: (err) => toast.error(errorMessage(err)),
-                          }
-                        );
-                      }}
-                      disabled={update.isPending}
-                    >
-                      <option value="">None</option>
-                      {(buyers ?? []).map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {b.name}
-                        </option>
-                      ))}
-                    </Select>
-                  </div>
-                ) : (
-                  <div>
-                    <Label>Buyer</Label>
-                    <div className="mt-1 text-sm text-gray-700">
-                      {lead.buyer_name ?? lead.preassigned_buyer_name ?? "—"}
-                    </div>
-                  </div>
-                )}
-                <LeadPipelineFields lead={lead} />
-              </div>
-            </div>
-            <LeadTagsEditor leadId={lead.id} tags={lead.tags ?? []} />
-            <div>
-              <SectionLabel className="mb-2">Contact</SectionLabel>
-              <div className="flex flex-col gap-2.5">
-                {BUILTINS.map((b) => (
-                  <div key={b.key as string}>
-                    <Label>{b.label}</Label>
-                    <InputWithOverflowTooltip
-                      value={fields[b.key as string] ?? ""}
-                      onChange={(e) => setFields((f) => ({ ...f, [b.key as string]: e.target.value }))}
-                      onBlur={() => saveField(b.key as string)}
-                    />
-                  </div>
-                ))}
-                {mapsConnected && lead.address_place_id && formattedAddress && (
-                  <div>
-                    <Label>Verified address</Label>
-                    <div className="mt-1 flex items-center gap-1.5">
-                      <MapPin className="h-3.5 w-3.5 shrink-0 text-indigo-600" />
-                      <ValidatedAddressLink
-                        formatted={formattedAddress}
-                        onClick={() => setMapOpen(true)}
-                      />
-                    </div>
-                  </div>
-                )}
-                {mapsConnected && !lead.address_place_id && formattedAddress && (
-                  <p className="text-xs text-amber-700">
-                    Select an address from suggestions to verify and enable map.
-                  </p>
-                )}
-                <AddressAutocomplete
-                  address={fields.address ?? ""}
-                  city={fields.city ?? ""}
-                  state={fields.state ?? ""}
-                  zip={fields.zip ?? ""}
-                  country={fields.country ?? ""}
-                  disabled={update.isPending}
-                  onPlainChange={(next) => setFields((prev) => ({ ...prev, ...next }))}
-                  onFieldBlur={(key) => saveAddressField(key)}
-                  onSelect={saveValidatedAddress}
-                />
-              </div>
-            </div>
-            <AddressMapDialog
-              open={mapOpen}
-              onClose={() => setMapOpen(false)}
-              placeId={lead.address_place_id ?? ""}
-              formattedAddress={formattedAddress}
-            />
             <CustomFieldsSection
               lead={lead}
               customFields={customFields}
               folders={customFieldFolders}
               collapsed={collapsed}
               onToggleFolder={toggleFolder}
+              fields={fields}
+              setFields={setFields}
+              mapsConnected={mapsConnected}
+              formattedAddress={formattedAddress}
+              mapOpen={mapOpen}
+              setMapOpen={setMapOpen}
+              saveField={saveField}
+              saveAddressField={saveAddressField}
+              saveValidatedAddress={saveValidatedAddress}
+              addressUpdatePending={update.isPending}
             />
             <RedistributeBox lead={lead} />
           </div>
         )}
-        {tab === "notes" && <NotesTab leadId={lead.id} />}
-        {tab === "history" && <HistoryTab leadId={lead.id} />}
+        {tab === "activity" && <ActivityTab leadId={lead.id} />}
         {tab === "profit" && (
           <LeadEconomics lead={lead} accountType={user?.account_type} />
         )}
@@ -495,7 +325,179 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   );
 }
 
-function LeadPipelineFields({ lead }: { lead: Lead }) {
+function LeadHeader({ lead, onClose }: { lead: Lead; onClose: () => void }) {
+  const user = useAuthStore((s) => s.user);
+  const isAdmin = user?.role === "admin";
+  const update = useUpdateLead();
+  const setAction = useSetActionAt();
+  const { data: users } = useUsers();
+
+  const canEditPreassignedBuyer =
+    isAdmin &&
+    user?.account_type === "publisher" &&
+    lead.status === "review" &&
+    !lead.contract_id &&
+    lead.owner_account_id === lead.publisher_id;
+  const { data: buyers } = useQuery({
+    queryKey: ["buyers"],
+    queryFn: () => get<BuyerSummary[]>("/publisher/buyers"),
+    enabled: canEditPreassignedBuyer,
+  });
+
+  const buyerName = lead.buyer_name ?? lead.preassigned_buyer_name ?? null;
+
+  const [actionAtLocal, setActionAtLocal] = useState(
+    lead.action_at ? isoToDatetimeLocal(lead.action_at) : ""
+  );
+  useEffect(() => {
+    setActionAtLocal(lead.action_at ? isoToDatetimeLocal(lead.action_at) : "");
+  }, [lead.action_at]);
+
+  function saveActionAt() {
+    const prev = lead.action_at ? isoToDatetimeLocal(lead.action_at) : "";
+    if (actionAtLocal === prev) return;
+    const payload = actionAtLocal ? new Date(actionAtLocal).toISOString() : null;
+    setAction.mutate(
+      { leadId: lead.id, action_at: payload },
+      { onSuccess: () => toast.success("Saved"), onError: (e) => toast.error(errorMessage(e)) }
+    );
+  }
+
+  const overdue = lead.action_at && isPast(new Date(lead.action_at));
+
+  return (
+    <div className={cn("border-b border-gray-100 px-5 py-3.5", formFieldClass)}>
+      <div className="flex items-start justify-between">
+        <div className="min-w-0">
+          <div className={cn(drawerTitleClass, "text-lg")}>
+            {lead.first_name} {lead.last_name}
+          </div>
+          <div className={drawerSubtitleClass}>
+            {leadSourceLabel(lead)} · {formatStatus(lead.status)}
+          </div>
+        </div>
+        <IconButton onClick={onClose} aria-label="Close">
+          <X className="h-4 w-4" />
+        </IconButton>
+      </div>
+
+      <div className="mt-1 flex items-center gap-1">
+        <span className="font-mono text-xs text-gray-400">{lead.public_id}</span>
+        <IconButton
+          aria-label="Copy lead ID"
+          className="h-5 w-5"
+          onClick={() => copyText(lead.public_id, "Lead ID copied")}
+        >
+          <Copy className="h-3 w-3" />
+        </IconButton>
+      </div>
+
+      <div
+        className={cn(
+          "mt-3 flex items-center gap-2 rounded-md border px-2.5 py-1.5",
+          overdue ? "border-danger-border bg-danger-bg" : "border-gray-100 bg-gray-100"
+        )}
+      >
+        {lead.action_at && <ActionDot actionAt={lead.action_at} variant="dot" />}
+        <span
+          className={cn(
+            "shrink-0 text-xs",
+            overdue ? "font-semibold text-danger-fg" : "text-gray-700"
+          )}
+        >
+          Action Date & Time{overdue && " — overdue"}
+        </span>
+        <DatetimeFieldInput
+          value={actionAtLocal}
+          onChange={setActionAtLocal}
+          onBlur={saveActionAt}
+          disabled={setAction.isPending}
+          className={overdue ? "font-semibold text-danger-fg" : "text-gray-700"}
+        />
+      </div>
+
+      <div className="mt-3 flex items-start gap-4">
+        <div className="min-w-0 flex-1">
+          <Label>Assigned</Label>
+          {isAdmin ? (
+            <Select
+              value={lead.assigned_user_id != null ? String(lead.assigned_user_id) : ""}
+              onChange={(e) =>
+                update.mutate(
+                  {
+                    leadId: lead.id,
+                    body: e.target.value
+                      ? { assigned_user_id: Number(e.target.value) }
+                      : { clear_assignee: true },
+                  },
+                  {
+                    onSuccess: () => toast.success("Saved"),
+                    onError: (err) => toast.error(errorMessage(err)),
+                  }
+                )
+              }
+              disabled={update.isPending}
+            >
+              <option value="">Unassigned</option>
+              {(users ?? []).filter((u) => u.status === "active").map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.full_name}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <div className="mt-1 text-sm text-gray-700">
+              {lead.assignee_name ? (
+                <span className="truncate">{lead.assignee_name}</span>
+              ) : (
+                "Unassigned"
+              )}
+            </div>
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <Label>Buyer</Label>
+          {canEditPreassignedBuyer ? (
+            <Select
+              value={lead.preassigned_buyer_id != null ? String(lead.preassigned_buyer_id) : ""}
+              onChange={(e) => {
+                const val = e.target.value;
+                update.mutate(
+                  {
+                    leadId: lead.id,
+                    body: val
+                      ? { preassigned_buyer_id: Number(val) }
+                      : { clear_preassigned_buyer: true },
+                  },
+                  {
+                    onSuccess: () => toast.success("Saved"),
+                    onError: (err) => toast.error(errorMessage(err)),
+                  }
+                );
+              }}
+              disabled={update.isPending}
+            >
+              <option value="">None</option>
+              {(buyers ?? []).map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <div className="mt-1 text-sm text-gray-700">
+              {buyerName ? <span className="truncate">{buyerName}</span> : "—"}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <LeadPipelineHeader lead={lead} />
+    </div>
+  );
+}
+
+function LeadPipelineHeader({ lead }: { lead: Lead }) {
   const user = useAuthStore((s) => s.user);
   const canEditPipeline =
     user?.role === "admin" ||
@@ -586,54 +588,64 @@ function LeadPipelineFields({ lead }: { lead: Lead }) {
     commitStage(stage);
   }
 
-  if (!canEditPipeline) {
-    return (
-      <>
-        <div>
-          <Label>Pipeline</Label>
-          <div className="mt-1 text-sm text-gray-700">{lead.pipeline_name ?? "—"}</div>
-        </div>
-        <div>
-          <Label>Pipeline Stage</Label>
-          <div className="mt-1 text-sm text-gray-700">{lead.stage_name ?? "—"}</div>
-        </div>
-      </>
-    );
-  }
+  const currentStageIndex = (stages ?? []).findIndex((s) => s.id === stageId);
+  const showStageBar = pipelineId > 0 && (stages?.length ?? 0) > 0;
 
   return (
-    <>
-      <div>
-        <Label>Pipeline</Label>
-        <Select
-          value={pipelineId}
-          onChange={(e) => onPipelineChange(Number(e.target.value))}
-          disabled={changeStage.isPending}
-        >
-          <option value={0}>None</option>
-          {(pipelines ?? []).map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </Select>
-      </div>
-      {pipelineId > 0 && (
+    <div className="mt-3">
+      {canEditPipeline && (
         <div>
-          <Label>Pipeline Stage</Label>
+          <Label>Pipeline</Label>
           <Select
-            value={stageId}
-            onChange={(e) => onStageChange(Number(e.target.value))}
+            value={pipelineId}
+            onChange={(e) => onPipelineChange(Number(e.target.value))}
             disabled={changeStage.isPending}
           >
-            <option value={0}>Select stage…</option>
-            {(stages ?? []).map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
+            <option value={0}>None</option>
+            {(pipelines ?? []).map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
               </option>
             ))}
           </Select>
         </div>
+      )}
+      {showStageBar && (
+        <>
+          <div className="mt-[25px] flex gap-1 pb-5">
+            {(stages ?? []).map((s, i) => {
+              const reached = currentStageIndex >= 0 && i <= currentStageIndex;
+              const isCurrent = s.id === stageId;
+              return (
+                <span key={s.id} className="group/stage relative flex flex-1">
+                  <button
+                    type="button"
+                    disabled={!canEditPipeline || changeStage.isPending}
+                    onClick={() => onStageChange(s.id)}
+                    className={cn(
+                      "h-6 w-full rounded-sm transition-colors",
+                      !reached && "border border-gray-200 bg-gray-200/60",
+                      reached && !isCurrent && cn("border", stageColorFill(s.color), stageColorBorder(s.color)),
+                      isCurrent && cn("border", stageColorFill(s.color), stageColorBorder(s.color)),
+                      canEditPipeline ? "cursor-pointer hover:opacity-80" : "cursor-default"
+                    )}
+                  />
+                  <span
+                    role="tooltip"
+                    className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-[#101828] px-2 py-1.5 text-xs font-normal leading-snug text-[#F9FAFB] opacity-0 shadow-sm transition-opacity duration-150 group-hover/stage:opacity-100"
+                  >
+                    {s.name}
+                  </span>
+                  {isCurrent && (
+                    <span className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap text-xs text-gray-400">
+                      {s.name}
+                    </span>
+                  )}
+                </span>
+              );
+            })}
+          </div>
+        </>
       )}
       <StagePromptModal
         key={prompt ? `${lead.id}-${prompt.stage.id}` : "closed"}
@@ -648,7 +660,150 @@ function LeadPipelineFields({ lead }: { lead: Lead }) {
           if (prompt) commitStage(prompt.stage, r);
         }}
       />
-    </>
+    </div>
+  );
+}
+
+function ContactSection({
+  lead,
+  customFields,
+  builtinOrder,
+  fields,
+  setFields,
+  mapsConnected,
+  formattedAddress,
+  mapOpen,
+  setMapOpen,
+  saveField,
+  saveAddressField,
+  saveValidatedAddress,
+  addressUpdatePending,
+}: {
+  lead: Lead;
+  customFields: CustomField[];
+  builtinOrder: ContactFieldKey[];
+  fields: Record<string, string>;
+  setFields: Dispatch<SetStateAction<Record<string, string>>>;
+  mapsConnected: boolean;
+  formattedAddress: string;
+  mapOpen: boolean;
+  setMapOpen: (open: boolean) => void;
+  saveField: (key: string) => void;
+  saveAddressField: (key: keyof typeof fields) => void;
+  saveValidatedAddress: (validated: {
+    address: string;
+    city: string;
+    state: string;
+    zip: string;
+    country: string;
+    address_place_id: string;
+  }) => void;
+  addressUpdatePending: boolean;
+}) {
+  const renderBuiltin = (key: ContactFieldKey) => {
+    switch (key) {
+      case "first_name":
+        return (
+          <div key={key}>
+            <Label>First Name</Label>
+            <InputWithOverflowTooltip
+              value={fields.first_name ?? ""}
+              onChange={(e) => setFields((f) => ({ ...f, first_name: e.target.value }))}
+              onBlur={() => saveField("first_name")}
+            />
+          </div>
+        );
+      case "last_name":
+        return (
+          <div key={key}>
+            <Label>Last Name</Label>
+            <InputWithOverflowTooltip
+              value={fields.last_name ?? ""}
+              onChange={(e) => setFields((f) => ({ ...f, last_name: e.target.value }))}
+              onBlur={() => saveField("last_name")}
+            />
+          </div>
+        );
+      case "phone":
+        return (
+          <div key={key}>
+            <Label>Phone</Label>
+            <InputWithOverflowTooltip
+              value={fields.phone ?? ""}
+              onChange={(e) => setFields((f) => ({ ...f, phone: e.target.value }))}
+              onBlur={() => saveField("phone")}
+            />
+          </div>
+        );
+      case "email":
+        return (
+          <div key={key}>
+            <Label>Email</Label>
+            <InputWithOverflowTooltip
+              value={fields.email ?? ""}
+              onChange={(e) => setFields((f) => ({ ...f, email: e.target.value }))}
+              onBlur={() => saveField("email")}
+            />
+          </div>
+        );
+      case "address":
+        return (
+          <div key={key} className="flex flex-col gap-2.5">
+            {mapsConnected && lead.address_place_id && formattedAddress && (
+              <div>
+                <Label>Verified address</Label>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <MapPin className="h-3.5 w-3.5 shrink-0 text-indigo-600" />
+                  <ValidatedAddressLink formatted={formattedAddress} onClick={() => setMapOpen(true)} />
+                </div>
+              </div>
+            )}
+            {mapsConnected && !lead.address_place_id && formattedAddress && (
+              <p className="text-xs text-amber-700">
+                Select an address from suggestions to verify and enable map.
+              </p>
+            )}
+            <AddressAutocomplete
+              address={fields.address ?? ""}
+              city={fields.city ?? ""}
+              state={fields.state ?? ""}
+              zip={fields.zip ?? ""}
+              country={fields.country ?? ""}
+              disabled={addressUpdatePending}
+              onPlainChange={(next) => setFields((prev) => ({ ...prev, ...next }))}
+              onFieldBlur={(key) => saveAddressField(key)}
+              onSelect={saveValidatedAddress}
+            />
+          </div>
+        );
+      case "tags":
+        return <LeadTagsEditor key={key} leadId={lead.id} tags={lead.tags ?? []} />;
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      {builtinOrder.map(renderBuiltin)}
+      {customFields.map((f) => (
+        <div key={f.id}>
+          <Label>{f.name}</Label>
+          <CustomFieldValue
+            leadId={lead.id}
+            fieldId={f.id}
+            type={f.type}
+            format={f.format}
+            options={f.options}
+            value={lead.custom_values?.[String(f.id)]}
+          />
+        </div>
+      ))}
+      <AddressMapDialog
+        open={mapOpen}
+        onClose={() => setMapOpen(false)}
+        placeId={lead.address_place_id ?? ""}
+        formattedAddress={formattedAddress}
+      />
+    </div>
   );
 }
 
@@ -658,15 +813,41 @@ function CustomFieldsSection({
   folders,
   collapsed,
   onToggleFolder,
+  fields,
+  setFields,
+  mapsConnected,
+  formattedAddress,
+  mapOpen,
+  setMapOpen,
+  saveField,
+  saveAddressField,
+  saveValidatedAddress,
+  addressUpdatePending,
 }: {
   lead: Lead;
   customFields: CustomField[] | undefined;
-  folders: { id: number; name: string; position: number }[] | undefined;
+  folders: CustomFieldFolder[] | undefined;
   collapsed: Record<string, boolean>;
   onToggleFolder: (folderId: number) => void;
+  fields: Record<string, string>;
+  setFields: Dispatch<SetStateAction<Record<string, string>>>;
+  mapsConnected: boolean;
+  formattedAddress: string;
+  mapOpen: boolean;
+  setMapOpen: (open: boolean) => void;
+  saveField: (key: string) => void;
+  saveAddressField: (key: keyof typeof fields) => void;
+  saveValidatedAddress: (validated: {
+    address: string;
+    city: string;
+    state: string;
+    zip: string;
+    country: string;
+    address_place_id: string;
+  }) => void;
+  addressUpdatePending: boolean;
 }) {
   const activeFields = (customFields ?? []).filter((f) => f.is_active);
-  if (activeFields.length === 0) return null;
   const grouped = groupCustomFieldsByFolder(folders ?? [], activeFields);
 
   const renderField = (f: CustomField) => (
@@ -683,40 +864,65 @@ function CustomFieldsSection({
     </div>
   );
 
+  const visibleFolders = grouped.folders.filter(
+    (g) => g.fields.length > 0 || isContactFolder(g.folder)
+  );
+
+  if (visibleFolders.length === 0 && grouped.unassigned.length === 0) return null;
+
   return (
-    <div>
-      <SectionLabel className="mb-2">Custom Fields</SectionLabel>
-      <div className="flex flex-col gap-3">
-        {grouped.folders
-          .filter((g) => g.fields.length > 0)
-          .map((g) => {
-            const isCollapsed = !!collapsed[g.folder.id];
-            return (
-              <div key={g.folder.id} className="rounded-md border border-gray-200">
-                <button
-                  type="button"
-                  onClick={() => onToggleFolder(g.folder.id)}
-                  className="flex w-full items-center gap-1.5 px-2.5 py-2 text-left text-sm font-medium text-gray-700 hover:bg-gray-50"
-                >
-                  {isCollapsed ? (
-                    <ChevronRight className="h-4 w-4 text-gray-400" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4 text-gray-400" />
-                  )}
-                  {g.folder.name}
-                </button>
-                {!isCollapsed && (
-                  <div className="flex flex-col gap-2.5 border-t border-gray-100 px-2.5 py-2.5">
-                    {g.fields.map(renderField)}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        {grouped.unassigned.length > 0 && (
-          <div className="flex flex-col gap-2.5">{grouped.unassigned.map(renderField)}</div>
-        )}
-      </div>
+    <div className="flex flex-col gap-4">
+      {visibleFolders.map((g, index) => {
+        const isCollapsed = !!collapsed[g.folder.id];
+        const contact = isContactFolder(g.folder);
+        const builtinOrder = resolveContactBuiltinOrder(g.folder.contact_builtin_order);
+        return (
+          <div key={g.folder.id} className={cn(index > 0 && "border-t border-gray-100 pt-4")}>
+            <button
+              type="button"
+              onClick={() => onToggleFolder(g.folder.id)}
+              className="mb-2 flex w-full items-center gap-1 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 hover:text-gray-600"
+            >
+              {isCollapsed ? (
+                <ChevronRight className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronDown className="h-3.5 w-3.5" />
+              )}
+              {contact ? "Contact" : g.folder.name}
+            </button>
+            {!isCollapsed &&
+              (contact ? (
+                <ContactSection
+                  lead={lead}
+                  customFields={g.fields}
+                  builtinOrder={builtinOrder}
+                  fields={fields}
+                  setFields={setFields}
+                  mapsConnected={mapsConnected}
+                  formattedAddress={formattedAddress}
+                  mapOpen={mapOpen}
+                  setMapOpen={setMapOpen}
+                  saveField={saveField}
+                  saveAddressField={saveAddressField}
+                  saveValidatedAddress={saveValidatedAddress}
+                  addressUpdatePending={addressUpdatePending}
+                />
+              ) : (
+                <div className="flex flex-col gap-2.5">{g.fields.map(renderField)}</div>
+              ))}
+          </div>
+        );
+      })}
+      {grouped.unassigned.length > 0 && (
+        <div
+          className={cn(
+            "flex flex-col gap-2.5",
+            visibleFolders.length > 0 && "border-t border-gray-100 pt-4"
+          )}
+        >
+          {grouped.unassigned.map(renderField)}
+        </div>
+      )}
     </div>
   );
 }
@@ -817,46 +1023,6 @@ function CustomFieldValue({
       onChange={(e) => setVal(e.target.value)}
       onBlur={() => save(type === "number" ? Number(val) : val)}
     />
-  );
-}
-
-function NotesTab({ leadId }: { leadId: number }) {
-  const { data: notes } = useNotes(leadId);
-  const addNote = useAddNote();
-  const [body, setBody] = useState("");
-  return (
-    <div className="flex flex-col gap-4">
-      <div>
-        <Textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          placeholder="Add a note…"
-        />
-        <div className="mt-1.5 flex justify-end">
-          <Button
-            size="sm"
-            disabled={!body.trim()}
-            onClick={() => addNote.mutate({ leadId, body }, { onSuccess: () => setBody("") })}
-          >
-            Add Note
-          </Button>
-        </div>
-      </div>
-      <div>
-        <SectionLabel className="mb-2">Notes</SectionLabel>
-        {(notes ?? []).map((n) => (
-          <div key={n.id} className="border-b border-gray-100 py-2 last:border-0">
-            <div className="mb-0.5 flex items-center gap-1.5">
-              <span className="text-xs font-semibold text-gray-600">{n.author_name || "System"}</span>
-              <span className="text-xs text-gray-400">
-                {format(new Date(n.created_at), "MMM d, h:mma")}
-              </span>
-            </div>
-            <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-700">{n.body}</p>
-          </div>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -975,10 +1141,28 @@ function historyHeadline(entry: LeadHistoryEntry): string {
   return kindLabel(entry.kind);
 }
 
-function HistoryTab({ leadId }: { leadId: number }) {
+function ActivityTab({ leadId }: { leadId: number }) {
   const { data: history, isLoading, isError } = useLeadHistory(leadId);
+  const addNote = useAddNote();
+  const [body, setBody] = useState("");
   return (
     <div>
+      <div className="mb-4">
+        <Textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="Add a note…"
+        />
+        <div className="mt-1.5 flex justify-end">
+          <Button
+            size="sm"
+            disabled={!body.trim()}
+            onClick={() => addNote.mutate({ leadId, body }, { onSuccess: () => setBody("") })}
+          >
+            Add Note
+          </Button>
+        </div>
+      </div>
       <SectionLabel className="mb-2">Activity</SectionLabel>
       {isLoading && (
         <div className="flex justify-center py-6">

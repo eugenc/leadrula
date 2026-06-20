@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 import type { DropResult } from "@hello-pangea/dnd";
 import type { CustomField, CustomFieldFolder } from "@/types";
 import {
+  applyContactSystemDrag,
   applyDrag,
   buildLayoutPayload,
+  CONTACT_SYSTEM_DROPPABLE,
   groupCustomFieldsByFolder,
   UNASSIGNED_DROPPABLE,
   folderDroppableId,
 } from "./customFieldLayout";
+import { DEFAULT_CONTACT_BUILTIN_ORDER } from "@/features/leads/contactSection";
 
 function field(id: number, overrides: Partial<CustomField> = {}): CustomField {
   return {
@@ -104,7 +107,7 @@ describe("buildLayoutPayload", () => {
       ]
     );
 
-    const payload = buildLayoutPayload(grouped);
+    const payload = buildLayoutPayload(grouped, [...DEFAULT_CONTACT_BUILTIN_ORDER]);
 
     expect(payload.folders).toEqual([
       { id: 1, position: 0 },
@@ -116,5 +119,19 @@ describe("buildLayoutPayload", () => {
       { id: 20, folder_id: 2, position: 2 },
       { id: 30, folder_id: null, position: 3 },
     ]);
+  });
+});
+
+describe("applyContactSystemDrag", () => {
+  it("reorders only the tail after locked name fields", () => {
+    const order = [...DEFAULT_CONTACT_BUILTIN_ORDER];
+    const result = {
+      type: "contact-system",
+      source: { droppableId: CONTACT_SYSTEM_DROPPABLE, index: 0 },
+      destination: { droppableId: CONTACT_SYSTEM_DROPPABLE, index: 1 },
+    } as DropResult;
+
+    const next = applyContactSystemDrag(order, result);
+    expect(next).toEqual(["first_name", "last_name", "email", "phone", "address", "tags"]);
   });
 });

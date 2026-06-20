@@ -158,12 +158,24 @@ export function useSetActionAt() {
 
 export function useUpdateLead() {
   const qc = useQueryClient();
+  const accountType = useAuthStore((s) => s.user?.account_type);
   return useMutation({
     mutationFn: ({ leadId, body }: { leadId: number; body: Record<string, unknown> }) =>
       patch<Lead>(`${ns()}/leads/${leadId}`, body),
-    onSuccess: (_d, v) => {
+    onSuccess: (updated, v) => {
+      qc.setQueryData(["lead", v.leadId], updated);
+      qc.setQueriesData<LeadListResponse>({ queryKey: ["leads"] }, (old) => {
+        if (!old?.items) return old;
+        return {
+          ...old,
+          items: old.items.map((l) => {
+            if (l.id !== v.leadId) return l;
+            const merged = { ...l, ...updated };
+            return { ...merged, board_stage_id: computeBoardStageId(merged, accountType) };
+          }),
+        };
+      });
       qc.invalidateQueries({ queryKey: ["leads"] });
-      qc.invalidateQueries({ queryKey: ["lead", v.leadId] });
       qc.invalidateQueries({ queryKey: ["lead-history", v.leadId] });
       if ("tags" in v.body) {
         qc.invalidateQueries({ queryKey: ["lead-tags"] });

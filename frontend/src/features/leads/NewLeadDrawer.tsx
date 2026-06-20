@@ -9,7 +9,9 @@ import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import { effectiveFieldFormat } from "@/features/admin/customFieldConstants";
 import { AddressAutocomplete } from "./AddressAutocomplete";
-import { useCreateLead, usePipelines, useStages, useUsers, useCustomFields } from "./hooks";
+import { useCreateLead, usePipelines, useStages, useUsers, useCustomFields, useCustomFieldFolders } from "./hooks";
+import { groupCustomFieldsByFolder } from "@/features/admin/customFieldLayout";
+import { isContactFolder, resolveContactBuiltinOrder } from "./contactSection";
 import type { CustomField } from "@/types";
 import {
   fromNativeDatetimeLocal,
@@ -40,6 +42,7 @@ export function NewLeadDrawer({ open, onClose }: Props) {
 
   const { data: pipelines } = usePipelines();
   const { data: customFields } = useCustomFields();
+  const { data: customFieldFolders } = useCustomFieldFolders();
   const { data: users } = useUsers();
 
   const [fields, setFields] = useState<Record<string, string>>({
@@ -64,6 +67,14 @@ export function NewLeadDrawer({ open, onClose }: Props) {
   const { data: stages } = useStages(pipelineId || undefined);
   const activeUsers = (users ?? []).filter((u) => u.status === "active");
   const activeCustom = (customFields ?? []).filter((f) => f.is_active);
+  const grouped = groupCustomFieldsByFolder(customFieldFolders ?? [], activeCustom);
+  const contactGroup = grouped.folders.find((g) => isContactFolder(g.folder));
+  const contactCustomFields = contactGroup?.fields ?? [];
+  const contactBuiltinOrder = resolveContactBuiltinOrder(contactGroup?.folder.contact_builtin_order);
+  const otherCustomFields = [
+    ...grouped.folders.filter((g) => !isContactFolder(g.folder)).flatMap((g) => g.fields),
+    ...grouped.unassigned,
+  ];
 
   function setField(key: string, val: string) {
     setFields((f) => ({ ...f, [key]: val }));
@@ -227,55 +238,76 @@ export function NewLeadDrawer({ open, onClose }: Props) {
                 onChange={(e) => setField("source", e.target.value)}
               />
             </div>
-            <div>
-              <Label>Tags</Label>
-              <Input
-                value={tagsInput}
-                onChange={(e) => setTagsInput(e.target.value)}
-                placeholder="Comma-separated tags"
-              />
-            </div>
           </div>
         </div>
 
         <div>
           <SectionLabel className="mb-2">Contact</SectionLabel>
           <div className="flex flex-col gap-2.5">
-            {BUILTINS.map((b) => (
-              <div key={b.key}>
-                <Label>
-                  {b.label}
-                  {"required" in b && b.required && <span className="text-danger"> *</span>}
-                </Label>
-                <Input
-                  value={fields[b.key] ?? ""}
-                  onChange={(e) => setField(b.key, e.target.value)}
-                />
-              </div>
+            {contactBuiltinOrder.map((key) => {
+              if (key === "address") {
+                return (
+                  <AddressAutocomplete
+                    key={key}
+                    address={fields.address ?? ""}
+                    city={fields.city ?? ""}
+                    state={fields.state ?? ""}
+                    zip={fields.zip ?? ""}
+                    country={fields.country ?? ""}
+                    onPlainChange={(next) => {
+                      setFields((prev) => ({ ...prev, ...next }));
+                      setAddressPlaceId("");
+                    }}
+                    onSelect={(validated) => {
+                      setFields((prev) => ({ ...prev, ...validated }));
+                      setAddressPlaceId(validated.address_place_id);
+                    }}
+                  />
+                );
+              }
+              if (key === "tags") {
+                return (
+                  <div key={key}>
+                    <Label>Tags</Label>
+                    <Input
+                      value={tagsInput}
+                      onChange={(e) => setTagsInput(e.target.value)}
+                      placeholder="Comma-separated tags"
+                    />
+                  </div>
+                );
+              }
+              const builtin = BUILTINS.find((b) => b.key === key);
+              if (!builtin) return null;
+              return (
+                <div key={key}>
+                  <Label>
+                    {builtin.label}
+                    {"required" in builtin && builtin.required && <span className="text-danger"> *</span>}
+                  </Label>
+                  <Input
+                    value={fields[builtin.key] ?? ""}
+                    onChange={(e) => setField(builtin.key, e.target.value)}
+                  />
+                </div>
+              );
+            })}
+            {contactCustomFields.map((f) => (
+              <CustomFieldInput
+                key={f.id}
+                field={f}
+                value={customValues[String(f.id)] ?? ""}
+                onChange={(v) => setCustomValues((c) => ({ ...c, [String(f.id)]: v }))}
+              />
             ))}
-            <AddressAutocomplete
-              address={fields.address ?? ""}
-              city={fields.city ?? ""}
-              state={fields.state ?? ""}
-              zip={fields.zip ?? ""}
-              country={fields.country ?? ""}
-              onPlainChange={(next) => {
-                setFields((prev) => ({ ...prev, ...next }));
-                setAddressPlaceId("");
-              }}
-              onSelect={(validated) => {
-                setFields((prev) => ({ ...prev, ...validated }));
-                setAddressPlaceId(validated.address_place_id);
-              }}
-            />
           </div>
         </div>
 
-        {activeCustom.length > 0 && (
+        {otherCustomFields.length > 0 && (
           <div>
             <SectionLabel className="mb-2">Custom Fields</SectionLabel>
             <div className="flex flex-col gap-2.5">
-              {activeCustom.map((f) => (
+              {otherCustomFields.map((f) => (
                 <CustomFieldInput
                   key={f.id}
                   field={f}

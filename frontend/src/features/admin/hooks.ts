@@ -219,6 +219,7 @@ export function useDeleteCustomFieldFolder() {
 export interface CustomFieldLayoutPayload {
   folders: { id: number; position: number }[];
   fields: { id: number; folder_id: number | null; position: number }[];
+  contact_builtin_order?: string[];
 }
 export function useSaveCustomFieldLayout() {
   const inv = useInvalidate(["custom-field-folders", "custom-fields"]);
