@@ -85,6 +85,68 @@ func RecordEarningReturn(ctx context.Context, q database.Querier, leadID int64, 
 	return nil
 }
 
+// RecordEarningPublisherDispute credits the publisher again when a publisher
+// disputes a returned lead and re-charges the buyer. It offsets the negative
+// 'return' earnings recorded when the lead was returned.
+func RecordEarningPublisherDispute(ctx context.Context, q database.Querier, compensationID, leadID int64, amount float64) error {
+	if compensationID == 0 || amount <= 0 {
+		return nil
+	}
+	_, err := q.Exec(ctx,
+		`INSERT INTO compensation_earnings(compensation_id, lead_id, amount, kind)
+		 VALUES ($1,$2,$3,'dispute')`,
+		compensationID, leadID, amount)
+	return err
+}
+
+// ReverseEarningPublisherDispute reverses positive dispute earnings recorded by
+// RecordEarningPublisherDispute when a publisher concedes a return dispute.
+func ReverseEarningPublisherDispute(ctx context.Context, q database.Querier, leadID int64, contractID *int64) error {
+	if contractID == nil || *contractID == 0 {
+		return nil
+	}
+	rows, err := q.Query(ctx,
+		`SELECT ce.compensation_id, ce.amount
+		 FROM compensation_earnings ce
+		 JOIN contract_compensations cc ON cc.id = ce.compensation_id
+		 WHERE ce.lead_id = $1 AND cc.contract_id = $2
+		   AND ce.kind = 'dispute' AND ce.amount > 0`,
+		leadID, *contractID)
+	if err != nil {
+		return err
+	}
+	var reversals []struct {
+		compID int64
+		amount float64
+	}
+	for rows.Next() {
+		var compID int64
+		var amount float64
+		if err := rows.Scan(&compID, &amount); err != nil {
+			rows.Close()
+			return err
+		}
+		reversals = append(reversals, struct {
+			compID int64
+			amount float64
+		}{compID, amount})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, r := range reversals {
+		if _, err := q.Exec(ctx,
+			`INSERT INTO compensation_earnings(compensation_id, lead_id, amount, kind)
+			 VALUES ($1,$2,$3,'dispute')`,
+			r.compID, leadID, -r.amount); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // RecordEarningDispute reverses distribute earnings when a buyer dispute is accepted.
 func RecordEarningDispute(ctx context.Context, q database.Querier, txnID int64, leadID *int64, contractID *int64, amount float64) error {
 	if leadID == nil || contractID == nil || *leadID == 0 || *contractID == 0 || amount <= 0 {
@@ -223,7 +285,7 @@ func (s *Service) PayoutSummary(ctx context.Context, publisherID int64) (*Payout
 		 FROM compensation_earnings ce
 		 JOIN contract_compensations cc ON cc.id = ce.compensation_id
 		 JOIN contracts c ON c.id = cc.contract_id
-		 WHERE c.publisher_id = $1 AND ce.kind IN ('return', 'dispute')`,
+		 WHERE c.publisher_id = $1 AND ce.kind IN ('return', 'dispute') AND ce.amount < 0`,
 		publisherID).Scan(&sum.ReturnedValue); err != nil {
 		return nil, err
 	}

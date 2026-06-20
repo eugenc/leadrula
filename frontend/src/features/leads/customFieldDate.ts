@@ -167,3 +167,8 @@ export function defaultDatetimeLocalParts(): DatetimeLocalParts {
   );
   return parseDatetimeLocalParts(snapped)!;
 }
+
+export function isoToDatetimeLocal(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}

@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { get } from "@/lib/api";
+import type { Me } from "@/types";
 import {
   DndContext,
   DragOverlay,
@@ -18,7 +21,11 @@ import {
 } from "./hooks";
 import { BoardSortPicker } from "./BoardSortPicker";
 import { BoardColumn } from "./BoardColumn";
-import { stageNeedsPrompt, stagePromptMissingError } from "@/features/pipelines/stageTypes";
+import {
+  initialActionAtForStageMove,
+  stageNeedsPrompt,
+  stagePromptMissingError,
+} from "@/features/pipelines/stageTypes";
 import { LeadCard } from "./LeadCard";
 import { LeadsColumnPicker } from "./LeadsColumnPicker";
 import { StagePromptModal, type PromptResult } from "./StagePromptModal";
@@ -28,13 +35,13 @@ import { LeadViewsMenu } from "./LeadViewsMenu";
 import {
   useSavedLeadViews,
   useActiveViewId,
-  useBoardCardFields,
   mergeViews,
   getViewById,
-  viewStateEqual,
+  filtersViewChanged,
   type FilterCondition,
   type SavedLeadView,
 } from "./leadsViews";
+import { loadBoardUi, saveBoardUi, defaultBoardUi } from "./leadsUiStorage";
 import { FilterSelect } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Spinner, EmptyState } from "@/components/ui/misc";
@@ -43,10 +50,10 @@ import { apiError, errorMessage } from "@/lib/api";
 import { toast } from "@/store/toastStore";
 import {
   SYSTEM_COLUMNS,
-  boardCardFields,
   DEFAULT_BOARD_CARD_FIELDS,
   normalizeBoardCardFields,
-  resolveBoardCardFields,
+  parseBoardCardFields,
+  BOARD_CARD_FIELDS_PREF_KEY,
   PIPELINE_COLUMNS,
 } from "./leadsListColumns";
 import { useAuthStore } from "@/store/authStore";
@@ -80,7 +87,8 @@ function estimateRowHeight(cardFieldCount: number): number {
 }
 
 export function Board() {
-  const accountType = useAuthStore((s) => s.user?.account_type);
+  const user = useAuthStore((s) => s.user);
+  const accountType = user?.account_type;
   const { data: pipelines, isLoading: plLoading } = usePipelines();
   const [pipelineId, setPipelineId] = useState<number | undefined>();
   useEffect(() => {
@@ -90,10 +98,14 @@ export function Board() {
   const { data: apiViews, isLoading: viewsLoading } = useSavedLeadViews("board");
   const views = useMemo(() => mergeViews(apiViews, "board"), [apiViews]);
   const { activeId, isLoading: activeLoading } = useActiveViewId("board");
-  const { savedCardFields, saveCardFields, isLoading: cardFieldsLoading } = useBoardCardFields();
+  const { data: me } = useQuery({
+    queryKey: ["me"],
+    queryFn: () => get<Me>("/auth/me"),
+  });
   const activeView = getViewById(views, activeId);
   const prevActiveId = useRef<string | null>(null);
-  const cardFieldsHydrated = useRef(false);
+  const uiHydrated = useRef(false);
+  const [uiReady, setUiReady] = useState(false);
 
   const [conditions, setConditions] = useState<FilterCondition[]>([]);
   const [cardFields, setCardFields] = useState<string[]>(DEFAULT_BOARD_CARD_FIELDS);
@@ -104,7 +116,7 @@ export function Board() {
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
-  const { data: customFields } = useCustomFields();
+  const { data: customFields, isLoading: customFieldsLoading } = useCustomFields();
 
   const allColumnIds = useMemo(() => {
     const custom = (customFields ?? [])
@@ -121,49 +133,60 @@ export function Board() {
     (cols: string[]) => {
       const normalized = normalizeBoardCardFields(cols, allColumnIds);
       setCardFields(normalized);
-      saveCardFields(normalized);
+      if (user?.id) saveBoardUi(user.id, { card_fields: normalized });
     },
-    [allColumnIds, saveCardFields]
+    [allColumnIds, user?.id]
   );
 
-  const applyView = useCallback(
-    (view: SavedLeadView, resetCardFields = false) => {
-      setConditions([...view.filters]);
-      setSort(view.sort ?? "created_at");
-      setSortDir(view.sort_dir ?? "desc");
-      setSearchTerm("");
-      setDebouncedSearch("");
-      if (resetCardFields) {
-        updateCardFields(boardCardFields(view.columns));
-      }
+  const updateSort = useCallback(
+    (nextSort: string) => {
+      setSort(nextSort);
+      if (user?.id) saveBoardUi(user.id, { sort: nextSort });
     },
-    [updateCardFields]
+    [user?.id]
   );
+
+  const updateSortDir = useCallback(
+    (nextDir: "asc" | "desc") => {
+      setSortDir(nextDir);
+      if (user?.id) saveBoardUi(user.id, { sort_dir: nextDir });
+    },
+    [user?.id]
+  );
+
+  const applyViewFilters = useCallback((view: SavedLeadView) => {
+    setConditions([...view.filters]);
+    setSearchTerm("");
+    setDebouncedSearch("");
+  }, []);
 
   useEffect(() => {
     if (viewsLoading || activeLoading) return;
     if (prevActiveId.current === activeId) return;
-    const isInitial = prevActiveId.current === null;
     prevActiveId.current = activeId;
-    applyView(getViewById(views, activeId), !isInitial);
-  }, [activeId, viewsLoading, activeLoading, views, applyView]);
+    applyViewFilters(getViewById(views, activeId));
+  }, [activeId, viewsLoading, activeLoading, views, applyViewFilters]);
 
   useEffect(() => {
-    if (cardFieldsLoading || cardFieldsHydrated.current) return;
-    setCardFields(
-      savedCardFields
-        ? normalizeBoardCardFields(savedCardFields, allColumnIds)
-        : resolveBoardCardFields(undefined)
-    );
-    cardFieldsHydrated.current = true;
-  }, [cardFieldsLoading, savedCardFields, allColumnIds]);
+    if (viewsLoading || activeLoading || customFieldsLoading || uiHydrated.current || !user?.id) return;
+    const legacyCardFields = parseBoardCardFields(me?.user.prefs?.[BOARD_CARD_FIELDS_PREF_KEY]);
+    const stored =
+      loadBoardUi(user.id, allColumnIds, legacyCardFields) ?? defaultBoardUi(allColumnIds);
+    setSort(stored.sort);
+    setSortDir(stored.sort_dir);
+    setCardFields(stored.card_fields);
+    uiHydrated.current = true;
+    setUiReady(true);
+  }, [
+    viewsLoading,
+    activeLoading,
+    customFieldsLoading,
+    user?.id,
+    allColumnIds,
+    me?.user.prefs,
+  ]);
 
-  const viewChanged = !viewStateEqual(activeView, {
-    filters: conditions,
-    columns: cardFields,
-    sort,
-    sort_dir: sortDir,
-  });
+  const filtersChanged = filtersViewChanged(activeView, conditions);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 300);
@@ -174,13 +197,13 @@ export function Board() {
     () => ({
       pipeline_id: pipelineId,
       all: true as const,
-      view_id: viewChanged ? undefined : activeId,
-      filters: viewChanged ? JSON.stringify(conditions) : undefined,
+      view_id: filtersChanged ? undefined : activeId,
+      filters: filtersChanged ? JSON.stringify(conditions) : undefined,
       q: debouncedSearch || undefined,
       sort,
       sort_dir: sortDir,
     }),
-    [pipelineId, viewChanged, activeId, conditions, debouncedSearch, sort, sortDir]
+    [pipelineId, filtersChanged, activeId, conditions, debouncedSearch, sort, sortDir]
   );
 
   const { data: stages } = useStages(pipelineId);
@@ -193,7 +216,11 @@ export function Board() {
 
   const [board, setBoard] = useState<Record<number, Lead[]>>({});
   const [unplacedLeads, setUnplacedLeads] = useState<Lead[]>([]);
-  const [prompt, setPrompt] = useState<{ leadId: number; stage: Stage } | null>(null);
+  const [prompt, setPrompt] = useState<{
+    leadId: number;
+    stage: Stage;
+    initialActionAt: string;
+  } | null>(null);
   const [activeDrag, setActiveDrag] = useState<Lead | null>(null);
 
   const stageList = useMemo(
@@ -254,7 +281,17 @@ export function Board() {
         onError: (err) => {
           const e = apiError(err);
           if (stagePromptMissingError(e.code, e.message, stage.stage_type)) {
-            setPrompt({ leadId, stage });
+            const lead = leads?.items.find((l) => l.id === leadId);
+            const fromStage = stageList.find((s) => s.id === lead?.stage_id);
+            setPrompt({
+              leadId,
+              stage,
+              initialActionAt: initialActionAtForStageMove(
+                fromStage?.stage_type,
+                stage.stage_type,
+                lead?.action_at
+              ),
+            });
           } else {
             toast.error(errorMessage(err));
             revert();
@@ -292,7 +329,12 @@ export function Board() {
     moveLocal(leadId, fromStage, toStage);
 
     if (stageNeedsPrompt(stage.stage_type)) {
-      setPrompt({ leadId, stage });
+      const fromStageType = stageList.find((s) => s.id === fromStage)?.stage_type;
+      setPrompt({
+        leadId,
+        stage,
+        initialActionAt: initialActionAtForStageMove(fromStageType, stage.stage_type, lead?.action_at),
+      });
       return;
     }
     commit(leadId, stage);
@@ -300,7 +342,7 @@ export function Board() {
 
   const customFieldsList = customFields ?? [];
 
-  if (plLoading || isLoading || viewsLoading || activeLoading || cardFieldsLoading) {
+  if (plLoading || isLoading || viewsLoading || activeLoading || customFieldsLoading || !uiReady) {
     return (
       <div className="flex justify-center py-16">
         <Spinner className="h-6 w-6" />
@@ -345,14 +387,14 @@ export function Board() {
           sort={sort}
           sortDir={sortDir}
           onFiltersChange={setConditions}
-          onViewApply={(view) => applyView(view, true)}
+          onViewApply={applyViewFilters}
         />
         <BoardSortPicker
           sort={sort}
           sortDir={sortDir}
           customFields={customFieldsList}
-          onSortChange={setSort}
-          onSortDirChange={setSortDir}
+          onSortChange={updateSort}
+          onSortDirChange={updateSortDir}
         />
         <LeadsColumnPicker
           open={colsOpen}
@@ -429,6 +471,7 @@ export function Board() {
         key={prompt ? `${prompt.leadId}-${prompt.stage.id}` : "closed"}
         open={!!prompt}
         stage={prompt?.stage ?? null}
+        initialActionAt={prompt?.initialActionAt}
         onCancel={() => {
           setPrompt(null);
           revert();

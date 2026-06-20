@@ -53,6 +53,7 @@ type BadgeVariant =
   | "distributed"
   | "returned"
   | "closed"
+  | "disputed"
   | "overdue"
   | "pending";
 
@@ -71,6 +72,7 @@ export function Badge({
     distributed: "border border-success-border bg-success-bg text-success-fg",
     returned: "border border-neutral-border bg-neutral-bg text-neutral-fg",
     closed: "border border-neutral-border bg-neutral-bg text-neutral-fg",
+    disputed: "border border-warning-border bg-warning-bg text-warning-fg",
     overdue: "border border-danger-border bg-danger-bg text-danger-fg",
     pending: "border border-warning-border bg-warning-bg text-warning-fg",
   };

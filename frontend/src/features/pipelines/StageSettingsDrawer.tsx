@@ -517,7 +517,7 @@ function summarizeAction(a: RuleAction, lk: Lookups): string {
   }
   if (def?.kind === "date") {
     const mode = modeOf(a.value);
-    if (mode === "clear") return "clear action date";
+    if (mode === "clear") return `clear ${label}`;
     if (mode === "plus_days")
       return `set ${label} +${daysOf(a.value)} days`;
     return `set ${label} to today`;

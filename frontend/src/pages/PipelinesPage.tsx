@@ -16,6 +16,7 @@ import {
   useReorderStages,
 } from "@/features/admin/hooks";
 import { StageSettingsDrawer } from "@/features/pipelines/StageSettingsDrawer";
+import { DeletePipelineResourceConfirmDialog } from "@/features/pipelines/DeletePipelineResourceConfirmDialog";
 import { stageColorDot } from "@/features/pipelines/stageColors";
 import { PageBody } from "@/components/layout/PageBody";
 import { SectionLabel } from "@/components/layout/SectionLabel";
@@ -41,6 +42,9 @@ export function PipelinesPage() {
   const deletePipeline = useDeletePipeline();
   const updatePipeline = useUpdatePipeline();
   const [newName, setNewName] = useState("");
+  const [pipelineToDelete, setPipelineToDelete] = useState<{ id: number; name: string } | null>(
+    null
+  );
 
   return (
     <>
@@ -78,11 +82,7 @@ export function PipelinesPage() {
                   />
                   <IconButton
                     variant="danger"
-                    onClick={() =>
-                      deletePipeline.mutate(p.id, {
-                        onError: (e) => toast.error(errorMessage(e)),
-                      })
-                    }
+                    onClick={() => setPipelineToDelete({ id: p.id, name: p.name })}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </IconButton>
@@ -119,6 +119,30 @@ export function PipelinesPage() {
           </div>
         )}
       </PageBody>
+
+      <DeletePipelineResourceConfirmDialog
+        open={pipelineToDelete != null}
+        onClose={() => setPipelineToDelete(null)}
+        title="Delete pipeline?"
+        subtitle={
+          pipelineToDelete
+            ? `Permanently delete "${pipelineToDelete.name}"? All stages and rules in this pipeline will be removed.`
+            : ""
+        }
+        loading={deletePipeline.isPending}
+        onConfirm={() => {
+          if (!pipelineToDelete) return;
+          const deletedId = pipelineToDelete.id;
+          deletePipeline.mutate(deletedId, {
+            onSuccess: () => {
+              toast.success("Pipeline deleted");
+              setPipelineToDelete(null);
+              if (selected === deletedId) setSelected(undefined);
+            },
+            onError: (e) => toast.error(errorMessage(e)),
+          });
+        }}
+      />
     </>
   );
 }
@@ -132,6 +156,7 @@ function StagesEditor({ pipelineId }: { pipelineId: number }) {
   const [name, setName] = useState("");
   const [newStageType, setNewStageType] = useState<StageType>("standard");
   const [settingsStage, setSettingsStage] = useState<Stage | null>(null);
+  const [stageToDelete, setStageToDelete] = useState<{ id: number; name: string } | null>(null);
 
   const sorted = [...(stages ?? [])].sort((a, b) => a.position - b.position);
 
@@ -219,9 +244,7 @@ function StagesEditor({ pipelineId }: { pipelineId: number }) {
                         <IconButton
                           variant="danger"
                           disabled={deleteStage.isPending && deleteStage.variables === s.id}
-                          onClick={() =>
-                            deleteStage.mutate(s.id, { onError: (e) => toast.error(errorMessage(e)) })
-                          }
+                          onClick={() => setStageToDelete({ id: s.id, name: s.name })}
                         >
                           <Trash2 className="h-4 w-4" />
                         </IconButton>
@@ -274,6 +297,24 @@ function StagesEditor({ pipelineId }: { pipelineId: number }) {
         pipelineId={pipelineId}
         open={!!settingsStage}
         onClose={() => setSettingsStage(null)}
+      />
+
+      <DeletePipelineResourceConfirmDialog
+        open={stageToDelete != null}
+        onClose={() => setStageToDelete(null)}
+        title="Delete stage?"
+        subtitle={stageToDelete ? `Permanently delete "${stageToDelete.name}"?` : ""}
+        loading={deleteStage.isPending}
+        onConfirm={() => {
+          if (!stageToDelete) return;
+          deleteStage.mutate(stageToDelete.id, {
+            onSuccess: () => {
+              toast.success("Stage deleted");
+              setStageToDelete(null);
+            },
+            onError: (e) => toast.error(errorMessage(e)),
+          });
+        }}
       />
     </>
   );

@@ -103,7 +103,7 @@ function customFieldDefs(customFields: CustomField[]): FieldDef[] {
 
 const LEAD_CORE_FIELDS: FieldDef[] = [
   { field: "status", label: "Status", kind: "status" },
-  { field: "action_at", label: "Action date", kind: "date" },
+  { field: "action_at", label: "Action Date & Time", kind: "date" },
   { field: "assigned_user_id", label: "Assignee", kind: "user" },
   { field: "disqualification_reason_id", label: "Disqualification reason", kind: "disq" },
   { field: "tags", label: "Tags", kind: "tags" },
@@ -128,7 +128,7 @@ export function actionFields(domain: string, customFields: CustomField[]): Field
     default:
       return [
         { field: "status", label: "Status", kind: "status" },
-        { field: "action_at", label: "Action date", kind: "date" },
+        { field: "action_at", label: "Action Date & Time", kind: "date" },
         { field: "disqualification_reason_id", label: "Disqualification reason", kind: "disq" },
         { field: "tags", label: "Tags", kind: "tags" },
         ...LEAD_TEXT_BUILTINS,

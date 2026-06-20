@@ -303,7 +303,7 @@ func ApplyContractDistribution(ctx context.Context, q database.Querier, deps Rou
 	if err := deps.Repo.LogPipelinePlacement(ctx, q, leadID, ActorSystem("Route"), target.BuyerPipelineID, destStage); err != nil {
 		return nil, err
 	}
-	if err := contracts.InitPublisherTracking(ctx, q, contractID, leadID, target.BuyerID, destStage); err != nil {
+	if err := contracts.ClearPublisherTracking(ctx, q, leadID); err != nil {
 		return nil, err
 	}
 	if err := contracts.CheckCap(ctx, q, target.ID, target.CompensationID); err != nil {

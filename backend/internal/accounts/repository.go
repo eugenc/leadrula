@@ -842,6 +842,24 @@ func (r *Repository) AdminUserIDs(ctx context.Context, q database.Querier, accou
 	return ids, rows.Err()
 }
 
+// AccountUserIDs returns all active user IDs on an account (any role).
+func (r *Repository) AccountUserIDs(ctx context.Context, q database.Querier, accountID int64) ([]int64, error) {
+	rows, err := q.Query(ctx, `SELECT id FROM users WHERE account_id = $1 AND is_active`, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (r *Repository) ListAccounts(ctx context.Context, accountType string) ([]Account, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT `+accountCols+` FROM accounts WHERE type = $1 ORDER BY name`, accountType)

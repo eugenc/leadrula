@@ -7,10 +7,11 @@ import {
 } from "@/features/admin/hooks";
 import { BuyerStripeBilling } from "@/features/billing/BuyerStripeBilling";
 import { BuyerInvoices } from "@/features/billing/BuyerInvoices";
+import { DisputeDetailDrawer } from "@/features/billing/DisputeDetailDrawer";
 import { PageBody } from "@/components/layout/PageBody";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Label, Textarea } from "@/components/ui/input";
+import { Label, Select, Textarea } from "@/components/ui/input";
 import { Badge, Spinner, EmptyState, StatCard } from "@/components/ui/misc";
 import { FormDrawer } from "@/components/ui/dialog";
 import { cn, formatMoney, resolveBuyerTxnCategory } from "@/lib/utils";
@@ -19,14 +20,19 @@ import { toast } from "@/store/toastStore";
 import { useUIStore } from "@/store/uiStore";
 import { errorMessage } from "@/lib/api";
 import { LogLeadLink } from "@/features/intake/logShared";
+import { DEADLINE_DAY_OPTIONS } from "@/features/billing/disputeOptions";
 import type { Dispute, Transaction } from "@/types";
 
 type BillingTab = "transactions" | "invoices" | "disputes" | "payments";
 
-function disputeBadgeVariant(status: Dispute["status"]): "overdue" | "distributed" | "pending" {
-  if (status === "accepted") return "distributed";
-  if (status === "rejected") return "overdue";
-  return "pending";
+function disputeBadge(d: Dispute): { variant: "pending" | "disputed" | "closed"; label: string } {
+  if (d.status === "open") {
+    return { variant: "pending", label: d.awaiting_party === "buyer" ? "Your turn" : "Awaiting publisher" };
+  }
+  if (d.placement_party === "buyer" && !d.placement_completed_at) {
+    return { variant: "disputed", label: "Placement needed" };
+  }
+  return { variant: "closed", label: "Resolved" };
 }
 
 export function BuyerBillingPage() {
@@ -102,7 +108,7 @@ function Transactions() {
               <TD className="font-medium text-gray-800">{typeLabel}</TD>
               <TD className="font-medium text-gray-800">{t.publisher_name ?? "—"}</TD>
               <TD>
-                <LogLeadLink leadId={t.lead_id} fallback={t.lead_name} onClick={openDetail} />
+                <LogLeadLink leadId={t.lead_viewable ? t.lead_id : null} fallback={t.lead_name} onClick={openDetail} />
               </TD>
               <TD className={t.amount < 0 ? "font-medium text-danger-fg" : "text-jade-700"}>
                 {formatMoney(t.amount)}
@@ -131,53 +137,45 @@ function Transactions() {
 }
 
 function Disputes() {
-  const [statusFilter, setStatusFilter] = useState<"" | "open" | "accepted" | "rejected">("");
-  const { data: disputes, isLoading } = useDisputes("buyer", statusFilter || undefined);
+  const { data: disputes, isLoading } = useDisputes("buyer");
+  const [selected, setSelected] = useState<Dispute | null>(null);
+
+  if (isLoading) return <Spinner className="h-6 w-6" />;
+  if ((disputes ?? []).length === 0) return <EmptyState title="No disputes." />;
 
   return (
     <>
-      <div className="mb-4 flex gap-2">
-        {(["", "open", "accepted", "rejected"] as const).map((s) => (
-          <Button
-            key={s || "all"}
-            size="sm"
-            variant={statusFilter === s ? "primary" : "secondary"}
-            onClick={() => setStatusFilter(s)}
-          >
-            {s === "" ? "All" : s.charAt(0).toUpperCase() + s.slice(1)}
-          </Button>
-        ))}
-      </div>
-
-      {isLoading ? (
-        <Spinner className="h-6 w-6" />
-      ) : (disputes ?? []).length === 0 ? (
-        <EmptyState title="No disputes." />
-      ) : (
-        <Table>
-          <THead>
-            <tr>
-              <TH>Publisher</TH>
-              <TH>Reason</TH>
-              <TH>Amount</TH>
-              <TH>Status</TH>
-              <TH>Opened</TH>
-            </tr>
-          </THead>
-          <TBody>
-            {(disputes ?? []).map((d) => (
-              <TR key={d.id}>
+      <Table>
+        <THead>
+          <tr>
+            <TH>Publisher</TH>
+            <TH>Lead</TH>
+            <TH>Reason</TH>
+            <TH>Amount</TH>
+            <TH>Status</TH>
+            <TH>Opened</TH>
+          </tr>
+        </THead>
+        <TBody>
+          {(disputes ?? []).map((d) => {
+            const badge = disputeBadge(d);
+            return (
+              <TR key={d.id} className="cursor-pointer" onClick={() => setSelected(d)}>
                 <TD className="font-medium text-gray-800">{d.counterparty_name ?? "—"}</TD>
+                <TD className="text-gray-600">{d.lead_name ?? "—"}</TD>
                 <TD className="text-gray-600">{d.reason}</TD>
-                <TD className="font-medium text-danger-fg">{formatMoney(d.amount)}</TD>
+                <TD className="font-medium text-danger-fg">{formatMoney(d.amount ?? 0)}</TD>
                 <TD>
-                  <Badge variant={disputeBadgeVariant(d.status)}>{d.status}</Badge>
+                  <Badge variant={badge.variant}>{badge.label}</Badge>
                 </TD>
                 <TD>{format(new Date(d.created_at), "MMM d, h:mma")}</TD>
               </TR>
-            ))}
-          </TBody>
-        </Table>
+            );
+          })}
+        </TBody>
+      </Table>
+      {selected && (
+        <DisputeDetailDrawer scope="buyer" dispute={selected} onClose={() => setSelected(null)} />
       )}
     </>
   );
@@ -186,6 +184,7 @@ function Disputes() {
 function DisputeDrawer({ txn, onClose }: { txn: Transaction; onClose: () => void }) {
   const open = useOpenDispute();
   const [reason, setReason] = useState("");
+  const [deadlineDays, setDeadlineDays] = useState(14);
   return (
     <FormDrawer
       open
@@ -201,7 +200,7 @@ function DisputeDrawer({ txn, onClose }: { txn: Transaction; onClose: () => void
             disabled={!reason.trim() || open.isPending}
             onClick={() =>
               open.mutate(
-                { transaction_id: txn.id, reason },
+                { transaction_id: txn.id, reason, deadline_days: deadlineDays },
                 {
                   onSuccess: () => {
                     toast.success("Dispute submitted");
@@ -217,9 +216,21 @@ function DisputeDrawer({ txn, onClose }: { txn: Transaction; onClose: () => void
         </>
       }
     >
-      <div>
-        <Label>Reason</Label>
-        <Textarea value={reason} onChange={(e) => setReason(e.target.value)} />
+      <div className="flex flex-col gap-3">
+        <div>
+          <Label>Reason</Label>
+          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} />
+        </div>
+        <div>
+          <Label>Response deadline</Label>
+          <Select value={deadlineDays} onChange={(e) => setDeadlineDays(Number(e.target.value))}>
+            {DEADLINE_DAY_OPTIONS.map((d) => (
+              <option key={d} value={d}>
+                {d} days
+              </option>
+            ))}
+          </Select>
+        </div>
       </div>
     </FormDrawer>
   );

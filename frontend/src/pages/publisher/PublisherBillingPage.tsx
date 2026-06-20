@@ -1,19 +1,18 @@
 import { useState } from "react";
-import { useTransactions, useDisputes, useResolveDispute } from "@/features/admin/hooks";
+import { useTransactions, useDisputes } from "@/features/admin/hooks";
 import { PublisherPayouts } from "@/features/billing/PublisherPayouts";
 import { PublisherInvoices } from "@/features/billing/PublisherInvoices";
+import { DisputeDetailDrawer } from "@/features/billing/DisputeDetailDrawer";
 import { formatAccountTypeLabel, formatBuyerWithType } from "@/features/admin/contractType";
 import { PageBody } from "@/components/layout/PageBody";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
-import { Spinner, EmptyState } from "@/components/ui/misc";
+import { Badge, Spinner, EmptyState } from "@/components/ui/misc";
 import { cn, formatMoney, resolveTxnCategory } from "@/lib/utils";
 import { format } from "date-fns";
-import { toast } from "@/store/toastStore";
 import { useUIStore } from "@/store/uiStore";
 import { errorMessage } from "@/lib/api";
 import { LogLeadLink } from "@/features/intake/logShared";
-import type { Transaction } from "@/types";
+import type { Dispute, Transaction } from "@/types";
 
 function formatAccountName(
   name: string | null | undefined,
@@ -64,62 +63,58 @@ export function PublisherBillingPage() {
   );
 }
 
+function disputeBadge(d: Dispute): { variant: "pending" | "disputed" | "closed"; label: string } {
+  if (d.status === "open") {
+    return { variant: "pending", label: d.awaiting_party === "publisher" ? "Your turn" : "Awaiting buyer" };
+  }
+  if (d.placement_party === "publisher" && !d.placement_completed_at) {
+    return { variant: "disputed", label: "Placement needed" };
+  }
+  return { variant: "closed", label: "Resolved" };
+}
+
 function Disputes() {
-  const { data: disputes, isLoading } = useDisputes("publisher", "open");
-  const resolve = useResolveDispute();
+  const { data: disputes, isLoading } = useDisputes("publisher");
+  const [selected, setSelected] = useState<Dispute | null>(null);
   if (isLoading) return <Spinner className="h-6 w-6" />;
-  if ((disputes ?? []).length === 0) return <EmptyState title="No open disputes." />;
+  if ((disputes ?? []).length === 0) return <EmptyState title="No disputes." />;
   return (
-    <Table>
-      <THead>
-        <tr>
-          <TH>Account</TH>
-          <TH>Reason</TH>
-          <TH>Amount</TH>
-          <TH>Opened</TH>
-          <TH className="min-w-0 w-12" />
-        </tr>
-      </THead>
-      <TBody>
-        {(disputes ?? []).map((d) => (
-          <TR key={d.id}>
-            <TD className="font-medium text-gray-800">
-              {formatAccount(d.counterparty_name, d.counterparty_account_type, d.buyer_name)}
-            </TD>
-            <TD className="text-gray-600">{d.reason}</TD>
-            <TD className="font-medium text-danger-fg">{formatMoney(d.amount)}</TD>
-            <TD>{format(new Date(d.created_at), "MMM d")}</TD>
-            <TD>
-              <div className="flex justify-end gap-2">
-                <Button
-                  size="sm"
-                  onClick={() =>
-                    resolve.mutate(
-                      { id: d.id, accept: true },
-                      { onSuccess: () => toast.success("Refunded"), onError: (e) => toast.error(errorMessage(e)) }
-                    )
-                  }
-                >
-                  Accept
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() =>
-                    resolve.mutate(
-                      { id: d.id, accept: false },
-                      { onSuccess: () => toast.info("Rejected"), onError: (e) => toast.error(errorMessage(e)) }
-                    )
-                  }
-                >
-                  Reject
-                </Button>
-              </div>
-            </TD>
-          </TR>
-        ))}
-      </TBody>
-    </Table>
+    <>
+      <Table>
+        <THead>
+          <tr>
+            <TH>Account</TH>
+            <TH>Lead</TH>
+            <TH>Reason</TH>
+            <TH>Amount</TH>
+            <TH>Status</TH>
+            <TH>Opened</TH>
+          </tr>
+        </THead>
+        <TBody>
+          {(disputes ?? []).map((d) => {
+            const badge = disputeBadge(d);
+            return (
+              <TR key={d.id} className="cursor-pointer" onClick={() => setSelected(d)}>
+                <TD className="font-medium text-gray-800">
+                  {formatAccount(d.counterparty_name, d.counterparty_account_type, d.buyer_name)}
+                </TD>
+                <TD className="text-gray-600">{d.lead_name ?? "—"}</TD>
+                <TD className="text-gray-600">{d.reason}</TD>
+                <TD className="font-medium text-danger-fg">{formatMoney(d.amount ?? 0)}</TD>
+                <TD>
+                  <Badge variant={badge.variant}>{badge.label}</Badge>
+                </TD>
+                <TD>{format(new Date(d.created_at), "MMM d")}</TD>
+              </TR>
+            );
+          })}
+        </TBody>
+      </Table>
+      {selected && (
+        <DisputeDetailDrawer scope="publisher" dispute={selected} onClose={() => setSelected(null)} />
+      )}
+    </>
   );
 }
 
@@ -163,7 +158,7 @@ function TransactionRow({ t }: { t: Transaction }) {
       </TD>
       <TD className="text-gray-600">{formatAccountType(t.counterparty_account_type)}</TD>
       <TD>
-        <LogLeadLink leadId={t.lead_id} fallback={t.lead_name} onClick={openDetail} />
+        <LogLeadLink leadId={t.lead_viewable ? t.lead_id : null} fallback={t.lead_name} onClick={openDetail} />
       </TD>
       <TD className={t.amount < 0 ? "font-medium text-danger-fg" : "text-jade-700"}>
         {formatMoney(t.amount)}

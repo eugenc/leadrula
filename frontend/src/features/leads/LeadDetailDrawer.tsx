@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Sheet, DrawerHeader, DrawerBody } from "@/components/ui/dialog";
+import { Sheet, DrawerHeader, DrawerBody, FormDrawer } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, InputWithOverflowTooltip, Label, Textarea, Select } from "@/components/ui/input";
 import { Avatar, Badge, Spinner } from "@/components/ui/misc";
@@ -27,8 +27,14 @@ import {
   useStages,
 } from "./hooks";
 import { DeleteLeadConfirmDialog } from "./DeleteLeadConfirmDialog";
+import { useOpenReturnDispute } from "@/features/admin/hooks";
+import { DEADLINE_DAY_OPTIONS } from "@/features/billing/disputeOptions";
 import { StagePromptModal, type PromptResult } from "./StagePromptModal";
-import { stageNeedsPrompt, stagePromptMissingError } from "@/features/pipelines/stageTypes";
+import {
+  initialActionAtForStageMove,
+  stageNeedsPrompt,
+  stagePromptMissingError,
+} from "@/features/pipelines/stageTypes";
 import type { Lead, LeadHistoryEntry, Stage } from "@/types";
 import { formatStatus, leadSourceLabel } from "./leadsListColumns";
 import { LeadTagsEditor } from "./LeadTagsEditor";
@@ -47,6 +53,7 @@ import { useGoogleMapsStatus } from "@/features/integrations/hooks";
 import {
   fromNativeDatetimeLocal,
   inputModeForFormat,
+  isoToDatetimeLocal,
   normalizeCustomDateValue,
   toNativeDateValue,
   toNativeDatetimeLocalValue,
@@ -67,12 +74,6 @@ const DRAWER_TABS = [
 ] as const;
 
 type DrawerTab = (typeof DRAWER_TABS)[number]["id"];
-
-function isoToDatetimeLocal(iso: string): string {
-  const d = new Date(iso);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-}
 
 function moneyOrDash(v: number | null | undefined): string {
   return v != null ? formatMoney(v) : "—";
@@ -143,11 +144,15 @@ function LeadEconomics({ lead, accountType }: { lead: Lead; accountType?: string
 export function LeadDetailDrawer() {
   const leadId = useUIStore((s) => s.detailLeadId);
   const close = useUIStore((s) => s.closeDetail);
-  const { data: lead, isLoading } = useLead(leadId);
+  const { data: lead, isLoading, isError } = useLead(leadId);
 
   return (
     <Sheet open={!!leadId} onClose={close}>
-      {isLoading || !lead ? (
+      {isError ? (
+        <div className="px-6 py-20 text-center text-sm text-gray-400">
+          This lead is no longer available.
+        </div>
+      ) : isLoading || !lead ? (
         <div className="flex justify-center py-20">
           <Spinner className="h-6 w-6" />
         </div>
@@ -284,7 +289,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
               overdue ? "font-semibold text-danger-fg" : "text-gray-700"
             )}
           >
-            Action{overdue && " — overdue"}
+            Action Date & Time{overdue && " — overdue"}
           </span>
           <DatetimeFieldInput
             value={actionAtLocal}
@@ -511,7 +516,15 @@ function LeadPipelineFields({ lead }: { lead: Lead }) {
   const [pipelineId, setPipelineId] = useState(lead.pipeline_id ?? 0);
   const [stageId, setStageId] = useState(lead.stage_id ?? 0);
   const { data: stages } = useStages(pipelineId || undefined);
-  const [prompt, setPrompt] = useState<{ stage: Stage } | null>(null);
+  const [prompt, setPrompt] = useState<{ stage: Stage; initialActionAt: string } | null>(null);
+
+  function openStagePrompt(stage: Stage) {
+    const fromStageType = stages?.find((s) => s.id === lead.stage_id)?.stage_type;
+    setPrompt({
+      stage,
+      initialActionAt: initialActionAtForStageMove(fromStageType, stage.stage_type, lead.action_at),
+    });
+  }
 
   useEffect(() => {
     setPipelineId(lead.pipeline_id ?? 0);
@@ -534,7 +547,7 @@ function LeadPipelineFields({ lead }: { lead: Lead }) {
         onError: (err) => {
           const e = apiError(err);
           if (stagePromptMissingError(e.code, e.message, stage.stage_type)) {
-            setPrompt({ stage });
+            openStagePrompt(stage);
           } else {
             toast.error(errorMessage(err));
             revertFromLead();
@@ -577,7 +590,7 @@ function LeadPipelineFields({ lead }: { lead: Lead }) {
     if (!stage) return;
     setStageId(nextStageId);
     if (stageNeedsPrompt(stage.stage_type)) {
-      setPrompt({ stage });
+      openStagePrompt(stage);
       return;
     }
     commitStage(stage);
@@ -636,6 +649,7 @@ function LeadPipelineFields({ lead }: { lead: Lead }) {
         key={prompt ? `${lead.id}-${prompt.stage.id}` : "closed"}
         open={!!prompt}
         stage={prompt?.stage ?? null}
+        initialActionAt={prompt?.initialActionAt}
         onCancel={() => {
           setPrompt(null);
           revertFromLead();
@@ -954,7 +968,7 @@ function HistoryTab({ leadId }: { leadId: number }) {
             <div className="text-xs text-gray-400">
               {historyActorLine(h)} · {format(new Date(h.created_at), "MMM d, h:mma")}
               {h.action_at_captured &&
-                ` · action ${format(new Date(h.action_at_captured), "MMM d, h:mm a")}`}
+                ` · Action Date & Time ${format(new Date(h.action_at_captured), "MMM d, h:mm a")}`}
               {h.disqualification_reason && ` · ${h.disqualification_reason}`}
               {h.trigger_label && ` · ${h.trigger_label}`}
               {h.actor_detail && h.kind !== "account_transfer" && ` · ${h.actor_detail}`}
@@ -972,6 +986,7 @@ function HistoryTab({ leadId }: { leadId: number }) {
 
 function RedistributeBox({ lead }: { lead: Lead }) {
   const user = useAuthStore((s) => s.user);
+  const [disputing, setDisputing] = useState(false);
   if (user?.account_type !== "publisher" || lead.status !== "returned") return null;
   return (
     <div className="rounded-md border border-warning-border bg-warning-bg p-2.5">
@@ -982,6 +997,67 @@ function RedistributeBox({ lead }: { lead: Lead }) {
       <p className="text-xs text-gray-400">
         Send this returned lead to another buyer from the Contracts page.
       </p>
+      {user?.role === "admin" && (
+        <Button size="sm" variant="outline" className="mt-2" onClick={() => setDisputing(true)}>
+          Dispute return
+        </Button>
+      )}
+      {disputing && <DisputeReturnDialog lead={lead} onClose={() => setDisputing(false)} />}
     </div>
+  );
+}
+
+function DisputeReturnDialog({ lead, onClose }: { lead: Lead; onClose: () => void }) {
+  const openDispute = useOpenReturnDispute();
+  const [reason, setReason] = useState("");
+  const [deadlineDays, setDeadlineDays] = useState(14);
+  return (
+    <FormDrawer
+      open
+      onClose={onClose}
+      title="Dispute return"
+      subtitle={`Charge the buyer and open a dispute for ${lead.first_name} ${lead.last_name}.`}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            disabled={!reason.trim() || openDispute.isPending}
+            onClick={() =>
+              openDispute.mutate(
+                { leadId: lead.id, reason, deadlineDays },
+                {
+                  onSuccess: () => {
+                    toast.success("Dispute opened");
+                    onClose();
+                  },
+                  onError: (e) => toast.error(errorMessage(e)),
+                }
+              )
+            }
+          >
+            Open dispute
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <div>
+          <Label>Reason</Label>
+          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={4} />
+        </div>
+        <div>
+          <Label>Response deadline</Label>
+          <Select value={deadlineDays} onChange={(e) => setDeadlineDays(Number(e.target.value))}>
+            {DEADLINE_DAY_OPTIONS.map((d) => (
+              <option key={d} value={d}>
+                {d} days
+              </option>
+            ))}
+          </Select>
+        </div>
+      </div>
+    </FormDrawer>
   );
 }

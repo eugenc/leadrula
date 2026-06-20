@@ -111,7 +111,7 @@ export const BUILTIN_FIELD_LABELS: Record<string, string> = {
   cost: "Cost",
   revenue: "Revenue",
   tags: "Tags",
-  action_at: "Action date & time",
+  action_at: "Action Date & Time",
   external_id: "External ID",
   lead_id: "Lead ID",
   disqualification_reason_id: "Disqualification reason",

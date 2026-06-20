@@ -189,7 +189,11 @@ func (r *Repository) GetByRef(ctx context.Context, p *auth.Principal, ref string
 		if p.AccountType == "publisher" {
 			l, err = scanLead(r.pool.QueryRow(ctx,
 				`SELECT `+leadCols+` FROM leads WHERE id=$1 AND `+leadNotDeleted+`
-				 AND (owner_account_id=$2 OR (publisher_id=$2 AND publisher_pipeline_id IS NOT NULL AND status IN ('distributed', 'closed')))`,
+				 AND (owner_account_id=$2 OR (publisher_id=$2 AND publisher_pipeline_id IS NOT NULL AND status IN ('distributed', 'closed'))
+				      OR (publisher_id=$2 AND owner_account_id<>$2 AND EXISTS (
+				        SELECT 1 FROM buyer_collaborations bc
+				        WHERE bc.publisher_id=$2 AND bc.buyer_id=owner_account_id AND bc.status='active'
+				      )))`,
 				leadID, p.AccountID))
 		} else {
 			l, err = scanLead(r.pool.QueryRow(ctx,
@@ -822,8 +826,12 @@ func (r *Repository) ClearFromPipeline(ctx context.Context, q database.Querier, 
 }
 
 func (r *Repository) MoveToPublisher(ctx context.Context, q database.Querier, leadID, publisherID, pipelineID, stageID int64) error {
+	// preassigned_buyer_id is set to the buyer that previously owned the lead
+	// (the right-hand owner_account_id references the pre-update value) so the
+	// "Buyer" field keeps showing who returned the lead.
 	_, err := q.Exec(ctx,
 		`UPDATE leads SET owner_account_id=$2, pipeline_id=$3, stage_id=$4, contract_id=NULL, status='returned',
+		   preassigned_buyer_id=owner_account_id,
 		   publisher_pipeline_id=NULL, publisher_stage_id=NULL, disqualification_reason_id=NULL,
 		   position=COALESCE((SELECT MAX(position)+1 FROM leads WHERE stage_id=$4),0)
 		 WHERE id=$1`, leadID, publisherID, pipelineID, stageID)

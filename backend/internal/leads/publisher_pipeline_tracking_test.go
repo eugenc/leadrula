@@ -41,10 +41,6 @@ func TestPublisherPipelineTracking_distributeAndBuyerWon(t *testing.T) {
 		t.Skip("no active contract with publisher and buyer pipelines")
 	}
 
-	if err := contracts.RebuildContractStageMaps(ctx, pool, contractID); err != nil {
-		t.Fatalf("RebuildContractStageMaps: %v", err)
-	}
-
 	if err := pool.QueryRow(ctx,
 		`SELECT id FROM pipeline_stages WHERE pipeline_id = $1 ORDER BY position, id LIMIT 1`, pubPipelineID).Scan(&pubStage1); err != nil {
 		t.Fatalf("pub stage: %v", err)
@@ -64,19 +60,22 @@ func TestPublisherPipelineTracking_distributeAndBuyerWon(t *testing.T) {
 	}
 	defer tx.Rollback(ctx)
 
+	// Lead starts tracked on the publisher board (pre-distribution state).
 	var leadID int64
 	if err := tx.QueryRow(ctx,
-		`INSERT INTO leads(owner_account_id, publisher_id, first_name, last_name, status, pipeline_id, stage_id)
-		 VALUES ($1,$1,'Track','Test','review',$2,$3) RETURNING id`,
+		`INSERT INTO leads(owner_account_id, publisher_id, first_name, last_name, status, pipeline_id, stage_id,
+		 publisher_pipeline_id, publisher_stage_id)
+		 VALUES ($1,$1,'Track','Test','review',$2,$3,$2,$3) RETURNING id`,
 		publisherID, pubPipelineID, pubStage1).Scan(&leadID); err != nil {
 		t.Fatalf("insert lead: %v", err)
 	}
 
+	// Distribution moves the lead to the buyer and clears publisher tracking.
 	if err := repo.PlaceInPipeline(ctx, tx, leadID, buyerID, buyerPipelineID, buyerStage1, &contractID); err != nil {
 		t.Fatalf("PlaceInPipeline: %v", err)
 	}
-	if err := contracts.InitPublisherTracking(ctx, tx, contractID, leadID, buyerID, buyerStage1); err != nil {
-		t.Fatalf("InitPublisherTracking: %v", err)
+	if err := contracts.ClearPublisherTracking(ctx, tx, leadID); err != nil {
+		t.Fatalf("ClearPublisherTracking: %v", err)
 	}
 	if err := repo.SetStatus(ctx, tx, leadID, "distributed"); err != nil {
 		t.Fatalf("SetStatus: %v", err)
@@ -92,13 +91,11 @@ func TestPublisherPipelineTracking_distributeAndBuyerWon(t *testing.T) {
 	if ownerID != buyerID {
 		t.Fatalf("owner = %d want buyer %d", ownerID, buyerID)
 	}
-	if pubPipe == nil || *pubPipe != pubPipelineID {
-		t.Fatalf("publisher_pipeline_id = %v want %d", pubPipe, pubPipelineID)
-	}
-	if pubStage == nil {
-		t.Fatal("expected publisher_stage_id after distribute")
+	if pubPipe != nil || pubStage != nil {
+		t.Fatalf("publisher tracking = %v,%v want cleared after distribute", pubPipe, pubStage)
 	}
 
+	// A buyer stage change keeps the lead off the publisher board.
 	if err := repo.UpdateStage(ctx, tx, leadID, buyerPipelineID, buyerWon); err != nil {
 		t.Fatalf("UpdateStage buyer won: %v", err)
 	}
@@ -110,20 +107,16 @@ func TestPublisherPipelineTracking_distributeAndBuyerWon(t *testing.T) {
 	}
 
 	var status string
-	if pubStage == nil {
-		t.Fatal("expected publisher_stage_id after distribute")
-	}
-
 	if err := tx.QueryRow(ctx,
 		`SELECT owner_account_id, publisher_stage_id, status FROM leads WHERE id = $1`, leadID).
-		Scan(&ownerID, pubStage, &status); err != nil {
+		Scan(&ownerID, &pubStage, &status); err != nil {
 		t.Fatalf("after won scan: %v", err)
 	}
 	if ownerID != buyerID {
 		t.Fatal("buyer should still own lead after won")
 	}
 	if pubStage != nil {
-		t.Fatalf("publisher_stage_id = %v want cleared (nil) after sync with no stage map", *pubStage)
+		t.Fatalf("publisher_stage_id = %v want cleared (nil) after buyer stage change", *pubStage)
 	}
 	if status != "closed" {
 		t.Fatalf("status = %q want closed", status)

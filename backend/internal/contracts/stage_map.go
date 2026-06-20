@@ -250,117 +250,17 @@ func SyncPublisherStageWithRebuild(ctx context.Context, q database.Querier, cont
 	return SyncPublisherStage(ctx, q, contractID, leadID, buyerID, buyerStageID)
 }
 
-func lookupPublisherStage(ctx context.Context, q database.Querier, contractID, buyerID, buyerStageID int64) (int64, int64, error) {
-	var sourcePipelineID *int64
-	var participationID *int64
-	err := q.QueryRow(ctx,
-		`SELECT COALESCE(p.source_pipeline_id, c.source_pipeline_id), p.id
-		 FROM contracts c
-		 LEFT JOIN contract_participations p
-		   ON p.contract_id = c.id AND p.buyer_id = $2 AND p.status = 'active'
-		 WHERE c.id = $1 AND c.deleted_at IS NULL
-		 ORDER BY p.id NULLS LAST
-		 LIMIT 1`,
-		contractID, buyerID).Scan(&sourcePipelineID, &participationID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, 0, httpx.NotFound("contract not found")
-	}
-	if err != nil {
-		return 0, 0, err
-	}
-	if sourcePipelineID == nil || *sourcePipelineID == 0 {
-		return 0, 0, httpx.BusinessRule("publisher pipeline is not configured on contract")
-	}
-
-	var pubStageID int64
-	if participationID != nil {
-		err = q.QueryRow(ctx,
-			`SELECT publisher_stage_id FROM contract_stage_maps
-			 WHERE contract_id = $1 AND participation_id = $2 AND buyer_stage_id = $3`,
-			contractID, *participationID, buyerStageID).Scan(&pubStageID)
-		if err == nil {
-			return *sourcePipelineID, pubStageID, nil
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return 0, 0, err
-		}
-	}
-	err = q.QueryRow(ctx,
-		`SELECT publisher_stage_id FROM contract_stage_maps
-		 WHERE contract_id = $1 AND participation_id IS NULL AND buyer_stage_id = $2`,
-		contractID, buyerStageID).Scan(&pubStageID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, 0, httpx.BusinessRule("contract stage map is not configured for this buyer stage")
-	}
-	if err != nil {
-		return 0, 0, err
-	}
-	return *sourcePipelineID, pubStageID, nil
-}
-
-func contractDistributeStage(ctx context.Context, q database.Querier, contractID int64) (pubPipelineID, pubStageID int64, err error) {
-	var sourcePipelineID, sourceStageID *int64
-	err = q.QueryRow(ctx,
-		`SELECT source_pipeline_id, source_stage_id FROM contracts WHERE id = $1 AND deleted_at IS NULL`,
-		contractID).Scan(&sourcePipelineID, &sourceStageID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, 0, httpx.NotFound("contract not found")
-	}
-	if err != nil {
-		return 0, 0, err
-	}
-	if sourcePipelineID == nil || sourceStageID == nil || *sourcePipelineID == 0 || *sourceStageID == 0 {
-		return 0, 0, httpx.BusinessRule("contract distribute stage is not configured")
-	}
-	return *sourcePipelineID, *sourceStageID, nil
-}
-
-func isStageMapMissingErr(err error) bool {
-	var appErr *httpx.AppError
-	return errors.As(err, &appErr) &&
-		appErr.Code == httpx.CodeBusinessRule &&
-		appErr.Message == "contract stage map is not configured for this buyer stage"
-}
-
-func setPublisherTracking(ctx context.Context, q database.Querier, leadID, pubPipelineID, pubStageID int64) error {
-	_, err := q.Exec(ctx,
-		`UPDATE leads SET publisher_pipeline_id = $2, publisher_stage_id = $3 WHERE id = $1`,
-		leadID, pubPipelineID, pubStageID)
-	return err
-}
-
-func clearPublisherTracking(ctx context.Context, q database.Querier, leadID int64) error {
+// ClearPublisherTracking removes publisher-board placement so a distributed lead lives only on the buyer board.
+func ClearPublisherTracking(ctx context.Context, q database.Querier, leadID int64) error {
 	_, err := q.Exec(ctx,
 		`UPDATE leads SET publisher_pipeline_id = NULL, publisher_stage_id = NULL WHERE id = $1`,
 		leadID)
 	return err
 }
 
-// InitPublisherTracking sets publisher-board placement when a lead is distributed to a buyer.
-// When no stage map exists yet, falls back to the contract distribute-from stage (source_stage_id).
-func InitPublisherTracking(ctx context.Context, q database.Querier, contractID, leadID, buyerID, buyerStageID int64) error {
-	pubPipelineID, pubStageID, err := lookupPublisherStage(ctx, q, contractID, buyerID, buyerStageID)
-	if err != nil && isStageMapMissingErr(err) {
-		pubPipelineID, pubStageID, err = contractDistributeStage(ctx, q, contractID)
-	}
-	if err != nil {
-		return err
-	}
-	return setPublisherTracking(ctx, q, leadID, pubPipelineID, pubStageID)
-}
-
-// SyncPublisherStage updates publisher-board placement only when an explicit delivery map exists.
-// When no map exists, clears publisher tracking so distributed leads leave the publisher board.
+// SyncPublisherStage clears publisher-board tracking when a buyer-owned lead changes stage.
+// Distributed leads live only on the buyer board; they never appear on the publisher pipeline
+// until a return rule hands ownership back via MoveToPublisher.
 func SyncPublisherStage(ctx context.Context, q database.Querier, contractID, leadID, buyerID, buyerStageID int64) error {
-	pubPipelineID, pubStageID, err := lookupPublisherStage(ctx, q, contractID, buyerID, buyerStageID)
-	if isStageMapMissingErr(err) {
-		return clearPublisherTracking(ctx, q, leadID)
-	}
-	if err != nil {
-		return err
-	}
-	if err := ValidateReturnDestination(ctx, q, pubPipelineID, pubStageID); err != nil {
-		return nil
-	}
-	return setPublisherTracking(ctx, q, leadID, pubPipelineID, pubStageID)
+	return ClearPublisherTracking(ctx, q, leadID)
 }

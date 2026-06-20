@@ -218,7 +218,7 @@ func actionAtChange(from, to *time.Time) []auth.ImpersonationChange {
 		return nil
 	}
 	return []auth.ImpersonationChange{{
-		Field: "Action date", From: fromStr, To: toStr,
+		Field: "Action Date & Time", From: fromStr, To: toStr,
 	}}
 }
 

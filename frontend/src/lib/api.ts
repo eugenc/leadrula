@@ -209,6 +209,15 @@ export async function postForm<T>(path: string, form: FormData): Promise<T> {
   }
 }
 
+export async function getBlob(path: string): Promise<Blob> {
+  try {
+    const res = await api.get(path, { responseType: "blob" });
+    return res.data as Blob;
+  } catch (e) {
+    throw apiError(e);
+  }
+}
+
 export async function patch<T>(path: string, body?: unknown): Promise<T> {
   try {
     const res = await api.patch(path, body);

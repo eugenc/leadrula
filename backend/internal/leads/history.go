@@ -58,6 +58,7 @@ func (r *Repository) LeadHistory(ctx context.Context, leadID int64) ([]LeadHisto
 		r.routeRunHistoryEntries,
 		r.transactionHistoryEntries,
 		r.disputeHistoryEntries,
+		r.disputeMessageHistoryEntries,
 		r.webhookHistoryEntries,
 		r.outboundWebhookHistoryEntries,
 		r.integrationHistoryEntries,
@@ -396,6 +397,63 @@ func (r *Repository) disputeHistoryEntries(ctx context.Context, leadID int64) ([
 	return out, nil
 }
 
+func (r *Repository) disputeMessageHistoryEntries(ctx context.Context, leadID int64) ([]LeadHistoryEntry, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT m.id, m.created_at, m.author_party, COALESCE(u.full_name,''), m.kind, m.body, d.buyer_id,
+		        COALESCE(string_agg(a.filename, ', '), '')
+		 FROM dispute_messages m
+		 JOIN disputes d ON d.id = m.dispute_id
+		 JOIN transactions t ON t.id = d.transaction_id
+		 LEFT JOIN users u ON u.id = m.user_id
+		 LEFT JOIN dispute_message_attachments a ON a.message_id = m.id
+		 WHERE COALESCE(d.lead_id, t.lead_id) = $1
+		 GROUP BY m.id, m.created_at, m.author_party, u.full_name, m.kind, m.body, d.buyer_id
+		 ORDER BY m.created_at`, leadID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []LeadHistoryEntry
+	for rows.Next() {
+		var id, buyerID int64
+		var createdAt time.Time
+		var party, authorName, kind, body, attachments string
+		if err := rows.Scan(&id, &createdAt, &party, &authorName, &kind, &body, &buyerID, &attachments); err != nil {
+			return nil, err
+		}
+		e := LeadHistoryEntry{
+			ID:             id,
+			Kind:           "dispute_message",
+			CreatedAt:      createdAt,
+			Summary:        body,
+			ActorDetail:    attachments,
+			buyerAccountID: buyerID,
+		}
+		if authorName != "" {
+			e.ActorType = "user"
+			e.ActorName = authorName
+		} else {
+			e.ActorType = "system"
+			e.ActorName = strings.Title(party)
+		}
+		switch kind {
+		case "open":
+			e.Summary = "Dispute opened — " + body
+		case "reject":
+			if body == "" {
+				e.Summary = "Dispute rejected"
+			} else {
+				e.Summary = "Dispute rejected — " + body
+			}
+		case "system":
+			e.ActorType = "system"
+			e.ActorName = "System"
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 func (r *Repository) webhookHistoryEntries(ctx context.Context, leadID int64) ([]LeadHistoryEntry, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT d.id, d.created_at, d.status::text, w.name, w.account_id, d.error_message
@@ -581,7 +639,7 @@ func changeLogSummary(changeKind string, fieldName, fromVal, toVal *string) stri
 	case "tags":
 		return fmt.Sprintf("Tags · %s → %s", from, to)
 	case "action_at":
-		return fmt.Sprintf("Action date · %s → %s", from, to)
+		return fmt.Sprintf("Action Date & Time · %s → %s", from, to)
 	case "status":
 		return fmt.Sprintf("Status · %s → %s", from, to)
 	case "pipeline_placed":
@@ -791,7 +849,7 @@ func includeHistoryForBuyer(buyerID int64, e LeadHistoryEntry) bool {
 		case "returned":
 			return e.fromAccountID == buyerID
 		}
-	case "purchase", "refund", "dispute_opened", "dispute_resolved":
+	case "purchase", "refund", "dispute_opened", "dispute_resolved", "dispute_message":
 		return e.buyerAccountID == buyerID
 	case "pipeline_placed":
 		return e.ownerAccountID == buyerID || e.toAccountID == buyerID

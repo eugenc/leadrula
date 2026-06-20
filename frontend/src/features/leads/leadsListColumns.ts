@@ -28,6 +28,7 @@ export const STATUS_LABELS: Record<string, string> = {
   distributed: "Distributed",
   returned: "Returned",
   closed: "Closed",
+  disputed: "Disputed",
 };
 
 export function formatStatus(status: string): string {
@@ -55,7 +56,7 @@ export const SYSTEM_COLUMNS: SystemColumn[] = [
   { id: "stage", label: "Pipeline Stage", sortKey: "stage_name" },
   { id: "status", label: "Status", sortKey: "status" },
   { id: "tags", label: "Tags" },
-  { id: "action_at", label: "Action At", sortKey: "action_at" },
+  { id: "action_at", label: "Action Date & Time", sortKey: "action_at" },
   { id: "created_at", label: "Created", sortKey: "created_at" },
   { id: "address", label: "Address", sortKey: "address" },
   { id: "city", label: "City", sortKey: "city" },
@@ -111,37 +112,9 @@ export function parseBoardCardFields(raw: unknown): string[] | null {
   return cols.length ? cols : null;
 }
 
-export function resolveBoardCardFields(prefs: Record<string, unknown> | undefined): string[] {
-  const saved = parseBoardCardFields(prefs?.[BOARD_CARD_FIELDS_PREF_KEY]);
-  return saved ?? [...DEFAULT_BOARD_CARD_FIELDS];
-}
-
 export function normalizeBoardCardFields(cols: string[], validIds: string[]): string[] {
   const filtered = cols.filter((id) => validIds.includes(id));
   return filtered.length ? filtered : [...DEFAULT_BOARD_CARD_FIELDS];
-}
-
-export function boardCardFields(columns?: string[]): string[] {
-  const filtered = (columns ?? []).filter((c) => c !== "name");
-  return filtered.length ? filtered : [...DEFAULT_BOARD_CARD_FIELDS];
-}
-
-const STORAGE_KEY = "leads-table-columns";
-
-export function loadVisibleColumns(): string[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_VISIBLE_COLUMNS;
-    const parsed = JSON.parse(raw) as string[];
-    const cols = parsed.map((c) => (c === "campaign" ? "source" : c));
-    return cols.length ? cols : DEFAULT_VISIBLE_COLUMNS;
-  } catch {
-    return DEFAULT_VISIBLE_COLUMNS;
-  }
-}
-
-export function saveVisibleColumns(cols: string[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(cols));
 }
 
 export function formatTimeInStage(enteredAt: string): string {

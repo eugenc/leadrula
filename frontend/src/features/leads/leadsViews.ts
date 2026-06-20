@@ -4,8 +4,6 @@ import { get, patch, post, del, ns } from "@/lib/api";
 import type { Me } from "@/types";
 import {
   DEFAULT_VISIBLE_COLUMNS,
-  BOARD_CARD_FIELDS_PREF_KEY,
-  parseBoardCardFields,
 } from "./leadsListColumns";
 
 export interface FilterCondition {
@@ -47,7 +45,7 @@ export const FILTER_FIELDS: {
   },
   {
     field: "action_at",
-    label: "Action date",
+    label: "Action Date & Time",
     ops: [
       { op: "on", label: "is on", needsValue: true, valueType: "date" },
       { op: "before", label: "is before", needsValue: true, valueType: "date" },
@@ -113,7 +111,7 @@ export const BUILTIN_VIEWS: SavedLeadView[] = [
   },
   {
     public_id: "action_today",
-    name: "Action date today",
+    name: "Action Date & Time today",
     placement: "both",
     filters: [{ field: "action_at", op: "on", value: "today" }],
     columns: ["name", "assignee", "action_at", "status"],
@@ -153,6 +151,10 @@ export function viewStateEqual(
   if (view.columns?.length !== state.columns.length) return false;
   if (view.columns?.some((c, i) => c !== state.columns[i])) return false;
   return filtersEqual(view.filters, state.filters);
+}
+
+export function filtersViewChanged(view: SavedLeadView, conditions: FilterCondition[]): boolean {
+  return !filtersEqual(view.filters, conditions);
 }
 
 export function useSavedLeadViews(placement: ViewPlacement) {
@@ -238,32 +240,6 @@ export function useActiveViewId(placement: ViewPlacement) {
   });
 
   return { activeId, setActiveId: setActiveId.mutateAsync, isLoading };
-}
-
-export function useBoardCardFields() {
-  const qc = useQueryClient();
-
-  const { data: me, isLoading } = useQuery({
-    queryKey: ["me"],
-    queryFn: () => get<Me>("/auth/me"),
-  });
-
-  const savedCardFields = useMemo(
-    () => parseBoardCardFields(me?.user.prefs?.[BOARD_CARD_FIELDS_PREF_KEY]),
-    [me]
-  );
-
-  const saveCardFields = useMutation({
-    mutationFn: (cols: string[]) =>
-      patch<Record<string, unknown>>("/auth/me/prefs", { [BOARD_CARD_FIELDS_PREF_KEY]: cols }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
-  });
-
-  return {
-    savedCardFields,
-    saveCardFields: saveCardFields.mutate,
-    isLoading,
-  };
 }
 
 export function mergeViews(apiViews: SavedLeadView[] | undefined, placement: ViewPlacement): SavedLeadView[] {

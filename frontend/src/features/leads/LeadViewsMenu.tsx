@@ -16,7 +16,7 @@ import {
   useActiveViewId,
   mergeViews,
   getViewById,
-  viewStateEqual,
+  filtersEqual,
   type FilterCondition,
   type SavedLeadView,
   type ViewPlacement,
@@ -59,12 +59,7 @@ export function LeadViewsMenu({
   const updateView = useUpdateLeadView();
   const deleteView = useDeleteLeadView();
 
-  const viewChanged = !viewStateEqual(activeView, {
-    filters,
-    columns,
-    sort,
-    sort_dir: sortDir,
-  });
+  const viewChanged = !filtersEqual(activeView.filters, filters);
 
   async function switchView(view: SavedLeadView) {
     onViewApply?.(view);

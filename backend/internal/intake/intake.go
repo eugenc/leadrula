@@ -691,7 +691,7 @@ func (s *Service) RouteFromQueue(ctx context.Context, queueID, routeID, pipeline
 	if err := s.leads.PlaceInPipeline(ctx, tx, leadID, buyerID, pipelineID, stageID, &contractID); err != nil {
 		return err
 	}
-	if err := contracts.InitPublisherTracking(ctx, tx, contractID, leadID, buyerID, stageID); err != nil {
+	if err := contracts.ClearPublisherTracking(ctx, tx, leadID); err != nil {
 		return err
 	}
 	if err := contracts.CheckCap(ctx, tx, target.ID, target.CompensationID); err != nil {

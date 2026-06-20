@@ -105,7 +105,9 @@ func main() {
 
 	stripeOAuthRedirect := strings.TrimRight(cfg.IntegrationOAuthRedirectBase, "/") + "/publisher/billing/stripe/oauth/callback"
 	billingSvc := billing.NewService(pool, notifSvc, accountsRepo, sc, encKey, stripeOAuthRedirect)
+	billingSvc.SetDisputeAttachments(storage.NewDisputeAttachmentStore(cfg.S3Endpoint, cfg.S3Bucket, cfg.S3AccessKey, cfg.S3SecretKey))
 	billingH := billing.NewHandler(billingSvc, cfg.StripeWebhookSecret)
+	go billingSvc.RunDisputeDeadlineWorker(ctx)
 
 	contractsSvc := contracts.NewService(pool)
 	contractsSvc.SetPayoutExecutor(billingSvc)

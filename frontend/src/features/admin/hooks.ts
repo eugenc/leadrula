@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { get, ns, post, postForm, patch, del } from "@/lib/api";
+import { get, getBlob, ns, post, postForm, patch, del } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import type {
   ApiKey,
@@ -1625,13 +1625,90 @@ export function useOpenDispute() {
     onSuccess: inv,
   });
 }
-export function useResolveDispute() {
-  const inv = useInvalidate(["disputes", "transactions"]);
+
+// Publisher opens a return dispute from a returned lead.
+export function useOpenReturnDispute() {
+  const inv = useInvalidate(["disputes", "transactions", "leads"]);
   return useMutation({
-    mutationFn: ({ id, accept }: { id: number; accept: boolean }) =>
-      post(`/publisher/billing/disputes/${id}/${accept ? "accept" : "reject"}`),
+    mutationFn: ({ leadId, reason, deadlineDays }: { leadId: number; reason: string; deadlineDays: number }) =>
+      post(`/publisher/leads/${leadId}/dispute`, { reason, deadline_days: deadlineDays }),
     onSuccess: inv,
   });
+}
+
+export function useDisputeMessages(scope: "publisher" | "buyer", disputeId: number | null) {
+  return useQuery({
+    queryKey: ["dispute-messages", scope, disputeId],
+    queryFn: () => get<import("@/types").DisputeMessage[]>(`/${scope}/billing/disputes/${disputeId}/messages`),
+    enabled: !!disputeId,
+  });
+}
+
+const disputeInvalidationKeys = ["disputes", "dispute-messages", "transactions", "balance", "leads"];
+
+export function usePostDisputeMessage(scope: "publisher" | "buyer") {
+  const inv = useInvalidate(disputeInvalidationKeys);
+  return useMutation({
+    mutationFn: ({ id, body, files }: { id: number; body: string; files?: File[] }) => {
+      const form = new FormData();
+      form.append("body", body);
+      (files ?? []).forEach((f) => form.append("files", f));
+      return postForm(`/${scope}/billing/disputes/${id}/messages`, form);
+    },
+    onSuccess: inv,
+  });
+}
+
+export function useAcceptDispute(scope: "publisher" | "buyer") {
+  const inv = useInvalidate(disputeInvalidationKeys);
+  return useMutation({
+    mutationFn: ({ id, pipelineId, stageId }: { id: number; pipelineId?: number; stageId?: number }) =>
+      post(`/${scope}/billing/disputes/${id}/accept`, {
+        ...(pipelineId ? { pipeline_id: pipelineId } : {}),
+        ...(stageId ? { stage_id: stageId } : {}),
+      }),
+    onSuccess: inv,
+  });
+}
+
+export function useRejectDispute(scope: "publisher" | "buyer") {
+  const inv = useInvalidate(disputeInvalidationKeys);
+  return useMutation({
+    mutationFn: ({ id, body, files }: { id: number; body: string; files?: File[] }) => {
+      const form = new FormData();
+      form.append("body", body);
+      (files ?? []).forEach((f) => form.append("files", f));
+      return postForm(`/${scope}/billing/disputes/${id}/reject`, form);
+    },
+    onSuccess: inv,
+  });
+}
+
+export function useSubmitDisputePlacement(scope: "publisher" | "buyer") {
+  const inv = useInvalidate(disputeInvalidationKeys);
+  return useMutation({
+    mutationFn: ({ id, pipelineId, stageId }: { id: number; pipelineId: number; stageId: number }) =>
+      post(`/${scope}/billing/disputes/${id}/placement`, { pipeline_id: pipelineId, stage_id: stageId }),
+    onSuccess: inv,
+  });
+}
+
+// Downloads an attachment as a blob, opening it in a new tab.
+export async function openDisputeAttachment(
+  scope: "publisher" | "buyer",
+  attachmentId: number,
+  filename: string
+) {
+  const blob = await getBlob(`/${scope}/billing/disputes/attachments/${attachmentId}`);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 export function useManualInvoice() {
   const inv = useInvalidate(["transactions", "invoices"]);

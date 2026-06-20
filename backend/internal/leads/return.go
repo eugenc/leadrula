@@ -56,6 +56,10 @@ func TryReturnLead(ctx context.Context, q database.Querier, deps ReturnDeps, lea
 	if err != nil {
 		return nil, err
 	}
+	// Frozen leads under dispute never auto-return.
+	if lead.Status == "disputed" {
+		return &ReturnOutcome{Lead: lead}, nil
+	}
 	contractID, err := resolveLeadContractID(ctx, q, lead)
 	if err != nil {
 		return nil, err

@@ -144,8 +144,12 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 	var enqueueBranchPos int
 	deps := RouteApplyDeps{Repo: s.repo, Accounts: s.accounts, Notif: s.notif, Integrations: s.integrations}
 
+	// Frozen leads (under active dispute) move stage manually but trigger no
+	// routes, returns, integrations or accruals — this prevents dispute loops.
+	frozen := lead.Status == "disputed"
+
 	// pipeline-origin route: publisher-owned lead reached a trigger stage
-	if lead.ContractID == nil && lead.OwnerAccountID == lead.PublisherID {
+	if !frozen && lead.ContractID == nil && lead.OwnerAccountID == lead.PublisherID {
 		rt, err := routing.MatchRouteByStage(ctx, tx, lead.PublisherID, *finalStageID, leadID, nil)
 		if err != nil {
 			return nil, nil, err
@@ -180,7 +184,7 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 	}
 
 	// buyer-owned pipeline-origin routes
-	if p.AccountType == "buyer" && lead.OwnerAccountID == p.AccountID {
+	if !frozen && p.AccountType == "buyer" && lead.OwnerAccountID == p.AccountID {
 		if rt, err := routing.MatchBuyerRouteByStage(ctx, tx, p.AccountID, *finalStageID, leadID, nil); err != nil {
 			return nil, nil, err
 		} else if rt != nil && enqueueRouteID == 0 {
@@ -212,22 +216,24 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		finalStageID = updated.StageID
 	}
 
-	returnOut, err := TryReturnLead(ctx, tx, ReturnDeps{Repo: s.repo, Notif: s.notif}, leadID)
-	if err != nil {
-		return nil, nil, err
-	}
-	pendingEmails = append(pendingEmails, returnOut.Emails...)
-	updated = returnOut.Lead
-	if returnOut.Returned {
-		finalStageID = updated.StageID
-	} else if updated.ContractID != nil && finalStageID != nil {
-		if updated.OwnerAccountID != updated.PublisherID {
-			if err := contracts.SyncPublisherStageWithRebuild(ctx, tx, *updated.ContractID, leadID, updated.OwnerAccountID, *finalStageID); err != nil {
+	if !frozen {
+		returnOut, err := TryReturnLead(ctx, tx, ReturnDeps{Repo: s.repo, Notif: s.notif}, leadID)
+		if err != nil {
+			return nil, nil, err
+		}
+		pendingEmails = append(pendingEmails, returnOut.Emails...)
+		updated = returnOut.Lead
+		if returnOut.Returned {
+			finalStageID = updated.StageID
+		} else if updated.ContractID != nil && finalStageID != nil {
+			if updated.OwnerAccountID != updated.PublisherID {
+				if err := contracts.SyncPublisherStageWithRebuild(ctx, tx, *updated.ContractID, leadID, updated.OwnerAccountID, *finalStageID); err != nil {
+					return nil, nil, err
+				}
+			}
+			if err := contracts.TryAccrueOnBuyerStage(ctx, tx, *updated.ContractID, leadID, *finalStageID); err != nil {
 				return nil, nil, err
 			}
-		}
-		if err := contracts.TryAccrueOnBuyerStage(ctx, tx, *updated.ContractID, leadID, *finalStageID); err != nil {
-			return nil, nil, err
 		}
 	}
 
@@ -245,12 +251,14 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		toName := s.repo.StageName(ctx, s.repo.pool, &newStageID)
 		auditChanges = stageChange(fromName, toName)
 	}
-	// Fire outbound webhook triggers for stage move.
-	s.fireOutbound(ctx, p.AccountID, "pipeline.move_stage", updated, PipelineContext{
-		PipelineID:  updated.PipelineID,
-		StageID:     finalStageID,
-		PrevStageID: fromStage,
-	})
+	// Fire outbound webhook triggers for stage move (skipped while frozen).
+	if !frozen {
+		s.fireOutbound(ctx, p.AccountID, "pipeline.move_stage", updated, PipelineContext{
+			PipelineID:  updated.PipelineID,
+			StageID:     finalStageID,
+			PrevStageID: fromStage,
+		})
+	}
 	return updated, auditChanges, nil
 }
 
@@ -356,6 +364,9 @@ func (s *Service) Redistribute(ctx context.Context, p *auth.Principal, leadID, c
 	if lead.OwnerAccountID != p.AccountID {
 		return nil, httpx.NotFound("lead not found")
 	}
+	if lead.Status == "disputed" {
+		return nil, httpx.BusinessRule("lead is under dispute and cannot be redistributed")
+	}
 
 	target, err := contracts.GetTargetByContract(ctx, tx, contractID)
 	if err != nil {
@@ -378,7 +389,7 @@ func (s *Service) Redistribute(ctx context.Context, p *auth.Principal, leadID, c
 	if err := s.repo.PlaceInPipeline(ctx, tx, leadID, target.BuyerID, target.BuyerPipelineID, firstStage, &target.ID); err != nil {
 		return nil, err
 	}
-	if err := contracts.InitPublisherTracking(ctx, tx, target.ID, leadID, target.BuyerID, firstStage); err != nil {
+	if err := contracts.ClearPublisherTracking(ctx, tx, leadID); err != nil {
 		return nil, err
 	}
 	if err := contracts.CheckCap(ctx, tx, target.ID, target.CompensationID); err != nil {

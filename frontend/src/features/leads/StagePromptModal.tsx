@@ -14,11 +14,13 @@ export interface PromptResult {
 export function StagePromptModal({
   open,
   stage,
+  initialActionAt,
   onCancel,
   onConfirm,
 }: {
   open: boolean;
   stage: Stage | null;
+  initialActionAt?: string;
   onCancel: () => void;
   onConfirm: (r: PromptResult) => void;
 }) {
@@ -28,9 +30,9 @@ export function StagePromptModal({
 
   useEffect(() => {
     if (!open) return;
-    setActionAt("");
+    setActionAt(initialActionAt ?? "");
     setReasonId("");
-  }, [open, stage?.id]);
+  }, [open, stage?.id, initialActionAt]);
 
   if (!stage) return null;
 

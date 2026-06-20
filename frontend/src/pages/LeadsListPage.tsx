@@ -21,10 +21,11 @@ import {
   useActiveViewId,
   mergeViews,
   getViewById,
-  viewStateEqual,
+  filtersViewChanged,
   type FilterCondition,
   type SavedLeadView,
 } from "@/features/leads/leadsViews";
+import { loadListUi, saveListUi, normalizeListColumns } from "@/features/leads/leadsUiStorage";
 import { useContracts } from "@/features/admin/hooks";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Badge, Spinner, EmptyState } from "@/components/ui/misc";
@@ -104,54 +105,40 @@ export function LeadsListPage() {
   const [assignTarget, setAssignTarget] = useState(0);
 
   const { data: users } = useUsers();
-  const { data: customFields } = useCustomFields();
+  const { data: customFields, isLoading: customFieldsLoading } = useCustomFields();
   const { data: contracts } = useContracts(isPublisher);
 
-  const applyView = useCallback((view: SavedLeadView) => {
+  const applyViewFilters = useCallback((view: SavedLeadView) => {
     setConditions([...view.filters]);
-    setSort(view.sort ?? "created_at");
-    setSortDir(view.sort_dir ?? "desc");
-    setVisibleCols(view.columns?.length ? [...view.columns] : [...DEFAULT_VISIBLE_COLUMNS]);
     setSearch("");
     setDebouncedSearch("");
     setPage(1);
   }, []);
 
-  useEffect(() => {
-    if (viewsLoading || activeLoading || viewApplied.current) return;
-    applyView(activeView);
-    viewApplied.current = true;
-  }, [viewsLoading, activeLoading, activeView, applyView]);
-
-  const viewChanged = !viewStateEqual(activeView, {
-    filters: conditions,
-    columns: visibleCols,
-    sort,
-    sort_dir: sortDir,
-  });
+  const filtersChanged = filtersViewChanged(activeView, conditions);
 
   const filters = useMemo(
     () => ({
-      view_id: viewChanged ? undefined : activeId,
-      filters: viewChanged ? JSON.stringify(conditions) : undefined,
+      view_id: filtersChanged ? undefined : activeId,
+      filters: filtersChanged ? JSON.stringify(conditions) : undefined,
       q: debouncedSearch || undefined,
       page,
       limit,
       sort,
       sort_dir: sortDir,
     }),
-    [viewChanged, activeId, conditions, debouncedSearch, page, limit, sort, sortDir]
+    [filtersChanged, activeId, conditions, debouncedSearch, page, limit, sort, sortDir]
   );
 
   const bulkListFilters = useMemo(
     () => ({
-      view_id: viewChanged ? undefined : activeId,
-      filters: viewChanged ? JSON.stringify(conditions) : undefined,
+      view_id: filtersChanged ? undefined : activeId,
+      filters: filtersChanged ? JSON.stringify(conditions) : undefined,
       q: debouncedSearch || undefined,
       sort,
       sort_dir: sortDir,
     }),
-    [viewChanged, activeId, conditions, debouncedSearch, sort, sortDir]
+    [filtersChanged, activeId, conditions, debouncedSearch, sort, sortDir]
   );
 
   const { data, isLoading, isError, error } = useLeads(filters);
@@ -188,7 +175,7 @@ export function LeadsListPage() {
   useEffect(() => {
     setSelected(new Set());
     setSelectAllMatching(false);
-  }, [conditions, limit, sort, sortDir, activeId, viewChanged, debouncedSearch]);
+  }, [conditions, limit, sort, sortDir, activeId, filtersChanged, debouncedSearch]);
 
   const allColumnIds = useMemo(() => {
     const custom = (customFields ?? [])
@@ -197,16 +184,46 @@ export function LeadsListPage() {
     return [...SYSTEM_COLUMNS.map((c) => c.id), ...custom];
   }, [customFields]);
 
+  useEffect(() => {
+    if (viewsLoading || activeLoading || customFieldsLoading || viewApplied.current || !user?.id) return;
+    applyViewFilters(activeView);
+    const stored = loadListUi(user.id, allColumnIds);
+    if (stored) {
+      setSort(stored.sort);
+      setSortDir(stored.sort_dir);
+      setVisibleCols(stored.columns);
+    } else {
+      setSort(activeView.sort ?? "created_at");
+      setSortDir(activeView.sort_dir ?? "desc");
+      setVisibleCols(
+        activeView.columns?.length ? [...activeView.columns] : [...DEFAULT_VISIBLE_COLUMNS]
+      );
+    }
+    viewApplied.current = true;
+  }, [viewsLoading, activeLoading, customFieldsLoading, activeView, applyViewFilters, user?.id, allColumnIds]);
+
   const activeCols = visibleCols.filter((id) => allColumnIds.includes(id));
+
+  const updateVisibleCols = useCallback(
+    (cols: string[]) => {
+      const normalized = normalizeListColumns(cols, allColumnIds);
+      setVisibleCols(normalized);
+      if (user?.id) saveListUi(user.id, { columns: normalized });
+    },
+    [allColumnIds, user?.id]
+  );
 
   function toggleSort(colId: string) {
     const key = columnSortKey(colId);
     if (!key) return;
     if (sort === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      const nextDir = sortDir === "asc" ? "desc" : "asc";
+      setSortDir(nextDir);
+      if (user?.id) saveListUi(user.id, { sort_dir: nextDir });
     } else {
       setSort(key);
       setSortDir("asc");
+      if (user?.id) saveListUi(user.id, { sort: key, sort_dir: "asc" });
     }
   }
 
@@ -271,7 +288,7 @@ export function LeadsListPage() {
             columns={visibleCols}
             sort={sort}
             sortDir={sortDir}
-            onViewApply={applyView}
+            onViewApply={applyViewFilters}
           />
           <Button variant="outline" size="sm" onClick={() => setFiltersExpanded((e) => !e)}>
             {filtersExpanded ? "Hide filters" : "Edit filters"}
@@ -342,7 +359,7 @@ export function LeadsListPage() {
               customFields={customFields ?? []}
               defaultCols={DEFAULT_VISIBLE_COLUMNS}
               lockedCols={DEFAULT_VISIBLE_COLUMNS}
-              onChange={setVisibleCols}
+              onChange={updateVisibleCols}
             />
           </div>
         </div>

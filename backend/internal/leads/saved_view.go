@@ -49,7 +49,7 @@ var BuiltinViews = map[string]SavedView{
 	},
 	"action_today": {
 		PublicID:   "action_today",
-		Name:       "Action date today",
+		Name:       "Action Date & Time today",
 		Placement:  "both",
 		Filters:    []FilterCondition{{Field: "action_at", Op: "on", Value: json.RawMessage(`"today"`)}},
 		Columns:    []string{"name", "assignee", "action_at", "status"},

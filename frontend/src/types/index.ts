@@ -164,7 +164,7 @@ export interface Lead {
   position: number;
   assigned_user_id: number | null;
   action_at: string | null;
-  status: "review" | "distributed" | "returned" | "closed";
+  status: "review" | "distributed" | "returned" | "closed" | "disputed";
   disqualification_reason_id: number | null;
   created_at: string;
   updated_at: string;
@@ -820,11 +820,14 @@ export interface Transaction {
   counterparty_name?: string | null;
   counterparty_account_type?: string | null;
   ledger_source?: "earning" | "transaction" | "legacy";
+  lead_viewable?: boolean;
   amount: number;
   balance_after?: number | null;
   description: string;
   created_at: string;
 }
+
+export type DisputeParty = "buyer" | "publisher";
 
 export interface Dispute {
   id: number;
@@ -837,6 +840,36 @@ export interface Dispute {
   status: "open" | "accepted" | "rejected";
   amount?: number;
   created_at: string;
+  initiated_by?: DisputeParty;
+  lead_id?: number;
+  lead_name?: string;
+  contract_id?: number;
+  deadline_days?: number;
+  response_deadline_at?: string;
+  awaiting_party?: DisputeParty;
+  outcome?: string;
+  winner_party?: DisputeParty;
+  placement_party?: DisputeParty;
+  placement_completed_at?: string;
+}
+
+export interface DisputeAttachment {
+  id: number;
+  message_id: number;
+  filename: string;
+  content_type: string;
+  byte_size: number;
+}
+
+export interface DisputeMessage {
+  id: number;
+  dispute_id: number;
+  author_party: DisputeParty;
+  author_name?: string;
+  kind: string;
+  body: string;
+  created_at: string;
+  attachments?: DisputeAttachment[];
 }
 
 export type InvoiceStatus = "open" | "paid" | "void";
