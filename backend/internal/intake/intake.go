@@ -220,7 +220,7 @@ func (s *Service) IngestFromSource(ctx context.Context, publisherID int64, slug 
 	}
 	s.notif.SendEmails(emails)
 	if rt.Destination == "integration" {
-		leads.TryEnqueueIntegrations(ctx, s.leads.Pool(), s.leads, s.integrations, rt.ID, leadID, rt.MatchedBranchPosition)
+		leads.TryEnqueueIntegrations(ctx, s.leads.Pool(), s.leads, s.integrations, rt.ID, leadID, rt.MatchedBranchPosition, nil)
 	}
 	return &IngestResult{LeadID: publicID, Status: status}, nil
 }
@@ -625,7 +625,7 @@ func (s *Service) RouteFromQueue(ctx context.Context, queueID, routeID, pipeline
 		}
 		s.notif.SendEmails(emails)
 		if applied.Destination == "integration" {
-			leads.TryEnqueueIntegrations(ctx, s.pool, s.leads, s.integrations, routeID, leadID, branchPos)
+			leads.TryEnqueueIntegrations(ctx, s.pool, s.leads, s.integrations, routeID, leadID, branchPos, nil)
 		}
 		return nil
 	}

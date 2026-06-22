@@ -142,7 +142,14 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 
 	var enqueueRouteID int64
 	var enqueueBranchPos int
-	deps := RouteApplyDeps{Repo: s.repo, Accounts: s.accounts, Notif: s.notif, Integrations: s.integrations}
+	var enqueuedConnIDs []int64
+	deps := RouteApplyDeps{
+		Repo:                  s.repo,
+		Accounts:              s.accounts,
+		Notif:                 s.notif,
+		Integrations:          s.integrations,
+		EnqueuedConnectionIDs: &enqueuedConnIDs,
+	}
 
 	// Frozen leads (under active dispute) move stage manually but trigger no
 	// routes, returns, integrations or accruals — this prevents dispute loops.
@@ -241,10 +248,15 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		return nil, nil, err
 	}
 	s.notif.SendEmails(pendingEmails)
-	if enqueueRouteID != 0 {
-		TryEnqueueIntegrations(ctx, s.repo.Pool(), s.repo, s.integrations, enqueueRouteID, leadID, enqueueBranchPos)
-	}
 	_ = s.repo.attachCustomValues(ctx, updated)
+	if enqueueRouteID != 0 {
+		TryEnqueueIntegrations(ctx, s.repo.Pool(), s.repo, s.integrations, enqueueRouteID, leadID, enqueueBranchPos, &enqueuedConnIDs)
+	}
+	if !frozen && s.integrations != nil && updated.PipelineID != nil && updated.StageID != nil {
+		if payloadJSON, err := BuildDeliveryPayload(updated); err == nil {
+			_ = s.integrations.TryEnqueueGHLWebhookOnStageMove(ctx, updated.OwnerAccountID, *updated.PipelineID, *updated.StageID, leadID, payloadJSON, enqueuedConnIDs)
+		}
+	}
 	var auditChanges []auth.ImpersonationChange
 	if p.Impersonator != nil {
 		fromName := s.repo.StageName(ctx, s.repo.pool, fromStage)

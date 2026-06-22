@@ -16,9 +16,10 @@ import (
 
 // IntegrationEnqueuer enqueues outbound integration deliveries after routing.
 type IntegrationEnqueuer interface {
-	EnqueueDelivery(ctx context.Context, routeID, leadID int64, branchPosition int, payloadJSON []byte) error
-	EnqueueConnectionDelivery(ctx context.Context, connectionID, leadID int64, payloadJSON []byte) error
+	EnqueueDelivery(ctx context.Context, routeID, leadID int64, branchPosition int, payloadJSON []byte, enqueued *[]int64) error
+	EnqueueConnectionDelivery(ctx context.Context, connectionID, leadID int64, payloadJSON []byte, enqueued *[]int64) error
 	EnqueueParticipationWebhook(ctx context.Context, webhookID, leadID int64, payloadJSON []byte) error
+	TryEnqueueGHLWebhookOnStageMove(ctx context.Context, ownerAccountID, pipelineID, stageID, leadID int64, payloadJSON []byte, skipConnIDs []int64) error
 }
 
 // PipelineContext carries the pipeline/stage snapshot that outbound webhook triggers receive.
@@ -39,10 +40,11 @@ type WebhookFirer interface {
 
 // RouteApplyDeps holds collaborators for ApplyRoute.
 type RouteApplyDeps struct {
-	Repo          *Repository
-	Accounts      *accounts.Repository
-	Notif         *notifications.Service
-	Integrations  IntegrationEnqueuer
+	Repo                  *Repository
+	Accounts              *accounts.Repository
+	Notif                 *notifications.Service
+	Integrations          IntegrationEnqueuer
+	EnqueuedConnectionIDs *[]int64
 }
 
 // ApplyRoute moves a lead according to route destination.
@@ -403,7 +405,7 @@ func enqueueParticipationIntegration(ctx context.Context, deps RouteApplyDeps, t
 		return err
 	}
 	if target.IntegrationID != 0 {
-		if err := deps.Integrations.EnqueueConnectionDelivery(ctx, target.IntegrationID, lead.ID, payloadJSON); err != nil {
+		if err := deps.Integrations.EnqueueConnectionDelivery(ctx, target.IntegrationID, lead.ID, payloadJSON, deps.EnqueuedConnectionIDs); err != nil {
 			return err
 		}
 	}

@@ -93,7 +93,7 @@ func RefreshDeliveryPayload(ctx context.Context, q database.Querier, repo *Repos
 }
 
 // TryEnqueueIntegrations runs after a route apply transaction commits.
-func TryEnqueueIntegrations(ctx context.Context, q database.Querier, repo *Repository, enq IntegrationEnqueuer, routeID, leadID int64, branchPosition int) {
+func TryEnqueueIntegrations(ctx context.Context, q database.Querier, repo *Repository, enq IntegrationEnqueuer, routeID, leadID int64, branchPosition int, enqueued *[]int64) {
 	if enq == nil || routeID == 0 {
 		return
 	}
@@ -108,5 +108,5 @@ func TryEnqueueIntegrations(ctx context.Context, q database.Querier, repo *Repos
 	if err != nil {
 		return
 	}
-	_ = enq.EnqueueDelivery(ctx, routeID, leadID, branchPosition, payloadJSON)
+	_ = enq.EnqueueDelivery(ctx, routeID, leadID, branchPosition, payloadJSON, enqueued)
 }

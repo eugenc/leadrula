@@ -50,7 +50,7 @@ func (s *Service) applyMatchedOriginRoute(ctx context.Context, rt *routing.Route
 	}
 	s.notif.SendEmails(emails)
 	if enqueue {
-		TryEnqueueIntegrations(ctx, s.repo.Pool(), s.repo, s.integrations, rt.ID, leadID, rt.MatchedBranchPosition)
+		TryEnqueueIntegrations(ctx, s.repo.Pool(), s.repo, s.integrations, rt.ID, leadID, rt.MatchedBranchPosition, nil)
 	}
 	return true
 }

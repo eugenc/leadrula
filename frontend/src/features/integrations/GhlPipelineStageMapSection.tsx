@@ -1,6 +1,6 @@
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Label, Select, Input } from "@/components/ui/input";
+import { Label, Select } from "@/components/ui/input";
 import { IconButton } from "@/components/layout/IconButton";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { usePipelines, useStages } from "@/features/leads/hooks";
@@ -13,13 +13,13 @@ export function GhlPipelineStageMapSection({
   onChange,
   ghlPipelines,
   ghlPipelinesLoading = false,
-  manualGhlIds = false,
+  triggerOnly = false,
 }: {
   entries: GHLPipelineStageMapEntry[];
   onChange: (entries: GHLPipelineStageMapEntry[]) => void;
   ghlPipelines: GhlPipeline[];
   ghlPipelinesLoading?: boolean;
-  manualGhlIds?: boolean;
+  triggerOnly?: boolean;
 }) {
   const { data: pipelines } = usePipelines();
 
@@ -43,17 +43,17 @@ export function GhlPipelineStageMapSection({
   return (
     <div className="space-y-3 rounded-lg border border-gray-100 p-3">
       <div className="flex items-center justify-between">
-        <Label>Pipeline / stage mapping</Label>
+        <Label>{triggerOnly ? "Outbound trigger stages" : "Pipeline / stage mapping"}</Label>
         <Button size="sm" variant="secondary" onClick={addRow}>
           <Plus className="h-3.5 w-3.5" /> Add row
         </Button>
       </div>
       <p className="text-xs text-gray-400">
-        {manualGhlIds
-          ? "Map each Leadrula stage to GHL pipeline/stage IDs included in the webhook payload."
+        {triggerOnly
+          ? "Push to GHL when a lead enters these Leadrula pipeline stages. At least one trigger stage is required."
           : "Map each Leadrula stage to a GHL pipeline stage when pushing opportunities."}
       </p>
-      {!manualGhlIds && !ghlPipelinesLoading && ghlPipelines.length === 0 && (
+      {!triggerOnly && !ghlPipelinesLoading && ghlPipelines.length === 0 && (
         <p className="text-xs text-gray-400">Click Test connection to load pipelines from GHL.</p>
       )}
       {entries.length === 0 ? (
@@ -64,8 +64,12 @@ export function GhlPipelineStageMapSection({
             <tr>
               <TH>Leadrula pipeline</TH>
               <TH>Leadrula stage</TH>
-              <TH>GHL pipeline</TH>
-              <TH>GHL stage</TH>
+              {!triggerOnly && (
+                <>
+                  <TH>GHL pipeline</TH>
+                  <TH>GHL stage</TH>
+                </>
+              )}
               <TH className="w-12" />
             </tr>
           </THead>
@@ -76,7 +80,7 @@ export function GhlPipelineStageMapSection({
                 entry={e}
                 pipelines={pipelines ?? []}
                 ghlPipelines={ghlPipelines}
-                manualGhlIds={manualGhlIds}
+                triggerOnly={triggerOnly}
                 onChange={(patch) => updateRow(idx, patch)}
                 onRemove={() => removeRow(idx)}
               />
@@ -92,14 +96,14 @@ function PipelineStageRow({
   entry,
   pipelines,
   ghlPipelines,
-  manualGhlIds,
+  triggerOnly,
   onChange,
   onRemove,
 }: {
   entry: GHLPipelineStageMapEntry;
   pipelines: { id: number; name: string }[];
   ghlPipelines: GhlPipeline[];
-  manualGhlIds?: boolean;
+  triggerOnly?: boolean;
   onChange: (patch: Partial<GHLPipelineStageMapEntry>) => void;
   onRemove: () => void;
 }) {
@@ -139,54 +143,40 @@ function PipelineStageRow({
           ))}
         </Select>
       </TD>
-      <TD>
-        {manualGhlIds ? (
-          <Input
-            className="!h-8 !text-sm"
-            value={entry.ghl_pipeline_id}
-            onChange={(ev) => onChange({ ghl_pipeline_id: ev.target.value, ghl_pipeline_stage_id: "" })}
-            placeholder="GHL pipeline ID"
-          />
-        ) : (
-          <Select
-            className="!h-8 !text-sm"
-            value={entry.ghl_pipeline_id}
-            onChange={(ev) => {
-              onChange({ ghl_pipeline_id: ev.target.value, ghl_pipeline_stage_id: "" });
-            }}
-          >
-            <option value="">Select…</option>
-            {ghlPipelines.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </Select>
-        )}
-      </TD>
-      <TD>
-        {manualGhlIds ? (
-          <Input
-            className="!h-8 !text-sm"
-            value={entry.ghl_pipeline_stage_id}
-            onChange={(ev) => onChange({ ghl_pipeline_stage_id: ev.target.value })}
-            placeholder="GHL stage ID"
-          />
-        ) : (
-          <Select
-            className="!h-8 !text-sm"
-            value={entry.ghl_pipeline_stage_id}
-            onChange={(ev) => onChange({ ghl_pipeline_stage_id: ev.target.value })}
-          >
-            <option value="">Select…</option>
-            {ghlStages.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </Select>
-        )}
-      </TD>
+      {!triggerOnly && (
+        <>
+          <TD>
+            <Select
+              className="!h-8 !text-sm"
+              value={entry.ghl_pipeline_id}
+              onChange={(ev) => {
+                onChange({ ghl_pipeline_id: ev.target.value, ghl_pipeline_stage_id: "" });
+              }}
+            >
+              <option value="">Select…</option>
+              {ghlPipelines.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </Select>
+          </TD>
+          <TD>
+            <Select
+              className="!h-8 !text-sm"
+              value={entry.ghl_pipeline_stage_id}
+              onChange={(ev) => onChange({ ghl_pipeline_stage_id: ev.target.value })}
+            >
+              <option value="">Select…</option>
+              {ghlStages.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </Select>
+          </TD>
+        </>
+      )}
       <TD>
         <IconButton variant="danger" aria-label="Remove" onClick={onRemove}>
           <Trash2 className="h-4 w-4" />

@@ -1,11 +1,9 @@
-import { useMemo, useState, type KeyboardEvent } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import Papa from "papaparse";
-import { X } from "lucide-react";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label, FilterSelect } from "@/components/ui/input";
-import { Badge } from "@/components/ui/misc";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
 import { ns, post, errorMessage } from "@/lib/api";
@@ -18,26 +16,13 @@ import {
   useTagSuggestions,
   type ImportLeadsResult,
 } from "./hooks";
+import { TagsInput, type TagsInputHandle } from "./LeadTagsEditor";
 import { buildInitialMapping, mappingTargetsWithCustom } from "./csvMapping";
 import { ADD_CUSTOM_FIELD, slugFieldKey } from "@/features/admin/customFieldConstants";
 import { CreateCustomFieldDrawer } from "@/features/admin/CreateCustomFieldDrawer";
 import { useCreateField } from "@/features/admin/hooks";
 
 type Step = "upload" | "map" | "destination" | "preview" | "done";
-
-function normalizeTags(tags: string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const raw of tags) {
-    const t = raw.trim();
-    if (!t) continue;
-    const key = t.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(t);
-  }
-  return out;
-}
 
 function sanitizeImportRows(rows: Record<string, unknown>[]): Record<string, string>[] {
   return rows
@@ -74,8 +59,8 @@ export function ImportLeadsModal({ open, onClose }: Props) {
   const [pipelineId, setPipelineId] = useState(0);
   const [stageId, setStageId] = useState(0);
   const [importTags, setImportTags] = useState<string[]>([]);
+  const tagsInputRef = useRef<TagsInputHandle>(null);
   const [importFilename, setImportFilename] = useState("");
-  const [tagInput, setTagInput] = useState("");
   const [result, setResult] = useState<{ created: number; skipped: number; errors: { row: number; message: string }[] } | null>(null);
   const [importing, setImporting] = useState(false);
   const [createFieldHeader, setCreateFieldHeader] = useState<string | null>(null);
@@ -98,28 +83,9 @@ export function ImportLeadsModal({ open, onClose }: Props) {
     setStageId(0);
     setImportTags([]);
     setImportFilename("");
-    setTagInput("");
     setResult(null);
     setImporting(false);
     setCreateFieldHeader(null);
-  }
-
-  function addImportTag(raw: string) {
-    const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
-    if (!parts.length) return;
-    setImportTags((prev) => normalizeTags([...prev, ...parts]));
-    setTagInput("");
-  }
-
-  function removeImportTag(tag: string) {
-    setImportTags((prev) => prev.filter((t) => t !== tag));
-  }
-
-  function onTagKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter" || e.key === ",") {
-      e.preventDefault();
-      addImportTag(tagInput);
-    }
   }
 
   function handleClose() {
@@ -159,7 +125,7 @@ export function ImportLeadsModal({ open, onClose }: Props) {
       toast.error("Select pipeline and stage");
       return;
     }
-    if (tagInput.trim()) addImportTag(tagInput);
+    const finalTags = tagsInputRef.current?.commitPending() ?? importTags;
 
     const cleanRows = sanitizeImportRows(rows as Record<string, unknown>[]);
     if (!cleanRows.length) {
@@ -176,7 +142,7 @@ export function ImportLeadsModal({ open, onClose }: Props) {
       destination,
       pipeline_id: destination === "pipeline" ? Number(pipelineId) : undefined,
       stage_id: destination === "pipeline" ? Number(stageId) : undefined,
-      default_tags: importTags.length ? importTags : undefined,
+      default_tags: finalTags.length ? finalTags : undefined,
       import_filename: importFilename || undefined,
       mapping: mappingArr,
     };
@@ -389,37 +355,14 @@ export function ImportLeadsModal({ open, onClose }: Props) {
           <div>
             <Label>Tags (optional)</Label>
             <p className="mt-0.5 text-xs text-gray-500">Applied to every imported lead.</p>
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {importTags.map((tag) => (
-                <Badge key={tag} variant="default" className="gap-1 pr-1">
-                  {tag}
-                  <button
-                    type="button"
-                    onClick={() => removeImportTag(tag)}
-                    className="rounded-full p-0.5 hover:bg-gray-200"
-                    aria-label={`Remove tag ${tag}`}
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </Badge>
-              ))}
-            </div>
-            <Input
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-              onKeyDown={onTagKeyDown}
-              onBlur={() => tagInput.trim() && addImportTag(tagInput)}
-              placeholder="Add tag…"
-              list="import-tag-suggestions"
-              className="mt-2"
+            <TagsInput
+              ref={tagsInputRef}
+              tags={importTags}
+              onChange={setImportTags}
+              suggestions={tagSuggestions}
+              listId="import-tag-suggestions"
+              className="mt-1.5"
             />
-            <datalist id="import-tag-suggestions">
-              {(tagSuggestions ?? [])
-                .filter((s) => !importTags.some((t) => t.toLowerCase() === s.toLowerCase()))
-                .map((s) => (
-                  <option key={s} value={s} />
-                ))}
-            </datalist>
           </div>
         </div>
       )}

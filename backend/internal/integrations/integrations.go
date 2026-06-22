@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/integrations/providers"
@@ -303,44 +304,166 @@ func (s *Service) ListRouteIntegrations(ctx context.Context, accountID int64, ac
 	return out, rows.Err()
 }
 
-func (s *Service) EnqueueDelivery(ctx context.Context, routeID, leadID int64, branchPosition int, payloadJSON []byte) error {
+func (s *Service) EnqueueDelivery(ctx context.Context, routeID, leadID int64, branchPosition int, payloadJSON []byte, enqueued *[]int64) error {
 	rows, err := s.pool.Query(ctx,
-		`SELECT ri.connection_id, ri.delivery_config
+		`SELECT ri.connection_id, ri.delivery_config, c.config, p.slug
 		 FROM route_integrations ri
+		 JOIN integration_connections c ON c.id = ri.connection_id
+		 JOIN integration_providers p ON p.id = c.provider_id
 		 WHERE ri.route_id = $1 AND ri.branch_position = $2 AND ri.is_active`, routeID, branchPosition)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
+	var payload map[string]any
+	_ = json.Unmarshal(payloadJSON, &payload)
+	pipelineID, stageID := payloadPipelineStage(payload)
 	for rows.Next() {
 		var connID int64
-		var deliveryConfig json.RawMessage
-		if err := rows.Scan(&connID, &deliveryConfig); err != nil {
+		var deliveryConfig, connConfig json.RawMessage
+		var providerSlug string
+		if err := rows.Scan(&connID, &deliveryConfig, &connConfig, &providerSlug); err != nil {
 			return err
 		}
-		var payload map[string]any
-		_ = json.Unmarshal(payloadJSON, &payload)
+		if !ghlWebhookShouldEnqueue(providerSlug, connConfig, pipelineID, stageID) {
+			continue
+		}
+		p := maps.Clone(payload)
 		var dc map[string]any
 		_ = json.Unmarshal(deliveryConfig, &dc)
-		payload["_config"] = dc
-		merged, _ := json.Marshal(payload)
+		p["_config"] = dc
+		merged, _ := json.Marshal(p)
 		if _, err := s.pool.Exec(ctx,
 			`INSERT INTO integration_delivery_queue (lead_id, connection_id, route_id, payload)
 			 VALUES ($1, $2, $3, $4)`,
 			leadID, connID, routeID, merged); err != nil {
 			return err
 		}
+		trackEnqueuedConn(enqueued, connID)
 	}
 	return rows.Err()
 }
 
 // EnqueueConnectionDelivery enqueues CRM delivery for a participation integration.
-func (s *Service) EnqueueConnectionDelivery(ctx context.Context, connectionID, leadID int64, payloadJSON []byte) error {
-	_, err := s.pool.Exec(ctx,
+func (s *Service) EnqueueConnectionDelivery(ctx context.Context, connectionID, leadID int64, payloadJSON []byte, enqueued *[]int64) error {
+	var providerSlug string
+	var connConfig json.RawMessage
+	err := s.pool.QueryRow(ctx,
+		`SELECT p.slug, c.config
+		 FROM integration_connections c
+		 JOIN integration_providers p ON p.id = c.provider_id
+		 WHERE c.id = $1`, connectionID).Scan(&providerSlug, &connConfig)
+	if err != nil {
+		return err
+	}
+	var payload map[string]any
+	_ = json.Unmarshal(payloadJSON, &payload)
+	pipelineID, stageID := payloadPipelineStage(payload)
+	if !ghlWebhookShouldEnqueue(providerSlug, connConfig, pipelineID, stageID) {
+		return nil
+	}
+	if _, err := s.pool.Exec(ctx,
 		`INSERT INTO integration_delivery_queue (lead_id, connection_id, payload)
 		 VALUES ($1, $2, $3)`,
-		leadID, connectionID, payloadJSON)
-	return err
+		leadID, connectionID, payloadJSON); err != nil {
+		return err
+	}
+	trackEnqueuedConn(enqueued, connectionID)
+	return nil
+}
+
+// TryEnqueueGHLWebhookOnStageMove enqueues GHL webhook deliveries when a lead enters a configured trigger stage.
+func (s *Service) TryEnqueueGHLWebhookOnStageMove(ctx context.Context, ownerAccountID, pipelineID, stageID, leadID int64, payloadJSON []byte, skipConnIDs []int64) error {
+	if pipelineID == 0 || stageID == 0 {
+		return nil
+	}
+	skip := connIDSet(skipConnIDs)
+	rows, err := s.pool.Query(ctx,
+		`SELECT c.id, c.config
+		 FROM integration_connections c
+		 JOIN integration_providers p ON p.id = c.provider_id
+		 WHERE c.account_id = $1 AND c.status = 'active' AND p.slug = 'ghl'
+		   AND COALESCE(c.config->>'delivery_mode', 'api') = 'webhook'`, ownerAccountID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var connID int64
+		var connConfig json.RawMessage
+		if err := rows.Scan(&connID, &connConfig); err != nil {
+			return err
+		}
+		if skip[connID] {
+			continue
+		}
+		cfg, err := ghlConfigFromJSON(connConfig)
+		if err != nil {
+			continue
+		}
+		if !providers.MatchesGHLWebhookTrigger(cfg.PipelineStageMap, pipelineID, stageID) {
+			continue
+		}
+		if _, err := s.pool.Exec(ctx,
+			`INSERT INTO integration_delivery_queue (lead_id, connection_id, payload)
+			 VALUES ($1, $2, $3)`,
+			leadID, connID, payloadJSON); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func payloadPipelineStage(payload map[string]any) (pipelineID, stageID int64) {
+	if payload == nil {
+		return 0, 0
+	}
+	switch v := payload["pipeline_id"].(type) {
+	case float64:
+		pipelineID = int64(v)
+	case int64:
+		pipelineID = v
+	}
+	switch v := payload["stage_id"].(type) {
+	case float64:
+		stageID = int64(v)
+	case int64:
+		stageID = v
+	}
+	return pipelineID, stageID
+}
+
+func ghlConfigFromJSON(raw json.RawMessage) (providers.GHLConfig, error) {
+	cfg := map[string]any{}
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &cfg)
+	}
+	return providers.ParseGHLConfig(providers.MergeGHLConfigDefaults(cfg))
+}
+
+func ghlWebhookShouldEnqueue(providerSlug string, connConfig json.RawMessage, pipelineID, stageID int64) bool {
+	if providerSlug != "ghl" {
+		return true
+	}
+	cfg, err := ghlConfigFromJSON(connConfig)
+	if err != nil || cfg.DeliveryMode != "webhook" {
+		return true
+	}
+	return providers.MatchesGHLWebhookTrigger(cfg.PipelineStageMap, pipelineID, stageID)
+}
+
+func trackEnqueuedConn(enqueued *[]int64, connID int64) {
+	if enqueued != nil {
+		*enqueued = append(*enqueued, connID)
+	}
+}
+
+func connIDSet(ids []int64) map[int64]bool {
+	out := make(map[int64]bool, len(ids))
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out
 }
 
 // EnqueueParticipationWebhook fires the first active lead.create trigger on a buyer webhook.

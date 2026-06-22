@@ -33,15 +33,6 @@ func ghlWebhookURLValid(raw string) bool {
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
-func lookupGHLStage(mapEntries []GHLPipelineStageMapEntry, pipelineID, stageID int64) (string, string) {
-	for _, e := range mapEntries {
-		if e.LeadrulaPipelineID == pipelineID && e.LeadrulaStageID == stageID {
-			return e.GHLPipelineID, e.GHLPipelineStageID
-		}
-	}
-	return "", ""
-}
-
 func buildGHLWebhookPayload(cfg GHLConfig, payload DeliveryPayload) map[string]any {
 	body := buildGHLContactBody(cfg, payload)
 	delete(body, "locationId")
@@ -51,10 +42,6 @@ func buildGHLWebhookPayload(cfg GHLConfig, payload DeliveryPayload) map[string]a
 	}
 	if payload.StageID != 0 {
 		body["leadrula_stage_id"] = payload.StageID
-	}
-	if pid, sid := lookupGHLStage(cfg.PipelineStageMap, payload.PipelineID, payload.StageID); pid != "" {
-		body["ghl_pipeline_id"] = pid
-		body["ghl_pipeline_stage_id"] = sid
 	}
 	appendLeadID(body, payload)
 	return body

@@ -180,8 +180,39 @@ func TestBuildGHLWebhookPayload(t *testing.T) {
 	if body["leadrula_pipeline_id"] != int64(1) {
 		t.Fatalf("leadrula_pipeline_id: %v", body["leadrula_pipeline_id"])
 	}
-	if body["ghl_pipeline_id"] != "p1" || body["ghl_pipeline_stage_id"] != "s1" {
-		t.Fatalf("ghl ids: %v %v", body["ghl_pipeline_id"], body["ghl_pipeline_stage_id"])
+	if body["leadrula_stage_id"] != int64(5) {
+		t.Fatalf("leadrula_stage_id: %v", body["leadrula_stage_id"])
+	}
+	if _, ok := body["ghl_pipeline_id"]; ok {
+		t.Fatalf("ghl_pipeline_id should be omitted from webhook payload")
+	}
+	if _, ok := body["ghl_pipeline_stage_id"]; ok {
+		t.Fatalf("ghl_pipeline_stage_id should be omitted from webhook payload")
+	}
+}
+
+func TestParsePipelineStageMap_webhookMode(t *testing.T) {
+	entries := parsePipelineStageMap([]map[string]any{
+		{"leadrula_pipeline_id": 1, "leadrula_stage_id": 5},
+		{"leadrula_pipeline_id": 2, "leadrula_stage_id": 0},
+	}, "webhook")
+	if len(entries) != 1 || entries[0].LeadrulaPipelineID != 1 || entries[0].LeadrulaStageID != 5 {
+		t.Fatalf("unexpected webhook entries: %+v", entries)
+	}
+}
+
+func TestMatchesGHLWebhookTrigger(t *testing.T) {
+	entries := []GHLPipelineStageMapEntry{
+		{LeadrulaPipelineID: 1, LeadrulaStageID: 5},
+	}
+	if !MatchesGHLWebhookTrigger(entries, 1, 5) {
+		t.Fatal("expected match")
+	}
+	if MatchesGHLWebhookTrigger(entries, 2, 5) {
+		t.Fatal("expected no match for wrong pipeline")
+	}
+	if MatchesGHLWebhookTrigger(nil, 1, 5) {
+		t.Fatal("expected no match for empty map")
 	}
 }
 

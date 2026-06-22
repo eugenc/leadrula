@@ -16,6 +16,9 @@ func (p *GHLProvider) Deliver(ctx context.Context, credentials []byte, payload D
 	}
 
 	if cfg.DeliveryMode == "webhook" {
+		if len(cfg.PipelineStageMap) == 0 || !MatchesGHLWebhookTrigger(cfg.PipelineStageMap, payload.PipelineID, payload.StageID) {
+			return &DeliveryResult{}, nil
+		}
 		body := buildGHLWebhookPayload(cfg, payload)
 		return ghlDeliverWebhook(ctx, cfg.WebhookURL, body)
 	}

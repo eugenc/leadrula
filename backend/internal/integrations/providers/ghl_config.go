@@ -100,7 +100,7 @@ func ParseGHLConfig(config map[string]any) (GHLConfig, error) {
 	if notes := parseGHLFieldSourcePtr(config["appointment_notes"]); notes != nil {
 		out.AppointmentNotes = notes
 	}
-	out.PipelineStageMap = parsePipelineStageMap(config["pipeline_stage_map"])
+	out.PipelineStageMap = parsePipelineStageMap(config["pipeline_stage_map"], out.DeliveryMode)
 	out.OutboundFieldMap = outboundFieldMapFromConfig(config)
 
 	if out.DeliveryMode == "webhook" {
@@ -213,7 +213,7 @@ func ghlFieldSourceSet(fs GHLFieldSource) bool {
 	}
 }
 
-func parsePipelineStageMap(raw any) []GHLPipelineStageMapEntry {
+func parsePipelineStageMap(raw any, deliveryMode string) []GHLPipelineStageMapEntry {
 	if raw == nil {
 		return nil
 	}
@@ -225,14 +225,17 @@ func parsePipelineStageMap(raw any) []GHLPipelineStageMapEntry {
 	if json.Unmarshal(b, &entries) != nil {
 		return nil
 	}
+	webhookMode := deliveryMode == "webhook"
 	seen := map[string]bool{}
 	out := make([]GHLPipelineStageMapEntry, 0, len(entries))
 	for _, e := range entries {
 		if e.LeadrulaPipelineID == 0 || e.LeadrulaStageID == 0 {
 			continue
 		}
-		if strings.TrimSpace(e.GHLPipelineID) == "" || strings.TrimSpace(e.GHLPipelineStageID) == "" {
-			continue
+		if !webhookMode {
+			if strings.TrimSpace(e.GHLPipelineID) == "" || strings.TrimSpace(e.GHLPipelineStageID) == "" {
+				continue
+			}
 		}
 		key := fmt.Sprintf("%d:%d", e.LeadrulaPipelineID, e.LeadrulaStageID)
 		if seen[key] {
@@ -242,6 +245,19 @@ func parsePipelineStageMap(raw any) []GHLPipelineStageMapEntry {
 		out = append(out, e)
 	}
 	return out
+}
+
+// MatchesGHLWebhookTrigger reports whether the lead stage is configured as a webhook outbound trigger.
+func MatchesGHLWebhookTrigger(entries []GHLPipelineStageMapEntry, pipelineID, stageID int64) bool {
+	if pipelineID == 0 || stageID == 0 || len(entries) == 0 {
+		return false
+	}
+	for _, e := range entries {
+		if e.LeadrulaPipelineID == pipelineID && e.LeadrulaStageID == stageID {
+			return true
+		}
+	}
+	return false
 }
 
 func resolveGHLStage(mapEntries []GHLPipelineStageMapEntry, pipelineID, stageID int64) (string, string, error) {

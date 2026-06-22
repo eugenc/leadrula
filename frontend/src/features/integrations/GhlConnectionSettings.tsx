@@ -232,8 +232,9 @@ export function GhlConnectionSettings({
 
       {webhookMode && (
         <p className="text-xs text-gray-500">
-          Contact fields and pipeline/stage metadata are sent as JSON to your GHL webhook. Configure your
-          GHL automation to create contacts and opportunities from the payload.
+          Contact fields are sent as JSON to your GHL automation webhook when a lead enters a configured
+          trigger stage below. Configure your GHL workflow to create contacts and opportunities from the
+          payload.
         </p>
       )}
 
@@ -267,7 +268,7 @@ export function GhlConnectionSettings({
           entries={config.pipeline_stage_map ?? []}
           onChange={(entries) => patch({ pipeline_stage_map: entries })}
           ghlPipelines={[]}
-          manualGhlIds
+          triggerOnly
         />
       )}
 

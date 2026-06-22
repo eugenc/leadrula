@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { FormDrawer } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, FilterSelect } from "@/components/ui/input";
@@ -9,7 +9,8 @@ import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import { effectiveFieldFormat } from "@/features/admin/customFieldConstants";
 import { AddressAutocomplete } from "./AddressAutocomplete";
-import { useCreateLead, usePipelines, useStages, useUsers, useCustomFields, useCustomFieldFolders } from "./hooks";
+import { TagsInput, type TagsInputHandle } from "./LeadTagsEditor";
+import { useCreateLead, usePipelines, useStages, useUsers, useCustomFields, useCustomFieldFolders, useTagSuggestions } from "./hooks";
 import { groupCustomFieldsByFolder } from "@/features/admin/customFieldLayout";
 import { isContactFolder, resolveContactBuiltinOrder } from "./contactSection";
 import type { CustomField } from "@/types";
@@ -61,8 +62,10 @@ export function NewLeadDrawer({ open, onClose }: Props) {
   const [pipelineId, setPipelineId] = useState(0);
   const [stageId, setStageId] = useState(0);
   const [assigneeId, setAssigneeId] = useState(0);
-  const [tagsInput, setTagsInput] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
+  const tagsInputRef = useRef<TagsInputHandle>(null);
   const [customValues, setCustomValues] = useState<Record<string, string>>({});
+  const { data: tagSuggestions } = useTagSuggestions();
 
   const { data: stages } = useStages(pipelineId || undefined);
   const activeUsers = (users ?? []).filter((u) => u.status === "active");
@@ -96,7 +99,7 @@ export function NewLeadDrawer({ open, onClose }: Props) {
     setPipelineId(0);
     setStageId(0);
     setAssigneeId(0);
-    setTagsInput("");
+    setTags([]);
     setCustomValues({});
     setAddressPlaceId("");
   }
@@ -114,10 +117,7 @@ export function NewLeadDrawer({ open, onClose }: Props) {
       return;
     }
 
-    const tags = tagsInput
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean);
+    const finalTags = tagsInputRef.current?.commitPending() ?? tags;
 
     const cv: Record<string, string> = {};
     for (const [k, v] of Object.entries(customValues)) {
@@ -142,7 +142,7 @@ export function NewLeadDrawer({ open, onClose }: Props) {
       body.stage_id = stageId;
     }
     if (isAdmin && assigneeId) body.assigned_user_id = assigneeId;
-    if (tags.length) body.tags = tags;
+    if (finalTags.length) body.tags = finalTags;
     if (Object.keys(cv).length) body.custom_values = cv;
 
     try {
@@ -269,10 +269,13 @@ export function NewLeadDrawer({ open, onClose }: Props) {
                 return (
                   <div key={key}>
                     <Label>Tags</Label>
-                    <Input
-                      value={tagsInput}
-                      onChange={(e) => setTagsInput(e.target.value)}
-                      placeholder="Comma-separated tags"
+                    <TagsInput
+                      ref={tagsInputRef}
+                      tags={tags}
+                      onChange={setTags}
+                      suggestions={tagSuggestions}
+                      listId="new-lead-tag-suggestions"
+                      className="mt-1"
                     />
                   </div>
                 );
