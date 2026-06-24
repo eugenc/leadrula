@@ -543,7 +543,10 @@ function LeadPipelineHeader({ lead }: { lead: Lead }) {
   const { data: pipelines } = usePipelines();
   const [pipelineId, setPipelineId] = useState(lead.pipeline_id ?? 0);
   const [stageId, setStageId] = useState(lead.stage_id ?? 0);
-  const { data: stages } = useStages(pipelineId || undefined);
+  const { data: stages, isFetching: stagesFetching, isFetched: stagesFetched } = useStages(
+    pipelineId || undefined
+  );
+  const stagesReady = !pipelineId || (stagesFetched && !stagesFetching);
   const [prompt, setPrompt] = useState<{ stage: Stage; initialActionAt: string } | null>(null);
 
   function openStagePrompt(stage: Stage) {
@@ -565,6 +568,7 @@ function LeadPipelineHeader({ lead }: { lead: Lead }) {
   }
 
   function commitStage(stage: Stage, extra?: PromptResult) {
+    if (stage.pipeline_id !== pipelineId) return;
     changeStage.mutate(
       { leadId: lead.id, payload: { stage_id: stage.id, ...extra } },
       {
@@ -615,7 +619,7 @@ function LeadPipelineHeader({ lead }: { lead: Lead }) {
     if (nextStageId === 0) return;
     if (nextStageId === (lead.stage_id ?? 0) && pipelineId === (lead.pipeline_id ?? 0)) return;
     const stage = stages?.find((s) => s.id === nextStageId);
-    if (!stage) return;
+    if (!stage || stage.pipeline_id !== pipelineId) return;
     setStageId(nextStageId);
     if (stageNeedsPrompt(stage.stage_type)) {
       openStagePrompt(stage);
@@ -625,7 +629,7 @@ function LeadPipelineHeader({ lead }: { lead: Lead }) {
   }
 
   const currentStageIndex = (stages ?? []).findIndex((s) => s.id === stageId);
-  const showStageBar = pipelineId > 0 && (stages?.length ?? 0) > 0;
+  const showStageBar = pipelineId > 0 && stagesReady && (stages?.length ?? 0) > 0;
 
   return (
     <div className="mt-3">
@@ -656,7 +660,7 @@ function LeadPipelineHeader({ lead }: { lead: Lead }) {
                 <span key={s.id} className="group/stage relative min-w-[3rem] shrink-0 flex-1">
                   <button
                     type="button"
-                    disabled={!canEditPipeline || changeStage.isPending}
+                    disabled={!canEditPipeline || changeStage.isPending || !stagesReady}
                     onClick={() => onStageChange(s.id)}
                     className={cn(
                       "h-6 w-full rounded-sm transition-colors",

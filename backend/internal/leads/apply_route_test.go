@@ -158,12 +158,12 @@ func TestRepairMigrationQuery_noRemainingMismatch(t *testing.T) {
 		   AND l.stage_id IS NOT NULL
 		   AND l.pipeline_id <> ps.pipeline_id
 		   AND l.deleted_at IS NULL
-		   AND oa.type = 'buyer'`).Scan(&count)
+		   AND oa.type IN ('buyer', 'publisher')`).Scan(&count)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if count > 0 {
-		t.Fatalf("%d buyer leads still have stage_id from a different pipeline; run migration 0073", count)
+		t.Fatalf("%d leads still have stage_id from a different pipeline; run repair-pipeline-stage -repair", count)
 	}
 }
 
@@ -181,7 +181,7 @@ func TestRepairMigrationQuery_skipsWhenClean(t *testing.T) {
 		   AND l.stage_id IS NOT NULL
 		   AND l.pipeline_id <> ps.pipeline_id
 		   AND l.deleted_at IS NULL
-		   AND oa.type = 'buyer'`).Scan(&count)
+		   AND oa.type IN ('buyer', 'publisher')`).Scan(&count)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return
 	}

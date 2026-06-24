@@ -489,6 +489,7 @@ export function Board() {
               activeDragId={activeDrag ? String(activeDrag.id) : null}
               accountType={accountType}
               droppable={false}
+              headerHint="Stage does not belong to this pipeline. Open the lead and pick a stage in this pipeline."
             />
           )}
         </div>

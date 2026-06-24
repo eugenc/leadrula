@@ -124,23 +124,12 @@ export type StageChangePayload =
 
 export function useChangeStage() {
   const qc = useQueryClient();
-  const accountType = useAuthStore((s) => s.user?.account_type);
   return useMutation({
     mutationFn: ({ leadId, payload }: { leadId: number; payload: StageChangePayload }) =>
       patch<Lead>(`${ns()}/leads/${leadId}/stage`, payload),
     onSuccess: (updated, { leadId }) => {
-      qc.setQueriesData<LeadListResponse>({ queryKey: ["leads"] }, (old) => {
-        if (!old?.items) return old;
-        return {
-          ...old,
-          items: old.items.map((l) => {
-            if (l.id !== leadId) return l;
-            const merged = { ...l, ...updated };
-            return { ...merged, board_stage_id: computeBoardStageId(merged, accountType) };
-          }),
-        };
-      });
       qc.setQueryData(["lead", leadId], updated);
+      qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["lead-history", leadId] });
     },
   });

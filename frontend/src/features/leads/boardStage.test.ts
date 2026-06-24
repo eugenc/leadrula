@@ -46,22 +46,25 @@ describe("groupLeadsForBoard", () => {
     expect(unplaced).toHaveLength(1);
   });
 
-  it("uses publisher mirror stage only for publisher accounts", () => {
+  it("puts cross-pipeline cached lead in unplaced on wrong pipeline board", () => {
+    const solarFloridaStageIds = new Set([1, 2]);
     const items = [
       lead({
-        id: 1,
-        stage_id: 10,
-        publisher_stage_id: 20,
-        owner_account_id: 5,
-        publisher_id: 2,
+        id: 2593,
+        first_name: "Steve",
+        last_name: "Ward",
+        pipeline_id: 8,
+        stage_id: 44,
       }),
     ];
-    const buyerView = groupLeadsForBoard(items, pipelineStageIds, "buyer");
-    expect(buyerView.unplaced).toHaveLength(0);
-    expect(buyerView.grouped[10]).toHaveLength(1);
+    const { unplaced, grouped } = groupLeadsForBoard(items, solarFloridaStageIds, "publisher");
+    expect(unplaced).toHaveLength(1);
+    expect(unplaced[0]?.id).toBe(2593);
+    expect(grouped[44]).toBeUndefined();
 
-    const pubView = groupLeadsForBoard(items, pipelineStageIds, "publisher");
-    expect(pubView.unplaced).toHaveLength(0);
-    expect(pubView.grouped[20]).toHaveLength(1);
+    const teestStageIds = new Set([44, 45]);
+    const onTeest = groupLeadsForBoard(items, teestStageIds, "publisher");
+    expect(onTeest.unplaced).toHaveLength(0);
+    expect(onTeest.grouped[44]).toHaveLength(1);
   });
 });

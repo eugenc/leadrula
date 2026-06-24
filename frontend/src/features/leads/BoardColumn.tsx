@@ -60,6 +60,7 @@ export function BoardColumn({
   activeDragId,
   accountType,
   droppable = true,
+  headerHint,
 }: {
   stage: Stage;
   items: Lead[];
@@ -70,6 +71,7 @@ export function BoardColumn({
   activeDragId: string | null;
   accountType?: AccountType;
   droppable?: boolean;
+  headerHint?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { setNodeRef, isOver } = useDroppable({
@@ -94,7 +96,12 @@ export function BoardColumn({
     >
       <div className="flex shrink-0 items-center gap-2 border-b border-gray-100 px-3.5 py-2.5">
         <span className={cn("h-2 w-2 shrink-0 rounded-full", stageColorDot(stage.color))} />
-        <span className="flex-1 text-base font-semibold text-gray-700">{stage.name}</span>
+        <span
+          className="flex-1 text-base font-semibold text-gray-700"
+          title={headerHint}
+        >
+          {stage.name}
+        </span>
         <span className="text-xs text-gray-400">{items.length}</span>
       </div>
       <div
