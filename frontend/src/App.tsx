@@ -28,6 +28,7 @@ import { IntakeLogTab } from "@/pages/publisher/IntakeLogTab";
 import { IntakeReviewTab } from "@/pages/publisher/IntakeReviewTab";
 import { CallsLogTab } from "@/pages/publisher/CallsLogTab";
 import { BuyerCallsLogTab } from "@/pages/buyer/CallsLogTab";
+import { PublisherAppointmentsPage } from "@/pages/publisher/AppointmentsPage";
 import { SourcesPage } from "@/pages/publisher/SourcesPage";
 import { WebhooksPage } from "@/pages/WebhooksPage";
 import { RoutingPage } from "@/pages/publisher/RoutingPage";
@@ -39,6 +40,7 @@ import { PublisherCollaborationActivityTab } from "@/pages/publisher/Collaborati
 import { PublisherBillingPage } from "@/pages/publisher/PublisherBillingPage";
 
 import { CalendarPage } from "@/pages/buyer/CalendarPage";
+import { BuyerAppointmentsPage } from "@/pages/buyer/AppointmentsPage";
 import { ContractPage } from "@/pages/buyer/ContractPage";
 import { ContractInvitePage } from "@/pages/buyer/ContractInvitePage";
 import { BuyerBillingPage } from "@/pages/buyer/BuyerBillingPage";
@@ -100,6 +102,7 @@ export default function App() {
                   <Route path="review" element={<IntakeReviewTab />} />
                 </Route>
                 <Route path="calls" element={<CallsLogTab />} />
+                <Route path="appointments" element={<PublisherAppointmentsPage />} />
                 <Route path="log/calls" element={<Navigate to="/p/calls" replace />} />
                 <Route path="intake" element={<Navigate to="/p/log" replace />} />
                 <Route path="pipelines" element={<PipelinesPage />} />
@@ -139,6 +142,7 @@ export default function App() {
                 <Route path="board" element={<BoardPage />} />
                 <Route path="leads" element={<LeadsListPage />} />
                 <Route path="calls" element={<BuyerCallsLogTab />} />
+                <Route path="appointments" element={<BuyerAppointmentsPage />} />
                 <Route path="calendar" element={<CalendarPage />} />
                 <Route path="pipelines" element={<PipelinesPage />} />
                 <Route path="fields" element={<CustomFieldsPage />} />

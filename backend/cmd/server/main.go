@@ -18,6 +18,7 @@ import (
 	"github.com/echayko/leadrula/backend/internal/apikeys"
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/internal/billing"
+	"github.com/echayko/leadrula/backend/internal/appointments"
 	"github.com/echayko/leadrula/backend/internal/calendar"
 	"github.com/echayko/leadrula/backend/internal/calls"
 	"github.com/echayko/leadrula/backend/internal/collaboration"
@@ -135,6 +136,7 @@ func main() {
 		}
 		integrationsSvc = integrations.NewService(pool, encKey, oauthCfg)
 		integrationsEnq = integrationsSvc
+		routingSvc.SetCallWebhooks(integrationsSvc, cfg.WebhookBaseURL)
 		go integrationsSvc.RunWorker(ctx)
 	} else if cfg.IntegrationEncKey != "" {
 		log.Println("warning: INTEGRATION_ENC_KEY must be 64 hex chars (32 bytes) — integrations disabled")
@@ -152,6 +154,9 @@ func main() {
 
 	calSvc := calendar.NewService(pool)
 	calH := calendar.NewHandler(calSvc)
+
+	apptSvc := appointments.NewService(pool, leadsRepo, accountsRepo, notifSvc)
+	apptH := appointments.NewHandler(apptSvc)
 
 	intakeSvc := intake.NewService(pool, leadsRepo, notifSvc, accountsRepo, integrationsEnq)
 	intakeH := intake.NewHandler(intakeSvc, apikeysSvc)
@@ -244,6 +249,7 @@ func main() {
 		webhooksH.RegisterRoutes(p)
 		dashboardH.RegisterRoutes(p)
 		callsH.RegisterPublisher(p)
+		apptH.RegisterPublisher(p)
 	})
 
 	// buyer namespace
@@ -270,6 +276,7 @@ func main() {
 		webhooksH.RegisterRoutes(b)
 		dashboardH.RegisterRoutes(b)
 		callsH.RegisterBuyer(b)
+		apptH.RegisterBuyer(b)
 	})
 
 	srv := &http.Server{

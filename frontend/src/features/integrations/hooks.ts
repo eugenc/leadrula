@@ -7,6 +7,8 @@ import type {
   RouteIntegration,
   SunbaseConnectionDetail,
   GhlConnectionDetail,
+  TwilioPhoneNumber,
+  TwilioAvailablePhoneNumber,
 } from "@/types";
 
 export function useOAuthConnect() {
@@ -121,6 +123,81 @@ export function useGhlCalendars(connectionId: number | null) {
         `${ns()}/integrations/connections/${connectionId}/ghl/calendars`
       ),
     enabled: connectionId != null,
+  });
+}
+
+export function useTwilioPhoneNumbers(connectionId: number | null) {
+  return useQuery({
+    queryKey: ["twilio-phone-numbers", connectionId],
+    queryFn: () =>
+      get<{ phone_numbers: TwilioPhoneNumber[] }>(
+        `${ns()}/integrations/connections/${connectionId}/twilio/phone-numbers`
+      ).then((res) => res.phone_numbers ?? []),
+    enabled: connectionId != null && connectionId > 0,
+  });
+}
+
+export function useTwilioAvailableNumbers(
+  connectionId: number | null,
+  filters: { type: "local" | "tollfree"; area_code?: string; prefix?: string } | null
+) {
+  return useQuery({
+    queryKey: ["twilio-available-numbers", connectionId, filters],
+    queryFn: () => {
+      const params = new URLSearchParams({ type: filters!.type });
+      if (filters!.type === "local" && filters!.area_code) {
+        params.set("area_code", filters!.area_code);
+      }
+      if (filters!.type === "tollfree" && filters!.prefix) {
+        params.set("prefix", filters!.prefix);
+      }
+      return get<{ phone_numbers: TwilioAvailablePhoneNumber[] }>(
+        `${ns()}/integrations/connections/${connectionId}/twilio/available-numbers?${params}`
+      ).then((res) => res.phone_numbers ?? []);
+    },
+    enabled:
+      connectionId != null &&
+      connectionId > 0 &&
+      filters != null &&
+      ((filters.type === "local" && filters.area_code?.length === 3) ||
+        (filters.type === "tollfree" && !!filters.prefix)),
+  });
+}
+
+export function useTwilioPricing(connectionId: number | null, type: "local" | "tollfree" | null) {
+  return useQuery({
+    queryKey: ["twilio-pricing", connectionId, type],
+    queryFn: () =>
+      get<{ monthly_price?: number; currency?: string }>(
+        `${ns()}/integrations/connections/${connectionId}/twilio/pricing?type=${type}`
+      ),
+    enabled: connectionId != null && connectionId > 0 && type != null,
+    staleTime: 60_000,
+  });
+}
+
+export function usePurchaseTwilioPhoneNumber() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ connectionId, phone_number }: { connectionId: number; phone_number: string }) =>
+      post<TwilioPhoneNumber>(`${ns()}/integrations/connections/${connectionId}/twilio/phone-numbers`, {
+        phone_number,
+      }),
+    onSuccess: (_, v) => {
+      qc.invalidateQueries({ queryKey: ["twilio-phone-numbers", v.connectionId] });
+      qc.invalidateQueries({ queryKey: ["twilio-available-numbers", v.connectionId] });
+    },
+  });
+}
+
+export function useReleaseTwilioPhoneNumber() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ connectionId, sid }: { connectionId: number; sid: string }) =>
+      del(`${ns()}/integrations/connections/${connectionId}/twilio/phone-numbers/${sid}`),
+    onSuccess: (_, v) => {
+      qc.invalidateQueries({ queryKey: ["twilio-phone-numbers", v.connectionId] });
+    },
   });
 }
 

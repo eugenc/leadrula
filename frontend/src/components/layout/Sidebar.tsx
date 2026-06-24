@@ -1,5 +1,6 @@
 import { NavLink, useLocation } from "react-router-dom";
 import { useAuthStore } from "@/store/authStore";
+import { useUIStore } from "@/store/uiStore";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/layout/Logo";
 import {
@@ -21,6 +22,7 @@ import {
   Import,
   Logs,
   Phone,
+  CalendarClock,
   type LucideIcon,
 } from "lucide-react";
 
@@ -43,6 +45,7 @@ const publisherNav: NavGroup[] = [
     items: [
       { to: "/p/leads", label: "Leads", icon: List },
       { to: "/p/calls", label: "Calls", icon: Phone },
+      { to: "/p/appointments", label: "Appointments", icon: CalendarClock },
       { to: "/p/fields", label: "Custom Fields", icon: Tags, adminOnly: true },
     ],
   },
@@ -90,6 +93,7 @@ const buyerNav: NavGroup[] = [
     items: [
       { to: "/b/leads", label: "Leads", icon: List },
       { to: "/b/calls", label: "Calls", icon: Phone },
+      { to: "/b/appointments", label: "Appointments", icon: CalendarClock },
       { to: "/b/calendar", label: "Calendar", icon: Calendar },
       { to: "/b/fields", label: "Custom Fields", icon: Tags, adminOnly: true },
     ],
@@ -149,10 +153,12 @@ const dashboardPaths = new Set(["/p", "/b", "/platform"]);
 
 function NavItem({ item }: { item: Item }) {
   const Icon = item.icon;
+  const closeSidebar = useUIStore((s) => s.closeSidebar);
   return (
     <NavLink
       to={item.to}
       end={dashboardPaths.has(item.to)}
+      onClick={() => closeSidebar()}
       className={({ isActive }) =>
         cn(
           "mb-0.5 flex h-8 items-center gap-2 rounded-md pl-7 pr-2.5 text-base transition-colors",
@@ -205,6 +211,7 @@ function NavGroupSection({
 
 export function Sidebar() {
   const user = useAuthStore((s) => s.user);
+  const sidebarOpen = useUIStore((s) => s.sidebarOpen);
   const { pathname } = useLocation();
   if (!user) return null;
 
@@ -229,7 +236,14 @@ export function Sidebar() {
         : null;
 
   return (
-    <aside className="flex w-sidebar shrink-0 flex-col border-r border-gray-100 bg-surface-card">
+    <aside
+      className={cn(
+        "flex w-sidebar shrink-0 flex-col border-r border-gray-100 bg-surface-card transition-transform duration-200 ease-out",
+        "fixed inset-y-0 left-0 z-50 lg:relative lg:z-auto",
+        sidebarOpen ? "translate-x-0" : "-translate-x-full",
+        "lg:translate-x-0"
+      )}
+    >
       <div className="mb-2 flex items-center gap-2.5 p-3">
         <Logo />
       </div>

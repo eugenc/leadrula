@@ -16,8 +16,8 @@ export function PageHeader({
   return (
     <div
       className={cn(
-        "flex items-start px-8 pt-6",
-        hasTitle ? "justify-between" : "justify-end",
+        "flex flex-col gap-3 px-4 pt-6 sm:flex-row sm:items-start sm:px-6 lg:px-8",
+        hasTitle ? "sm:justify-between" : "sm:justify-end",
         action && "mb-4",
         className
       )}

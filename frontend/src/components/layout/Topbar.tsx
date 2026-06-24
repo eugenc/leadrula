@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, LogOut } from "lucide-react";
+import { Bell, LogOut, Menu } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
 import { Avatar } from "@/components/ui/misc";
 import { Dropdown, DropdownItem } from "@/components/ui/dropdown";
@@ -131,18 +131,33 @@ export function Topbar({ title }: { title: string }) {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigate();
+  const toggleSidebar = useUIStore((s) => s.toggleSidebar);
   const [open, setOpen] = useState(false);
   const { data: notifs } = useNotifications();
   const markRead = useMarkRead();
   const unread = (notifs ?? []).filter((n) => !n.read_at).length;
 
   return (
-    <header className="sticky top-0 z-30 flex h-13 shrink-0 items-center justify-between border-b border-gray-100 bg-surface-card px-6">
-      <h1 className="text-xl font-semibold text-gray-800">{title}</h1>
-      <div className="flex items-center gap-4">
-        <SwitchSessionIndicator />
-        <AccountSwitcher />
-        <ThemeToggle />
+    <header className="sticky top-0 z-30 flex h-13 shrink-0 items-center justify-between gap-2 border-b border-gray-100 bg-surface-card px-4 lg:px-6">
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-gray-600 hover:bg-gray-100 lg:hidden"
+          aria-label="Open menu"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <h1 className="truncate text-xl font-semibold text-gray-800">{title}</h1>
+      </div>
+      <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+        <div className="hidden md:block">
+          <SwitchSessionIndicator />
+        </div>
+        <AccountSwitcher compact />
+        <div className="hidden lg:block">
+          <ThemeToggle />
+        </div>
         <Dropdown
           open={open}
           onClose={() => setOpen(false)}
@@ -159,7 +174,7 @@ export function Topbar({ title }: { title: string }) {
               )}
             </button>
           }
-          className="w-80 p-0"
+          className="w-[calc(100vw-2rem)] max-w-80 p-0 sm:w-80"
         >
           <div className="border-b border-gray-100 px-4 py-2 text-sm font-semibold text-gray-800">
             Notifications
@@ -193,9 +208,9 @@ export function Topbar({ title }: { title: string }) {
             ))}
           </div>
         </Dropdown>
-        <div className="flex items-center gap-2">
+        <div className="hidden items-center gap-2 lg:flex">
           <Avatar name={user?.full_name ?? "?"} src={user?.avatar_url} />
-          <div className="hidden text-right sm:block">
+          <div className="text-right">
             <div className="text-base font-semibold leading-tight text-gray-800">
               {user?.full_name}
             </div>

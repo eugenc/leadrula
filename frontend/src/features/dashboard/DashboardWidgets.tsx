@@ -401,7 +401,7 @@ export function DashboardWideWidgets({
                 <div key={l.id} className="grid grid-cols-[1fr_7rem_5rem] items-center gap-2 text-sm">
                   <span className="truncate font-medium text-gray-800">{leadName(l)}</span>
                   <div className="flex justify-center">
-                    <Badge variant={isBuyer ? buyerStatusBadgeVariant(l) : l.status}>
+                    <Badge plain variant={isBuyer ? buyerStatusBadgeVariant(l) : l.status}>
                       {isBuyer ? formatBuyerStatus(l) : formatStatus(l.status, "publisher")}
                     </Badge>
                   </div>

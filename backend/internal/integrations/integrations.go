@@ -201,6 +201,9 @@ func (s *Service) CreateConnection(ctx context.Context, accountID int64, provide
 }
 
 func (s *Service) DeleteConnection(ctx context.Context, accountID, id int64) error {
+	if err := s.CanDeleteTwilioConnection(ctx, accountID, id); err != nil {
+		return err
+	}
 	ct, err := s.pool.Exec(ctx,
 		`DELETE FROM integration_connections WHERE id = $1 AND account_id = $2`, id, accountID)
 	if err != nil {

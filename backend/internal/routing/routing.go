@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/customfields"
@@ -153,7 +152,9 @@ type UpdateRouteParams struct {
 }
 
 type Service struct {
-	pool *pgxpool.Pool
+	pool             *pgxpool.Pool
+	callWebhookCreds CallWebhookCreds
+	webhookBaseURL   string
 }
 
 func NewService(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }
@@ -522,8 +523,13 @@ func (s *Service) CreateSource(ctx context.Context, publisherID int64, name, slu
 	if call == nil {
 		call = &CallSourceParams{}
 	}
-	if sourceType == "call" && (call.TrackingNumber == nil || strings.TrimSpace(*call.TrackingNumber) == "") {
-		return nil, httpx.Validation("tracking_number is required for call sources")
+	if sourceType == "call" {
+		if err := s.validateCallSourceParams(ctx, publisherID, call); err != nil {
+			return nil, err
+		}
+		if err := s.syncCreateCallWebhooks(ctx, publisherID, call); err != nil {
+			return nil, err
+		}
 	}
 	payloadEnabled := call.PayloadEnabled != nil && *call.PayloadEnabled
 	requirePreload := call.RequirePreload != nil && *call.RequirePreload
@@ -554,6 +560,15 @@ func SourceByTrackingNumber(ctx context.Context, q database.Querier, trackingNum
 func (s *Service) UpdateSource(ctx context.Context, publisherID, id int64, name, slug *string, isActive, apiKeyRequired *bool, call *CallSourceParams) (*Source, error) {
 	if call == nil {
 		call = &CallSourceParams{}
+	}
+	old, err := s.GetSource(ctx, publisherID, id)
+	if err != nil {
+		return nil, err
+	}
+	if old.Type == "call" {
+		if err := s.syncUpdateCallWebhooks(ctx, publisherID, old, call); err != nil {
+			return nil, err
+		}
 	}
 	src, err := scanSource(s.pool.QueryRow(ctx,
 		`UPDATE routing_sources SET

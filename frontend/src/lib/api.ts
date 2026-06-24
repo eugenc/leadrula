@@ -227,6 +227,15 @@ export async function patch<T>(path: string, body?: unknown): Promise<T> {
   }
 }
 
+export async function put<T>(path: string, body?: unknown): Promise<T> {
+  try {
+    const res = await api.put(path, body);
+    return res.data.data as T;
+  } catch (e) {
+    throw apiError(e);
+  }
+}
+
 export async function del<T>(path: string): Promise<T> {
   try {
     const res = await api.delete(path);

@@ -68,7 +68,7 @@ function CardFieldRow({
       accountType === "buyer" ? formatBuyerStatus(lead) : formatStatus(lead.status, accountType);
     return (
       <CardFieldLine colId={colId} customFields={customFields}>
-        <Badge variant={variant}>{label}</Badge>
+        <Badge variant={variant} plain>{label}</Badge>
       </CardFieldLine>
     );
   }
@@ -119,7 +119,7 @@ export const LeadCard = memo(function LeadCard({
         </span>
         <div className="flex shrink-0 items-center gap-1">
           {showReturnedInHeader && (
-            <Badge variant="returned">
+            <Badge variant="returned" plain>
               {accountType === "buyer" ? formatBuyerStatus(lead) : formatStatus(lead.status, accountType)}
             </Badge>
           )}

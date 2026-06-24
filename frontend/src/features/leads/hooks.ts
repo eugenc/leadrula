@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { get, ns, patch, post, del } from "@/lib/api";
 import { chunk } from "@/lib/chunk";
 import { toast } from "@/store/toastStore";
@@ -83,7 +83,10 @@ function leadsBasePath(namespace?: "publisher" | "buyer"): string {
   return ns();
 }
 
-export function useLeads(filters: LeadFilters = {}, options?: { enabled?: boolean }) {
+export function useLeads(
+  filters: LeadFilters = {},
+  options?: { enabled?: boolean; keepPreviousData?: boolean }
+) {
   const q = leadsQueryString(filters);
   const base = leadsBasePath(filters.namespace);
   return useQuery({
@@ -93,6 +96,7 @@ export function useLeads(filters: LeadFilters = {}, options?: { enabled?: boolea
         await get<LeadListResponse | Lead[]>(`${base}/leads${q ? `?${q}` : ""}`)
       ),
     enabled: options?.enabled ?? true,
+    placeholderData: options?.keepPreviousData ? keepPreviousData : undefined,
   });
 }
 

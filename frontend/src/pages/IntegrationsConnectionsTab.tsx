@@ -14,6 +14,7 @@ import { SunbaseFieldMapSection } from "@/features/integrations/SunbaseFieldMapS
 import { SunbaseInboundEndpointSection } from "@/features/integrations/SunbaseInboundEndpointSection";
 import { GhlInboundEndpointSection } from "@/features/integrations/GhlInboundEndpointSection";
 import { GhlConnectionSettings } from "@/features/integrations/GhlConnectionSettings";
+import { TwilioPhoneNumbersSection } from "@/features/integrations/TwilioPhoneNumbersSection";
 import {
   DEFAULT_GHL_CONFIG,
   normalizeGhlConfig,
@@ -153,6 +154,7 @@ function AddConnectionDrawer({
   const [fieldMap, setFieldMap] = useState<OutboundFieldMapEntry[]>(sunbaseFieldMap(""));
   const [sunbaseActive, setSunbaseActive] = useState(false);
   const [ghlActive, setGhlActive] = useState(false);
+  const [twilioActive, setTwilioActive] = useState(false);
   const [ghlConfig, setGhlConfig] = useState<GHLConfig>(DEFAULT_GHL_CONFIG(""));
   const [activeConnection, setActiveConnection] = useState<IntegrationConnection | null>(null);
   const [inboundWebhook, setInboundWebhook] = useState<SunbaseInboundWebhook | null>(null);
@@ -176,6 +178,7 @@ function AddConnectionDrawer({
   const isManage = existingForSlug.length > 0;
   const showSunbaseActive = isSunbase && sunbaseActive && activeConnection != null;
   const showGhlActive = isGhl && ghlActive && activeConnection != null;
+  const showTwilioActive = isTwilio && twilioActive && activeConnection != null;
 
   const detailId = showSunbaseActive ? activeConnection.id : null;
   const ghlDetailId = showGhlActive ? activeConnection.id : null;
@@ -195,6 +198,8 @@ function AddConnectionDrawer({
     ? "SunBase connected"
     : showGhlActive
       ? "GoHighLevel connected"
+      : showTwilioActive
+        ? "Twilio connected"
       : isManage && selected
         ? `Manage ${selected.name}`
         : "Add Integration";
@@ -214,6 +219,7 @@ function AddConnectionDrawer({
       setFieldMap(sunbaseFieldMap(""));
       setSunbaseActive(false);
       setGhlActive(false);
+      setTwilioActive(false);
       setGhlConfig(DEFAULT_GHL_CONFIG(""));
       setActiveConnection(null);
       setInboundWebhook(null);
@@ -235,6 +241,12 @@ function AddConnectionDrawer({
         const existing = connections.find((c) => c.provider_slug === "ghl");
         if (existing) {
           loadGhlConnection(existing);
+        }
+      }
+      if (initialSlug === "twilio") {
+        const existing = connections.find((c) => c.provider_slug === "twilio");
+        if (existing) {
+          loadTwilioConnection(existing);
         }
       }
       if (initialSlug === "google_maps") {
@@ -269,6 +281,8 @@ function AddConnectionDrawer({
   function loadSunbaseConnection(conn: IntegrationConnection) {
     setActiveConnection(conn);
     setSunbaseActive(true);
+    setGhlActive(false);
+    setTwilioActive(false);
     setName(conn.name);
     const cfg = conn.config ?? {};
     if (typeof cfg.endpoint_url === "string") setEndpointUrl(cfg.endpoint_url);
@@ -287,6 +301,7 @@ function AddConnectionDrawer({
     setActiveConnection(conn);
     setGhlActive(true);
     setSunbaseActive(false);
+    setTwilioActive(false);
     setName(conn.name);
     const cfg = (conn.config ?? {}) as GHLConfig;
     setLocationId(cfg.location_id ?? "");
@@ -296,6 +311,14 @@ function AddConnectionDrawer({
       create_contact: true,
     }));
     if (conn.inbound_webhook) setInboundWebhook(conn.inbound_webhook);
+  }
+
+  function loadTwilioConnection(conn: IntegrationConnection) {
+    setActiveConnection(conn);
+    setTwilioActive(true);
+    setSunbaseActive(false);
+    setGhlActive(false);
+    setName(conn.name);
   }
 
   const ghlWebhookMode = isGhlWebhookMode(ghlConfig);
@@ -553,6 +576,7 @@ function AddConnectionDrawer({
         if (activeConnection?.id === id) {
           setSunbaseActive(false);
           setGhlActive(false);
+          setTwilioActive(false);
           setActiveConnection(null);
           setInboundWebhook(null);
         }
@@ -562,7 +586,8 @@ function AddConnectionDrawer({
     });
   }
 
-  const logo = integrationLogoUrl("sunbase");
+  const sunbaseLogo = integrationLogoUrl("sunbase");
+  const twilioLogo = integrationLogoUrl("twilio");
 
   return (
     <FormDrawer
@@ -607,6 +632,21 @@ function AddConnectionDrawer({
               Save changes
             </Button>
           </>
+        ) : showTwilioActive ? (
+          <>
+            {activeConnection && (
+              <Button
+                variant="secondary"
+                disabled={remove.isPending}
+                onClick={() => disconnect(activeConnection.id, true)}
+              >
+                Disconnect
+              </Button>
+            )}
+            <Button variant="secondary" onClick={onClose}>
+              Done
+            </Button>
+          </>
         ) : (
           <>
             <Button variant="secondary" onClick={onClose}>
@@ -642,10 +682,16 @@ function AddConnectionDrawer({
       }
     >
       <div className="space-y-4">
-        {isSunbase && logo && (
+        {isSunbase && sunbaseLogo && (
           <div className="flex items-center gap-2">
-            <img src={logo} alt="" className={integrationLogoClassName("sunbase")} />
+            <img src={sunbaseLogo} alt="" className={integrationLogoClassName("sunbase")} />
             <span className="text-sm text-gray-500">SunBase CRM</span>
+          </div>
+        )}
+        {isTwilio && twilioLogo && (
+          <div className="flex items-center gap-2">
+            <img src={twilioLogo} alt="" className={integrationLogoClassName("twilio")} />
+            <span className="text-sm text-gray-500">Twilio</span>
           </div>
         )}
         {showSunbaseActive && inboundWebhook && (
@@ -654,7 +700,11 @@ function AddConnectionDrawer({
 
         {showGhlActive && inboundWebhook && <GhlInboundEndpointSection inbound={inboundWebhook} />}
 
-        {isManage && !showSunbaseActive && !showGhlActive && (
+        {showTwilioActive && activeConnection && (
+          <TwilioPhoneNumbersSection connectionId={activeConnection.id} />
+        )}
+
+        {isManage && !showSunbaseActive && !showGhlActive && !showTwilioActive && (
           <div className="space-y-2 border-b border-gray-100 pb-4">
             <p className="text-sm font-semibold text-gray-800">Connected</p>
             {existingForSlug.map((c) => (
@@ -665,6 +715,7 @@ function AddConnectionDrawer({
                   onClick={() => {
                     if (c.provider_slug === "sunbase") loadSunbaseConnection(c);
                     if (c.provider_slug === "ghl") loadGhlConnection(c);
+                    if (c.provider_slug === "twilio") loadTwilioConnection(c);
                   }}
                 >
                   {c.name}
@@ -683,7 +734,7 @@ function AddConnectionDrawer({
         )}
 
         <>
-            {!showSunbaseActive && !showGhlActive && !(isGoogleMaps && isManage) && (
+            {!showSunbaseActive && !showGhlActive && !showTwilioActive && !(isGoogleMaps && isManage) && (
               <>
                 <div>
                   <Label>Provider</Label>
@@ -827,7 +878,7 @@ function AddConnectionDrawer({
                 </div>
               </>
             )}
-            {isTwilio && (
+            {isTwilio && !showTwilioActive && (
               <>
                 <p className="text-sm text-gray-500">
                   Connect your Twilio account to route inbound calls. Credentials are stored encrypted and

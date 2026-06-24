@@ -16,6 +16,8 @@ import { LeadSearchInput } from "@/features/leads/LeadSearchInput";
 import { LeadViewsMenu } from "@/features/leads/LeadViewsMenu";
 import { NewLeadDrawer } from "@/features/leads/NewLeadDrawer";
 import { ImportLeadsModal } from "@/features/leads/ImportLeadsModal";
+import { LeadListCard } from "@/features/leads/LeadListCard";
+import { LeadStagePickerSheet } from "@/features/leads/LeadStagePickerSheet";
 import {
   useSavedLeadViews,
   useActiveViewId,
@@ -50,6 +52,7 @@ import {
   Plus,
   Upload,
 } from "lucide-react";
+import type { Lead } from "@/types";
 import {
   DEFAULT_VISIBLE_COLUMNS,
   SYSTEM_COLUMNS,
@@ -106,6 +109,7 @@ export function LeadsListPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [assignOpen, setAssignOpen] = useState<"user" | "follower" | "buyer" | null>(null);
   const [assignTarget, setAssignTarget] = useState(0);
+  const [stagePickerLead, setStagePickerLead] = useState<Lead | null>(null);
 
   const { data: users } = useUsers();
   const { data: customFields, isLoading: customFieldsLoading } = useCustomFields();
@@ -284,30 +288,37 @@ export function LeadsListPage() {
     <>
       <PageBody>
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          <LeadViewsMenu
-            placement="list"
-            filters={conditions}
-            onFiltersChange={setConditions}
-            columns={visibleCols}
-            sort={sort}
-            sortDir={sortDir}
-            onViewApply={applyViewFilters}
-          />
-          <Button variant="outline" size="sm" onClick={() => setFiltersExpanded((e) => !e)}>
-            {filtersExpanded ? "Hide filters" : "Edit filters"}
-          </Button>
+          <div className="hidden sm:contents">
+            <LeadViewsMenu
+              placement="list"
+              filters={conditions}
+              onFiltersChange={setConditions}
+              columns={visibleCols}
+              sort={sort}
+              sortDir={sortDir}
+              onViewApply={applyViewFilters}
+            />
+            <Button variant="outline" size="sm" onClick={() => setFiltersExpanded((e) => !e)}>
+              {filtersExpanded ? "Hide filters" : "Edit filters"}
+            </Button>
+          </div>
           <LeadSearchInput
             value={search}
             onChange={setSearch}
-            className="w-72"
+            className="w-full min-w-0 sm:w-72"
             inputClassName="h-7 text-sm"
             leadFilters={bulkListFilters}
             onSelectLead={(lead) => openDetail(lead.id)}
           />
-          <div className="ml-auto flex items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto">
             {canCreate && (
               <>
-                <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="hidden sm:inline-flex"
+                  onClick={() => setImportOpen(true)}
+                >
                   <Upload className="h-4 w-4" />
                   Import CSV
                 </Button>
@@ -318,6 +329,7 @@ export function LeadsListPage() {
               </>
             )}
             {isAdmin && hasSelection && (
+              <div className="hidden sm:contents">
               <Dropdown
                 open={bulkOpen}
                 onClose={() => setBulkOpen(false)}
@@ -353,7 +365,9 @@ export function LeadsListPage() {
                   Delete
                 </DropdownItem>
               </Dropdown>
+              </div>
             )}
+            <div className="hidden sm:block">
             <LeadsColumnPicker
               open={colsOpen}
               onOpenChange={setColsOpen}
@@ -364,11 +378,12 @@ export function LeadsListPage() {
               lockedCols={DEFAULT_VISIBLE_COLUMNS}
               onChange={updateVisibleCols}
             />
+            </div>
           </div>
         </div>
 
         {filtersExpanded && (
-          <div className="mb-4 rounded-lg border border-gray-100 bg-gray-50/50 p-4">
+          <div className="mb-4 hidden rounded-lg border border-gray-100 bg-gray-50/50 p-4 sm:block">
             <LeadFilterBuilder conditions={conditions} onChange={setConditions} />
           </div>
         )}
@@ -384,7 +399,7 @@ export function LeadsListPage() {
         ) : (
           <>
             {(showSelectAllBanner || showAllSelectedBanner) && (
-              <div className="mb-2 rounded-lg border border-blue-100 bg-blue-50 px-4 py-2 text-sm text-gray-700">
+              <div className="mb-2 hidden rounded-lg border border-blue-100 bg-blue-50 px-4 py-2 text-sm text-gray-700 sm:block">
                 {showSelectAllBanner ? (
                   <>
                     All {leads.length} leads on this page are selected.{" "}
@@ -410,6 +425,19 @@ export function LeadsListPage() {
                 )}
               </div>
             )}
+            <div className="space-y-2 sm:hidden">
+              {leads.map((l) => (
+                <LeadListCard
+                  key={l.id}
+                  lead={l}
+                  accountType={user?.account_type}
+                  isBuyer={isBuyer}
+                  onOpen={() => openDetail(l.id)}
+                  onChangeStage={() => setStagePickerLead(l)}
+                />
+              ))}
+            </div>
+            <div className="hidden sm:block">
             <Table>
               <THead>
                 <tr>
@@ -479,6 +507,7 @@ export function LeadsListPage() {
                       >
                         {colId === "status" ? (
                           <Badge
+                            plain
                             variant={
                               isBuyer
                                 ? buyerStatusBadgeVariant(l)
@@ -502,6 +531,7 @@ export function LeadsListPage() {
                 ))}
               </TBody>
             </Table>
+            </div>
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-500">
               <span>
@@ -650,6 +680,11 @@ export function LeadsListPage() {
 
       <NewLeadDrawer open={newLeadOpen} onClose={() => setNewLeadOpen(false)} />
       <ImportLeadsModal open={importOpen} onClose={() => setImportOpen(false)} />
+      <LeadStagePickerSheet
+        lead={stagePickerLead}
+        open={!!stagePickerLead}
+        onClose={() => setStagePickerLead(null)}
+      />
     </>
   );
 }

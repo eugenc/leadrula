@@ -943,6 +943,19 @@ func (r *Repository) GetByPhone(ctx context.Context, q database.Querier, account
 		accountID, phone))
 }
 
+// GetByPhoneNormalized finds the newest active lead matching phone digits.
+func (r *Repository) GetByPhoneNormalized(ctx context.Context, q database.Querier, accountID int64, phone string) (*Lead, error) {
+	phoneNorm := NormalizePhone(phone)
+	if phoneNorm == "" {
+		return nil, httpx.NotFound("lead not found")
+	}
+	return scanLead(q.QueryRow(ctx,
+		`SELECT `+leadCols+` FROM leads WHERE owner_account_id=$1 AND `+leadNotDeleted+
+			` AND phone IS NOT NULL AND regexp_replace(phone, '[^0-9]', '', 'g') = $2
+		 ORDER BY id DESC LIMIT 1`,
+		accountID, phoneNorm))
+}
+
 // GetByEmail finds an active lead by email.
 func (r *Repository) GetByEmail(ctx context.Context, q database.Querier, accountID int64, email string) (*Lead, error) {
 	return scanLead(q.QueryRow(ctx,

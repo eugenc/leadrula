@@ -23,6 +23,7 @@ import {
 import { ContractOfferSection } from "@/features/admin/ContractOfferSection";
 import { ContractParticipationsSection } from "@/features/admin/ContractParticipationsSection";
 import { CallSettingsSection } from "@/features/calls/CallSettingsSection";
+import { AppointmentSettingsSection } from "@/features/appointments/AppointmentSettingsSection";
 import { offerFromContractModes, type ContractOfferDraft } from "@/features/admin/contractOffer";
 import {
   ContractLeadCriteriaSection,
@@ -455,6 +456,9 @@ function DraftDrawerContent({
                   />
                 )}
                 {form.lead_type === "Call" && <CallSettingsSection contractId={contract.id} />}
+                {form.lead_type === "Appointment" && (
+                  <AppointmentSettingsSection contractId={contract.id} />
+                )}
               </div>
             ),
             criteria: (
@@ -814,6 +818,11 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
                 {leadType === "Call" && (
                   <div className="mt-4">
                     <CallSettingsSection contractId={contract.id} />
+                  </div>
+                )}
+                {leadType === "Appointment" && (
+                  <div className="mt-4">
+                    <AppointmentSettingsSection contractId={contract.id} />
                   </div>
                 )}
               </>

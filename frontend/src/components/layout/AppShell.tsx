@@ -2,11 +2,12 @@ import { useEffect } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
+import { BottomTabBar } from "./BottomTabBar";
 import { ImpersonationBanner } from "./ImpersonationBanner";
-import { AccountSwitcher } from "./AccountSwitcher";
 import { LeadDetailDrawer } from "@/features/leads/LeadDetailDrawer";
 import { useMe } from "@/features/leads/hooks";
 import { useAuthStore } from "@/store/authStore";
+import { useUIStore } from "@/store/uiStore";
 
 const titles: Record<string, string> = {
   board: "Pipeline",
@@ -46,6 +47,8 @@ export function AppShell() {
   const { data: me } = useMe();
   const syncUserProfile = useAuthStore((s) => s.syncUserProfile);
   const syncFromMe = useAuthStore((s) => s.syncFromMe);
+  const sidebarOpen = useUIStore((s) => s.sidebarOpen);
+  const closeSidebar = useUIStore((s) => s.closeSidebar);
 
   useEffect(() => {
     if (!me) return;
@@ -64,16 +67,29 @@ export function AppShell() {
     });
   }, [me, syncUserProfile, syncFromMe]);
 
+  useEffect(() => {
+    closeSidebar();
+  }, [loc.pathname, closeSidebar]);
+
   return (
     <div className="flex h-screen overflow-hidden bg-surface-app">
+      {sidebarOpen && (
+        <button
+          type="button"
+          aria-label="Close menu"
+          className="fixed inset-0 z-40 bg-[var(--surface-overlay)] lg:hidden"
+          onClick={closeSidebar}
+        />
+      )}
       <Sidebar />
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <ImpersonationBanner />
         <Topbar title={title} />
-        <main className="flex flex-1 flex-col overflow-y-auto">
+        <main className="flex flex-1 flex-col overflow-y-auto pb-14 lg:pb-0">
           <Outlet />
         </main>
       </div>
+      <BottomTabBar />
       <LeadDetailDrawer />
     </div>
   );

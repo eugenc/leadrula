@@ -78,6 +78,25 @@ func resolveIngestSource(raw map[string]any) string {
 	return ""
 }
 
+func extractPhoneFromPayload(flat map[string]any, maps []routing.SourceFieldMapEntry) string {
+	if v, ok := flat["phone"]; ok {
+		if s := toText(v); s != "" {
+			return s
+		}
+	}
+	for _, m := range maps {
+		if m.TargetType != "builtin" || m.BuiltinField == nil || *m.BuiltinField != "phone" {
+			continue
+		}
+		if v, ok := flat[m.SourceKey]; ok {
+			if s := toText(v); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
 func applyPayloadMappings(ctx context.Context, tx database.Querier, repo *leads.Repository, accountID, leadID int64, flat map[string]any, maps []routing.SourceFieldMapEntry) error {
 	for _, k := range builtinKeys {
 		if v, ok := flat[k]; ok {
@@ -169,11 +188,30 @@ func (s *Service) IngestFromSource(ctx context.Context, publisherID int64, slug 
 		return nil, httpx.NotFound("source not found")
 	}
 
-	leadID, publicID, err := s.leads.InsertLead(ctx, tx, publisherID, publisherID, slug, rawJSON)
+	maps, err := routing.SourceFieldMap(ctx, tx, src.ID)
 	if err != nil {
 		return nil, err
 	}
-	maps, err := routing.SourceFieldMap(ctx, tx, src.ID)
+
+	if phone := extractPhoneFromPayload(sources, maps); phone != "" {
+		lead, lookupErr := s.leads.GetByPhoneNormalized(ctx, tx, publisherID, phone)
+		if lookupErr != nil {
+			var appErr *httpx.AppError
+			if !errors.As(lookupErr, &appErr) || appErr.Code != httpx.CodeNotFound {
+				return nil, lookupErr
+			}
+		} else {
+			if err := applyPayloadMappings(ctx, tx, s.leads, publisherID, lead.ID, sources, maps); err != nil {
+				return nil, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return nil, err
+			}
+			return &IngestResult{LeadID: lead.PublicID, Status: "updated"}, nil
+		}
+	}
+
+	leadID, publicID, err := s.leads.InsertLead(ctx, tx, publisherID, publisherID, slug, rawJSON)
 	if err != nil {
 		return nil, err
 	}

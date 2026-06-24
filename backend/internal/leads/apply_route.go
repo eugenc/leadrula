@@ -535,3 +535,13 @@ func builtinValue(l *Lead, field string) string {
 	}
 	return ""
 }
+
+// DistributeToContract moves a lead to a buyer via an active contract (appointment booking, manual flows).
+func DistributeToContract(ctx context.Context, q database.Querier, deps RouteApplyDeps, contractID int64, delivery string, leadID int64, billingLabel string) ([]notifications.EmailJob, error) {
+	return ApplyContractDistribution(ctx, q, deps, contractDistributionParams{
+		ContractID:   contractID,
+		Delivery:     delivery,
+		BillingLabel: billingLabel,
+		RouteName:    "Appointment",
+	}, leadID, RouteExecutionMeta{TriggerType: "appointment"})
+}

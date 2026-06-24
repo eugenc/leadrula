@@ -482,6 +482,78 @@ export interface CallSettings {
   caller_geo_mode: "twilio_lookup" | "area_code" | "none";
 }
 
+export interface BuyerAvailability {
+  account_id: number;
+  schedule: Record<string, { start: string; end: string }>;
+  timezone: string;
+  buffer_min: number;
+  configured: boolean;
+  updated_at: string;
+}
+
+export interface BuyerAppointmentSlot {
+  id: number;
+  account_id: number;
+  weekday: number;
+  start_time: string;
+  duration_min: number;
+  capacity: number;
+  disabled_at?: string | null;
+}
+
+export interface ContractAppointmentSlot {
+  buyer_slot_id: number;
+  weekday: number;
+  start_time: string;
+  duration_min: number;
+  capacity: number;
+  enabled: boolean;
+  duration_min_override?: number | null;
+  capacity_override?: number | null;
+  disabled: boolean;
+}
+
+export interface AppointmentFreeSlot {
+  buyer_slot_id: number;
+  slot_start: string;
+  duration_min: number;
+  capacity: number;
+  remaining_capacity: number;
+}
+
+export interface AppointmentBooking {
+  id: number;
+  contract_id: number;
+  contract_name?: string;
+  lead_id: number;
+  lead_name: string;
+  phone?: string;
+  email?: string;
+  slot_start: string;
+  duration_min: number;
+  delivery_mode: string;
+  delivery_status: string;
+  buyer_name?: string;
+  publisher_name?: string;
+  lead_status?: string;
+  created_at: string;
+}
+
+export interface AppointmentContractOption {
+  contract_id: number;
+  contract_name: string;
+  buyer_id: number;
+  buyer_name: string;
+  timezone: string;
+  configured: boolean;
+}
+
+export interface AppointmentCalendarMarker {
+  date: string;
+  has_bookable: boolean;
+  has_bookings: boolean;
+}
+
 export interface CallTarget {
   participation_id: number;
   target_type: "static" | "dynamic";
@@ -1217,6 +1289,23 @@ export interface GhlConnectionDetail {
     inbound: number;
     inbound_webhook_slug?: string;
   };
+}
+
+export interface TwilioPhoneNumber {
+  sid: string;
+  phone_number: string;
+  friendly_name: string;
+  number_type?: string;
+  in_use_by_source?: string | null;
+  in_use_active?: boolean;
+}
+
+export interface TwilioAvailablePhoneNumber {
+  phone_number: string;
+  friendly_name?: string;
+  locality?: string;
+  region?: string;
+  number_type: string;
 }
 
 export interface RouteIntegration {

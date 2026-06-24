@@ -15,6 +15,7 @@ import {
 } from "@/features/admin/hooks";
 import { get } from "@/lib/api";
 import { useIntegrationConnections } from "@/features/integrations/hooks";
+import { TwilioPhoneNumberSelect } from "@/features/calls/TwilioPhoneNumberSelect";
 import { useCustomFields } from "@/features/leads/hooks";
 import { CreateCustomFieldDrawer } from "@/features/admin/CreateCustomFieldDrawer";
 import { BuiltinCustomFieldSelect } from "@/features/admin/BuiltinCustomFieldSelect";
@@ -107,6 +108,7 @@ export function SourcesPage() {
                   <TD className="font-mono">{s.slug}</TD>
                   <TD className="font-mono text-xs text-gray-500">
                     <div>POST {apiBaseURL}/api/v1/sources/{s.slug}</div>
+                    <div className="mt-0.5 text-gray-400">Creates a lead, or updates when phone matches</div>
                     <Badge className="mt-1">{s.api_key_required ? "Auth required" : "Open"}</Badge>
                   </TD>
                   <TD>
@@ -196,6 +198,7 @@ function SourceDrawerContent({
   const [isActive, setIsActive] = useState(source?.is_active ?? true);
   const [apiKeyRequired, setApiKeyRequired] = useState(source?.api_key_required ?? true);
   const [trackingNumber, setTrackingNumber] = useState(source?.tracking_number ?? "");
+  const [twilioSid, setTwilioSid] = useState(source?.twilio_sid ?? "");
   const [twilioConnId, setTwilioConnId] = useState(source?.integration_connection_id ?? 0);
   const [payloadEnabled, setPayloadEnabled] = useState(source?.payload_enabled ?? false);
   const [requirePreload, setRequirePreload] = useState(source?.require_preload ?? false);
@@ -208,6 +211,7 @@ function SourceDrawerContent({
     setIsActive(source?.is_active ?? true);
     setApiKeyRequired(source?.api_key_required ?? true);
     setTrackingNumber(source?.tracking_number ?? "");
+    setTwilioSid(source?.twilio_sid ?? "");
     setTwilioConnId(source?.integration_connection_id ?? 0);
     setPayloadEnabled(source?.payload_enabled ?? false);
     setRequirePreload(source?.require_preload ?? false);
@@ -218,6 +222,7 @@ function SourceDrawerContent({
   function callBody() {
     return {
       tracking_number: trackingNumber.trim(),
+      twilio_sid: twilioSid.trim() || null,
       integration_connection_id: twilioConnId || null,
       payload_enabled: payloadEnabled,
       require_preload: payloadEnabled ? requirePreload : false,
@@ -256,7 +261,11 @@ function SourceDrawerContent({
     }
   }
 
-  const valid = !!name && !!slug && !!type && (!isCall || !!trackingNumber.trim());
+  const valid =
+    !!name &&
+    !!slug &&
+    !!type &&
+    (!isCall || (!!trackingNumber.trim() && !!twilioSid.trim() && twilioConnId > 0));
   const saving = create.isPending || update.isPending;
 
   return (
@@ -318,13 +327,22 @@ function SourceDrawerContent({
         {slug && !isCall && (
           <p className="text-xs font-mono text-gray-500">
             POST {apiBaseURL}/api/v1/sources/{slug}
+            <span className="block font-sans text-gray-400">Creates a lead, or updates when phone matches</span>
           </p>
         )}
         {isCall && (
           <>
             <div>
               <Label>Twilio account</Label>
-              <Select value={twilioConnId} onChange={(e) => setTwilioConnId(Number(e.target.value))}>
+              <Select
+                value={twilioConnId}
+                onChange={(e) => {
+                  const next = Number(e.target.value);
+                  setTwilioConnId(next);
+                  setTwilioSid("");
+                  setTrackingNumber("");
+                }}
+              >
                 <option value={0}>Select Twilio connection…</option>
                 {twilioConnections.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -339,17 +357,18 @@ function SourceDrawerContent({
               )}
             </div>
             <div>
-              <Label>Tracking number (E.164)</Label>
-              <Input
-                value={trackingNumber}
-                onChange={(e) => setTrackingNumber(e.target.value)}
-                placeholder="+14155550123"
+              <Label>Tracking number</Label>
+              <TwilioPhoneNumberSelect
+                connectionId={twilioConnId > 0 ? twilioConnId : null}
+                valueSid={twilioSid}
+                valueNumber={trackingNumber}
+                onChange={(sid, phone) => {
+                  setTwilioSid(sid);
+                  setTrackingNumber(phone);
+                }}
               />
               <p className="mt-1 text-xs text-gray-500">
-                Point this Twilio number's Voice webhook at:
-              </p>
-              <p className="text-xs font-mono text-gray-500">
-                POST {apiBaseURL}/webhooks/twilio/voice
+                Voice webhook is configured automatically on save.
               </p>
             </div>
             <div className="flex items-center justify-between">
@@ -595,6 +614,7 @@ function SourceFieldMapContent({
               <p>No webhook received yet.</p>
               <p className="mt-1 font-mono text-xs">
                 POST {apiBaseURL}/api/v1/sources/{slug}
+                <span className="block font-sans text-gray-400">Creates a lead, or updates when phone matches</span>
               </p>
             </div>
           ) : (

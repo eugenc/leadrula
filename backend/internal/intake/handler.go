@@ -133,7 +133,11 @@ func (h *Handler) ingestSource(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusAccepted, res)
+	status := http.StatusAccepted
+	if res.Status == "updated" {
+		status = http.StatusOK
+	}
+	httpx.JSON(w, status, res)
 }
 
 func (h *Handler) action(w http.ResponseWriter, r *http.Request) {

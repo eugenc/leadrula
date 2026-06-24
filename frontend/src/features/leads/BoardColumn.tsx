@@ -88,7 +88,7 @@ export function BoardColumn({
   return (
     <div
       className={cn(
-        "flex h-full min-h-0 w-[280px] shrink-0 flex-col rounded-lg bg-gray-50",
+        "flex h-full min-h-0 w-[260px] shrink-0 flex-col rounded-lg bg-gray-50 sm:w-[280px]",
         isOver && "ring-2 ring-jade-400/40"
       )}
     >

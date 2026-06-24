@@ -9,9 +9,10 @@ import { useAuthStore } from "@/store/authStore";
 import { useMe } from "@/features/leads/hooks";
 import { errorMessage } from "@/lib/api";
 import { toast } from "@/store/toastStore";
+import { Avatar } from "@/components/ui/misc";
 import type { CurrentUser } from "@/types";
 
-export function AccountSwitcher() {
+export function AccountSwitcher({ compact = false }: { compact?: boolean }) {
   const user = useAuthStore((s) => s.user);
   const impersonation = useAuthStore((s) => s.impersonation);
   const startImpersonation = useAuthStore((s) => s.startImpersonation);
@@ -59,7 +60,22 @@ export function AccountSwitcher() {
 
   return (
     <div className="relative">
-      <Button variant="secondary" size="sm" onClick={() => setOpen((o) => !o)}>
+      {compact ? (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-gray-100 lg:hidden"
+          aria-label="Switch account"
+        >
+          <Avatar name={user?.full_name ?? "?"} src={user?.avatar_url} className="h-8 w-8" />
+        </button>
+      ) : null}
+      <Button
+        variant="secondary"
+        size="sm"
+        onClick={() => setOpen((o) => !o)}
+        className={compact ? "hidden lg:inline-flex" : undefined}
+      >
         <ArrowRightLeft className="h-3.5 w-3.5" /> Switch account
       </Button>
       {open ? (

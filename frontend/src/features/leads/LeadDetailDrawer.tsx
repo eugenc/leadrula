@@ -1,4 +1,4 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
   Sheet,
   DrawerBody,
@@ -187,6 +187,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === "admin";
   const [tab, setTab] = useState<DrawerTab>("details");
+  const edgeTouchStart = useRef<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const update = useUpdateLead();
   const { data: leadCall } = useLeadCall(lead.id, user?.account_type);
@@ -198,6 +199,28 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   const { data: customFieldFolders } = useCustomFieldFolders();
   const { collapsed, toggle: toggleFolder } = useFolderCollapse(user?.account_id);
   const { data: mapsStatus } = useGoogleMapsStatus();
+
+  useEffect(() => {
+    setTab("details");
+  }, [lead.id]);
+
+  function onDrawerTouchStart(e: React.TouchEvent) {
+    if (e.touches[0].clientX <= 24) {
+      edgeTouchStart.current = e.touches[0].clientX;
+    }
+  }
+
+  function onDrawerTouchMove(e: React.TouchEvent) {
+    if (edgeTouchStart.current === null) return;
+    if (e.touches[0].clientX - edgeTouchStart.current > 80) {
+      edgeTouchStart.current = null;
+      onClose();
+    }
+  }
+
+  function onDrawerTouchEnd() {
+    edgeTouchStart.current = null;
+  }
   const mapsConnected = mapsStatus?.connected === true;
 
   const [fields, setFields] = useState<Record<string, string>>({});
@@ -265,16 +288,21 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div
+      className="flex h-full flex-col"
+      onTouchStart={onDrawerTouchStart}
+      onTouchMove={onDrawerTouchMove}
+      onTouchEnd={onDrawerTouchEnd}
+    >
       <LeadHeader lead={lead} onClose={onClose} />
 
-      <div className="flex border-b border-gray-100 px-5 py-[10px]">
+      <div className="flex overflow-x-auto border-b border-gray-100 px-5 py-[10px]">
         {drawerTabs.map(({ id, label }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
             className={cn(
-              "-mb-px border-b-2 px-2.5 py-1.5 text-base font-semibold transition-colors",
+              "-mb-px shrink-0 border-b-2 px-2.5 py-1.5 text-base font-semibold transition-colors",
               tab === id ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400 hover:text-gray-600"
             )}
           >
@@ -424,7 +452,7 @@ function LeadHeader({ lead, onClose }: { lead: Lead; onClose: () => void }) {
         />
       </div>
 
-      <div className="mt-3 flex items-start gap-4">
+      <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-start">
         <div className="min-w-0 flex-1">
           <Label>Assigned</Label>
           {isAdmin ? (
@@ -620,12 +648,12 @@ function LeadPipelineHeader({ lead }: { lead: Lead }) {
       )}
       {showStageBar && (
         <>
-          <div className="mt-[25px] flex gap-1 pb-5">
+          <div className="mt-[25px] flex gap-1 overflow-x-auto pb-5">
             {(stages ?? []).map((s, i) => {
               const reached = currentStageIndex >= 0 && i <= currentStageIndex;
               const isCurrent = s.id === stageId;
               return (
-                <span key={s.id} className="group/stage relative flex flex-1">
+                <span key={s.id} className="group/stage relative min-w-[3rem] shrink-0 flex-1">
                   <button
                     type="button"
                     disabled={!canEditPipeline || changeStage.isPending}
@@ -1242,7 +1270,7 @@ function RedistributeBox({ lead }: { lead: Lead }) {
   return (
     <div className="rounded-md border border-warning-border bg-warning-bg p-2.5">
       <div className="mb-0.5 flex items-center gap-2">
-        <Badge variant="returned">Returned</Badge>
+        <Badge variant="returned" plain>Returned</Badge>
         <span className="text-xs font-semibold text-warning-fg">Re-distribute this lead</span>
       </div>
       <p className="text-xs text-gray-400">

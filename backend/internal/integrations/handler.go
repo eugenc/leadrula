@@ -69,6 +69,11 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Get("/integrations/connections/{id}/ghl", h.getGHLDetail)
 		r.Get("/integrations/connections/{id}/ghl/pipelines", h.getGHLPipelines)
 		r.Get("/integrations/connections/{id}/ghl/calendars", h.getGHLCalendars)
+		r.Get("/integrations/connections/{id}/twilio/phone-numbers", h.getTwilioPhoneNumbers)
+		r.Get("/integrations/connections/{id}/twilio/available-numbers", h.getTwilioAvailableNumbers)
+		r.Get("/integrations/connections/{id}/twilio/pricing", h.getTwilioPricing)
+		r.Post("/integrations/connections/{id}/twilio/phone-numbers", h.postTwilioPhoneNumber)
+		r.Delete("/integrations/connections/{id}/twilio/phone-numbers/{sid}", h.deleteTwilioPhoneNumber)
 		r.Delete("/integrations/connections/{id}", h.deleteConnection)
 		r.Post("/integrations/routes/{routeID}/attach", h.attachToRoute)
 		r.Delete("/integrations/route-integrations/{id}", h.detachFromRoute)
@@ -338,6 +343,74 @@ func (h *Handler) getGHLCalendars(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, data)
+}
+
+func (h *Handler) getTwilioPhoneNumbers(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	numbers, err := h.svc.ListTwilioPhoneNumbers(r.Context(), p.AccountID, id)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"phone_numbers": numbers})
+}
+
+func (h *Handler) getTwilioAvailableNumbers(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	q := r.URL.Query()
+	numbers, err := h.svc.SearchTwilioAvailableNumbers(r.Context(), p.AccountID, id,
+		q.Get("type"), q.Get("area_code"), q.Get("prefix"))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"phone_numbers": numbers})
+}
+
+func (h *Handler) getTwilioPricing(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	price, err := h.svc.TwilioMonthlyPrice(r.Context(), p.AccountID, id, r.URL.Query().Get("type"))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	out := map[string]any{"currency": "USD"}
+	if price != nil {
+		out["monthly_price"] = *price
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) postTwilioPhoneNumber(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	var body struct {
+		PhoneNumber string `json:"phone_number"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpx.WriteError(w, httpx.Validation("invalid json"))
+		return
+	}
+	purchased, err := h.svc.PurchaseTwilioPhoneNumber(r.Context(), p.AccountID, id, body.PhoneNumber)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, purchased)
+}
+
+func (h *Handler) deleteTwilioPhoneNumber(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	sid := chi.URLParam(r, "sid")
+	if err := h.svc.ReleaseTwilioPhoneNumber(r.Context(), p.AccountID, id, sid); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (h *Handler) ghlResponse(conn *Connection) GHLConnectionResponse {

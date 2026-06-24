@@ -60,13 +60,15 @@ type BadgeVariant =
 export function Badge({
   children,
   variant = "default",
+  plain = false,
   className,
 }: {
   children: React.ReactNode;
   variant?: BadgeVariant;
+  plain?: boolean;
   className?: string;
 }) {
-  const styles: Record<BadgeVariant, string> = {
+  const pillStyles: Record<BadgeVariant, string> = {
     default: "border border-neutral-border bg-neutral-bg text-neutral-fg",
     review: "border border-info-border bg-info-bg text-info-fg",
     distributed: "border border-success-border bg-success-bg text-success-fg",
@@ -76,11 +78,21 @@ export function Badge({
     overdue: "border border-danger-border bg-danger-bg text-danger-fg",
     pending: "border border-warning-border bg-warning-bg text-warning-fg",
   };
+  const textStyles: Record<BadgeVariant, string> = {
+    default: "text-neutral-fg",
+    review: "text-info-fg",
+    distributed: "text-success-fg",
+    returned: "text-neutral-fg",
+    closed: "text-neutral-fg",
+    disputed: "text-warning-fg",
+    overdue: "text-danger-fg",
+    pending: "text-warning-fg",
+  };
   return (
     <span
       className={cn(
-        "inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold",
-        styles[variant],
+        "inline-flex items-center whitespace-nowrap text-xs font-semibold",
+        plain ? textStyles[variant] : cn("rounded-full px-2 py-0.5", pillStyles[variant]),
         className
       )}
     >

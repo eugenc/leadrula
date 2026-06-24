@@ -159,6 +159,8 @@ func eventLabel(eventType string, payload map[string]any) string {
 	switch eventType {
 	case "new_lead":
 		return "New lead received"
+	case "new_appointment":
+		return "New appointment booked"
 	case "lead_returned":
 		return "A lead was returned"
 	case "lead_disputed":
@@ -218,6 +220,8 @@ func eventLink(baseURL, accountType, eventType string) string {
 	switch eventType {
 	case "new_lead", "lead_returned":
 		return baseURL + prefix + "/leads"
+	case "new_appointment":
+		return baseURL + prefix + "/appointments"
 	case "dispute_update", "new_invoice", "lead_disputed", "dispute_message", "dispute_deadline":
 		return baseURL + prefix + "/billing"
 	case "collaboration_request":

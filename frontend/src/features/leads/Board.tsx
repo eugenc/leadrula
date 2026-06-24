@@ -214,8 +214,22 @@ export function Board() {
     [pipelineId, filtersChanged, activeId, conditions, debouncedSearch, sort, sortDir]
   );
 
+  const suggestionFilters = useMemo(
+    () => ({
+      pipeline_id: pipelineId,
+      all: true as const,
+      view_id: filtersChanged ? undefined : activeId,
+      filters: filtersChanged ? JSON.stringify(conditions) : undefined,
+      sort,
+      sort_dir: sortDir,
+    }),
+    [pipelineId, filtersChanged, activeId, conditions, sort, sortDir]
+  );
+
   const { data: stages } = useStages(pipelineId);
-  const { data: leads, isLoading, isError, error } = useLeads(leadFilters);
+  const { data: leads, isLoading, isFetching, isError, error } = useLeads(leadFilters, {
+    keepPreviousData: true,
+  });
   const changeStage = useChangeStage();
   const openDetail = useUIStore((s) => s.openDetail);
 
@@ -350,7 +364,14 @@ export function Board() {
 
   const customFieldsList = customFields ?? [];
 
-  if (plLoading || isLoading || viewsLoading || activeLoading || customFieldsLoading || !uiReady) {
+  if (
+    plLoading ||
+    viewsLoading ||
+    activeLoading ||
+    customFieldsLoading ||
+    !uiReady ||
+    (isLoading && !leads)
+  ) {
     return (
       <div className="flex justify-center py-16">
         <Spinner className="h-6 w-6" />
@@ -368,11 +389,11 @@ export function Board() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="relative z-10 mb-4 flex shrink-0 flex-wrap items-center gap-2 px-8 pt-5">
+      <div className="relative z-10 mb-4 flex shrink-0 flex-wrap items-center gap-2 px-4 pt-5 sm:px-6 lg:px-8">
         <FilterSelect
           value={pipelineId ?? ""}
           onChange={(e) => setPipelineId(Number(e.target.value))}
-          className="w-56"
+          className="w-full min-w-0 sm:w-56"
         >
           {pipelines.map((p) => (
             <option key={p.id} value={p.id}>
@@ -383,11 +404,12 @@ export function Board() {
         <LeadSearchInput
           value={searchTerm}
           onChange={setSearchTerm}
-          className="w-72"
+          className="w-full min-w-0 sm:w-72"
           inputClassName="h-7 text-sm"
-          leadFilters={leadFilters}
+          leadFilters={suggestionFilters}
           onSelectLead={(lead) => openDetail(lead.id)}
         />
+        <div className="hidden flex-wrap items-center gap-2 sm:flex">
         <LeadViewsMenu
           placement="board"
           filters={conditions}
@@ -418,10 +440,11 @@ export function Board() {
         <Button variant="outline" size="sm" onClick={() => setFiltersExpanded((e) => !e)}>
           {filtersExpanded ? "Hide filters" : "Edit filters"}
         </Button>
+        </div>
       </div>
 
       {filtersExpanded && (
-        <div className="relative z-10 mx-8 mb-4 shrink-0 rounded-lg border border-gray-100 bg-gray-50/50 p-4">
+        <div className="relative z-10 mx-4 mb-4 hidden shrink-0 rounded-lg border border-gray-100 bg-gray-50/50 p-4 sm:mx-6 sm:block lg:mx-8">
           <LeadFilterBuilder conditions={conditions} onChange={setConditions} />
         </div>
       )}
@@ -433,7 +456,14 @@ export function Board() {
         onDragEnd={onDragEnd}
         onDragCancel={() => setActiveDrag(null)}
       >
-        <div className="relative z-0 flex h-full min-h-0 flex-1 gap-3 overflow-x-auto px-8 pb-8">
+        <div
+          className={`relative z-0 flex h-full min-h-0 flex-1 gap-3 overflow-x-auto px-4 pb-8 transition-opacity sm:px-6 lg:px-8 ${isFetching && !isLoading ? "opacity-60" : ""}`}
+        >
+          {isFetching && !isLoading && (
+            <span className="pointer-events-none absolute right-4 top-0 z-10 text-xs text-gray-400 sm:right-6 lg:right-8">
+              Updating…
+            </span>
+          )}
           {stageList.map((stage) => (
             <BoardColumn
               key={stage.id}
