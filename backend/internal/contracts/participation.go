@@ -103,7 +103,9 @@ var allowedDistributionStrategy = map[string]bool{
 func deliveryModesForLeadType(leadType string) []string {
 	switch strings.TrimSpace(leadType) {
 	case "Call":
-		return nil
+		// Calls route via the calls package; on billable connect the lead lands
+		// in the buyer inbox or pipeline (never webhook), so allow both.
+		return []string{"leads", "leads_pipeline"}
 	default:
 		return []string{"leads", "leads_pipeline", "webhook"}
 	}
@@ -112,7 +114,7 @@ func deliveryModesForLeadType(leadType string) []string {
 func validateAllowedDeliveryModes(leadType string, modes []string) error {
 	allowed := deliveryModesForLeadType(leadType)
 	if len(allowed) == 0 {
-		return httpx.Validation("Call lead type is not supported in this version")
+		return httpx.Validation("delivery is not supported for this lead type")
 	}
 	if len(modes) == 0 {
 		return httpx.Validation("at least one delivery mode is required")
@@ -551,6 +553,9 @@ func (s *Service) AcceptParticipation(ctx context.Context, buyerID, participatio
 	if err := s.ValidateParticipationFieldMapping(ctx, part.ContractID, participationID); err != nil {
 		return nil, err
 	}
+	if err := s.requireCallTargetIfCall(ctx, part.ContractID, participationID); err != nil {
+		return nil, err
+	}
 	if validated.delivery == "leads_pipeline" {
 		if err := applyBuyerStageTriggersToWon(ctx, s.pool, part.ContractID, participationID, validated.buyerPipelineID); err != nil {
 			return nil, err
@@ -635,6 +640,35 @@ func (s *Service) UpdateParticipationDelivery(ctx context.Context, buyerID, part
 	return updated, nil
 }
 
+// requireCallTargetIfCall blocks activating a Call-contract participation until
+// the buyer has saved a destination number or RTB endpoint. Uses a direct SQL
+// check to avoid importing the calls package.
+func (s *Service) requireCallTargetIfCall(ctx context.Context, contractID, participationID int64) error {
+	var leadType string
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(lead_type,'') FROM contracts WHERE id=$1`, contractID).Scan(&leadType); err != nil {
+		return err
+	}
+	if strings.TrimSpace(leadType) != "Call" {
+		return nil
+	}
+	var configured bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(
+		   SELECT 1 FROM participation_call_targets
+		   WHERE participation_id=$1
+		     AND ((target_type='static' AND COALESCE(destination_number,'') <> '')
+		       OR (target_type='dynamic' AND COALESCE(rtb_endpoint,'') <> '')))`,
+		participationID).Scan(&configured)
+	if err != nil {
+		return err
+	}
+	if !configured {
+		return httpx.Validation("configure a call target (destination number or RTB endpoint) before activating")
+	}
+	return nil
+}
+
 func (s *Service) UpdateParticipationStatus(ctx context.Context, buyerID, participationID int64, status string) (*Participation, error) {
 	part, err := s.GetParticipationForBuyer(ctx, buyerID, participationID)
 	if err != nil {
@@ -649,6 +683,9 @@ func (s *Service) UpdateParticipationStatus(ctx context.Context, buyerID, partic
 	case "active":
 		if part.Status != "paused" {
 			return nil, httpx.Validation("only paused participations can be resumed")
+		}
+		if err := s.requireCallTargetIfCall(ctx, part.ContractID, participationID); err != nil {
+			return nil, err
 		}
 	case "withdrawn":
 		if !participationManageable(part.Status) {

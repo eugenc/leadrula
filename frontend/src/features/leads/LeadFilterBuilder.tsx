@@ -1,6 +1,8 @@
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FilterSelect } from "@/components/ui/input";
+import { useAuthStore } from "@/store/authStore";
+import { formatStatus } from "./leadsListColumns";
 import { FILTER_FIELDS, type FilterCondition } from "./leadsViews";
 import { usePipelines, useStages, useUsers } from "./hooks";
 
@@ -9,12 +11,15 @@ interface Props {
   onChange: (conditions: FilterCondition[]) => void;
 }
 
-const STATUS_OPTIONS = [
-  { value: "distributed", label: "Distributed" },
+const PUBLISHER_STATUS_VALUES = ["distributed", "returned", "review", "closed"] as const;
+
+const BUYER_STATUS_OPTIONS = [
+  { value: "buyer_new", label: "New" },
+  { value: "buyer_active", label: "Active" },
   { value: "returned", label: "Returned" },
-  { value: "review", label: "In Review" },
-  { value: "closed", label: "Closed" },
-];
+  { value: "closed", label: "Won" },
+  { value: "disputed", label: "Disputed" },
+] as const;
 
 function emptyCondition(): FilterCondition {
   const first = FILTER_FIELDS[0]!;
@@ -22,6 +27,7 @@ function emptyCondition(): FilterCondition {
 }
 
 export function LeadFilterBuilder({ conditions, onChange }: Props) {
+  const accountType = useAuthStore((s) => s.user?.account_type);
   const { data: pipelines } = usePipelines();
   const { data: users } = useUsers();
   const pipelineId = conditions.find((c) => c.field === "pipeline_id")?.value;
@@ -127,11 +133,17 @@ export function LeadFilterBuilder({ conditions, onChange }: Props) {
                     className="w-36"
                   >
                     <option value="">Select…</option>
-                    {STATUS_OPTIONS.map((s) => (
-                      <option key={s.value} value={s.value}>
-                        {s.label}
-                      </option>
-                    ))}
+                    {accountType === "buyer"
+                      ? BUYER_STATUS_OPTIONS.map((s) => (
+                          <option key={s.value} value={s.value}>
+                            {s.label}
+                          </option>
+                        ))
+                      : PUBLISHER_STATUS_VALUES.map((s) => (
+                          <option key={s} value={s}>
+                            {formatStatus(s, accountType)}
+                          </option>
+                        ))}
                   </FilterSelect>
                 )}
                 {opDef.valueType === "pipeline" && (

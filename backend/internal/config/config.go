@@ -20,6 +20,7 @@ type Config struct {
 	RefreshTokenTTL  time.Duration
 	AppBaseURL       string
 	APIBaseURL       string
+	WebhookBaseURL   string
 	CORSOrigins      []string
 
 	MailgunAPIKey  string
@@ -65,6 +66,7 @@ func Load() *Config {
 		RefreshTokenTTL:  getdur("REFRESH_TOKEN_TTL", 720*time.Hour),
 		AppBaseURL:       getenv("APP_BASE_URL", "http://localhost:5173"),
 		APIBaseURL:       firstNonEmpty(os.Getenv("API_BASE_URL"), oauthRedirectBase, "http://localhost:8080"),
+		WebhookBaseURL:   firstNonEmpty(os.Getenv("WEBHOOK_BASE_URL"), os.Getenv("API_BASE_URL"), oauthRedirectBase, "http://localhost:8080"),
 		CORSOrigins:      splitCSV(getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:5174")),
 		MailgunAPIKey:  os.Getenv("MAILGUN_API_KEY"),
 		MailgunDomain:  os.Getenv("MAILGUN_DOMAIN"),

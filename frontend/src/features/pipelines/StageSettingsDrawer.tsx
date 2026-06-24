@@ -36,8 +36,10 @@ import { formatStatus } from "@/features/leads/leadsListColumns";
 import { cn } from "@/lib/utils";
 import { errorMessage } from "@/lib/api";
 import { toast } from "@/store/toastStore";
+import { useAuthStore } from "@/store/authStore";
 import { Plus, Trash2 } from "lucide-react";
 import type {
+  AccountType,
   CustomField,
   DisqReason,
   RuleAction,
@@ -54,6 +56,7 @@ type Lookups = {
   users: { id: number; full_name: string }[];
   reasons: DisqReason[];
   currentStageId: number;
+  accountType?: AccountType;
 };
 
 type RuleDraft = {
@@ -207,6 +210,7 @@ export function StageSettingsDrawer({ stage, pipelineId, open, onClose }: Props)
   const updateReason = useUpdateStageReason();
   const removeReason = useDeleteStageReason();
   const createRule = useCreateStageRule();
+  const accountType = useAuthStore((s) => s.user?.account_type);
   const [draft, setDraft] = useState<RuleDraft | null>(null);
   const [newReasonLabel, setNewReasonLabel] = useState("");
 
@@ -218,6 +222,7 @@ export function StageSettingsDrawer({ stage, pipelineId, open, onClose }: Props)
     users: (users ?? []).filter((u) => u.status === "active"),
     reasons: (pipelineReasons ?? []).filter((r) => r.is_active),
     currentStageId: stage.id,
+    accountType,
   };
 
   return (
@@ -530,7 +535,7 @@ function summarizeAction(a: RuleAction, lk: Lookups): string {
 function valueLabel(kind: FieldKind, value: unknown, lk: Lookups): string {
   switch (kind) {
     case "status":
-      return formatStatus(asStr(value));
+      return formatStatus(asStr(value), lk.accountType);
     case "stage":
       return lk.stages.find((s) => s.id === asNum(value))?.name ?? "—";
     case "user":
@@ -789,7 +794,7 @@ function ConditionValue({
         <Select value={asStr(value)} onChange={(e) => onChange(e.target.value)} className="min-w-[130px]">
           {LEAD_STATUSES.map((s) => (
             <option key={s} value={s}>
-              {formatStatus(s)}
+              {formatStatus(s, lk.accountType)}
             </option>
           ))}
         </Select>
@@ -1082,7 +1087,7 @@ function ActionValue({
             <Select value={asStr(value)} onChange={(e) => onChange(e.target.value)} className={fieldClass}>
               {LEAD_STATUSES.map((s) => (
                 <option key={s} value={s}>
-                  {formatStatus(s)}
+                  {formatStatus(s, lk.accountType)}
                 </option>
               ))}
             </Select>

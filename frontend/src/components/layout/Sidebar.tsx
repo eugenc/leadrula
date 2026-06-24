@@ -20,6 +20,7 @@ import {
   Handshake,
   Import,
   Logs,
+  Phone,
   type LucideIcon,
 } from "lucide-react";
 
@@ -41,6 +42,7 @@ const publisherNav: NavGroup[] = [
     label: "Leads",
     items: [
       { to: "/p/leads", label: "Leads", icon: List },
+      { to: "/p/calls", label: "Calls", icon: Phone },
       { to: "/p/fields", label: "Custom Fields", icon: Tags, adminOnly: true },
     ],
   },
@@ -87,6 +89,7 @@ const buyerNav: NavGroup[] = [
     label: "Leads",
     items: [
       { to: "/b/leads", label: "Leads", icon: List },
+      { to: "/b/calls", label: "Calls", icon: Phone },
       { to: "/b/calendar", label: "Calendar", icon: Calendar },
       { to: "/b/fields", label: "Custom Fields", icon: Tags, adminOnly: true },
     ],

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/customfields"
@@ -22,7 +23,13 @@ type Source struct {
 	Type           string    `json:"type"`
 	IsActive       bool      `json:"is_active"`
 	APIKeyRequired bool      `json:"api_key_required"`
-	CreatedAt      time.Time `json:"created_at"`
+	// Call sources only.
+	IntegrationConnectionID *int64    `json:"integration_connection_id,omitempty"`
+	TrackingNumber          *string   `json:"tracking_number,omitempty"`
+	TwilioSID               *string   `json:"twilio_sid,omitempty"`
+	PayloadEnabled          bool      `json:"payload_enabled"`
+	RequirePreload          bool      `json:"require_preload"`
+	CreatedAt               time.Time `json:"created_at"`
 }
 
 type SourceFieldMapEntry struct {
@@ -196,18 +203,23 @@ func scanRoute(row pgx.Row) (*Route, error) {
 	return rt, nil
 }
 
-const sourceCols = `id, publisher_id, name, slug, type, is_active, api_key_required, created_at`
+const sourceCols = `id, publisher_id, name, slug, type, is_active, api_key_required,
+	integration_connection_id, tracking_number, twilio_sid, payload_enabled, require_preload, created_at`
 
 func scanSource(row pgx.Row) (*Source, error) {
 	s := &Source{}
-	err := row.Scan(&s.ID, &s.PublisherID, &s.Name, &s.Slug, &s.Type, &s.IsActive, &s.APIKeyRequired, &s.CreatedAt)
-	if err != nil {
+	if err := scanSourceInto(row, s); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
 	return s, nil
+}
+
+func scanSourceInto(row pgx.Row, s *Source) error {
+	return row.Scan(&s.ID, &s.PublisherID, &s.Name, &s.Slug, &s.Type, &s.IsActive, &s.APIKeyRequired,
+		&s.IntegrationConnectionID, &s.TrackingNumber, &s.TwilioSID, &s.PayloadEnabled, &s.RequirePreload, &s.CreatedAt)
 }
 
 // MatchSourceBySlug finds an active source by slug. nil means no match.
@@ -479,7 +491,7 @@ func (s *Service) ListSources(ctx context.Context, publisherID int64) ([]Source,
 	var out []Source
 	for rows.Next() {
 		var src Source
-		if err := rows.Scan(&src.ID, &src.PublisherID, &src.Name, &src.Slug, &src.Type, &src.IsActive, &src.APIKeyRequired, &src.CreatedAt); err != nil {
+		if err := scanSourceInto(rows, &src); err != nil {
 			return nil, err
 		}
 		out = append(out, src)
@@ -487,38 +499,82 @@ func (s *Service) ListSources(ctx context.Context, publisherID int64) ([]Source,
 	return out, rows.Err()
 }
 
-func (s *Service) CreateSource(ctx context.Context, publisherID int64, name, slug, sourceType string, apiKeyRequired *bool) (*Source, error) {
+// CallSourceParams carries the Twilio/preload fields for a call-type source.
+type CallSourceParams struct {
+	IntegrationConnectionID *int64  `json:"integration_connection_id"`
+	TrackingNumber          *string `json:"tracking_number"`
+	TwilioSID               *string `json:"twilio_sid"`
+	PayloadEnabled          *bool   `json:"payload_enabled"`
+	RequirePreload          *bool   `json:"require_preload"`
+}
+
+func (s *Service) CreateSource(ctx context.Context, publisherID int64, name, slug, sourceType string, apiKeyRequired *bool, call *CallSourceParams) (*Source, error) {
 	if sourceType == "" {
 		return nil, httpx.Validation("type is required")
 	}
-	if sourceType != "webhook" {
-		return nil, httpx.Validation("type must be webhook")
+	if sourceType != "webhook" && sourceType != "call" {
+		return nil, httpx.Validation("type must be webhook or call")
 	}
 	required := true
 	if apiKeyRequired != nil {
 		required = *apiKeyRequired
 	}
-	return scanSource(s.pool.QueryRow(ctx,
-		`INSERT INTO routing_sources(publisher_id, name, slug, type, api_key_required) VALUES ($1,$2,$3,$4,$5)
+	if call == nil {
+		call = &CallSourceParams{}
+	}
+	if sourceType == "call" && (call.TrackingNumber == nil || strings.TrimSpace(*call.TrackingNumber) == "") {
+		return nil, httpx.Validation("tracking_number is required for call sources")
+	}
+	payloadEnabled := call.PayloadEnabled != nil && *call.PayloadEnabled
+	requirePreload := call.RequirePreload != nil && *call.RequirePreload
+	src, err := scanSource(s.pool.QueryRow(ctx,
+		`INSERT INTO routing_sources(publisher_id, name, slug, type, api_key_required,
+		   integration_connection_id, tracking_number, twilio_sid, payload_enabled, require_preload)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		 RETURNING `+sourceCols,
-		publisherID, name, slug, sourceType, required))
+		publisherID, name, slug, sourceType, required,
+		call.IntegrationConnectionID, call.TrackingNumber, call.TwilioSID, payloadEnabled, requirePreload))
+	if err != nil && database.IsUniqueViolation(err) {
+		return nil, httpx.Conflict("a source with this slug or tracking number already exists")
+	}
+	return src, err
 }
 
-func (s *Service) UpdateSource(ctx context.Context, publisherID, id int64, name, slug *string, isActive, apiKeyRequired *bool) (*Source, error) {
+// SourceByTrackingNumber resolves the active call source that owns a tracking number.
+func SourceByTrackingNumber(ctx context.Context, q database.Querier, trackingNumber string) (*Source, error) {
+	if trackingNumber == "" {
+		return nil, nil
+	}
+	return scanSource(q.QueryRow(ctx,
+		`SELECT `+sourceCols+`
+		 FROM routing_sources WHERE tracking_number=$1 AND type='call' AND is_active`,
+		trackingNumber))
+}
+
+func (s *Service) UpdateSource(ctx context.Context, publisherID, id int64, name, slug *string, isActive, apiKeyRequired *bool, call *CallSourceParams) (*Source, error) {
+	if call == nil {
+		call = &CallSourceParams{}
+	}
 	src, err := scanSource(s.pool.QueryRow(ctx,
 		`UPDATE routing_sources SET
 		   name = COALESCE($3, name),
 		   slug = COALESCE($4, slug),
 		   is_active = COALESCE($5, is_active),
-		   api_key_required = COALESCE($6, api_key_required)
+		   api_key_required = COALESCE($6, api_key_required),
+		   integration_connection_id = COALESCE($7, integration_connection_id),
+		   tracking_number = COALESCE($8, tracking_number),
+		   twilio_sid = COALESCE($9, twilio_sid),
+		   payload_enabled = COALESCE($10, payload_enabled),
+		   require_preload = COALESCE($11, require_preload)
 		 WHERE id=$1 AND publisher_id=$2
 		 RETURNING `+sourceCols,
-		id, publisherID, name, slug, isActive, apiKeyRequired))
+		id, publisherID, name, slug, isActive, apiKeyRequired,
+		call.IntegrationConnectionID, call.TrackingNumber, call.TwilioSID, call.PayloadEnabled, call.RequirePreload))
 	if err == nil && src == nil {
 		return nil, httpx.NotFound("source not found")
 	}
 	if err != nil && database.IsUniqueViolation(err) {
-		return nil, httpx.Conflict("a source with this slug already exists")
+		return nil, httpx.Conflict("a source with this slug or tracking number already exists")
 	}
 	return src, err
 }

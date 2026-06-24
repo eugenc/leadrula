@@ -19,6 +19,7 @@ import (
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/internal/billing"
 	"github.com/echayko/leadrula/backend/internal/calendar"
+	"github.com/echayko/leadrula/backend/internal/calls"
 	"github.com/echayko/leadrula/backend/internal/collaboration"
 	"github.com/echayko/leadrula/backend/internal/config"
 	"github.com/echayko/leadrula/backend/internal/contracts"
@@ -164,6 +165,15 @@ func main() {
 
 	oversightH := oversight.NewHandler(accountsRepo, accountsSvc, leadsRepo, pipelinesSvc, billingSvc, calSvc, collabSvc, partnersSvc, partnersSvc)
 
+	// Call leads: contract-owned live call routing + billing.
+	var callsCreds calls.CredentialProvider
+	if integrationsSvc != nil {
+		callsCreds = integrationsSvc
+	}
+	callsSvc := calls.NewService(pool, encKey, leadsRepo, accountsRepo, notifSvc, integrationsEnq, callsCreds, cfg.WebhookBaseURL)
+	callsH := calls.NewHandler(callsSvc)
+	go callsSvc.RunCapResetWorker(ctx)
+
 	// ── router ───────────────────────────────────────────────────
 	r := chi.NewRouter()
 	r.Use(mw.RequestID, mw.RealIP, mw.Recoverer, mw.Logger, mw.CORS(cfg.CORSOrigins))
@@ -175,6 +185,7 @@ func main() {
 		pub.Use(apikeysSvc.RequireAPIKey)
 		intakeH.RegisterPublicRoutes(pub)
 		leadsH.RegisterPublicRoutes(pub, apikeysSvc)
+		callsH.RegisterPublicRoutes(pub)
 	})
 
 	// source ingest (per-source API-key auth)
@@ -182,6 +193,9 @@ func main() {
 
 	// inbound webhooks (per-webhook secret auth)
 	webhooksH.RegisterPublicRoutes(r)
+
+	// Twilio call webhooks (validate X-Twilio-Signature per publisher token)
+	callsSvc.RegisterWebhookRoutes(r)
 
 	// public auth
 	accountsH.RegisterAuthRoutes(r)
@@ -229,6 +243,7 @@ func main() {
 		}
 		webhooksH.RegisterRoutes(p)
 		dashboardH.RegisterRoutes(p)
+		callsH.RegisterPublisher(p)
 	})
 
 	// buyer namespace
@@ -254,6 +269,7 @@ func main() {
 		}
 		webhooksH.RegisterRoutes(b)
 		dashboardH.RegisterRoutes(b)
+		callsH.RegisterBuyer(b)
 	})
 
 	srv := &http.Server{

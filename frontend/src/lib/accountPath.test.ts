@@ -6,6 +6,8 @@ describe("mapAccountPath", () => {
     expect(mapAccountPath("/p/board", "", "buyer")).toBe("/b/board");
     expect(mapAccountPath("/b/board", "", "publisher")).toBe("/p/board");
     expect(mapAccountPath("/p/settings/users", "", "buyer")).toBe("/b/settings/users");
+    expect(mapAccountPath("/p/calls", "", "buyer")).toBe("/b/calls");
+    expect(mapAccountPath("/b/calls", "", "publisher")).toBe("/p/calls");
   });
 
   it("maps known mismatched suffixes", () => {

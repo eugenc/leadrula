@@ -142,6 +142,30 @@ func Debit(ctx context.Context, q database.Querier, buyerID int64, amount float6
 	return err
 }
 
+// DebitCall charges the buyer for a call (billable connect or no-answer attempt)
+// and links the transaction to the call so the ledger can label it "Call".
+// Mirrors Debit but sets call_id. Runs inside the caller's transaction.
+func DebitCall(ctx context.Context, q database.Querier, buyerID int64, amount float64, leadID, contractID, callID int64, desc string) error {
+	if err := EnsureBalance(ctx, q, buyerID); err != nil {
+		return err
+	}
+	var balance float64
+	if err := q.QueryRow(ctx,
+		`SELECT balance::float8 FROM buyer_balances WHERE buyer_id = $1 FOR UPDATE`, buyerID).Scan(&balance); err != nil {
+		return err
+	}
+	newBal := balance - amount
+	if _, err := q.Exec(ctx,
+		`UPDATE buyer_balances SET balance = $2 WHERE buyer_id = $1`, buyerID, newBal); err != nil {
+		return err
+	}
+	_, err := q.Exec(ctx,
+		`INSERT INTO transactions(buyer_id, lead_id, contract_id, call_id, type, amount, balance_after, description)
+		 VALUES ($1, NULLIF($2,0), NULLIF($3,0), NULLIF($4,0), 'debit', $5, $6, $7)`,
+		buyerID, leadID, contractID, callID, -amount, newBal, desc)
+	return err
+}
+
 // Credit refunds the buyer inside the caller's transaction (mirror of Debit).
 func Credit(ctx context.Context, q database.Querier, buyerID int64, amount float64, leadID, contractID int64, desc string) error {
 	if amount <= 0 {

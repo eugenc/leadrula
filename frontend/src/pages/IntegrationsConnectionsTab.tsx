@@ -145,6 +145,8 @@ function AddConnectionDrawer({
   const [pitToken, setPitToken] = useState("");
   const [locationId, setLocationId] = useState("");
   const [apiDomain, setApiDomain] = useState("com");
+  const [twilioSid, setTwilioSid] = useState("");
+  const [twilioToken, setTwilioToken] = useState("");
 
   const [endpointUrl, setEndpointUrl] = useState(SUNBASE_URL);
   const [schemaName, setSchemaName] = useState("");
@@ -170,6 +172,7 @@ function AddConnectionDrawer({
   const isSunbase = effectiveSlug === "sunbase";
   const isGhl = effectiveSlug === "ghl";
   const isGoogleMaps = effectiveSlug === "google_maps";
+  const isTwilio = effectiveSlug === "twilio";
   const isManage = existingForSlug.length > 0;
   const showSunbaseActive = isSunbase && sunbaseActive && activeConnection != null;
   const showGhlActive = isGhl && ghlActive && activeConnection != null;
@@ -482,6 +485,9 @@ function AddConnectionDrawer({
       credentials = { api_key: apiKey };
       connectionName = "Google Maps";
     }
+    if (slug === "twilio") {
+      credentials = { account_sid: twilioSid.trim(), auth_token: twilioToken.trim() };
+    }
     create.mutate(
       { provider_slug: slug, name: connectionName, credentials, config },
       {
@@ -611,6 +617,7 @@ function AddConnectionDrawer({
                 !slug ||
                 (!isSunbase && !isGoogleMaps && !name) ||
                 (isGoogleMaps && !apiKey.trim()) ||
+                (isTwilio && (!twilioSid.trim() || !twilioToken.trim())) ||
                 (isGhl &&
                   !ghlWebhookMode &&
                   !pitToken.trim() &&
@@ -817,6 +824,26 @@ function AddConnectionDrawer({
                 <div>
                   <Label>Google Maps API key</Label>
                   <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+                </div>
+              </>
+            )}
+            {isTwilio && (
+              <>
+                <p className="text-sm text-gray-500">
+                  Connect your Twilio account to route inbound calls. Credentials are stored encrypted and
+                  used to dial buyers and fetch call recordings.
+                </p>
+                <div>
+                  <Label>Account SID</Label>
+                  <Input
+                    value={twilioSid}
+                    onChange={(e) => setTwilioSid(e.target.value)}
+                    placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                  />
+                </div>
+                <div>
+                  <Label>Auth token</Label>
+                  <Input type="password" value={twilioToken} onChange={(e) => setTwilioToken(e.target.value)} />
                 </div>
               </>
             )}

@@ -14,6 +14,7 @@ import {
   useBuyers,
 } from "@/features/admin/hooks";
 import { formatParticipationStatus } from "@/features/admin/contractOffer";
+import { PublisherCallTargetEditor } from "@/features/calls/PublisherCallTargetEditor";
 import { usePipelines, useStages } from "@/features/leads/hooks";
 import type { Contract, ContractParticipation } from "@/types";
 
@@ -127,6 +128,7 @@ export function ContractParticipationsSection({ contract }: { contract: Contract
               <ParticipationRow
                 key={p.id}
                 part={p}
+                isCall={contract.lead_type === "Call"}
                 onAcceptCounter={() =>
                   acceptCounter.mutate(p.id, {
                     onSuccess: () => toast.success("Counter accepted — new contract created"),
@@ -151,11 +153,13 @@ export function ContractParticipationsSection({ contract }: { contract: Contract
 
 function ParticipationRow({
   part,
+  isCall,
   onAcceptCounter,
   onRejectCounter,
   counterLoading,
 }: {
   part: ContractParticipation;
+  isCall: boolean;
   onAcceptCounter: () => void;
   onRejectCounter: () => void;
   counterLoading: boolean;
@@ -164,6 +168,7 @@ function ParticipationRow({
   const { data: pipelines } = usePipelines();
   const { data: stages } = useStages(part.buyer_pipeline_id ?? undefined);
   const pipelineName = pipelines?.find((p) => p.id === part.buyer_pipeline_id)?.name;
+  const [expanded, setExpanded] = useState(false);
 
   const distribution =
     part.delivery === "leads_pipeline" && part.buyer_pipeline_id
@@ -173,8 +178,21 @@ function ParticipationRow({
         : part.delivery || "—";
 
   return (
+    <>
     <TR>
-      <TD className="font-semibold">{part.buyer_name || `#${part.buyer_id}`}</TD>
+      <TD className="font-semibold">
+        {isCall && (
+          <button
+            type="button"
+            className="mr-1 text-gray-400 hover:text-gray-700"
+            onClick={() => setExpanded((v) => !v)}
+            aria-label={expanded ? "Collapse" : "Expand"}
+          >
+            {expanded ? "▾" : "▸"}
+          </button>
+        )}
+        {part.buyer_name || `#${part.buyer_id}`}
+      </TD>
       <TD>{formatParticipationStatus(part.status)}</TD>
       <TD>{part.delivery || "—"}</TD>
       <TD className="text-sm text-gray-600">{part.status === "active" ? distribution : "—"}</TD>
@@ -215,5 +233,13 @@ function ParticipationRow({
         )}
       </TD>
     </TR>
+    {isCall && expanded && (
+      <tr>
+        <td colSpan={5} className="p-0">
+          <PublisherCallTargetEditor participationId={part.id} />
+        </td>
+      </tr>
+    )}
+    </>
   );
 }

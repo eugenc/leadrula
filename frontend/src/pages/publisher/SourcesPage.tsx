@@ -14,6 +14,7 @@ import {
   useRoutes,
 } from "@/features/admin/hooks";
 import { get } from "@/lib/api";
+import { useIntegrationConnections } from "@/features/integrations/hooks";
 import { useCustomFields } from "@/features/leads/hooks";
 import { CreateCustomFieldDrawer } from "@/features/admin/CreateCustomFieldDrawer";
 import { BuiltinCustomFieldSelect } from "@/features/admin/BuiltinCustomFieldSelect";
@@ -185,27 +186,55 @@ function SourceDrawerContent({
   const editing = source !== null;
   const create = useCreateSource();
   const update = useUpdateSource();
+  const { data: connections } = useIntegrationConnections();
+  const twilioConnections = (connections ?? []).filter((c) => c.provider_slug === "twilio");
 
-  const [type, setType] = useState<SourceType>("webhook");
+  const [type, setType] = useState<SourceType>(source?.type ?? "webhook");
   const [name, setName] = useState(source?.name ?? "");
   const [slug, setSlug] = useState(source?.slug ?? "");
   const [slugTouched, setSlugTouched] = useState(false);
   const [isActive, setIsActive] = useState(source?.is_active ?? true);
   const [apiKeyRequired, setApiKeyRequired] = useState(source?.api_key_required ?? true);
+  const [trackingNumber, setTrackingNumber] = useState(source?.tracking_number ?? "");
+  const [twilioConnId, setTwilioConnId] = useState(source?.integration_connection_id ?? 0);
+  const [payloadEnabled, setPayloadEnabled] = useState(source?.payload_enabled ?? false);
+  const [requirePreload, setRequirePreload] = useState(source?.require_preload ?? false);
 
   useEffect(() => {
-    setType("webhook");
+    setType(source?.type ?? "webhook");
     setName(source?.name ?? "");
     setSlug(source?.slug ?? "");
     setSlugTouched(false);
     setIsActive(source?.is_active ?? true);
     setApiKeyRequired(source?.api_key_required ?? true);
+    setTrackingNumber(source?.tracking_number ?? "");
+    setTwilioConnId(source?.integration_connection_id ?? 0);
+    setPayloadEnabled(source?.payload_enabled ?? false);
+    setRequirePreload(source?.require_preload ?? false);
   }, [source]);
+
+  const isCall = type === "call";
+
+  function callBody() {
+    return {
+      tracking_number: trackingNumber.trim(),
+      integration_connection_id: twilioConnId || null,
+      payload_enabled: payloadEnabled,
+      require_preload: payloadEnabled ? requirePreload : false,
+    };
+  }
 
   function submit() {
     if (editing) {
+      const body: Record<string, unknown> = {
+        name,
+        slug,
+        is_active: isActive,
+        api_key_required: apiKeyRequired,
+      };
+      if (source.type === "call") body.call = callBody();
       update.mutate(
-        { id: source.id, body: { name, slug, is_active: isActive, api_key_required: apiKeyRequired } },
+        { id: source.id, body },
         {
           onSuccess: () => {
             toast.success("Source updated");
@@ -215,20 +244,19 @@ function SourceDrawerContent({
         }
       );
     } else {
-      create.mutate(
-        { name, slug, type, api_key_required: apiKeyRequired },
-        {
-          onSuccess: (src) => {
-            onCreated?.(src);
-            onClose();
-          },
-          onError: (e) => toast.error(errorMessage(e)),
-        }
-      );
+      const body: Record<string, unknown> = { name, slug, type, api_key_required: apiKeyRequired };
+      if (isCall) body.call = callBody();
+      create.mutate(body, {
+        onSuccess: (src) => {
+          onCreated?.(src);
+          onClose();
+        },
+        onError: (e) => toast.error(errorMessage(e)),
+      });
     }
   }
 
-  const valid = !!name && !!slug && !!type;
+  const valid = !!name && !!slug && !!type && (!isCall || !!trackingNumber.trim());
   const saving = create.isPending || update.isPending;
 
   return (
@@ -253,7 +281,7 @@ function SourceDrawerContent({
           <div>
             <Label>Type</Label>
             <p className="text-sm text-gray-700">
-              <Badge>{source.type === "webhook" ? "Webhook" : source.type}</Badge>
+              <Badge>{source.type === "webhook" ? "Webhook" : source.type === "call" ? "Call" : source.type}</Badge>
             </p>
           </div>
         ) : (
@@ -261,6 +289,7 @@ function SourceDrawerContent({
             <Label>Type</Label>
             <Select value={type} onChange={(e) => setType(e.target.value as SourceType)}>
               <option value="webhook">Webhook</option>
+              <option value="call">Call (inbound phone)</option>
             </Select>
           </div>
         )}
@@ -286,20 +315,74 @@ function SourceDrawerContent({
             placeholder="roofing-gta"
           />
         </div>
-        {slug && (
+        {slug && !isCall && (
           <p className="text-xs font-mono text-gray-500">
             POST {apiBaseURL}/api/v1/sources/{slug}
           </p>
         )}
-        <div className="flex items-center justify-between">
-          <div>
-            <Label>Require API key</Label>
-            <p className="text-xs text-gray-500">Publisher API key Bearer token on inbound POST requests</p>
-          </div>
-          <Switch checked={apiKeyRequired} onChange={setApiKeyRequired} />
-        </div>
-        {!apiKeyRequired && (
-          <p className="text-xs text-amber-700">Anyone with the source URL can POST payloads.</p>
+        {isCall && (
+          <>
+            <div>
+              <Label>Twilio account</Label>
+              <Select value={twilioConnId} onChange={(e) => setTwilioConnId(Number(e.target.value))}>
+                <option value={0}>Select Twilio connection…</option>
+                {twilioConnections.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
+              {twilioConnections.length === 0 && (
+                <p className="mt-1 text-xs text-amber-700">
+                  Connect Twilio on the Integrations page first.
+                </p>
+              )}
+            </div>
+            <div>
+              <Label>Tracking number (E.164)</Label>
+              <Input
+                value={trackingNumber}
+                onChange={(e) => setTrackingNumber(e.target.value)}
+                placeholder="+14155550123"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Point this Twilio number's Voice webhook at:
+              </p>
+              <p className="text-xs font-mono text-gray-500">
+                POST {apiBaseURL}/webhooks/twilio/voice
+              </p>
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <Label>Accept inbound payload</Label>
+                <p className="text-xs text-gray-500">Preload caller/lead data via the calls API before the call.</p>
+              </div>
+              <Switch checked={payloadEnabled} onChange={setPayloadEnabled} />
+            </div>
+            {payloadEnabled && (
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label>Require preload</Label>
+                  <p className="text-xs text-gray-500">Only route calls that have a matching preload payload.</p>
+                </div>
+                <Switch checked={requirePreload} onChange={setRequirePreload} />
+              </div>
+            )}
+          </>
+        )}
+        {!isCall && (
+          <>
+            <div className="flex items-center justify-between">
+              <div>
+                <Label>Require API key</Label>
+                <p className="text-xs text-gray-500">Publisher API key Bearer token on inbound POST requests</p>
+              </div>
+              <Switch checked={apiKeyRequired} onChange={setApiKeyRequired} />
+            </div>
+            {!apiKeyRequired && (
+              <p className="text-xs text-amber-700">Anyone with the source URL can POST payloads.</p>
+            )}
+          </>
         )}
         {editing && (
           <div className="flex items-center justify-between">

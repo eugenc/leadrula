@@ -216,7 +216,7 @@ var allowedCompKinds = map[string]bool{
 }
 
 var allowedCompTriggers = map[string]bool{
-	"per_lead": true, "buyer_stage": true, "manual": true,
+	"per_lead": true, "buyer_stage": true, "manual": true, "per_connected_call": true,
 }
 
 var allowedCompDelivery = map[string]bool{
@@ -249,7 +249,7 @@ func validateCompensationParams(p CompensationParams) error {
 		trigger = defaultTriggerForKind(kind)
 	}
 	if !allowedCompTriggers[trigger] {
-		return httpx.Validation("trigger must be per_lead, buyer_stage, or manual")
+		return httpx.Validation("trigger must be per_lead, buyer_stage, manual, or per_connected_call")
 	}
 	period := strings.TrimSpace(p.CapPeriod)
 	if period == "" {
@@ -270,15 +270,15 @@ func validateCompensationParams(p CompensationParams) error {
 		if p.FlatAmount == nil || *p.FlatAmount < 0 {
 			return httpx.Validation("flat_amount is required for flat_rate")
 		}
-		if trigger != "per_lead" {
-			return httpx.Validation("flat_rate compensation must use per_lead trigger")
+		if trigger != "per_lead" && trigger != "per_connected_call" {
+			return httpx.Validation("flat_rate compensation must use per_lead or per_connected_call trigger")
 		}
 	case "bid":
 		if p.BidMin == nil || p.BidMax == nil || *p.BidMin < 0 || *p.BidMax < *p.BidMin {
 			return httpx.Validation("bid_min and bid_max are required for bid with bid_min <= bid_max")
 		}
-		if trigger != "per_lead" {
-			return httpx.Validation("bid compensation must use per_lead trigger")
+		if trigger != "per_lead" && trigger != "per_connected_call" {
+			return httpx.Validation("bid compensation must use per_lead or per_connected_call trigger")
 		}
 	case "rev_share":
 		if p.RevPercent == nil || *p.RevPercent < 0 || *p.RevPercent > 100 {

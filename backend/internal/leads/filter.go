@@ -148,13 +148,27 @@ func appendCompiledFilters(where string, args []any, conditions []FilterConditio
 				if v == "" {
 					return "", nil, httpx.Validation("status value required")
 				}
-				add("l.status =", v)
+				switch v {
+				case "buyer_new":
+					addRaw(buyerStatusNewSQL)
+				case "buyer_active":
+					addRaw(buyerStatusActiveSQL)
+				default:
+					add("l.status =", v)
+				}
 			case "not_equals":
 				v := resolveText(c.Value)
 				if v == "" {
 					return "", nil, httpx.Validation("status value required")
 				}
-				add("l.status !=", v)
+				switch v {
+				case "buyer_new":
+					addRaw("NOT " + buyerStatusNewSQL)
+				case "buyer_active":
+					addRaw("NOT " + buyerStatusActiveSQL)
+				default:
+					add("l.status !=", v)
+				}
 			default:
 				return "", nil, httpx.Validation("unsupported operator for status: " + op)
 			}

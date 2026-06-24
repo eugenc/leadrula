@@ -4,6 +4,7 @@ import "github.com/echayko/leadrula/backend/pkg/httpx"
 
 var ValidColors = []string{
 	"gray", "jade", "blue", "amber", "red", "purple", "teal", "orange", "pink", "slate",
+	"green", "cyan", "indigo", "yellow", "rose", "violet", "emerald", "sky",
 }
 
 func validateColor(c string) error {

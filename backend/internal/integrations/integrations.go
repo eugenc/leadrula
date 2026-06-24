@@ -61,8 +61,33 @@ func NewService(pool *pgxpool.Pool, encKey []byte, oauth OAuthConfig) *Service {
 			"salesforce": &providers.SalesforceProvider{},
 			"sunbase":      &providers.SunbaseProvider{},
 			"google_maps":  &providers.GoogleMapsProvider{},
+			"twilio":       &providers.TwilioProvider{},
 		},
 	}
+}
+
+// DecryptedCredentials returns a connection's stored credentials as a string map.
+// Used by the calls package to read publisher Twilio account_sid/auth_token.
+func (s *Service) DecryptedCredentials(ctx context.Context, accountID, connectionID int64) (map[string]string, error) {
+	var encCredentials []byte
+	err := s.pool.QueryRow(ctx,
+		`SELECT credentials FROM integration_connections WHERE id=$1 AND account_id=$2`,
+		connectionID, accountID).Scan(&encCredentials)
+	if err != nil {
+		return nil, err
+	}
+	if len(encCredentials) == 0 {
+		return map[string]string{}, nil
+	}
+	plain, err := decrypt(s.encKey, encCredentials)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	if err := json.Unmarshal(plain, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (s *Service) ListProviders(ctx context.Context) ([]map[string]any, error) {

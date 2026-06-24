@@ -36,7 +36,7 @@ func testPublisherSource(t *testing.T, pool *pgxpool.Pool) (publisherID, sourceI
 	}
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
-	src, err := svc.CreateSource(ctx, publisherID, "Field map test "+suffix, "field-map-test-"+suffix, "webhook", nil)
+	src, err := svc.CreateSource(ctx, publisherID, "Field map test "+suffix, "field-map-test-"+suffix, "webhook", nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSource: %v", err)
 	}

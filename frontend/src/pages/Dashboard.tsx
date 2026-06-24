@@ -16,6 +16,7 @@ import {
   useResolvedDashboardView,
 } from "@/features/dashboard/DashboardViewPicker";
 import { useDashboardPeriod, inPeriod } from "@/features/dashboard/dashboardViews";
+import { buyerDisplayStatus } from "@/features/leads/leadsListColumns";
 
 export function Dashboard() {
   const user = useAuthStore((s) => s.user);
@@ -26,9 +27,18 @@ export function Dashboard() {
   const { periodState, isLoading: periodLoading } = useDashboardPeriod();
   const { stats, loading: statsLoading } = useDashboardStats(view, !!isBuyer, periodState);
 
-  const fixedStats = useMemo(() => {
-    const all = leadsData?.items ?? [];
-    const inRange = all.filter((l) => inPeriod(l.created_at, periodState));
+  const buyerFixedStats = useMemo(() => {
+    const inRange = (leadsData?.items ?? []).filter((l) => inPeriod(l.created_at, periodState));
+    return {
+      total: inRange.length,
+      new: inRange.filter((l) => buyerDisplayStatus(l) === "new").length,
+      active: inRange.filter((l) => buyerDisplayStatus(l) === "active").length,
+      returned: inRange.filter((l) => l.status === "returned").length,
+    };
+  }, [leadsData, periodState]);
+
+  const publisherFixedStats = useMemo(() => {
+    const inRange = (leadsData?.items ?? []).filter((l) => inPeriod(l.created_at, periodState));
     return {
       total: inRange.length,
       distributed: inRange.filter((l) => l.status === "distributed").length,
@@ -57,14 +67,20 @@ export function Dashboard() {
         ) : (
           <>
             <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-4">
-              <StatCard label="Total Leads" value={fixedStats.total.toLocaleString()} />
-              <StatCard label="Distributed" value={fixedStats.distributed.toLocaleString()} />
+              <StatCard label="Total Leads" value={(isBuyer ? buyerFixedStats.total : publisherFixedStats.total).toLocaleString()} />
               {isBuyer ? (
-                <StatCard label="Balance" value={formatMoney(balance?.balance)} />
+                <>
+                  <StatCard label="New" value={buyerFixedStats.new.toLocaleString()} />
+                  <StatCard label="Active" value={buyerFixedStats.active.toLocaleString()} />
+                  <StatCard label="Balance" value={formatMoney(balance?.balance)} />
+                </>
               ) : (
-                <StatCard label="In Review" value={fixedStats.review.toLocaleString()} />
+                <>
+                  <StatCard label="Distributed" value={publisherFixedStats.distributed.toLocaleString()} />
+                  <StatCard label="In Review" value={publisherFixedStats.review.toLocaleString()} />
+                </>
               )}
-              <StatCard label="Returned" value={fixedStats.returned.toLocaleString()} />
+              <StatCard label="Returned" value={(isBuyer ? buyerFixedStats.returned : publisherFixedStats.returned).toLocaleString()} />
               <DashboardStatCards view={view} stats={stats} />
             </div>
 

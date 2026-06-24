@@ -65,8 +65,11 @@ func listSelect(accountType string) string {
 		 WHERE h.lead_id = l.id AND h.to_stage_id = l.stage_id
 		 ORDER BY h.created_at DESC, h.id DESC LIMIT 1),
 		l.created_at
-	) AS stage_entered_at`
+	) AS stage_entered_at,
+	` + stageMoveCountSQL + ` AS stage_move_count`
 }
+
+const stageMoveCountSQL = `(SELECT COUNT(*)::int FROM lead_stage_history h WHERE h.lead_id = l.id)`
 
 const leadNotDeleted = `deleted_at IS NULL`
 
@@ -217,6 +220,9 @@ func (r *Repository) GetByRef(ctx context.Context, p *auth.Principal, ref string
 	if err := r.attachLeadNames(ctx, l); err != nil {
 		return nil, err
 	}
+	if err := r.attachStageMoveCount(ctx, l); err != nil {
+		return nil, err
+	}
 	if err := r.EnrichLeadEconomics(ctx, p.AccountType, l); err != nil {
 		return nil, err
 	}
@@ -235,6 +241,11 @@ func (r *Repository) attachLeadNames(ctx context.Context, l *Lead) error {
 		 LEFT JOIN pipelines pl ON pl.id = l.pipeline_id
 		 LEFT JOIN pipeline_stages st ON st.id = l.stage_id
 		 WHERE l.id = $1`, l.ID).Scan(&l.BuyerName, &l.PreassignedBuyerName, &l.SourceName, &l.AssigneeName, &l.AssigneeAvatarURL, &l.PipelineName, &l.StageName)
+}
+
+func (r *Repository) attachStageMoveCount(ctx context.Context, l *Lead) error {
+	return r.pool.QueryRow(ctx,
+		`SELECT COUNT(*)::int FROM lead_stage_history WHERE lead_id = $1`, l.ID).Scan(&l.StageMoveCount)
 }
 
 func (r *Repository) attachCustomValues(ctx context.Context, l *Lead) error {
@@ -341,7 +352,7 @@ func scanListLead(row pgx.Row) (*Lead, error) {
 		&l.Cost, &l.Revenue,
 		&l.PipelineID, &l.StageID, &l.PublisherPipelineID, &l.PublisherStageID, &l.Position, &l.AssignedUserID, &l.PreassignedBuyerID, &l.ActionAt, &l.Status,
 		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt, &l.Tags, &l.BuyerName, &l.PreassignedBuyerName, &l.SourceName, &l.AssigneeName, &l.AssigneeAvatarURL,
-		&l.PipelineName, &l.StageName, &l.BoardStageID, &l.StageEnteredAt)
+		&l.PipelineName, &l.StageName, &l.BoardStageID, &l.StageEnteredAt, &l.StageMoveCount)
 	if err != nil {
 		return nil, err
 	}
@@ -398,7 +409,14 @@ func (r *Repository) appendListFilters(p *auth.Principal, f ListFilters, where s
 		}
 	} else {
 		if f.Status != "" {
-			add("l.status =", f.Status)
+			switch f.Status {
+			case "buyer_new":
+				where += " AND " + buyerStatusNewSQL
+			case "buyer_active":
+				where += " AND " + buyerStatusActiveSQL
+			default:
+				add("l.status =", f.Status)
+			}
 		}
 		if f.Source != "" {
 			add("l.source =", f.Source)

@@ -47,6 +47,7 @@ type Lead struct {
 	PipelineName      *string                   `json:"pipeline_name,omitempty"`
 	StageName         *string                   `json:"stage_name,omitempty"`
 	StageEnteredAt    time.Time                 `json:"stage_entered_at"`
+	StageMoveCount    int                       `json:"stage_move_count"`
 	Tags              []string                  `json:"tags"`
 	Cost              *float64                  `json:"cost,omitempty"`
 	Revenue           *float64                  `json:"revenue,omitempty"`

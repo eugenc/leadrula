@@ -36,6 +36,8 @@ import {
   useStages,
 } from "./hooks";
 import { DeleteLeadConfirmDialog } from "./DeleteLeadConfirmDialog";
+import { LeadCallTab } from "@/features/calls/LeadCallTab";
+import { useLeadCall } from "@/features/calls/hooks";
 import { useOpenReturnDispute } from "@/features/admin/hooks";
 import { DEADLINE_DAY_OPTIONS } from "@/features/billing/disputeOptions";
 import { StagePromptModal, type PromptResult } from "./StagePromptModal";
@@ -45,7 +47,7 @@ import {
   stagePromptMissingError,
 } from "@/features/pipelines/stageTypes";
 import type { CustomField, CustomFieldFolder, Lead, LeadHistoryEntry, Stage } from "@/types";
-import { formatStatus, leadSourceLabel } from "./leadsListColumns";
+import { formatStatus, leadSourceLabel, formatBuyerStatus } from "./leadsListColumns";
 import { LeadTagsEditor } from "./LeadTagsEditor";
 import { useQuery } from "@tanstack/react-query";
 import { get } from "@/lib/api";
@@ -91,7 +93,7 @@ const DRAWER_TABS = [
   { id: "profit", label: "Profit" },
 ] as const;
 
-type DrawerTab = (typeof DRAWER_TABS)[number]["id"];
+type DrawerTab = (typeof DRAWER_TABS)[number]["id"] | "call";
 
 function moneyOrDash(v: number | null | undefined): string {
   return v != null ? formatMoney(v) : "—";
@@ -187,6 +189,10 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   const [tab, setTab] = useState<DrawerTab>("details");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const update = useUpdateLead();
+  const { data: leadCall } = useLeadCall(lead.id, user?.account_type);
+  const drawerTabs = leadCall
+    ? [...DRAWER_TABS, { id: "call" as const, label: "Call" }]
+    : DRAWER_TABS;
   const removeLead = useDeleteLead();
   const { data: customFields } = useCustomFields();
   const { data: customFieldFolders } = useCustomFieldFolders();
@@ -263,7 +269,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
       <LeadHeader lead={lead} onClose={onClose} />
 
       <div className="flex border-b border-gray-100 px-5 py-[10px]">
-        {DRAWER_TABS.map(({ id, label }) => (
+        {drawerTabs.map(({ id, label }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
@@ -304,6 +310,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
         {tab === "profit" && (
           <LeadEconomics lead={lead} accountType={user?.account_type} />
         )}
+        {tab === "call" && <LeadCallTab leadId={lead.id} accountType={user?.account_type} />}
       </DrawerBody>
 
       {isAdmin && (
@@ -373,7 +380,8 @@ function LeadHeader({ lead, onClose }: { lead: Lead; onClose: () => void }) {
             {lead.first_name} {lead.last_name}
           </div>
           <div className={drawerSubtitleClass}>
-            {leadSourceLabel(lead)} · {formatStatus(lead.status)}
+            {leadSourceLabel(lead)} ·{" "}
+            {user?.account_type === "buyer" ? formatBuyerStatus(lead) : formatStatus(lead.status, user?.account_type)}
           </div>
         </div>
         <IconButton onClick={onClose} aria-label="Close">

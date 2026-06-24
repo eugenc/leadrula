@@ -10,7 +10,7 @@ import { isContractType } from "@/features/admin/contractType";
 import { offerDraftValid, type ContractOfferDraft } from "@/features/admin/contractOffer";
 import type { ContractLeadCriteria } from "@/types";
 
-export type ContractTabId = "details" | "compensation" | "delivery" | "criteria" | "returns" | "buyers" | "fieldmap" | "triggers";
+export type ContractTabId = "details" | "compensation" | "delivery" | "criteria" | "returns" | "buyers" | "fieldmap" | "triggers" | "calltarget";
 
 export function isOpenSellOffer(form: { contract_type: string; buyer_id: number }): boolean {
   return form.contract_type === "sell" && !form.buyer_id;
@@ -137,6 +137,7 @@ export function sectionComplete(
       return true;
     case "fieldmap":
     case "triggers":
+    case "calltarget":
       return true;
   }
 }

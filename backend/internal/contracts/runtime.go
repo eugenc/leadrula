@@ -104,6 +104,12 @@ func GetTargetForRoute(ctx context.Context, q database.Querier, contractID int64
 	return loadParticipationTarget(ctx, q, partID)
 }
 
+// GetTargetByParticipation loads the routing target for a specific participation.
+// Used by call routing where the winning buyer is already known.
+func GetTargetByParticipation(ctx context.Context, q database.Querier, participationID int64) (*Target, error) {
+	return loadParticipationTarget(ctx, q, participationID)
+}
+
 func loadParticipationTarget(ctx context.Context, q database.Querier, participationID int64) (*Target, error) {
 	t := &Target{}
 	var delivery string

@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLeads } from "@/features/leads/hooks";
 import { useTransactions, usePayoutSummary } from "@/features/admin/hooks";
-import { formatStatus, leadSourceLabel } from "@/features/leads/leadsListColumns";
+import { formatStatus, leadSourceLabel, formatBuyerStatus, buyerStatusBadgeVariant } from "@/features/leads/leadsListColumns";
 import { get } from "@/lib/api";
 import { Card, StatCard, Badge, Spinner } from "@/components/ui/misc";
 import { formatMoney, cn } from "@/lib/utils";
@@ -401,7 +401,9 @@ export function DashboardWideWidgets({
                 <div key={l.id} className="grid grid-cols-[1fr_7rem_5rem] items-center gap-2 text-sm">
                   <span className="truncate font-medium text-gray-800">{leadName(l)}</span>
                   <div className="flex justify-center">
-                    <Badge variant={l.status}>{formatStatus(l.status)}</Badge>
+                    <Badge variant={isBuyer ? buyerStatusBadgeVariant(l) : l.status}>
+                      {isBuyer ? formatBuyerStatus(l) : formatStatus(l.status, "publisher")}
+                    </Badge>
                   </div>
                   <span className="text-right text-xs text-gray-400">
                     {new Date(l.created_at).toLocaleDateString()}

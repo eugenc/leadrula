@@ -22,6 +22,7 @@ import {
 } from "@/features/admin/hooks";
 import { ContractOfferSection } from "@/features/admin/ContractOfferSection";
 import { ContractParticipationsSection } from "@/features/admin/ContractParticipationsSection";
+import { CallSettingsSection } from "@/features/calls/CallSettingsSection";
 import { offerFromContractModes, type ContractOfferDraft } from "@/features/admin/contractOffer";
 import {
   ContractLeadCriteriaSection,
@@ -436,20 +437,25 @@ function DraftDrawerContent({
                 onChange={setCompDrafts}
               />
             ),
-            delivery: openOffer ? (
+            delivery: (
               <div className="space-y-4">
-                <ContractOfferSection value={offerDraft} onChange={setOfferDraft} />
-                {openOfferPipelineRequired(offerDraft.allowed_delivery_modes) && (
-                  <ContractPublisherPipelineSection value={deliveryDraft} onChange={setDeliveryDraft} />
+                {openOffer ? (
+                  <div className="space-y-4">
+                    <ContractOfferSection value={offerDraft} onChange={setOfferDraft} />
+                    {openOfferPipelineRequired(offerDraft.allowed_delivery_modes) && (
+                      <ContractPublisherPipelineSection value={deliveryDraft} onChange={setDeliveryDraft} />
+                    )}
+                  </div>
+                ) : (
+                  <ContractDeliverySection
+                    buyerId={form.buyer_id}
+                    contractType={form.contract_type}
+                    value={deliveryDraft}
+                    onChange={setDeliveryDraft}
+                  />
                 )}
+                {form.lead_type === "Call" && <CallSettingsSection contractId={contract.id} />}
               </div>
-            ) : (
-              <ContractDeliverySection
-                buyerId={form.buyer_id}
-                contractType={form.contract_type}
-                value={deliveryDraft}
-                onChange={setDeliveryDraft}
-              />
             ),
             criteria: (
               <ContractLeadCriteriaSection
@@ -751,56 +757,65 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
                 )}
               </>
             ),
-            delivery: isOpenOffer ? (
+            delivery: (
               <>
-                <ContractOfferSection value={offerDraft} onChange={setOfferDraft} />
-                {openOfferPipelineRequired(offerDraft.allowed_delivery_modes) && (
-                  <div className="mt-4">
-                    <ContractPublisherPipelineSection value={deliveryDraft} onChange={setDeliveryDraft} />
-                    {offerBlocked && (
-                      <p className="mt-2 text-xs text-gray-500">
-                        Select source pipeline, distribute stage, and return stage to save.
-                      </p>
+                {isOpenOffer ? (
+                  <>
+                    <ContractOfferSection value={offerDraft} onChange={setOfferDraft} />
+                    {openOfferPipelineRequired(offerDraft.allowed_delivery_modes) && (
+                      <div className="mt-4">
+                        <ContractPublisherPipelineSection value={deliveryDraft} onChange={setDeliveryDraft} />
+                        {offerBlocked && (
+                          <p className="mt-2 text-xs text-gray-500">
+                            Select source pipeline, distribute stage, and return stage to save.
+                          </p>
+                        )}
+                      </div>
                     )}
+                    <Button
+                      className="mt-3"
+                      variant="secondary"
+                      disabled={offerUnchanged || offerBlocked || saveOffer.isPending}
+                      onClick={() => saveOfferSettings()}
+                    >
+                      Save offer settings
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <ContractDeliverySection
+                      buyerId={contract.buyer_id ?? 0}
+                      contractType={contract.contract_type}
+                      value={deliveryDraft}
+                      onChange={setDeliveryDraft}
+                    />
+                    <Button
+                      className="mt-3"
+                      variant="secondary"
+                      disabled={
+                        deliveryUnchanged ||
+                        !deliveryDraftValid(deliveryDraft) ||
+                        saveDelivery.isPending
+                      }
+                      onClick={() =>
+                        saveDelivery.mutate(
+                          { contractId: contract.id, body: deliveryDraftToBody(deliveryDraft) },
+                          {
+                            onSuccess: () => toast.success("Delivery saved"),
+                            onError: (e) => toast.error(errorMessage(e)),
+                          }
+                        )
+                      }
+                    >
+                      Save delivery
+                    </Button>
+                  </>
+                )}
+                {leadType === "Call" && (
+                  <div className="mt-4">
+                    <CallSettingsSection contractId={contract.id} />
                   </div>
                 )}
-                <Button
-                  className="mt-3"
-                  variant="secondary"
-                  disabled={offerUnchanged || offerBlocked || saveOffer.isPending}
-                  onClick={() => saveOfferSettings()}
-                >
-                  Save offer settings
-                </Button>
-              </>
-            ) : (
-              <>
-                <ContractDeliverySection
-                  buyerId={contract.buyer_id ?? 0}
-                  contractType={contract.contract_type}
-                  value={deliveryDraft}
-                  onChange={setDeliveryDraft}
-                />
-                <Button
-                  className="mt-3"
-                  variant="secondary"
-                  disabled={
-                    deliveryUnchanged ||
-                    !deliveryDraftValid(deliveryDraft) ||
-                    saveDelivery.isPending
-                  }
-                  onClick={() =>
-                    saveDelivery.mutate(
-                      { contractId: contract.id, body: deliveryDraftToBody(deliveryDraft) },
-                      {
-                        onSuccess: () => toast.success("Delivery saved"),
-                        onError: (e) => toast.error(errorMessage(e)),
-                      }
-                    )
-                  }
-                >
-                  Save delivery
-                </Button>
               </>
             ),
             ...(isOpenOffer

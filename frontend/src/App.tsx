@@ -26,6 +26,8 @@ import { ApiDocsPage } from "@/pages/settings/ApiDocsPage";
 import { IntakeLogLayout } from "@/pages/publisher/IntakeLogLayout";
 import { IntakeLogTab } from "@/pages/publisher/IntakeLogTab";
 import { IntakeReviewTab } from "@/pages/publisher/IntakeReviewTab";
+import { CallsLogTab } from "@/pages/publisher/CallsLogTab";
+import { BuyerCallsLogTab } from "@/pages/buyer/CallsLogTab";
 import { SourcesPage } from "@/pages/publisher/SourcesPage";
 import { WebhooksPage } from "@/pages/WebhooksPage";
 import { RoutingPage } from "@/pages/publisher/RoutingPage";
@@ -97,6 +99,8 @@ export default function App() {
                   <Route index element={<IntakeLogTab />} />
                   <Route path="review" element={<IntakeReviewTab />} />
                 </Route>
+                <Route path="calls" element={<CallsLogTab />} />
+                <Route path="log/calls" element={<Navigate to="/p/calls" replace />} />
                 <Route path="intake" element={<Navigate to="/p/log" replace />} />
                 <Route path="pipelines" element={<PipelinesPage />} />
                 <Route path="fields" element={<CustomFieldsPage />} />
@@ -134,6 +138,7 @@ export default function App() {
                 <Route index element={<Dashboard />} />
                 <Route path="board" element={<BoardPage />} />
                 <Route path="leads" element={<LeadsListPage />} />
+                <Route path="calls" element={<BuyerCallsLogTab />} />
                 <Route path="calendar" element={<CalendarPage />} />
                 <Route path="pipelines" element={<PipelinesPage />} />
                 <Route path="fields" element={<CustomFieldsPage />} />

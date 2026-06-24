@@ -24,6 +24,7 @@ import { formatParticipationStatus } from "@/features/admin/contractOffer";
 import { COMPENSATION_KINDS, formatCompTrigger } from "@/features/admin/contractCompensation";
 import { ContractReturnRulesEditor } from "@/features/admin/ContractReturnRulesEditor";
 import { BuyerContractFieldMapSection } from "@/features/admin/BuyerContractFieldMapSection";
+import { BuyerCallTargetSection } from "@/features/calls/BuyerCallTargetSection";
 import { BuyerTriggerStageFields } from "@/features/admin/BuyerTriggerStageFields";
 import {
   BuyerParticipationDeliveryFields,
@@ -94,6 +95,8 @@ function DrawerContent({
   const hasTriggerComps = (compensations ?? []).some(
     (c) => (c.kind === "rev_share" || c.kind === "profit_share") && c.trigger === "buyer_stage"
   );
+
+  const isCall = participation.lead_type === "Call";
 
   function buildDeliveryBody() {
     const body: Record<string, unknown> = { delivery };
@@ -332,6 +335,7 @@ function DrawerContent({
               <p className="text-sm text-gray-500">Return routes apply when delivery mode is Pipeline.</p>
             ),
             fieldmap: <BuyerContractFieldMapSection participationId={participation.id} />,
+            ...(isCall ? { calltarget: <BuyerCallTargetSection participationId={participation.id} /> } : {}),
             ...(hasTriggerComps
               ? {
                   triggers: (
@@ -345,6 +349,7 @@ function DrawerContent({
           }}
           extraTabs={[
             { id: "fieldmap", label: "Field mapping" },
+            ...(isCall ? [{ id: "calltarget" as const, label: "Call target" }] : []),
             ...(hasTriggerComps ? [{ id: "triggers" as const, label: "Rev / profit share" }] : []),
           ]}
         />

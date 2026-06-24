@@ -178,6 +178,7 @@ export interface Lead {
   pipeline_name?: string | null;
   stage_name?: string | null;
   stage_entered_at?: string | null;
+  stage_move_count?: number;
   tags?: string[];
   cost?: number | null;
   revenue?: number | null;
@@ -450,7 +451,7 @@ export interface ParticipationReturnRule extends ReturnRule {
   buyer_stage_name: string;
 }
 
-export type SourceType = "webhook";
+export type SourceType = "webhook" | "call";
 
 export interface Source {
   id: number;
@@ -459,6 +460,106 @@ export interface Source {
   type: SourceType;
   is_active: boolean;
   api_key_required: boolean;
+  // Call sources only.
+  integration_connection_id?: number | null;
+  tracking_number?: string | null;
+  twilio_sid?: string | null;
+  payload_enabled?: boolean;
+  require_preload?: boolean;
+}
+
+export interface CallSettings {
+  contract_id: number;
+  duration_threshold_sec: number;
+  tier_timeout_sec: number;
+  duplicate_window_hours: number;
+  mask_caller_id: boolean;
+  expose_caller_id: boolean;
+  pass_inbound_payload: boolean;
+  recording_enabled: boolean;
+  vertical: string;
+  allowed_states: string[];
+  caller_geo_mode: "twilio_lookup" | "area_code" | "none";
+}
+
+export interface CallTarget {
+  participation_id: number;
+  target_type: "static" | "dynamic";
+  destination_number?: string | null;
+  rtb_endpoint?: string | null;
+  rtb_headers?: Record<string, string>;
+  priority: number;
+  weight: number;
+  rate_override?: number | null;
+  schedule?: unknown;
+  daily_cap?: number | null;
+  monthly_cap?: number | null;
+  concurrency_cap?: number | null;
+  calls_today: number;
+  calls_this_month: number;
+  concurrent_calls: number;
+  configured: boolean;
+}
+
+export interface CallLeg {
+  id: number;
+  call_id: number;
+  participation_id?: number | null;
+  buyer_id?: number | null;
+  buyer_name?: string | null;
+  tier: number;
+  destination_number?: string | null;
+  leg_status: string;
+  rate: number;
+  billed: boolean;
+  answered_at?: string | null;
+  ended_at?: string | null;
+  duration_sec: number;
+  created_at: string;
+}
+
+export interface CallRtbPing {
+  id: number;
+  call_id: number;
+  participation_id?: number | null;
+  endpoint: string;
+  accepted: boolean;
+  bid_amount?: number | null;
+  destination_number?: string | null;
+  response_status?: number | null;
+  response_body?: string | null;
+  reason?: string | null;
+  created_at: string;
+}
+
+export interface Call {
+  id: number;
+  public_id: string;
+  source_id?: number | null;
+  contract_id?: number | null;
+  lead_id?: number | null;
+  winner_participation_id?: number | null;
+  caller_number?: string | null;
+  caller_state?: string | null;
+  tracking_number?: string | null;
+  status: string;
+  disposition?: string | null;
+  disposition_note?: string | null;
+  billable: boolean;
+  duration_sec: number;
+  billable_duration_sec: number;
+  price_cents: number;
+  recording_url?: string | null;
+  connected_at?: string | null;
+  ended_at?: string | null;
+  created_at: string;
+  contract_name?: string | null;
+  winner_buyer_name?: string | null;
+  lead_name?: string | null;
+  lead_phone?: string | null;
+  publisher_name?: string | null;
+  legs?: CallLeg[];
+  rtb_pings?: CallRtbPing[];
 }
 
 export interface RouteBranch {

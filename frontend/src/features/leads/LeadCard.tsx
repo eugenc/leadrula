@@ -1,8 +1,9 @@
 import { memo, type ReactNode } from "react";
-import type { CustomField, Lead } from "@/types";
+import type { AccountType, CustomField, Lead } from "@/types";
 import { Avatar, Badge } from "@/components/ui/misc";
+import { useAuthStore } from "@/store/authStore";
 import { ActionIndicator } from "./ActionDot";
-import { cellValue, columnIcon, formatStatus } from "./leadsListColumns";
+import { cellValue, columnIcon, buyerStatusBadgeVariant, formatBuyerStatus, formatStatus } from "./leadsListColumns";
 import { LeadTagBadges } from "./LeadTagsEditor";
 import { cn } from "@/lib/utils";
 
@@ -40,10 +41,12 @@ function CardFieldRow({
   colId,
   lead,
   customFields,
+  accountType,
 }: {
   colId: string;
   lead: Lead;
   customFields: CustomField[];
+  accountType?: AccountType;
 }) {
   if (colId === "name") return null;
 
@@ -57,14 +60,20 @@ function CardFieldRow({
   }
 
   if (colId === "status") {
+    const variant =
+      accountType === "buyer"
+        ? buyerStatusBadgeVariant(lead)
+        : statusVariant[lead.status] ?? "default";
+    const label =
+      accountType === "buyer" ? formatBuyerStatus(lead) : formatStatus(lead.status, accountType);
     return (
       <CardFieldLine colId={colId} customFields={customFields}>
-        <Badge variant={statusVariant[lead.status] ?? "default"}>{formatStatus(lead.status)}</Badge>
+        <Badge variant={variant}>{label}</Badge>
       </CardFieldLine>
     );
   }
 
-  const value = cellValue(lead, colId, customFields);
+  const value = cellValue(lead, colId, customFields, accountType);
   if (!value || value === "—") return null;
 
   return (
@@ -87,6 +96,7 @@ export const LeadCard = memo(function LeadCard({
   onClick: () => void;
   dragging?: boolean;
 }) {
+  const accountType = useAuthStore((s) => s.user?.account_type);
   const activeFields = cardFields.filter((id) => id !== "name");
   const showReturnedInHeader =
     lead.status === "returned" && !activeFields.includes("status");
@@ -109,7 +119,9 @@ export const LeadCard = memo(function LeadCard({
         </span>
         <div className="flex shrink-0 items-center gap-1">
           {showReturnedInHeader && (
-            <Badge variant="returned">{formatStatus(lead.status)}</Badge>
+            <Badge variant="returned">
+              {accountType === "buyer" ? formatBuyerStatus(lead) : formatStatus(lead.status, accountType)}
+            </Badge>
           )}
           <ActionIndicator actionAt={lead.action_at} size="sm" />
           {lead.assigned_user_id && (
@@ -145,7 +157,13 @@ export const LeadCard = memo(function LeadCard({
       {activeFields.length > 0 && (
         <div className="flex flex-col gap-1.5">
           {activeFields.map((colId) => (
-            <CardFieldRow key={colId} colId={colId} lead={lead} customFields={customFields} />
+            <CardFieldRow
+              key={colId}
+              colId={colId}
+              lead={lead}
+              customFields={customFields}
+              accountType={accountType}
+            />
           ))}
         </div>
       )}

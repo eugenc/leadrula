@@ -19,11 +19,11 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import type { CustomField, Lead } from "@/types";
+import type { AccountType, CustomField, Lead } from "@/types";
 import { formatMoney } from "@/lib/utils";
 import { formatCustomDateForDisplay, formatDatetimeForDisplay } from "./customFieldDate";
 
-export const STATUS_LABELS: Record<string, string> = {
+export const PUBLISHER_STATUS_LABELS: Record<string, string> = {
   review: "In Review",
   distributed: "Distributed",
   returned: "Returned",
@@ -31,8 +31,62 @@ export const STATUS_LABELS: Record<string, string> = {
   disputed: "Disputed",
 };
 
-export function formatStatus(status: string): string {
-  return STATUS_LABELS[status] ?? status.charAt(0).toUpperCase() + status.slice(1);
+export const BUYER_STATUS_LABELS: Record<string, string> = {
+  review: "New",
+  distributed: "Active",
+  returned: "Returned",
+  closed: "Won",
+  disputed: "Disputed",
+};
+
+export function formatStatus(status: string, accountType?: AccountType): string {
+  const labels = accountType === "buyer" ? BUYER_STATUS_LABELS : PUBLISHER_STATUS_LABELS;
+  return labels[status] ?? status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+export type BuyerDisplayStatus = "new" | "active" | "won" | "returned" | "disputed";
+
+export function buyerDisplayStatus(
+  lead: Pick<Lead, "status" | "stage_id" | "stage_move_count">
+): BuyerDisplayStatus {
+  if (lead.status === "returned") return "returned";
+  if (lead.status === "closed") return "won";
+  if (lead.status === "disputed") return "disputed";
+
+  const moves = lead.stage_move_count ?? 0;
+  if (!lead.stage_id) return "new";
+  if (lead.status === "distributed") return moves >= 1 ? "active" : "new";
+  return moves >= 2 ? "active" : "new";
+}
+
+export function formatBuyerStatus(
+  lead: Pick<Lead, "status" | "stage_id" | "stage_move_count">
+): string {
+  const labels: Record<BuyerDisplayStatus, string> = {
+    new: "New",
+    active: "Active",
+    won: "Won",
+    returned: "Returned",
+    disputed: "Disputed",
+  };
+  return labels[buyerDisplayStatus(lead)];
+}
+
+export function buyerStatusBadgeVariant(
+  lead: Pick<Lead, "status" | "stage_id" | "stage_move_count">
+): "distributed" | "returned" | "review" | "closed" | "default" {
+  switch (buyerDisplayStatus(lead)) {
+    case "new":
+      return "review";
+    case "active":
+      return "distributed";
+    case "won":
+      return "closed";
+    case "returned":
+      return "returned";
+    default:
+      return "default";
+  }
 }
 
 export function leadSourceLabel(lead: Lead): string {
@@ -142,7 +196,12 @@ function renderCustomValue(v: unknown, field?: CustomField): string {
   return JSON.stringify(v);
 }
 
-export function cellValue(lead: Lead, colId: string, customFields: CustomField[]): string {
+export function cellValue(
+  lead: Lead,
+  colId: string,
+  customFields: CustomField[],
+  accountType?: AccountType
+): string {
   switch (colId) {
     case "name":
       return `${lead.first_name} ${lead.last_name}`.trim() || "—";
@@ -161,7 +220,8 @@ export function cellValue(lead: Lead, colId: string, customFields: CustomField[]
     case "stage":
       return lead.stage_name ?? "—";
     case "status":
-      return formatStatus(lead.status);
+      if (accountType === "buyer") return formatBuyerStatus(lead);
+      return formatStatus(lead.status, accountType);
     case "tags":
       return (lead.tags ?? []).length ? (lead.tags ?? []).join(", ") : "—";
     case "action_at":

@@ -57,6 +57,8 @@ import {
   columnLabel,
   columnSortKey,
   formatStatus,
+  buyerStatusBadgeVariant,
+  formatBuyerStatus,
 } from "@/features/leads/leadsListColumns";
 
 const PAGE_SIZES = [25, 50, 100] as const;
@@ -75,6 +77,7 @@ export function LeadsListPage() {
   const user = useAuthStore((s) => s.user);
   const isAdmin = user?.role === "admin";
   const isPublisher = user?.account_type === "publisher";
+  const isBuyer = user?.account_type === "buyer";
   const canCreate = user?.role === "admin" || user?.role === "user";
 
   const [newLeadOpen, setNewLeadOpen] = useState(false);
@@ -475,8 +478,14 @@ export function LeadsListPage() {
                         className={cn(colId === "name" && "font-medium text-gray-800")}
                       >
                         {colId === "status" ? (
-                          <Badge variant={statusVariant[l.status] ?? "default"}>
-                            {formatStatus(l.status)}
+                          <Badge
+                            variant={
+                              isBuyer
+                                ? buyerStatusBadgeVariant(l)
+                                : statusVariant[l.status] ?? "default"
+                            }
+                          >
+                            {isBuyer ? formatBuyerStatus(l) : formatStatus(l.status, user?.account_type)}
                           </Badge>
                         ) : colId === "tags" ? (
                           (l.tags ?? []).length ? (
@@ -485,7 +494,7 @@ export function LeadsListPage() {
                             "—"
                           )
                         ) : (
-                          cellValue(l, colId, customFields ?? [])
+                          cellValue(l, colId, customFields ?? [], user?.account_type)
                         )}
                       </TD>
                     ))}
