@@ -46,11 +46,19 @@ const publisherNav: NavGroup[] = [
     label: "Leads",
     items: [
       { to: "/p/leads", label: "Leads", icon: List },
-      { to: "/p/calls", label: "Calls", icon: Phone },
-      { to: "/p/appointments", label: "Appointments", icon: CalendarClock },
-      { to: "/p/calendar", label: "Calendars", icon: Calendar },
       { to: "/p/fields", label: "Custom Fields", icon: Tags, adminOnly: true },
     ],
+  },
+  {
+    label: "Appointments",
+    items: [
+      { to: "/p/appointments", label: "Appointments", icon: CalendarClock },
+      { to: "/p/calendar", label: "Calendars", icon: Calendar },
+    ],
+  },
+  {
+    label: "Calls",
+    items: [{ to: "/p/calls", label: "Calls", icon: Phone }],
   },
   {
     label: "Pipeline",
@@ -95,11 +103,19 @@ const buyerNav: NavGroup[] = [
     label: "Leads",
     items: [
       { to: "/b/leads", label: "Leads", icon: List },
-      { to: "/b/calls", label: "Calls", icon: Phone },
-      { to: "/b/appointments", label: "Appointments", icon: CalendarClock },
-      { to: "/b/calendar", label: "Calendars", icon: Calendar },
       { to: "/b/fields", label: "Custom Fields", icon: Tags, adminOnly: true },
     ],
+  },
+  {
+    label: "Appointments",
+    items: [
+      { to: "/b/appointments", label: "Appointments", icon: CalendarClock },
+      { to: "/b/calendar", label: "Calendars", icon: Calendar },
+    ],
+  },
+  {
+    label: "Calls",
+    items: [{ to: "/b/calls", label: "Calls", icon: Phone }],
   },
   {
     label: "Pipeline",

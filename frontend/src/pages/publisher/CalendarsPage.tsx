@@ -5,8 +5,10 @@ import {
   endOfMonth,
   endOfWeek,
   format,
+  isAfter,
   isSameDay,
   isSameMonth,
+  startOfDay,
   startOfMonth,
   startOfWeek,
 } from "date-fns";
@@ -74,6 +76,8 @@ export function PublisherCalendarsPage() {
     return days;
   }, [month]);
 
+  const today = startOfDay(new Date());
+
   function openBook(slot: AppointmentFreeSlot) {
     setBookSlot(slot);
     setDrawerOpen(true);
@@ -132,27 +136,33 @@ export function PublisherCalendarsPage() {
                         </Button>
                       </div>
                     </div>
-                    <div className="grid grid-cols-7 gap-1 text-center text-xs font-semibold text-gray-400">
-                      {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
-                        <div key={d}>{d}</div>
-                      ))}
-                    </div>
-                    <div className="mt-1 grid grid-cols-7 gap-1">
+                    <div className="mt-1 overflow-hidden rounded border border-gray-100">
+                      <div className="grid grid-cols-7 border-b border-gray-100 text-center text-xs font-semibold text-gray-400">
+                        {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => (
+                          <div key={d} className="py-1">
+                            {d}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-7 divide-x divide-y divide-gray-100">
                       {calendarDays.map((d) => {
                         const key = format(d, "yyyy-MM-dd");
                         const m = markers.find((x) => x.date === key);
                         const selected = key === selectedDate;
+                        const inMonth = isSameMonth(d, month);
+                        const isFutureDay = inMonth && isAfter(startOfDay(d), today);
                         return (
                           <button
                             key={key}
                             type="button"
-                            disabled={!isSameMonth(d, month)}
+                            disabled={!inMonth}
                             onClick={() => setSelectedDate(key)}
                             className={cn(
-                              "relative aspect-square rounded text-sm",
-                              !isSameMonth(d, month) && "text-gray-300",
+                              "relative aspect-square text-sm",
+                              !inMonth && "text-gray-300",
+                              isFutureDay && !selected && "text-gray-400",
                               selected && "bg-jade-500 font-bold text-white",
-                              !selected && isSameDay(d, new Date()) && "ring-1 ring-jade-300"
+                              !selected && isSameDay(d, new Date()) && "ring-1 ring-inset ring-jade-300"
                             )}
                           >
                             {format(d, "d")}
@@ -175,6 +185,7 @@ export function PublisherCalendarsPage() {
                           </button>
                         );
                       })}
+                      </div>
                     </div>
                   </div>
 

@@ -277,13 +277,30 @@ func scanBuyerSlots(rows pgx.Rows) ([]BuyerSlot, error) {
 	return out, rows.Err()
 }
 
+func (s *Service) findSlotAtTime(ctx context.Context, calendarID int64, weekday int, startTime string) (*BuyerSlot, error) {
+	var sl BuyerSlot
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, account_id, calendar_id, weekday, start_time::text, duration_min, capacity, disabled_at
+		 FROM buyer_appointment_slots
+		 WHERE calendar_id=$1 AND weekday=$2 AND start_time=$3::time`,
+		calendarID, weekday, startTime).Scan(
+		&sl.ID, &sl.AccountID, &sl.CalendarID, &sl.Weekday, &sl.StartTime, &sl.DurationMin, &sl.Capacity, &sl.DisabledAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &sl, nil
+}
+
 func (s *Service) CreateCalendarSlot(ctx context.Context, buyerID, calendarID int64, p CreateSlotParams) (*BuyerSlot, error) {
 	cal, err := s.loadCalendar(ctx, buyerID, calendarID)
 	if err != nil {
 		return nil, err
 	}
 	if p.DurationMin < minDurationMin || p.DurationMin > maxDurationMin {
-		return nil, httpx.Validation("duration_min must be between 15 and 240")
+		return nil, httpx.Validation("duration_min must be between 15 and 180")
 	}
 	if p.Capacity < minCapacity || p.Capacity > maxCapacity {
 		return nil, httpx.Validation("capacity must be between 1 and 20")
@@ -307,12 +324,30 @@ func (s *Service) CreateCalendarSlot(ctx context.Context, buyerID, calendarID in
 	if err := s.validateSlotOverlapCalendar(ctx, calendarID, p.Weekday, slotStart, p.DurationMin, cal.BufferMin, 0); err != nil {
 		return nil, err
 	}
+	existing, err := s.findSlotAtTime(ctx, calendarID, p.Weekday, p.StartTime)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		if existing.DisabledAt != nil {
+			reenable := false
+			return s.patchSlotRecord(ctx, buyerID, calendarID, existing, PatchSlotParams{
+				DurationMin: &p.DurationMin,
+				Capacity:    &p.Capacity,
+				Disabled:    &reenable,
+			})
+		}
+		return nil, httpx.Conflict("slot already exists at this time")
+	}
 	var id int64
 	err = s.pool.QueryRow(ctx,
 		`INSERT INTO buyer_appointment_slots(account_id, calendar_id, weekday, start_time, duration_min, capacity)
 		 VALUES ($1,$2,$3,$4::time,$5,$6)
 		 RETURNING id`, buyerID, calendarID, p.Weekday, p.StartTime, p.DurationMin, p.Capacity).Scan(&id)
 	if err != nil {
+		if database.IsUniqueViolation(err) {
+			return nil, httpx.Conflict("slot already exists at this time")
+		}
 		return nil, err
 	}
 	if err := s.syncNewSlotToContracts(ctx, buyerID, calendarID, id); err != nil {
@@ -365,7 +400,7 @@ func (s *Service) patchSlotRecord(ctx context.Context, buyerID, calendarID int64
 		start = *p.StartTime
 	}
 	if dur < minDurationMin || dur > maxDurationMin {
-		return nil, httpx.Validation("duration_min must be between 15 and 240")
+		return nil, httpx.Validation("duration_min must be between 15 and 180")
 	}
 	if cap < minCapacity || cap > maxCapacity {
 		return nil, httpx.Validation("capacity must be between 1 and 20")

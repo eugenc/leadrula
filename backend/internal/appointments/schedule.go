@@ -9,7 +9,7 @@ import (
 
 const (
 	minDurationMin = 15
-	maxDurationMin = 240
+	maxDurationMin = 180
 	minCapacity    = 1
 	maxCapacity    = 20
 	maxBufferMin   = 60
