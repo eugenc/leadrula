@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   addMonths,
   eachDayOfInterval,
@@ -207,7 +207,7 @@ export function DatetimeFieldInput({
   onChange: (value: string) => void;
   onBlur?: () => void;
   disabled?: boolean;
-  placeholder?: string;
+  placeholder?: ReactNode;
   className?: string;
   layout?: "compact" | "inline";
 }) {

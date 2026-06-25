@@ -14,7 +14,7 @@ import { Badge, Spinner } from "@/components/ui/misc";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { ActionDot } from "./ActionDot";
 import { format, isPast } from "date-fns";
-import { CircleHelp, Copy, MapPin, ChevronDown, ChevronRight, X } from "lucide-react";
+import { CircleHelp, Copy, MapPin, ChevronDown, ChevronRight, X, Zap } from "lucide-react";
 import { stageColorBorder, stageColorFill } from "@/features/pipelines/stageColors";
 import { cn, formatMoney } from "@/lib/utils";
 import { useUIStore } from "@/store/uiStore";
@@ -444,24 +444,37 @@ function LeadHeader({ lead, onClose }: { lead: Lead; onClose: () => void }) {
       {showActionAtForStage(currentStageType) && (
         <div
           className={cn(
-            "mt-3 flex items-center gap-2 rounded-md border px-2.5 py-1.5",
+            "mt-3 flex flex-nowrap items-center gap-1 rounded-md border px-2.5 py-1.5",
             overdue ? "border-danger-border bg-danger-bg" : "border-gray-100 bg-gray-100"
           )}
         >
           {lead.action_at && <ActionDot actionAt={lead.action_at} variant="dot" />}
+          <Zap
+            className={cn(
+              "h-3.5 w-3.5 shrink-0",
+              overdue ? "text-danger-fg" : "text-gray-700"
+            )}
+            aria-hidden
+          />
           <span
             className={cn(
               "shrink-0 text-xs",
               overdue ? "font-semibold text-danger-fg" : "text-gray-700"
             )}
           >
-            Action Date & Time{overdue && " — overdue"}
+            Action Date & Time{overdue && " — overdue"}:
           </span>
           <DatetimeFieldInput
             value={actionAtLocal}
             onChange={setActionAtLocal}
             onBlur={saveActionAt}
             disabled={setAction.isPending}
+            placeholder={
+              <>
+                <span className="hidden underline lg:inline">Click to Set</span>
+                <span className="underline lg:hidden">Tap to Set</span>
+              </>
+            }
             className={overdue ? "font-semibold text-danger-fg" : "text-gray-700"}
           />
         </div>

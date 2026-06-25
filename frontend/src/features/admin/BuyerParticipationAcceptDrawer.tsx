@@ -152,7 +152,7 @@ function DrawerContent({
         onClose={onClose}
       />
       <DrawerBody>
-        <div className="mb-4 flex flex-wrap border-b border-gray-100">
+        <div className="mb-4 flex overflow-x-auto border-b border-gray-100">
           {STEPS.filter((s) => !(s === "Return routes" && !pipelineDelivery)).map((s) => {
             const stepIndex = STEPS.indexOf(s);
             const done = stepComplete(stepIndex);
@@ -163,7 +163,7 @@ function DrawerContent({
                 onClick={() => goToStep(stepIndex)}
                 disabled={!canGoToStep(stepIndex)}
                 className={cn(
-                  "-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-semibold transition-colors",
+                  "-mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-semibold transition-colors",
                   step === stepIndex ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400",
                   !canGoToStep(stepIndex) && "cursor-not-allowed opacity-50"
                 )}

@@ -1,7 +1,8 @@
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
 import { cn } from "@/lib/utils";
+import { queryClient } from "@/lib/queryClient";
 import { Logo } from "@/components/layout/Logo";
 import {
   LayoutDashboard,
@@ -23,6 +24,7 @@ import {
   Logs,
   Phone,
   CalendarClock,
+  LogOut,
   type LucideIcon,
 } from "lucide-react";
 
@@ -212,7 +214,10 @@ function NavGroupSection({
 
 export function Sidebar() {
   const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
   const sidebarOpen = useUIStore((s) => s.sidebarOpen);
+  const closeSidebar = useUIStore((s) => s.closeSidebar);
+  const navigate = useNavigate();
   const { pathname } = useLocation();
   if (!user) return null;
 
@@ -258,6 +263,21 @@ export function Sidebar() {
         {bottomNav && (
           <NavGroupSection group={bottomNav} isAdmin={isAdmin} pathname={pathname} />
         )}
+        <div className="mt-2 border-t border-gray-100 pt-2 lg:hidden">
+          <button
+            type="button"
+            onClick={() => {
+              logout();
+              queryClient.clear();
+              navigate("/login");
+              closeSidebar();
+            }}
+            className="mb-0.5 flex h-8 w-full items-center gap-2 rounded-md pl-7 pr-2.5 text-base font-normal text-gray-600 transition-colors hover:bg-jade-50 hover:text-gray-800"
+          >
+            <LogOut className="h-4 w-4 shrink-0 opacity-75" />
+            Log out
+          </button>
+        </div>
       </div>
     </aside>
   );

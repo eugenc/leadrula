@@ -1,17 +1,18 @@
-import { useRef, useState } from "react";
-import { Phone, GitBranch } from "lucide-react";
+import { type ReactNode } from "react";
+import { Phone, GitBranch, StickyNote } from "lucide-react";
 import { Badge } from "@/components/ui/misc";
 import { cn } from "@/lib/utils";
 import type { AccountType, Lead } from "@/types";
 import {
   cellValue,
+  columnIcon,
   formatStatus,
   formatBuyerStatus,
   buyerStatusBadgeVariant,
 } from "./leadsListColumns";
 
-const ACTION_WIDTH = 140;
-const SWIPE_THRESHOLD = 60;
+const ACTION_BTN =
+  "flex w-[70px] shrink-0 snap-start flex-col items-center justify-center gap-1 text-xs font-medium";
 
 const statusVariant: Record<
   string,
@@ -23,12 +24,33 @@ const statusVariant: Record<
   closed: "closed",
 };
 
+function FieldLine({
+  colId,
+  children,
+  className,
+}: {
+  colId: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  const Icon = columnIcon(colId);
+  return (
+    <div className={cn("flex items-center gap-2 leading-tight", className)}>
+      <span className="flex w-4 shrink-0 justify-center">
+        <Icon className="h-3.5 w-3.5 text-gray-300" aria-hidden />
+      </span>
+      <span className="min-w-0 truncate">{children}</span>
+    </div>
+  );
+}
+
 interface LeadListCardProps {
   lead: Lead;
   accountType?: AccountType;
   isBuyer: boolean;
   onOpen: () => void;
   onChangeStage: () => void;
+  onAddNote: () => void;
 }
 
 export function LeadListCard({
@@ -37,98 +59,18 @@ export function LeadListCard({
   isBuyer,
   onOpen,
   onChangeStage,
+  onAddNote,
 }: LeadListCardProps) {
-  const [offset, setOffset] = useState(0);
-  const [open, setOpen] = useState(false);
-  const startX = useRef(0);
-  const startOffset = useRef(0);
-  const swiping = useRef(false);
-
   const name = cellValue(lead, "name", []);
   const phone = lead.phone?.trim() ?? "";
+  const pipeline = cellValue(lead, "pipeline", []);
   const stage = cellValue(lead, "stage", []);
   const created = cellValue(lead, "created_at", []);
   const assignee = lead.assignee_name;
 
-  function snap(next: number, revealed: boolean) {
-    setOffset(next);
-    setOpen(revealed);
-  }
-
-  function onTouchStart(e: React.TouchEvent) {
-    startX.current = e.touches[0].clientX;
-    startOffset.current = offset;
-    swiping.current = false;
-  }
-
-  function onTouchMove(e: React.TouchEvent) {
-    const delta = e.touches[0].clientX - startX.current;
-    if (Math.abs(delta) > 8) swiping.current = true;
-    const next = Math.min(0, Math.max(-ACTION_WIDTH, startOffset.current + delta));
-    setOffset(next);
-  }
-
-  function onTouchEnd() {
-    if (!swiping.current) return;
-    if (offset < -SWIPE_THRESHOLD) {
-      snap(-ACTION_WIDTH, true);
-    } else {
-      snap(0, false);
-    }
-  }
-
-  function handleTap() {
-    if (open) {
-      snap(0, false);
-      return;
-    }
-    if (!swiping.current) onOpen();
-  }
-
   return (
-    <div className="relative overflow-hidden rounded-lg border border-gray-100 bg-surface-card">
-      <div
-        className="absolute inset-y-0 right-0 flex items-stretch"
-        style={{ width: ACTION_WIDTH }}
-      >
-        {phone ? (
-          <a
-            href={`tel:${phone}`}
-            className="flex flex-1 flex-col items-center justify-center gap-1 bg-jade-600 text-xs font-medium text-white"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <Phone className="h-4 w-4" />
-            Call
-          </a>
-        ) : (
-          <span className="flex flex-1 flex-col items-center justify-center gap-1 bg-gray-200 text-xs text-gray-400">
-            <Phone className="h-4 w-4" />
-            Call
-          </span>
-        )}
-        <button
-          type="button"
-          className="flex flex-1 flex-col items-center justify-center gap-1 bg-gray-700 text-xs font-medium text-white"
-          onClick={(e) => {
-            e.stopPropagation();
-            snap(0, false);
-            onChangeStage();
-          }}
-        >
-          <GitBranch className="h-4 w-4" />
-          Stage
-        </button>
-      </div>
-
-      <button
-        type="button"
-        className="relative w-full touch-pan-y pl-4 py-3 text-left transition-transform duration-150 ease-out"
-        style={{ transform: `translateX(${offset}px)`, paddingRight: ACTION_WIDTH + 16 }}
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
-        onClick={handleTap}
-      >
+    <div className="flex overflow-hidden rounded-lg border border-gray-100 bg-surface-card">
+      <button type="button" className="min-w-0 flex-1 px-4 py-3 text-left" onClick={onOpen}>
         <div className="flex items-start justify-between gap-2">
           <span className="font-medium text-gray-800">{name}</span>
           <Badge
@@ -140,15 +82,68 @@ export function LeadListCard({
             {isBuyer ? formatBuyerStatus(lead) : formatStatus(lead.status, accountType)}
           </Badge>
         </div>
-        <div className="mt-1.5 space-y-0.5 text-sm text-gray-500">
-          {stage !== "—" && <div>Stage: {stage}</div>}
-          {phone && <div>{phone}</div>}
-          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-400">
-            <span>{created}</span>
-            {assignee && <span>{assignee}</span>}
-          </div>
+        <div className="mt-1.5 space-y-0.5">
+          {(pipeline !== "—" || stage !== "—") && (
+            <FieldLine colId="stage" className="text-sm text-gray-500">
+              {pipeline !== "—" && stage !== "—"
+                ? `${pipeline} · ${stage}`
+                : pipeline !== "—"
+                  ? pipeline
+                  : stage}
+            </FieldLine>
+          )}
+          {phone && (
+            <FieldLine colId="phone" className="text-sm text-gray-500">
+              {phone}
+            </FieldLine>
+          )}
+          <FieldLine colId="created_at" className="text-xs text-gray-400">
+            {created}
+          </FieldLine>
+          {assignee && (
+            <FieldLine colId="assignee" className="text-xs text-gray-400">
+              {assignee}
+            </FieldLine>
+          )}
         </div>
       </button>
+
+      <div
+        className="flex w-[140px] shrink-0 snap-x snap-mandatory overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch]"
+        onTouchStart={(e) => e.stopPropagation()}
+        onTouchMove={(e) => e.stopPropagation()}
+      >
+        {phone ? (
+          <a
+            href={`tel:${phone}`}
+            className={cn(ACTION_BTN, "bg-jade-500 text-white")}
+          >
+            <Phone className="h-4 w-4" />
+            Call
+          </a>
+        ) : (
+          <span className={cn(ACTION_BTN, "cursor-default bg-gray-100 text-gray-400")}>
+            <Phone className="h-4 w-4" />
+            Call
+          </span>
+        )}
+        <button
+          type="button"
+          className={cn(ACTION_BTN, "bg-surface-hover text-gray-800")}
+          onClick={onAddNote}
+        >
+          <StickyNote className="h-4 w-4" />
+          Note
+        </button>
+        <button
+          type="button"
+          className={cn(ACTION_BTN, "bg-gray-100 text-gray-800")}
+          onClick={onChangeStage}
+        >
+          <GitBranch className="h-4 w-4" />
+          Stage
+        </button>
+      </div>
     </div>
   );
 }

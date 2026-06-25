@@ -55,7 +55,7 @@ export function ContractFormTabs({
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap border-b border-gray-100">
+      <div className="mb-4 flex overflow-x-auto border-b border-gray-100">
         {tabs.filter((t) => panels[t.id] != null).map((t) => {
           const done = showCheckmarks && sectionComplete(t.id, ctx);
           return (
@@ -64,7 +64,7 @@ export function ContractFormTabs({
               type="button"
               onClick={() => setTab(t.id)}
               className={cn(
-                "-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-semibold transition-colors",
+                "-mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-semibold transition-colors",
                 tab === t.id ? "border-jade-500 text-jade-700" : "border-transparent text-gray-400"
               )}
             >

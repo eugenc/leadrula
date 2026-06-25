@@ -155,9 +155,7 @@ export function Topbar({ title }: { title: string }) {
           <SwitchSessionIndicator />
         </div>
         <AccountSwitcher compact />
-        <div className="hidden lg:block">
-          <ThemeToggle />
-        </div>
+        <ThemeToggle />
         <Dropdown
           open={open}
           onClose={() => setOpen(false)}
@@ -223,7 +221,7 @@ export function Topbar({ title }: { title: string }) {
             queryClient.clear();
             navigate("/login");
           }}
-          className="text-gray-400 hover:text-danger"
+          className="hidden text-gray-400 hover:text-danger lg:flex"
           title="Log out"
         >
           <LogOut className="h-5 w-5" />

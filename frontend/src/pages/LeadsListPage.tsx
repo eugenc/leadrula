@@ -18,6 +18,7 @@ import { NewLeadDrawer } from "@/features/leads/NewLeadDrawer";
 import { ImportLeadsModal } from "@/features/leads/ImportLeadsModal";
 import { LeadListCard } from "@/features/leads/LeadListCard";
 import { LeadStagePickerSheet } from "@/features/leads/LeadStagePickerSheet";
+import { LeadNoteSheet } from "@/features/leads/LeadNoteSheet";
 import {
   useSavedLeadViews,
   useActiveViewId,
@@ -110,6 +111,7 @@ export function LeadsListPage() {
   const [assignOpen, setAssignOpen] = useState<"user" | "follower" | "buyer" | null>(null);
   const [assignTarget, setAssignTarget] = useState(0);
   const [stagePickerLead, setStagePickerLead] = useState<Lead | null>(null);
+  const [notePickerLead, setNotePickerLead] = useState<Lead | null>(null);
 
   const { data: users } = useUsers();
   const { data: customFields, isLoading: customFieldsLoading } = useCustomFields();
@@ -434,6 +436,7 @@ export function LeadsListPage() {
                   isBuyer={isBuyer}
                   onOpen={() => openDetail(l.id)}
                   onChangeStage={() => setStagePickerLead(l)}
+                  onAddNote={() => setNotePickerLead(l)}
                 />
               ))}
             </div>
@@ -684,6 +687,11 @@ export function LeadsListPage() {
         lead={stagePickerLead}
         open={!!stagePickerLead}
         onClose={() => setStagePickerLead(null)}
+      />
+      <LeadNoteSheet
+        lead={notePickerLead}
+        open={!!notePickerLead}
+        onClose={() => setNotePickerLead(null)}
       />
     </>
   );
