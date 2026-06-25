@@ -180,14 +180,14 @@ function NavItem({ item }: { item: Item }) {
       onClick={() => closeSidebar()}
       className={({ isActive }) =>
         cn(
-          "mb-0.5 flex h-8 items-center gap-2 rounded-md pl-7 pr-2.5 text-base transition-colors",
+          "mb-0.5 flex h-8 lg:h-7 items-center gap-2 rounded-md pl-7 lg:pl-6 pr-2.5 text-base lg:text-sm transition-colors",
           isActive
             ? "bg-jade-100 font-semibold text-jade-700"
             : "font-normal text-gray-600 hover:bg-jade-50 hover:text-gray-800"
         )
       }
     >
-      <Icon className="h-4 w-4 shrink-0 opacity-75 [.active_&]:opacity-100" />
+      <Icon className="h-4 w-4 lg:h-3.5 lg:w-3.5 shrink-0 opacity-75 [.active_&]:opacity-100" />
       {item.label}
     </NavLink>
   );
@@ -214,7 +214,7 @@ function NavGroupSection({
       {group.label && (
         <div
           className={cn(
-            "px-3 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide",
+            "px-3 pb-2 pt-3 lg:pt-2 lg:pb-1.5 text-xs font-semibold uppercase tracking-wide",
             childActive ? "text-jade-600" : "text-gray-400"
           )}
         >
