@@ -308,6 +308,7 @@ export interface Contract {
   buyer_name?: string;
   buyer_account_type?: string;
   publisher_name?: string;
+  publisher_id?: number;
   name: string;
   description?: string;
   contract_type?: string;
@@ -544,14 +545,14 @@ export interface AppointmentBooking {
   lead_name: string;
   phone?: string;
   email?: string;
-  slot_start: string;
-  duration_min: number;
-  delivery_mode: string;
-  delivery_status: string;
+  booked_at: string;
+  appointment_at?: string | null;
+  duration_min?: number;
+  delivery_mode?: string;
+  delivery_status?: string;
   buyer_name?: string;
   publisher_name?: string;
   lead_status?: string;
-  created_at: string;
 }
 
 export interface AppointmentContractOption {

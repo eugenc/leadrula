@@ -616,10 +616,3 @@ func (s *Service) calendarDayHasBookings(ctx context.Context, buyerID, calendarI
 	return ok, err
 }
 
-func (s *Service) ListBuyerBookingsForCalendar(ctx context.Context, buyerID, calendarID int64) ([]BookingRow, error) {
-	if _, err := s.loadCalendar(ctx, buyerID, calendarID); err != nil {
-		return nil, err
-	}
-	return s.listBookingsQuery(ctx,
-		`l.owner_account_id = $1 AND sl.calendar_id = $2`, []any{buyerID, calendarID}, "b.created_at DESC", 0)
-}

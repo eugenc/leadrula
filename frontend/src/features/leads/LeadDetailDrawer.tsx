@@ -797,6 +797,7 @@ function ContactSection({
           <div key={key}>
             <Label>First Name</Label>
             <InputWithOverflowTooltip
+              linkify
               value={fields.first_name ?? ""}
               onChange={(e) => setFields((f) => ({ ...f, first_name: e.target.value }))}
               onBlur={() => saveField("first_name")}
@@ -808,6 +809,7 @@ function ContactSection({
           <div key={key}>
             <Label>Last Name</Label>
             <InputWithOverflowTooltip
+              linkify
               value={fields.last_name ?? ""}
               onChange={(e) => setFields((f) => ({ ...f, last_name: e.target.value }))}
               onBlur={() => saveField("last_name")}
@@ -819,6 +821,7 @@ function ContactSection({
           <div key={key}>
             <Label>Phone</Label>
             <InputWithOverflowTooltip
+              linkify
               value={fields.phone ?? ""}
               onChange={(e) => setFields((f) => ({ ...f, phone: e.target.value }))}
               onBlur={() => saveField("phone")}
@@ -830,6 +833,7 @@ function ContactSection({
           <div key={key}>
             <Label>Email</Label>
             <InputWithOverflowTooltip
+              linkify
               value={fields.email ?? ""}
               onChange={(e) => setFields((f) => ({ ...f, email: e.target.value }))}
               onBlur={() => saveField("email")}
@@ -1108,6 +1112,7 @@ function CustomFieldValue({
 
   return (
     <InputWithOverflowTooltip
+      linkify={type === "text"}
       value={val}
       type={type === "number" ? "number" : "text"}
       onChange={(e) => setVal(e.target.value)}

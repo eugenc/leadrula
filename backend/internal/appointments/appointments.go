@@ -74,21 +74,22 @@ type CalendarDayMarker struct {
 }
 
 type BookingRow struct {
-	ID             int64     `json:"id"`
-	ContractID     int64     `json:"contract_id"`
-	ContractName   string    `json:"contract_name,omitempty"`
-	LeadID         int64     `json:"lead_id"`
-	LeadName       string    `json:"lead_name"`
-	Phone          string    `json:"phone,omitempty"`
-	Email          string    `json:"email,omitempty"`
-	SlotStart      time.Time `json:"slot_start"`
-	DurationMin    int       `json:"duration_min"`
-	DeliveryMode   string    `json:"delivery_mode"`
-	DeliveryStatus string    `json:"delivery_status"`
-	BuyerName      string    `json:"buyer_name,omitempty"`
-	PublisherName  string    `json:"publisher_name,omitempty"`
-	LeadStatus     string    `json:"lead_status,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID             int64      `json:"id"`
+	ContractID     int64      `json:"contract_id"`
+	ContractName   string     `json:"contract_name,omitempty"`
+	LeadID         int64      `json:"lead_id"`
+	LeadName       string     `json:"lead_name"`
+	Phone          string     `json:"phone,omitempty"`
+	Email          string     `json:"email,omitempty"`
+	BookedAt       time.Time  `json:"booked_at"`
+	AppointmentAt  *time.Time `json:"appointment_at,omitempty"`
+	DurationMin    int        `json:"duration_min,omitempty"`
+	DeliveryMode   string     `json:"delivery_mode,omitempty"`
+	DeliveryStatus string     `json:"delivery_status,omitempty"`
+	BuyerName      string     `json:"buyer_name,omitempty"`
+	PublisherName  string     `json:"publisher_name,omitempty"`
+	LeadStatus     string     `json:"lead_status,omitempty"`
+	IsRoute        bool       `json:"-"`
 }
 
 type AppointmentContract struct {
@@ -101,14 +102,21 @@ type AppointmentContract struct {
 }
 
 func (s *Service) getAccountTimezone(ctx context.Context, accountID int64) (string, error) {
-	acct, err := s.accounts.GetAccount(ctx, accountID)
-	if err != nil {
-		return "", err
+	if s.accounts != nil {
+		acct, err := s.accounts.GetAccount(ctx, accountID)
+		if err != nil {
+			return "", err
+		}
+		if acct.Timezone != "" {
+			return acct.Timezone, nil
+		}
+		return "UTC", nil
 	}
-	if acct.Timezone != "" {
-		return acct.Timezone, nil
+	var tz string
+	if err := s.pool.QueryRow(ctx, `SELECT COALESCE(NULLIF(timezone,''), 'UTC') FROM accounts WHERE id=$1`, accountID).Scan(&tz); err != nil {
+		return "UTC", nil
 	}
-	return "UTC", nil
+	return tz, nil
 }
 
 func (s *Service) loadAvailability(ctx context.Context, buyerID int64) (*Availability, error) {

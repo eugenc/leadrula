@@ -247,6 +247,7 @@ export function UnifiedInboundLogTable({
                       leadId={q.lead_id || null}
                       firstName={q.first_name}
                       lastName={q.last_name}
+                      fallback={q.phone}
                       onClick={openDetail}
                     />
                     {unmapped > 0 && (

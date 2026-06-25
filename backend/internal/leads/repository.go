@@ -895,6 +895,14 @@ func (r *Repository) AddInboundNote(ctx context.Context, q database.Querier, lea
 	return err
 }
 
+func (r *Repository) AddInboundNoteFromValue(ctx context.Context, q database.Querier, leadID int64, authorName string, v any) error {
+	s := strings.TrimSpace(fmt.Sprint(v))
+	if s == "" || s == "<nil>" {
+		return nil
+	}
+	return r.AddInboundNote(ctx, q, leadID, authorName, s)
+}
+
 func (r *Repository) ListFollowers(ctx context.Context, leadID int64) ([]int64, error) {
 	rows, err := r.pool.Query(ctx, `SELECT user_id FROM lead_followers WHERE lead_id=$1`, leadID)
 	if err != nil {
@@ -973,6 +981,20 @@ func (r *Repository) GetByPhoneNormalized(ctx context.Context, q database.Querie
 			` AND phone IS NOT NULL AND regexp_replace(phone, '[^0-9]', '', 'g') = $2
 		 ORDER BY id DESC LIMIT 1`,
 		accountID, phoneNorm))
+}
+
+// GetByPhoneNormalizedForPublisher finds the newest lead for a publisher by phone digits,
+// regardless of current owner (e.g. after routing to a buyer).
+func (r *Repository) GetByPhoneNormalizedForPublisher(ctx context.Context, q database.Querier, publisherID int64, phone string) (*Lead, error) {
+	phoneNorm := NormalizePhone(phone)
+	if phoneNorm == "" {
+		return nil, httpx.NotFound("lead not found")
+	}
+	return scanLead(q.QueryRow(ctx,
+		`SELECT `+leadCols+` FROM leads WHERE publisher_id=$1 AND `+leadNotDeleted+
+			` AND phone IS NOT NULL AND regexp_replace(phone, '[^0-9]', '', 'g') = $2
+		 ORDER BY id DESC LIMIT 1`,
+		publisherID, phoneNorm))
 }
 
 // GetByEmail finds an active lead by email.

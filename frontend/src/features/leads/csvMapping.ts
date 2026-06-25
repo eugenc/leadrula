@@ -63,6 +63,10 @@ const ALIASES: Record<string, string> = {
   action_date: "action_at",
   appointmenttime: "action_at",
   appointment_time: "action_at",
+  note: "note",
+  notes: "note",
+  comment: "note",
+  comments: "note",
 };
 
 export const MAPPING_TARGETS: { value: string; label: string }[] = [
@@ -96,7 +100,7 @@ export const MAP_BUILTIN_FIELDS = [
   "tags",
 ];
 
-export const PAYLOAD_MAP_BUILTIN_FIELDS = [...MAP_BUILTIN_FIELDS, "action_at"];
+export const PAYLOAD_MAP_BUILTIN_FIELDS = [...MAP_BUILTIN_FIELDS, "action_at", "note"];
 
 export const BUILTIN_FIELD_LABELS: Record<string, string> = {
   first_name: "First name",

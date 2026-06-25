@@ -199,12 +199,28 @@ func (h *Handler) setContractAppointmentCalendar(w http.ResponseWriter, r *http.
 
 func (h *Handler) listBuyerAppointments(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	items, err := h.svc.ListBuyerBookings(r.Context(), p.AccountID)
+	q := r.URL.Query()
+	page, _ := strconv.Atoi(q.Get("page"))
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	contractID, _ := strconv.ParseInt(q.Get("contract_id"), 10, 64)
+	publisherID, _ := strconv.ParseInt(q.Get("publisher_id"), 10, 64)
+
+	result, err := h.svc.ListBuyerBookings(r.Context(), BuyerListParams{
+		BuyerID:           p.AccountID,
+		Page:              page,
+		Limit:             limit,
+		Sort:              q.Get("sort"),
+		SortDir:           q.Get("sort_dir"),
+		Q:                 q.Get("q"),
+		ContractID:        contractID,
+		PublisherID:       publisherID,
+		AppointmentPreset: q.Get("appointment_preset"),
+	})
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+	httpx.JSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) listPublisherContracts(w http.ResponseWriter, r *http.Request) {

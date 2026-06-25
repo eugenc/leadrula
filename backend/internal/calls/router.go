@@ -72,7 +72,7 @@ func (s *Service) HandleInbound(ctx context.Context, trackingNumber, caller, twi
 		}
 	}
 	if src.PayloadEnabled {
-		if err := s.applyPreloadFieldMap(ctx, tx, src.ID, src.PublisherID, leadID, merged); err != nil {
+		if err := s.applyPreloadFieldMap(ctx, tx, src.ID, src.PublisherID, leadID, src.Name, merged); err != nil {
 			return "", err
 		}
 	}
@@ -384,7 +384,7 @@ func (s *Service) logPing(ctx context.Context, q database.Querier, callID int64,
 		callID, p.ParticipationID, p.Endpoint, p.Accepted, p.BidAmount, p.DestinationNumber, p.ResponseStatus, p.ResponseBody, p.Reason)
 }
 
-func (s *Service) applyPreloadFieldMap(ctx context.Context, tx database.Querier, sourceID, publisherID, leadID int64, flat map[string]any) error {
+func (s *Service) applyPreloadFieldMap(ctx context.Context, tx database.Querier, sourceID, publisherID, leadID int64, authorName string, flat map[string]any) error {
 	maps, err := routing.SourceFieldMap(ctx, tx, sourceID)
 	if err != nil {
 		return err
@@ -395,6 +395,12 @@ func (s *Service) applyPreloadFieldMap(ctx context.Context, tx database.Querier,
 			continue
 		}
 		if m.TargetType == "builtin" && m.BuiltinField != nil {
+			if *m.BuiltinField == "note" {
+				if err := s.leads.AddInboundNoteFromValue(ctx, tx, leadID, authorName, v); err != nil {
+					return err
+				}
+				continue
+			}
 			if err := leads.ApplyMappedField(ctx, tx, s.leads, publisherID, leadID, *m.BuiltinField, v); err != nil {
 				return err
 			}

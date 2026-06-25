@@ -9,6 +9,20 @@ function splitUrl(raw: string): { href: string; trailing: string } {
   return { href: trailing ? raw.slice(0, -trailing.length) : raw, trailing };
 }
 
+const BARE_DOMAIN_RE = /^[\w-]+(?:\.[\w-]+)+(\/\S*)?$/i;
+
+export function urlHrefFromValue(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) {
+    return splitUrl(trimmed).href;
+  }
+  if (BARE_DOMAIN_RE.test(trimmed)) {
+    return `https://${splitUrl(trimmed).href}`;
+  }
+  return null;
+}
+
 export function LinkifiedText({ text, className }: { text: string; className?: string }) {
   const parts = text.split(URL_RE);
   const nodes: ReactNode[] = [];

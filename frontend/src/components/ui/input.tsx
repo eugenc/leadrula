@@ -1,4 +1,6 @@
+import { LinkifiedText, urlHrefFromValue } from "@/components/ui/linkified-text";
 import { cn } from "@/lib/utils";
+import { ExternalLink } from "lucide-react";
 import {
   type InputHTMLAttributes,
   type TextareaHTMLAttributes,
@@ -12,6 +14,9 @@ import {
 const overflowTooltipClass =
   "pointer-events-none absolute left-0 top-full z-20 mt-1.5 max-w-md rounded-md bg-[#101828] px-2 py-1.5 text-xs font-normal leading-snug text-[#F9FAFB] opacity-0 shadow-sm transition-opacity duration-150 group-hover/overflow:opacity-100 whitespace-normal break-words";
 
+const overflowTooltipLinkifyClass =
+  "pointer-events-auto absolute left-0 top-full z-20 mt-1.5 max-w-md rounded-md bg-[#101828] px-2 py-1.5 text-xs font-normal leading-snug text-[#F9FAFB] opacity-0 shadow-sm transition-opacity duration-150 group-hover/overflow:opacity-100 whitespace-normal break-words [&_a]:text-jade-300 [&_a:hover]:underline";
+
 const base =
   "w-full rounded-md border border-gray-200 bg-surface-card text-md text-gray-800 outline-none transition-[border-color,box-shadow] placeholder:text-gray-300 hover:border-gray-300 focus:border-jade-500 focus:ring-[3px] focus:ring-jade-500/12 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400";
 
@@ -24,11 +29,12 @@ Input.displayName = "Input";
 
 export const InputWithOverflowTooltip = forwardRef<
   HTMLInputElement,
-  InputHTMLAttributes<HTMLInputElement>
->(({ className, value, ...props }, ref) => {
+  InputHTMLAttributes<HTMLInputElement> & { linkify?: boolean }
+>(({ className, value, linkify = false, ...props }, ref) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const [overflow, setOverflow] = useState(false);
   const displayText = value == null ? "" : String(value);
+  const href = linkify ? urlHrefFromValue(displayText) : null;
 
   useLayoutEffect(() => {
     const el = inputRef.current;
@@ -51,12 +57,27 @@ export const InputWithOverflowTooltip = forwardRef<
       <Input
         ref={setRefs}
         value={value}
-        className={cn(overflow && "truncate", className)}
+        className={cn(overflow && "truncate", href && "pr-9", className)}
         {...props}
       />
+      {href && (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Open link"
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-jade-600 hover:text-jade-700"
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <ExternalLink className="h-4 w-4" />
+        </a>
+      )}
       {overflow && displayText && (
-        <span role="tooltip" className={overflowTooltipClass}>
-          {displayText}
+        <span
+          role="tooltip"
+          className={linkify ? overflowTooltipLinkifyClass : overflowTooltipClass}
+        >
+          {linkify ? <LinkifiedText text={displayText} /> : displayText}
         </span>
       )}
     </span>

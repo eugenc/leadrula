@@ -150,7 +150,6 @@ const BUILTINS = [
   ...PAYLOAD_MAP_BUILTIN_FIELDS,
   "external_id",
   "disqualification_reason_id",
-  "note",
 ];
 
 const OUTBOUND_BUILTINS = [

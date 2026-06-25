@@ -46,7 +46,7 @@ func TestApplyPayloadMappings_actionAt(t *testing.T) {
 		{SourceKey: "appt_time", TargetType: "builtin", BuiltinField: strPtr("action_at")},
 	}
 
-	if err := applyPayloadMappings(ctx, tx, repo, accountID, leadID, flat, maps); err != nil {
+	if err := applyPayloadMappings(ctx, tx, repo, accountID, leadID, "test-source", flat, maps); err != nil {
 		t.Fatal(err)
 	}
 

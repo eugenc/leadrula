@@ -1,17 +1,34 @@
 import { format } from "date-fns";
-import { Badge, EmptyState, Spinner } from "@/components/ui/misc";
+import { EmptyState, Spinner } from "@/components/ui/misc";
 import { useUIStore } from "@/store/uiStore";
 import type { AppointmentBooking } from "@/types";
+
+function formatAppointmentTime(iso: string | null | undefined, timeZone: string): string {
+  if (!iso) return "—";
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date(iso));
+  } catch {
+    return format(new Date(iso), "MMM d, h:mm a");
+  }
+}
 
 export function BookedAppointmentsTable({
   items,
   isLoading,
   showBuyer,
+  timeZone = "UTC",
   emptyTitle = "No appointments booked yet.",
 }: {
   items: AppointmentBooking[];
   isLoading: boolean;
   showBuyer?: boolean;
+  timeZone?: string;
   emptyTitle?: string;
 }) {
   const openDetail = useUIStore((s) => s.openDetail);
@@ -30,7 +47,6 @@ export function BookedAppointmentsTable({
             <th className="px-3 py-2">Phone</th>
             {showBuyer ? <th className="px-3 py-2">Buyer</th> : <th className="px-3 py-2">Publisher</th>}
             <th className="px-3 py-2">Contract</th>
-            <th className="px-3 py-2">Delivery</th>
           </tr>
         </thead>
         <tbody>
@@ -40,17 +56,14 @@ export function BookedAppointmentsTable({
               className="cursor-pointer border-t border-gray-50 hover:bg-jade-50/50"
               onClick={() => openDetail(row.lead_id)}
             >
-              <td className="px-3 py-2 text-gray-500">{format(new Date(row.created_at), "MMM d, h:mm a")}</td>
-              <td className="px-3 py-2 font-medium">{format(new Date(row.slot_start), "MMM d, h:mm a")}</td>
+              <td className="px-3 py-2 text-gray-500">{formatAppointmentTime(row.booked_at, timeZone)}</td>
+              <td className="px-3 py-2 font-medium">
+                {formatAppointmentTime(row.appointment_at, timeZone)}
+              </td>
               <td className="px-3 py-2">{row.lead_name || "—"}</td>
               <td className="px-3 py-2">{row.phone || row.email || "—"}</td>
               <td className="px-3 py-2">{showBuyer ? row.buyer_name : row.publisher_name}</td>
               <td className="px-3 py-2">{row.contract_name}</td>
-              <td className="px-3 py-2">
-                <Badge variant={row.delivery_status === "delivered" ? "distributed" : "pending"}>
-                  {row.delivery_status}
-                </Badge>
-              </td>
             </tr>
           ))}
         </tbody>

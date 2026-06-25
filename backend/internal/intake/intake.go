@@ -97,7 +97,14 @@ func extractPhoneFromPayload(flat map[string]any, maps []routing.SourceFieldMapE
 	return ""
 }
 
-func applyPayloadMappings(ctx context.Context, tx database.Querier, repo *leads.Repository, accountID, leadID int64, flat map[string]any, maps []routing.SourceFieldMapEntry) error {
+func sourceAuthorName(name, slug string) string {
+	if name != "" {
+		return name
+	}
+	return slug
+}
+
+func applyPayloadMappings(ctx context.Context, tx database.Querier, repo *leads.Repository, accountID, leadID int64, authorName string, flat map[string]any, maps []routing.SourceFieldMapEntry) error {
 	for _, k := range builtinKeys {
 		if v, ok := flat[k]; ok {
 			if str := toText(v); str != "" {
@@ -113,6 +120,12 @@ func applyPayloadMappings(ctx context.Context, tx database.Querier, repo *leads.
 			continue
 		}
 		if m.TargetType == "builtin" && m.BuiltinField != nil {
+			if *m.BuiltinField == "note" {
+				if err := repo.AddInboundNoteFromValue(ctx, tx, leadID, authorName, v); err != nil {
+					return err
+				}
+				continue
+			}
 			if err := leads.ApplyMappedField(ctx, tx, repo, accountID, leadID, *m.BuiltinField, v); err != nil {
 				return err
 			}
@@ -193,15 +206,17 @@ func (s *Service) IngestFromSource(ctx context.Context, publisherID int64, slug 
 		return nil, err
 	}
 
+	authorName := sourceAuthorName(src.Name, slug)
+
 	if phone := extractPhoneFromPayload(sources, maps); phone != "" {
-		lead, lookupErr := s.leads.GetByPhoneNormalized(ctx, tx, publisherID, phone)
+		lead, lookupErr := s.leads.GetByPhoneNormalizedForPublisher(ctx, tx, publisherID, phone)
 		if lookupErr != nil {
 			var appErr *httpx.AppError
 			if !errors.As(lookupErr, &appErr) || appErr.Code != httpx.CodeNotFound {
 				return nil, lookupErr
 			}
 		} else {
-			if err := applyPayloadMappings(ctx, tx, s.leads, publisherID, lead.ID, sources, maps); err != nil {
+			if err := applyPayloadMappings(ctx, tx, s.leads, publisherID, lead.ID, authorName, sources, maps); err != nil {
 				return nil, err
 			}
 			if err := tx.Commit(ctx); err != nil {
@@ -215,7 +230,7 @@ func (s *Service) IngestFromSource(ctx context.Context, publisherID int64, slug 
 	if err != nil {
 		return nil, err
 	}
-	if err := applyPayloadMappings(ctx, tx, s.leads, publisherID, leadID, sources, maps); err != nil {
+	if err := applyPayloadMappings(ctx, tx, s.leads, publisherID, leadID, authorName, sources, maps); err != nil {
 		return nil, err
 	}
 	lead, err := s.leads.GetByID(ctx, tx, leadID)
@@ -828,8 +843,10 @@ func (s *Service) MapField(ctx context.Context, publisherID, queueID int64, sour
 	}
 
 	slug := ""
+	authorName := ""
 	if sourceSlug != nil {
 		slug = *sourceSlug
+		authorName = slug
 	}
 	if slug != "" {
 		src, err := routing.MatchSourceBySlug(ctx, tx, publisherID, slug)
@@ -837,6 +854,7 @@ func (s *Service) MapField(ctx context.Context, publisherID, queueID int64, sour
 			return nil, err
 		}
 		if src != nil {
+			authorName = sourceAuthorName(src.Name, slug)
 			var insertBuiltin *string
 			var insertCustom *int64
 			if targetType == "ignore" {
@@ -853,7 +871,11 @@ func (s *Service) MapField(ctx context.Context, publisherID, queueID int64, sour
 	}
 
 	if targetType == "builtin" && builtinField != nil {
-		if err := leads.ApplyMappedField(ctx, tx, s.leads, publisherID, leadID, *builtinField, v); err != nil {
+		if *builtinField == "note" {
+			if err := s.leads.AddInboundNoteFromValue(ctx, tx, leadID, authorName, v); err != nil {
+				return nil, err
+			}
+		} else if err := leads.ApplyMappedField(ctx, tx, s.leads, publisherID, leadID, *builtinField, v); err != nil {
 			return nil, err
 		}
 	} else if targetType == "custom" {
@@ -904,8 +926,10 @@ func (s *Service) ReprocessQueueItem(ctx context.Context, publisherID, queueID i
 
 	var maps []routing.SourceFieldMapEntry
 	slug := ""
+	authorName := ""
 	if sourceSlug != nil {
 		slug = *sourceSlug
+		authorName = slug
 	}
 	if slug != "" {
 		src, err := routing.MatchSourceBySlug(ctx, tx, publisherID, slug)
@@ -913,13 +937,14 @@ func (s *Service) ReprocessQueueItem(ctx context.Context, publisherID, queueID i
 			return nil, err
 		}
 		if src != nil {
+			authorName = sourceAuthorName(src.Name, slug)
 			maps, err = routing.SourceFieldMap(ctx, tx, src.ID)
 			if err != nil {
 				return nil, err
 			}
 		}
 	}
-	if err := applyPayloadMappings(ctx, tx, s.leads, publisherID, leadID, flat, maps); err != nil {
+	if err := applyPayloadMappings(ctx, tx, s.leads, publisherID, leadID, authorName, flat, maps); err != nil {
 		return nil, err
 	}
 

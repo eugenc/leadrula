@@ -145,12 +145,37 @@ export function useSetContractAppointmentCalendar() {
   });
 }
 
-export function useBuyerBookings() {
+export interface BuyerBookingsParams {
+  page?: number;
+  limit?: number;
+  sort?: string;
+  sort_dir?: "asc" | "desc";
+  q?: string;
+  contract_id?: number;
+  publisher_id?: number;
+  appointment_preset?: string;
+}
+
+export interface BuyerBookingsResult {
+  items: AppointmentBooking[];
+  total: number;
+}
+
+export function useBuyerBookings(params: BuyerBookingsParams) {
   return useQuery({
-    queryKey: ["buyer-appointments"],
+    queryKey: ["buyer-appointments", params],
     queryFn: async () => {
-      const res = await get<{ items: AppointmentBooking[] }>("/buyer/appointments");
-      return res.items ?? [];
+      const sp = new URLSearchParams();
+      if (params.page) sp.set("page", String(params.page));
+      if (params.limit) sp.set("limit", String(params.limit));
+      if (params.sort) sp.set("sort", params.sort);
+      if (params.sort_dir) sp.set("sort_dir", params.sort_dir);
+      if (params.q) sp.set("q", params.q);
+      if (params.contract_id) sp.set("contract_id", String(params.contract_id));
+      if (params.publisher_id) sp.set("publisher_id", String(params.publisher_id));
+      if (params.appointment_preset) sp.set("appointment_preset", params.appointment_preset);
+      const qs = sp.toString();
+      return get<BuyerBookingsResult>(`/buyer/appointments${qs ? `?${qs}` : ""}`);
     },
   });
 }

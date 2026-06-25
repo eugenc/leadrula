@@ -18,7 +18,7 @@ type Contract struct {
 	ID               int64     `json:"id"`
 	PublicID         string    `json:"public_id"`
 	HandlerID        string    `json:"handler_id"`
-	PublisherID      int64     `json:"-"`
+	PublisherID      int64     `json:"publisher_id,omitempty"`
 	BuyerID          *int64    `json:"buyer_id,omitempty"`
 	BuyerName        string    `json:"buyer_name,omitempty"`
 	BuyerAccountType string    `json:"buyer_account_type,omitempty"`
