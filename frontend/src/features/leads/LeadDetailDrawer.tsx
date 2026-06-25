@@ -11,6 +11,7 @@ import { IconButton } from "@/components/layout/IconButton";
 import { Button } from "@/components/ui/button";
 import { Input, InputWithOverflowTooltip, Label, Textarea, Select } from "@/components/ui/input";
 import { Badge, Spinner } from "@/components/ui/misc";
+import { LinkifiedText } from "@/components/ui/linkified-text";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { ActionDot } from "./ActionDot";
 import { format, isPast } from "date-fns";
@@ -723,16 +724,13 @@ function LeadPipelineHeader({ lead, collapsed = false }: { lead: Lead; collapsed
                     )}
                   />
                   <span
-                    role="tooltip"
-                    className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md bg-[#101828] px-2 py-1.5 text-xs font-normal leading-snug text-[#F9FAFB] opacity-0 shadow-sm transition-opacity duration-150 group-hover/stage:opacity-100"
+                    className={cn(
+                      "pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap text-xs text-gray-400 transition-opacity duration-150",
+                      isCurrent ? "opacity-100" : "opacity-0 group-hover/stage:opacity-100"
+                    )}
                   >
                     {s.name}
                   </span>
-                  {isCurrent && (
-                    <span className="pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap text-xs text-gray-400">
-                      {s.name}
-                    </span>
-                  )}
                 </span>
               );
             })}
@@ -1297,7 +1295,7 @@ function ActivityTab({ leadId }: { leadId: number }) {
               </div>
             ) : (
               <div className={cn("font-medium", h.kind === "note_added" && "whitespace-pre-wrap")}>
-                {historyHeadline(h)}
+                <LinkifiedText text={historyHeadline(h)} />
               </div>
             )}
             <div className="text-xs text-gray-400">
