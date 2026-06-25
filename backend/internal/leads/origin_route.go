@@ -39,6 +39,14 @@ func (s *Service) applyMatchedOriginRoute(ctx context.Context, rt *routing.Route
 	}
 	defer tx.Rollback(ctx)
 
+	lead, err := s.repo.GetByID(ctx, tx, leadID)
+	if err != nil {
+		return false
+	}
+	if lead.Status == "returned" && lead.OwnerAccountID == lead.PublisherID {
+		return false
+	}
+
 	deps := RouteApplyDeps{Repo: s.repo, Accounts: s.accounts, Notif: s.notif, Integrations: s.integrations}
 	meta := originRouteMeta(rt)
 	enqueue, emails, err := TryApplyMatchedRoute(ctx, tx, deps, rt, leadID, meta)

@@ -3,13 +3,11 @@ package appointments
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/accounts"
 	"github.com/echayko/leadrula/backend/internal/leads"
 	"github.com/echayko/leadrula/backend/internal/notifications"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -41,6 +39,7 @@ type Availability struct {
 type BuyerSlot struct {
 	ID          int64      `json:"id"`
 	AccountID   int64      `json:"account_id"`
+	CalendarID  int64      `json:"calendar_id"`
 	Weekday     int        `json:"weekday"`
 	StartTime   string     `json:"start_time"`
 	DurationMin int        `json:"duration_min"`
@@ -113,37 +112,51 @@ func (s *Service) getAccountTimezone(ctx context.Context, accountID int64) (stri
 }
 
 func (s *Service) loadAvailability(ctx context.Context, buyerID int64) (*Availability, error) {
-	a := &Availability{AccountID: buyerID}
-	err := s.pool.QueryRow(ctx,
-		`SELECT schedule, timezone, buffer_min, updated_at FROM buyer_availability WHERE account_id=$1`,
-		buyerID).Scan(&a.Schedule, &a.Timezone, &a.BufferMin, &a.UpdatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
+	calID, err := s.firstCalendarID(ctx, buyerID)
+	if err != nil {
+		return nil, err
+	}
+	if calID == 0 {
 		tz, tzErr := s.getAccountTimezone(ctx, buyerID)
 		if tzErr != nil {
 			return nil, tzErr
 		}
-		a.Timezone = tz
-		a.Schedule = json.RawMessage(`{}`)
-		return a, nil
+		return &Availability{AccountID: buyerID, Timezone: tz, Schedule: json.RawMessage(`{}`)}, nil
 	}
+	cal, err := s.GetBookingCalendar(ctx, buyerID, calID)
 	if err != nil {
 		return nil, err
 	}
-	a.Configured, _ = s.buyerConfigured(ctx, buyerID)
-	return a, nil
+	return &Availability{
+		AccountID:  buyerID,
+		Schedule:   cal.Schedule,
+		Timezone:   cal.Timezone,
+		BufferMin:  cal.BufferMin,
+		Configured: cal.Configured,
+		UpdatedAt:  cal.UpdatedAt,
+	}, nil
 }
 
 func (s *Service) buyerConfigured(ctx context.Context, buyerID int64) (bool, error) {
 	var ok bool
 	err := s.pool.QueryRow(ctx,
 		`SELECT EXISTS(
-			SELECT 1 FROM buyer_availability ba
-			WHERE ba.account_id = $1 AND ba.schedule::text NOT IN ('{}', 'null')
+			SELECT 1 FROM buyer_booking_calendars c
+			WHERE c.account_id = $1 AND c.schedule::text NOT IN ('{}', 'null')
 		) AND EXISTS(
 			SELECT 1 FROM buyer_appointment_slots s
-			WHERE s.account_id = $1 AND s.disabled_at IS NULL
+			JOIN buyer_booking_calendars c ON c.id = s.calendar_id
+			WHERE c.account_id = $1 AND s.disabled_at IS NULL
 		)`, buyerID).Scan(&ok)
 	return ok, err
+}
+
+func (s *Service) contractCalendarConfigured(ctx context.Context, contractID int64) (bool, error) {
+	calID, err := s.contractCalendarID(ctx, contractID)
+	if err != nil {
+		return false, err
+	}
+	return s.calendarConfigured(ctx, calID)
 }
 
 func effectiveCapacity(slot BuyerSlot, cs *ContractSlot) int {

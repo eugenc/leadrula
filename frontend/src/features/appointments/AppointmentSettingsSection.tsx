@@ -24,7 +24,8 @@ export function AppointmentSettingsSection({ contractId }: { contractId: number 
   if (!data?.length) {
     return (
       <p className="text-sm text-amber-700">
-        Buyer has not configured appointment slots yet. Booking is blocked until they set up availability.
+        No bookable slots for this contract. The buyer must attach a booking calendar and configure slots
+        before publishers can book.
       </p>
     );
   }

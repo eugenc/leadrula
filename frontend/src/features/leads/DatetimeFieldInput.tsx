@@ -199,7 +199,7 @@ export function DatetimeFieldInput({
   onChange,
   onBlur,
   disabled,
-  placeholder = "Set date & time",
+  placeholder,
   className,
   layout = "compact",
 }: {
@@ -231,7 +231,12 @@ export function DatetimeFieldInput({
     );
   }
 
-  const display = value ? formatDatetimeForDisplay(value) : placeholder;
+  const emptyLabel = placeholder ?? (
+    <>
+      <span className="hidden lg:inline">Click to Set Date & Time</span>
+      <span className="lg:hidden">Tap to Set Date & Time</span>
+    </>
+  );
 
   return (
     <Dropdown
@@ -253,7 +258,7 @@ export function DatetimeFieldInput({
             className
           )}
         >
-          {display}
+          {value ? formatDatetimeForDisplay(value) : emptyLabel}
         </button>
       }
     >

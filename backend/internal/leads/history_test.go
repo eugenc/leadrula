@@ -479,3 +479,22 @@ func TestDedupeLeadCreated(t *testing.T) {
 		t.Fatalf("kept earliest lead_created id = %d, want 2", keptID)
 	}
 }
+
+func TestDedupePipelinePlaced(t *testing.T) {
+	ts := time.Date(2026, 6, 25, 1, 36, 40, 0, time.UTC)
+	summary := "Placed · Sunbright → Reschedule"
+	entries := []LeadHistoryEntry{
+		{ID: 1, Kind: "pipeline_placed", ActorType: "integration", Summary: summary, CreatedAt: ts},
+		{ID: 2, Kind: "pipeline_placed", ActorType: "route", Summary: summary, CreatedAt: ts},
+		{ID: 3, Kind: "stage_change", CreatedAt: ts},
+	}
+	out := dedupePipelinePlaced(entries)
+	if len(out) != 2 {
+		t.Fatalf("want 2 entries after dedupe, got %d", len(out))
+	}
+	for _, e := range out {
+		if e.Kind == "pipeline_placed" && e.ActorType == "route" {
+			t.Fatal("change_log pipeline_placed should be dropped when route_executions exists")
+		}
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/pipelines"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/go-chi/chi/v5"
 )
@@ -414,6 +415,19 @@ func (h *Handler) setAction(w http.ResponseWriter, r *http.Request) {
 		ActionAt *time.Time `json:"action_at"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	if before.StageID == nil {
+		httpx.WriteError(w, httpx.BusinessRule("action date & time can only be set on action stages"))
+		return
+	}
+	stage, err := h.svc.repo.GetStage(r.Context(), h.svc.repo.pool, *before.StageID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if stage.StageType != pipelines.StageTypeAction {
+		httpx.WriteError(w, httpx.BusinessRule("action date & time can only be set on action stages"))
 		return
 	}
 	if err := h.svc.repo.SetActionAt(r.Context(), h.svc.repo.pool, leadID, body.ActionAt); err != nil {

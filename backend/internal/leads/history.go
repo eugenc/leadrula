@@ -75,7 +75,42 @@ func (r *Repository) LeadHistory(ctx context.Context, leadID int64) ([]LeadHisto
 		out = append(out, entries...)
 	}
 	sortHistory(out)
-	return dedupeLeadCreated(out), nil
+	return dedupePipelinePlaced(dedupeLeadCreated(out)), nil
+}
+
+// dedupePipelinePlaced drops change_log pipeline_placed rows when a route_executions
+// pipeline_placed row exists at the same second with the same summary (dual audit write).
+func dedupePipelinePlaced(entries []LeadHistoryEntry) []LeadHistoryEntry {
+	routeKeys := map[string]struct{}{}
+	for _, e := range entries {
+		if e.Kind != "pipeline_placed" || e.ActorType != "integration" {
+			continue
+		}
+		key := pipelinePlacedDedupeKey(e)
+		if key != "" {
+			routeKeys[key] = struct{}{}
+		}
+	}
+	if len(routeKeys) == 0 {
+		return entries
+	}
+	out := make([]LeadHistoryEntry, 0, len(entries))
+	for _, e := range entries {
+		if e.Kind == "pipeline_placed" && e.ActorType == "route" {
+			if _, dup := routeKeys[pipelinePlacedDedupeKey(e)]; dup {
+				continue
+			}
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+func pipelinePlacedDedupeKey(e LeadHistoryEntry) string {
+	if e.Summary == "" {
+		return ""
+	}
+	return e.CreatedAt.UTC().Truncate(time.Second).Format(time.RFC3339) + "|" + e.Summary
 }
 
 func dedupeLeadCreated(entries []LeadHistoryEntry) []LeadHistoryEntry {
@@ -708,14 +743,6 @@ func (r *Repository) createdHistoryEntry(ctx context.Context, leadID int64) ([]L
 	return []LeadHistoryEntry{e}, nil
 }
 
-func truncateNoteSummary(body string, maxLen int) string {
-	body = strings.TrimSpace(body)
-	if len(body) <= maxLen {
-		return body
-	}
-	return body[:maxLen-1] + "…"
-}
-
 func (r *Repository) noteHistoryEntries(ctx context.Context, leadID int64) ([]LeadHistoryEntry, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT n.id, n.created_at, n.body, n.user_id, n.author_name, u.full_name
@@ -736,7 +763,7 @@ func (r *Repository) noteHistoryEntries(ctx context.Context, leadID int64) ([]Le
 			return nil, err
 		}
 		e.Kind = "note_added"
-		e.Summary = truncateNoteSummary(body, 200)
+		e.Summary = strings.TrimSpace(body)
 		to := body
 		e.ToValue = &to
 		if userID == nil && authorName != nil && *authorName != "" {

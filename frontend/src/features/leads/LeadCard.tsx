@@ -1,9 +1,10 @@
 import { memo, type ReactNode } from "react";
-import type { AccountType, CustomField, Lead } from "@/types";
+import type { AccountType, CustomField, Lead, StageType } from "@/types";
 import { Avatar, Badge } from "@/components/ui/misc";
 import { useAuthStore } from "@/store/authStore";
 import { ActionIndicator } from "./ActionDot";
 import { cellValue, columnIcon, buyerStatusBadgeVariant, formatBuyerStatus, formatStatus } from "./leadsListColumns";
+import { showActionAtForStage } from "@/features/pipelines/stageTypes";
 import { LeadTagBadges } from "./LeadTagsEditor";
 import { cn } from "@/lib/utils";
 
@@ -89,14 +90,17 @@ export const LeadCard = memo(function LeadCard({
   cardFields,
   onClick,
   dragging,
+  stageType,
 }: {
   lead: Lead;
   customFields: CustomField[];
   cardFields: string[];
   onClick: () => void;
   dragging?: boolean;
+  stageType?: StageType;
 }) {
   const accountType = useAuthStore((s) => s.user?.account_type);
+  const showActionAt = showActionAtForStage(stageType ?? lead.stage_type);
   const activeFields = cardFields.filter((id) => id !== "name");
   const showReturnedInHeader =
     lead.status === "returned" && !activeFields.includes("status");
@@ -123,7 +127,7 @@ export const LeadCard = memo(function LeadCard({
               {accountType === "buyer" ? formatBuyerStatus(lead) : formatStatus(lead.status, accountType)}
             </Badge>
           )}
-          <ActionIndicator actionAt={lead.action_at} size="sm" />
+          {showActionAt && <ActionIndicator actionAt={lead.action_at} size="sm" />}
           {lead.assigned_user_id && (
             <span
               className="group/avatar relative shrink-0"

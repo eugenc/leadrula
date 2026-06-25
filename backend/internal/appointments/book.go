@@ -39,18 +39,23 @@ func (s *Service) Book(ctx context.Context, p *auth.Principal, params BookParams
 	if err != nil {
 		return nil, err
 	}
-	ok, err := s.buyerConfigured(ctx, buyerID)
+	ok, err := s.contractCalendarConfigured(ctx, params.ContractID)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return nil, httpx.Validation("buyer has not configured availability")
 	}
-	avail, err := s.loadAvailability(ctx, buyerID)
+	calID, err := s.contractCalendarID(ctx, params.ContractID)
 	if err != nil {
 		return nil, err
 	}
-	loc := loadLocation(avail.Timezone)
+	cal, err := s.loadCalendarByID(ctx, calID)
+	if err != nil {
+		return nil, err
+	}
+	_ = buyerID
+	loc := loadLocation(cal.Timezone)
 	slotStart := params.SlotStart.In(loc)
 	if !bookingWindowOK(slotStart, time.Now()) {
 		return nil, httpx.Validation("slot is outside booking window")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/echayko/leadrula/backend/internal/accounts"
 	"github.com/echayko/leadrula/backend/internal/auth"
@@ -541,5 +542,38 @@ func TestChangeStage_returnRefundsBuyerAndReversesEarning(t *testing.T) {
 	}
 	if returnAmt != -debitAmt {
 		t.Fatalf("return earning = %v, want %v", returnAmt, -debitAmt)
+	}
+}
+
+func TestChangeStage_actionToStandardClearsActionAt(t *testing.T) {
+	pool := connectLeadsTestDB(t)
+	ctx := context.Background()
+	svc := newStageTestService(t, pool)
+
+	var leadID, ownerAccountID, actionStageID, standardStageID int64
+	err := pool.QueryRow(ctx,
+		`SELECT l.id, l.owner_account_id, ps_action.id, ps_standard.id
+		 FROM leads l
+		 JOIN pipeline_stages ps_action ON ps_action.pipeline_id = l.pipeline_id AND ps_action.stage_type = 'action'
+		 JOIN pipeline_stages ps_standard ON ps_standard.pipeline_id = l.pipeline_id AND ps_standard.stage_type = 'standard'
+		 WHERE l.deleted_at IS NULL AND l.contract_id IS NULL
+		 LIMIT 1`).Scan(&leadID, &ownerAccountID, &actionStageID, &standardStageID)
+	if err != nil {
+		t.Skip("no lead with action and standard stages in same pipeline")
+	}
+
+	actionAt := time.Now().UTC().Add(24 * time.Hour)
+	_, err = pool.Exec(ctx, `UPDATE leads SET stage_id = $2, action_at = $3 WHERE id = $1`, leadID, actionStageID, actionAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p := &auth.Principal{AccountID: ownerAccountID, Role: "admin", UserID: 1}
+	updated, _, err := svc.ChangeStage(ctx, p, leadID, standardStageID, nil, nil)
+	if err != nil {
+		t.Fatalf("ChangeStage: %v", err)
+	}
+	if updated.ActionAt != nil {
+		t.Fatalf("action_at = %v, want nil after move to standard stage", updated.ActionAt)
 	}
 }

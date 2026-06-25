@@ -5,6 +5,8 @@
 //
 //	railway run go run ./cmd/repair-pipeline-stage -first Eugene -last Tester
 //	railway run go run ./cmd/repair-pipeline-stage -repair
+//	railway run go run ./cmd/repair-pipeline-stage -clear-stale-publisher-tracking
+//	railway run go run ./cmd/repair-pipeline-stage -clear-stale-publisher-tracking -repair
 package main
 
 import (
@@ -98,10 +100,29 @@ WHERE l.contract_id IS NOT NULL
   )
 `
 
+const clearStalePublisherTrackingSQL = `
+UPDATE leads
+SET publisher_pipeline_id = NULL, publisher_stage_id = NULL
+WHERE owner_account_id <> publisher_id
+  AND status = 'distributed'
+  AND publisher_pipeline_id IS NOT NULL
+  AND deleted_at IS NULL
+`
+
+const stalePublisherTrackingCountSQL = `
+SELECT COUNT(*)
+FROM leads
+WHERE owner_account_id <> publisher_id
+  AND status = 'distributed'
+  AND publisher_pipeline_id IS NOT NULL
+  AND deleted_at IS NULL
+`
+
 func main() {
 	first := flag.String("first", "", "lead first name (ILIKE)")
 	last := flag.String("last", "", "lead last name (ILIKE)")
 	repair := flag.Bool("repair", false, "repair all pipeline/stage mismatches")
+	clearStale := flag.Bool("clear-stale-publisher-tracking", false, "clear stale publisher_pipeline_id on buyer-owned distributed leads")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -128,17 +149,19 @@ func main() {
 	}
 	fmt.Printf("leads with pipeline/stage mismatch: %d\n", mismatchCount)
 
+	var staleCount int
+	if err := pool.QueryRow(ctx, stalePublisherTrackingCountSQL).Scan(&staleCount); err != nil {
+		log.Fatalf("count stale publisher tracking: %v", err)
+	}
+	fmt.Printf("buyer-owned distributed leads with stale publisher tracking: %d\n", staleCount)
+
 	if *first != "" || *last != "" {
 		if err := diagnoseLead(ctx, pool, *first, *last); err != nil {
 			log.Fatalf("diagnose: %v", err)
 		}
 	}
 
-	if *repair {
-		if mismatchCount == 0 {
-			fmt.Println("nothing to repair")
-			return
-		}
+	if *repair && mismatchCount > 0 {
 		tag, err := pool.Exec(ctx, repairSQL)
 		if err != nil {
 			log.Fatalf("repair: %v", err)
@@ -157,6 +180,29 @@ func main() {
 		if after > 0 {
 			os.Exit(1)
 		}
+	} else if *repair && mismatchCount == 0 {
+		fmt.Println("no pipeline/stage mismatches to repair")
+	}
+
+	if *clearStale {
+		if staleCount == 0 {
+			fmt.Println("no stale publisher tracking to clear")
+			return
+		}
+		if !*repair {
+			fmt.Printf("dry run: would clear publisher tracking on %d lead(s) (pass -repair to apply)\n", staleCount)
+			return
+		}
+		tag, err := pool.Exec(ctx, clearStalePublisherTrackingSQL)
+		if err != nil {
+			log.Fatalf("clear stale publisher tracking: %v", err)
+		}
+		fmt.Printf("cleared publisher tracking on %d lead(s)\n", tag.RowsAffected())
+		var after int
+		if err := pool.QueryRow(ctx, stalePublisherTrackingCountSQL).Scan(&after); err != nil {
+			log.Fatalf("count after clear: %v", err)
+		}
+		fmt.Printf("remaining stale publisher tracking: %d\n", after)
 	}
 }
 

@@ -16,13 +16,19 @@ type Handler struct{ svc *Service }
 func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 
 func (h *Handler) RegisterBuyer(r chi.Router) {
-	r.Get("/availability", h.getAvailability)
-	r.With(auth.RequireRole("admin")).Put("/availability", h.putAvailability)
-	r.Get("/appointment-slots", h.listBuyerSlots)
-	r.With(auth.RequireRole("admin")).Post("/appointment-slots", h.createBuyerSlot)
-	r.With(auth.RequireRole("admin")).Patch("/appointment-slots/{id}", h.patchBuyerSlot)
-	r.With(auth.RequireRole("admin")).Post("/appointment-slots/copy", h.copyBuyerSlots)
+	r.Get("/booking-calendars", h.listBookingCalendars)
+	r.With(auth.RequireRole("admin")).Post("/booking-calendars", h.createBookingCalendar)
+	r.Get("/booking-calendars/{calendarId}", h.getBookingCalendar)
+	r.With(auth.RequireRole("admin")).Put("/booking-calendars/{calendarId}", h.putBookingCalendar)
+	r.Get("/booking-calendars/{calendarId}/slots", h.listCalendarSlots)
+	r.With(auth.RequireRole("admin")).Post("/booking-calendars/{calendarId}/slots", h.createCalendarSlot)
+	r.With(auth.RequireRole("admin")).Patch("/booking-calendars/{calendarId}/slots/{slotId}", h.patchCalendarSlot)
+	r.With(auth.RequireRole("admin")).Post("/booking-calendars/{calendarId}/slots/copy", h.copyCalendarSlots)
+	r.Get("/booking-calendars/{calendarId}/markers", h.listBuyerCalendarMarkers)
+	r.Get("/booking-calendars/{calendarId}/appointments", h.listBuyerCalendarAppointments)
+
 	r.Get("/appointments", h.listBuyerAppointments)
+	r.With(auth.RequireRole("admin")).Patch("/contracts/{id}/appointment-calendar", h.setContractAppointmentCalendar)
 }
 
 func (h *Handler) RegisterPublisher(r chi.Router) {
@@ -35,19 +41,49 @@ func (h *Handler) RegisterPublisher(r chi.Router) {
 	r.With(auth.RequireRole("admin")).Put("/contracts/{id}/appointment-slots", h.putContractSlots)
 }
 
-func (h *Handler) getAvailability(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) listBookingCalendars(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	a, err := h.svc.GetBuyerAvailability(r.Context(), p.AccountID)
+	items, err := h.svc.ListBookingCalendars(r.Context(), p.AccountID)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, a)
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
-func (h *Handler) putAvailability(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) createBookingCalendar(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
+		Name     string `json:"name"`
+		Timezone string `json:"timezone"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	cal, err := h.svc.CreateBookingCalendar(r.Context(), p.AccountID, CreateCalendarParams{
+		Name: body.Name, Timezone: body.Timezone,
+	})
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, cal)
+}
+
+func (h *Handler) getBookingCalendar(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	cal, err := h.svc.GetBookingCalendar(r.Context(), p.AccountID, int64(pathInt(r, "calendarId")))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, cal)
+}
+
+func (h *Handler) putBookingCalendar(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		Name      string          `json:"name"`
 		Schedule  json.RawMessage `json:"schedule"`
 		Timezone  string          `json:"timezone"`
 		BufferMin int             `json:"buffer_min"`
@@ -55,19 +91,19 @@ func (h *Handler) putAvailability(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	a, err := h.svc.PutBuyerAvailability(r.Context(), p.AccountID, PutAvailabilityParams{
-		Schedule: body.Schedule, Timezone: body.Timezone, BufferMin: body.BufferMin,
+	cal, err := h.svc.PutBookingCalendar(r.Context(), p.AccountID, int64(pathInt(r, "calendarId")), PutCalendarParams{
+		Name: body.Name, Schedule: body.Schedule, Timezone: body.Timezone, BufferMin: body.BufferMin,
 	})
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, a)
+	httpx.JSON(w, http.StatusOK, cal)
 }
 
-func (h *Handler) listBuyerSlots(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) listCalendarSlots(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	slots, err := h.svc.ListBuyerSlots(r.Context(), p.AccountID)
+	slots, err := h.svc.ListCalendarSlots(r.Context(), p.AccountID, int64(pathInt(r, "calendarId")))
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -75,13 +111,13 @@ func (h *Handler) listBuyerSlots(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": slots})
 }
 
-func (h *Handler) createBuyerSlot(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) createCalendarSlot(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body CreateSlotParams
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	sl, err := h.svc.CreateBuyerSlot(r.Context(), p.AccountID, body)
+	sl, err := h.svc.CreateCalendarSlot(r.Context(), p.AccountID, int64(pathInt(r, "calendarId")), body)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -89,14 +125,13 @@ func (h *Handler) createBuyerSlot(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, sl)
 }
 
-func (h *Handler) patchBuyerSlot(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) patchCalendarSlot(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
-	id := pathInt(r, "id")
 	var body PatchSlotParams
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	sl, err := h.svc.PatchBuyerSlot(r.Context(), p.AccountID, int64(id), body)
+	sl, err := h.svc.PatchCalendarSlot(r.Context(), p.AccountID, int64(pathInt(r, "calendarId")), int64(pathInt(r, "slotId")), body)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -104,7 +139,7 @@ func (h *Handler) patchBuyerSlot(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, sl)
 }
 
-func (h *Handler) copyBuyerSlots(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) copyCalendarSlots(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
 		FromWeekday int   `json:"from_weekday"`
@@ -113,12 +148,53 @@ func (h *Handler) copyBuyerSlots(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	slots, err := h.svc.CopyBuyerSlots(r.Context(), p.AccountID, body.FromWeekday, body.ToWeekdays)
+	slots, err := h.svc.CopyCalendarSlots(r.Context(), p.AccountID, int64(pathInt(r, "calendarId")), body.FromWeekday, body.ToWeekdays)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"items": slots})
+}
+
+func (h *Handler) listBuyerCalendarMarkers(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	from := r.URL.Query().Get("from")
+	to := r.URL.Query().Get("to")
+	items, err := h.svc.ListBuyerCalendarMarkers(r.Context(), p.AccountID, int64(pathInt(r, "calendarId")), from, to)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *Handler) listBuyerCalendarAppointments(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	items, err := h.svc.ListBuyerBookingsForCalendar(r.Context(), p.AccountID, int64(pathInt(r, "calendarId")))
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *Handler) setContractAppointmentCalendar(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		AppointmentCalendarID int64 `json:"appointment_calendar_id"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	if body.AppointmentCalendarID == 0 {
+		httpx.WriteError(w, httpx.Validation("appointment_calendar_id is required"))
+		return
+	}
+	if err := h.svc.SetContractAppointmentCalendar(r.Context(), p.AccountID, int64(pathInt(r, "id")), body.AppointmentCalendarID); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) listBuyerAppointments(w http.ResponseWriter, r *http.Request) {

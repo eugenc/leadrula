@@ -28,6 +28,7 @@ import { IntakeLogTab } from "@/pages/publisher/IntakeLogTab";
 import { IntakeReviewTab } from "@/pages/publisher/IntakeReviewTab";
 import { CallsLogTab } from "@/pages/publisher/CallsLogTab";
 import { BuyerCallsLogTab } from "@/pages/buyer/CallsLogTab";
+import { PublisherCalendarsPage } from "@/pages/publisher/CalendarsPage";
 import { PublisherAppointmentsPage } from "@/pages/publisher/AppointmentsPage";
 import { SourcesPage } from "@/pages/publisher/SourcesPage";
 import { WebhooksPage } from "@/pages/WebhooksPage";
@@ -39,7 +40,7 @@ import { PublisherCollaborationAccessTab } from "@/pages/publisher/Collaboration
 import { PublisherCollaborationActivityTab } from "@/pages/publisher/CollaborationActivityTab";
 import { PublisherBillingPage } from "@/pages/publisher/PublisherBillingPage";
 
-import { CalendarPage } from "@/pages/buyer/CalendarPage";
+import { BuyerCalendarsPage } from "@/pages/buyer/CalendarsPage";
 import { BuyerAppointmentsPage } from "@/pages/buyer/AppointmentsPage";
 import { ContractPage } from "@/pages/buyer/ContractPage";
 import { ContractInvitePage } from "@/pages/buyer/ContractInvitePage";
@@ -103,6 +104,7 @@ export default function App() {
                 </Route>
                 <Route path="calls" element={<CallsLogTab />} />
                 <Route path="appointments" element={<PublisherAppointmentsPage />} />
+                <Route path="calendar" element={<PublisherCalendarsPage />} />
                 <Route path="log/calls" element={<Navigate to="/p/calls" replace />} />
                 <Route path="intake" element={<Navigate to="/p/log" replace />} />
                 <Route path="pipelines" element={<PipelinesPage />} />
@@ -143,7 +145,7 @@ export default function App() {
                 <Route path="leads" element={<LeadsListPage />} />
                 <Route path="calls" element={<BuyerCallsLogTab />} />
                 <Route path="appointments" element={<BuyerAppointmentsPage />} />
-                <Route path="calendar" element={<CalendarPage />} />
+                <Route path="calendar" element={<BuyerCalendarsPage />} />
                 <Route path="pipelines" element={<PipelinesPage />} />
                 <Route path="fields" element={<CustomFieldsPage />} />
                 <Route path="publishers" element={<PublishersPage />} />

@@ -7,15 +7,17 @@ export function BookedAppointmentsTable({
   items,
   isLoading,
   showBuyer,
+  emptyTitle = "No appointments booked yet.",
 }: {
   items: AppointmentBooking[];
   isLoading: boolean;
   showBuyer?: boolean;
+  emptyTitle?: string;
 }) {
   const openDetail = useUIStore((s) => s.openDetail);
 
   if (isLoading) return <Spinner className="h-6 w-6" />;
-  if (!items.length) return <EmptyState title="No appointments booked yet." />;
+  if (!items.length) return <EmptyState title={emptyTitle} />;
 
   return (
     <div className="overflow-x-auto rounded-md border border-gray-100">

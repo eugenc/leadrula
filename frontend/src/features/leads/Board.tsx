@@ -58,7 +58,7 @@ import {
 } from "./leadsListColumns";
 import { useAuthStore } from "@/store/authStore";
 import { groupLeadsForBoard, isPublisherTrackedLead, UNPLACED_BOARD_STAGE_ID } from "./boardStage";
-import type { AccountType, Lead, Stage } from "@/types";
+import type { AccountType, Lead, Stage, StageType } from "@/types";
 
 const unplacedStage: Stage = {
   id: UNPLACED_BOARD_STAGE_ID,
@@ -244,6 +244,7 @@ export function Board() {
     initialActionAt: string;
   } | null>(null);
   const [activeDrag, setActiveDrag] = useState<Lead | null>(null);
+  const [activeDragStageType, setActiveDragStageType] = useState<StageType | undefined>();
 
   const stageList = useMemo(
     () => [...(stages ?? [])].sort((a, b) => a.position - b.position),
@@ -326,11 +327,20 @@ export function Board() {
   function onDragStart(event: DragStartEvent) {
     const lead = event.active.data.current?.lead as Lead | undefined;
     if (lead && isDragBlocked(lead, accountType)) return;
-    if (lead) setActiveDrag(lead);
+    if (lead) {
+      setActiveDrag(lead);
+      const fromStageId = Number(event.active.data.current?.stageId);
+      if (fromStageId === UNPLACED_BOARD_STAGE_ID) {
+        setActiveDragStageType(unplacedStage.stage_type);
+      } else {
+        setActiveDragStageType(stageList.find((s) => s.id === fromStageId)?.stage_type);
+      }
+    }
   }
 
   function onDragEnd(event: DragEndEvent) {
     setActiveDrag(null);
+    setActiveDragStageType(undefined);
     const lead = event.active.data.current?.lead as Lead | undefined;
     if (lead && isDragBlocked(lead, accountType)) return;
     const { active, over } = event;
@@ -501,6 +511,7 @@ export function Board() {
               cardFields={activeCardFields}
               onClick={() => {}}
               dragging
+              stageType={activeDragStageType}
             />
           ) : null}
         </DragOverlay>

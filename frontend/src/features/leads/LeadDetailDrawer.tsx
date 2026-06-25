@@ -43,6 +43,7 @@ import { DEADLINE_DAY_OPTIONS } from "@/features/billing/disputeOptions";
 import { StagePromptModal, type PromptResult } from "./StagePromptModal";
 import {
   initialActionAtForStageMove,
+  showActionAtForStage,
   stageNeedsPrompt,
   stagePromptMissingError,
 } from "@/features/pipelines/stageTypes";
@@ -56,6 +57,7 @@ import { effectiveFieldFormat } from "@/features/admin/customFieldConstants";
 import { groupCustomFieldsByFolder } from "@/features/admin/customFieldLayout";
 import { isContactFolder, resolveContactBuiltinOrder, type ContactFieldKey } from "./contactSection";
 import { useFolderCollapse } from "./customFieldFolderCollapse";
+import { useLeadAssignmentCollapse } from "./leadAssignmentCollapse";
 import { DatetimeFieldInput } from "./DatetimeFieldInput";
 import {
   AddressAutocomplete,
@@ -380,6 +382,17 @@ function LeadHeader({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   });
 
   const buyerName = lead.buyer_name ?? lead.preassigned_buyer_name ?? null;
+  const { collapsed: assignmentCollapsed, toggle: toggleAssignment } = useLeadAssignmentCollapse(
+    user?.account_id
+  );
+  const { data: summaryStages } = useStages(lead.pipeline_id ?? undefined);
+  const assigneeLabel = lead.assignee_name ?? "Unassigned";
+  const buyerLabel = buyerName ?? "—";
+  const stageLabel =
+    summaryStages?.find((s) => s.id === lead.stage_id)?.name ?? lead.stage_name ?? "—";
+  const currentStageType =
+    summaryStages?.find((s) => s.id === lead.stage_id)?.stage_type ?? lead.stage_type;
+  const assignmentSummary = `${assigneeLabel} · ${buyerLabel} · ${stageLabel}`;
 
   const [actionAtLocal, setActionAtLocal] = useState(
     lead.action_at ? isoToDatetimeLocal(lead.action_at) : ""
@@ -428,112 +441,138 @@ function LeadHeader({ lead, onClose }: { lead: Lead; onClose: () => void }) {
         </IconButton>
       </div>
 
-      <div
-        className={cn(
-          "mt-3 flex items-center gap-2 rounded-md border px-2.5 py-1.5",
-          overdue ? "border-danger-border bg-danger-bg" : "border-gray-100 bg-gray-100"
-        )}
-      >
-        {lead.action_at && <ActionDot actionAt={lead.action_at} variant="dot" />}
-        <span
+      {showActionAtForStage(currentStageType) && (
+        <div
           className={cn(
-            "shrink-0 text-xs",
-            overdue ? "font-semibold text-danger-fg" : "text-gray-700"
+            "mt-3 flex items-center gap-2 rounded-md border px-2.5 py-1.5",
+            overdue ? "border-danger-border bg-danger-bg" : "border-gray-100 bg-gray-100"
           )}
         >
-          Action Date & Time{overdue && " — overdue"}
+          {lead.action_at && <ActionDot actionAt={lead.action_at} variant="dot" />}
+          <span
+            className={cn(
+              "shrink-0 text-xs",
+              overdue ? "font-semibold text-danger-fg" : "text-gray-700"
+            )}
+          >
+            Action Date & Time{overdue && " — overdue"}
+          </span>
+          <DatetimeFieldInput
+            value={actionAtLocal}
+            onChange={setActionAtLocal}
+            onBlur={saveActionAt}
+            disabled={setAction.isPending}
+            className={overdue ? "font-semibold text-danger-fg" : "text-gray-700"}
+          />
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={toggleAssignment}
+        aria-expanded={!assignmentCollapsed}
+        className="mt-3 flex w-full min-h-11 items-center gap-1 py-1 text-left text-xs font-semibold uppercase tracking-wide text-gray-400 hover:text-gray-600"
+      >
+        {assignmentCollapsed ? (
+          <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+        ) : (
+          <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+        )}
+        <span className="min-w-0 truncate">
+          Assignment & pipeline
+          {assignmentCollapsed && (
+            <span className="font-normal normal-case tracking-normal text-gray-500">
+              {" "}
+              · {assignmentSummary}
+            </span>
+          )}
         </span>
-        <DatetimeFieldInput
-          value={actionAtLocal}
-          onChange={setActionAtLocal}
-          onBlur={saveActionAt}
-          disabled={setAction.isPending}
-          className={overdue ? "font-semibold text-danger-fg" : "text-gray-700"}
-        />
-      </div>
+      </button>
 
-      <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-start">
-        <div className="min-w-0 flex-1">
-          <Label>Assigned</Label>
-          {isAdmin ? (
-            <Select
-              value={lead.assigned_user_id != null ? String(lead.assigned_user_id) : ""}
-              onChange={(e) =>
-                update.mutate(
-                  {
-                    leadId: lead.id,
-                    body: e.target.value
-                      ? { assigned_user_id: Number(e.target.value) }
-                      : { clear_assignee: true },
-                  },
-                  {
-                    onSuccess: () => toast.success("Saved"),
-                    onError: (err) => toast.error(errorMessage(err)),
-                  }
-                )
-              }
-              disabled={update.isPending}
-            >
-              <option value="">Unassigned</option>
-              {(users ?? []).filter((u) => u.status === "active").map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.full_name}
-                </option>
-              ))}
-            </Select>
-          ) : (
-            <div className="mt-1 text-sm text-gray-700">
-              {lead.assignee_name ? (
-                <span className="truncate">{lead.assignee_name}</span>
-              ) : (
-                "Unassigned"
-              )}
-            </div>
-          )}
+      {!assignmentCollapsed && (
+        <div className="mt-1 flex flex-col gap-4 sm:flex-row sm:items-start">
+          <div className="min-w-0 flex-1">
+            <Label>Assigned</Label>
+            {isAdmin ? (
+              <Select
+                value={lead.assigned_user_id != null ? String(lead.assigned_user_id) : ""}
+                onChange={(e) =>
+                  update.mutate(
+                    {
+                      leadId: lead.id,
+                      body: e.target.value
+                        ? { assigned_user_id: Number(e.target.value) }
+                        : { clear_assignee: true },
+                    },
+                    {
+                      onSuccess: () => toast.success("Saved"),
+                      onError: (err) => toast.error(errorMessage(err)),
+                    }
+                  )
+                }
+                disabled={update.isPending}
+              >
+                <option value="">Unassigned</option>
+                {(users ?? []).filter((u) => u.status === "active").map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.full_name}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <div className="mt-1 text-sm text-gray-700">
+                {lead.assignee_name ? (
+                  <span className="truncate">{lead.assignee_name}</span>
+                ) : (
+                  "Unassigned"
+                )}
+              </div>
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <Label>Buyer</Label>
+            {canEditPreassignedBuyer ? (
+              <Select
+                value={lead.preassigned_buyer_id != null ? String(lead.preassigned_buyer_id) : ""}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  update.mutate(
+                    {
+                      leadId: lead.id,
+                      body: val
+                        ? { preassigned_buyer_id: Number(val) }
+                        : { clear_preassigned_buyer: true },
+                    },
+                    {
+                      onSuccess: () => toast.success("Saved"),
+                      onError: (err) => toast.error(errorMessage(err)),
+                    }
+                  );
+                }}
+                disabled={update.isPending}
+              >
+                <option value="">None</option>
+                {(buyers ?? []).map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <div className="mt-1 text-sm text-gray-700">
+                {buyerName ? <span className="truncate">{buyerName}</span> : "—"}
+              </div>
+            )}
+          </div>
         </div>
-        <div className="min-w-0 flex-1">
-          <Label>Buyer</Label>
-          {canEditPreassignedBuyer ? (
-            <Select
-              value={lead.preassigned_buyer_id != null ? String(lead.preassigned_buyer_id) : ""}
-              onChange={(e) => {
-                const val = e.target.value;
-                update.mutate(
-                  {
-                    leadId: lead.id,
-                    body: val
-                      ? { preassigned_buyer_id: Number(val) }
-                      : { clear_preassigned_buyer: true },
-                  },
-                  {
-                    onSuccess: () => toast.success("Saved"),
-                    onError: (err) => toast.error(errorMessage(err)),
-                  }
-                );
-              }}
-              disabled={update.isPending}
-            >
-              <option value="">None</option>
-              {(buyers ?? []).map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </Select>
-          ) : (
-            <div className="mt-1 text-sm text-gray-700">
-              {buyerName ? <span className="truncate">{buyerName}</span> : "—"}
-            </div>
-          )}
-        </div>
-      </div>
+      )}
 
-      <LeadPipelineHeader lead={lead} />
+      <LeadPipelineHeader lead={lead} collapsed={assignmentCollapsed} />
     </div>
   );
 }
 
-function LeadPipelineHeader({ lead }: { lead: Lead }) {
+function LeadPipelineHeader({ lead, collapsed = false }: { lead: Lead; collapsed?: boolean }) {
   const user = useAuthStore((s) => s.user);
   const canEditPipeline =
     user?.role === "admin" ||
@@ -632,8 +671,8 @@ function LeadPipelineHeader({ lead }: { lead: Lead }) {
   const showStageBar = pipelineId > 0 && stagesReady && (stages?.length ?? 0) > 0;
 
   return (
-    <div className="mt-3">
-      {canEditPipeline && (
+    <div className={collapsed ? undefined : "mt-3"}>
+      {!collapsed && canEditPipeline && (
         <div>
           <Label>Pipeline</Label>
           <Select
@@ -650,7 +689,7 @@ function LeadPipelineHeader({ lead }: { lead: Lead }) {
           </Select>
         </div>
       )}
-      {showStageBar && (
+      {!collapsed && showStageBar && (
         <>
           <div className="mt-[25px] flex gap-1 overflow-x-auto pb-5">
             {(stages ?? []).map((s, i) => {
@@ -1244,7 +1283,7 @@ function ActivityTab({ leadId }: { leadId: number }) {
                 })()}
               </div>
             ) : (
-              <div className={cn("font-medium", h.kind === "note_added" && "line-clamp-3 whitespace-pre-wrap")}>
+              <div className={cn("font-medium", h.kind === "note_added" && "whitespace-pre-wrap")}>
                 {historyHeadline(h)}
               </div>
             )}

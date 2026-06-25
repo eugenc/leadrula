@@ -59,6 +59,7 @@ func listSelect(accountType string) string {
 	u.prefs->>'avatar_url' AS assignee_avatar_url,
 	pl.name AS pipeline_name,
 	st.name AS stage_name,
+	st.stage_type AS stage_type,
 	` + boardStageSQL(accountType) + ` AS board_stage_id,
 	COALESCE(
 		(SELECT h.created_at FROM lead_stage_history h
@@ -232,7 +233,7 @@ func (r *Repository) GetByRef(ctx context.Context, p *auth.Principal, ref string
 func (r *Repository) attachLeadNames(ctx context.Context, l *Lead) error {
 	return r.pool.QueryRow(ctx,
 		`SELECT CASE WHEN ba.type = 'buyer' THEN ba.name ELSE NULL END, pba.name, rs.name,
-		        u.full_name, u.prefs->>'avatar_url', pl.name, st.name
+		        u.full_name, u.prefs->>'avatar_url', pl.name, st.name, st.stage_type
 		 FROM leads l
 		 LEFT JOIN accounts ba ON ba.id = l.owner_account_id AND ba.type = 'buyer'
 		 LEFT JOIN accounts pba ON pba.id = l.preassigned_buyer_id
@@ -240,7 +241,7 @@ func (r *Repository) attachLeadNames(ctx context.Context, l *Lead) error {
 		 LEFT JOIN users u ON u.id = l.assigned_user_id
 		 LEFT JOIN pipelines pl ON pl.id = l.pipeline_id
 		 LEFT JOIN pipeline_stages st ON st.id = l.stage_id
-		 WHERE l.id = $1`, l.ID).Scan(&l.BuyerName, &l.PreassignedBuyerName, &l.SourceName, &l.AssigneeName, &l.AssigneeAvatarURL, &l.PipelineName, &l.StageName)
+		 WHERE l.id = $1`, l.ID).Scan(&l.BuyerName, &l.PreassignedBuyerName, &l.SourceName, &l.AssigneeName, &l.AssigneeAvatarURL, &l.PipelineName, &l.StageName, &l.StageType)
 }
 
 func (r *Repository) attachStageMoveCount(ctx context.Context, l *Lead) error {
@@ -352,7 +353,7 @@ func scanListLead(row pgx.Row) (*Lead, error) {
 		&l.Cost, &l.Revenue,
 		&l.PipelineID, &l.StageID, &l.PublisherPipelineID, &l.PublisherStageID, &l.Position, &l.AssignedUserID, &l.PreassignedBuyerID, &l.ActionAt, &l.Status,
 		&l.DisqReasonID, &l.CreatedAt, &l.UpdatedAt, &l.Tags, &l.BuyerName, &l.PreassignedBuyerName, &l.SourceName, &l.AssigneeName, &l.AssigneeAvatarURL,
-		&l.PipelineName, &l.StageName, &l.BoardStageID, &l.StageEnteredAt, &l.StageMoveCount)
+		&l.PipelineName, &l.StageName, &l.StageType, &l.BoardStageID, &l.StageEnteredAt, &l.StageMoveCount)
 	if err != nil {
 		return nil, err
 	}
@@ -927,6 +928,24 @@ func (r *Repository) GetByExternalID(ctx context.Context, q database.Querier, ac
 	return scanLead(q.QueryRow(ctx,
 		`SELECT `+leadCols+` FROM leads WHERE owner_account_id=$1 AND external_id=$2 AND `+leadNotDeleted,
 		accountID, externalID))
+}
+
+// GetCollaborationLeadByExternalID finds a publisher lead with the same external_id
+// when the buyer account shares an active contract with that publisher.
+func (r *Repository) GetCollaborationLeadByExternalID(ctx context.Context, q database.Querier, buyerAccountID int64, externalID string) (*Lead, error) {
+	return scanLead(q.QueryRow(ctx,
+		`SELECT `+leadCols+` FROM leads l
+		 WHERE l.external_id = $2 AND l.deleted_at IS NULL
+		   AND l.publisher_id IN (
+		     SELECT c.publisher_id FROM contracts c
+		     WHERE c.buyer_id = $1 AND c.status = 'active' AND c.deleted_at IS NULL
+		     UNION
+		     SELECT c.publisher_id FROM contract_participations cp
+		     JOIN contracts c ON c.id = cp.contract_id
+		     WHERE cp.buyer_id = $1 AND cp.status = 'active' AND c.deleted_at IS NULL
+		   )
+		 ORDER BY l.id DESC LIMIT 1`,
+		buyerAccountID, externalID))
 }
 
 // GetByPublicID finds an active lead by public_id UUID string.

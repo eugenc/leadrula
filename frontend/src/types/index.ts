@@ -177,6 +177,7 @@ export interface Lead {
   assignee_avatar_url?: string | null;
   pipeline_name?: string | null;
   stage_name?: string | null;
+  stage_type?: StageType;
   stage_entered_at?: string | null;
   stage_move_count?: number;
   tags?: string[];
@@ -330,6 +331,7 @@ export interface Contract {
   distribution_strategy?: string;
   parent_contract_id?: number | null;
   invite_token?: string;
+  appointment_calendar_id?: number | null;
   participations?: ContractParticipation[];
 }
 
@@ -491,9 +493,22 @@ export interface BuyerAvailability {
   updated_at: string;
 }
 
+export interface BuyerBookingCalendar {
+  id: number;
+  account_id: number;
+  name: string;
+  schedule: Record<string, { start: string; end: string }>;
+  timezone: string;
+  buffer_min: number;
+  configured: boolean;
+  slot_count: number;
+  updated_at: string;
+}
+
 export interface BuyerAppointmentSlot {
   id: number;
   account_id: number;
+  calendar_id: number;
   weekday: number;
   start_time: string;
   duration_min: number;

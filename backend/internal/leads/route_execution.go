@@ -80,11 +80,30 @@ func recordRouteFromRoute(ctx context.Context, q database.Querier, route *routin
 	if route.Destination == "pipeline" {
 		p.TargetPipelineID = route.TargetPipelineID
 		p.TargetStageID = route.TargetStageID
-		p.TargetPipelineName = route.TargetPipelineName
-		p.TargetStageName = route.TargetStageName
 		p.Delivery = route.Delivery
+		if route.TargetPipelineID != nil && route.TargetStageID != nil {
+			pipelineName, stageName := resolveRouteTargetNames(ctx, q, *route.TargetPipelineID, *route.TargetStageID)
+			p.TargetPipelineName = pipelineName
+			p.TargetStageName = stageName
+		} else {
+			p.TargetPipelineName = route.TargetPipelineName
+			p.TargetStageName = route.TargetStageName
+		}
 	}
 	return RecordRouteExecution(ctx, q, p)
+}
+
+func resolveRouteTargetNames(ctx context.Context, q database.Querier, pipelineID, stageID int64) (*string, *string) {
+	var pipelineName, stageName string
+	err := q.QueryRow(ctx,
+		`SELECT p.name, ps.name FROM pipeline_stages ps
+		 JOIN pipelines p ON p.id = ps.pipeline_id
+		 WHERE ps.id = $1 AND ps.pipeline_id = $2`,
+		stageID, pipelineID).Scan(&pipelineName, &stageName)
+	if err != nil {
+		return nil, nil
+	}
+	return &pipelineName, &stageName
 }
 
 func defaultTriggerLabel(route *routing.Route) string {

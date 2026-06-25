@@ -5,11 +5,12 @@ import { LeadCard } from "./LeadCard";
 import { cn } from "@/lib/utils";
 import { stageColorDot, stageColorLine } from "@/features/pipelines/stageColors";
 import { isBoardDraggable } from "./boardStage";
-import type { AccountType, CustomField, Lead, Stage } from "@/types";
+import type { AccountType, CustomField, Lead, Stage, StageType } from "@/types";
 
 function VirtualLeadRow({
   lead,
   stageId,
+  stageType,
   customFields,
   cardFields,
   onClick,
@@ -18,6 +19,7 @@ function VirtualLeadRow({
 }: {
   lead: Lead;
   stageId: number;
+  stageType: StageType;
   customFields: CustomField[];
   cardFields: string[];
   onClick: () => void;
@@ -45,6 +47,7 @@ function VirtualLeadRow({
         customFields={customFields}
         cardFields={cardFields}
         onClick={onClick}
+        stageType={stageType}
       />
     </div>
   );
@@ -145,6 +148,7 @@ export function BoardColumn({
                 <VirtualLeadRow
                   lead={lead}
                   stageId={stage.id}
+                  stageType={stage.stage_type}
                   customFields={customFields}
                   cardFields={cardFields}
                   onClick={() => onCardClick(lead.id)}

@@ -20,7 +20,7 @@ import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Switch, Spinner, EmptyState, Badge, TextWithOverflowTooltip } from "@/components/ui/misc";
+import { Switch, Spinner, EmptyState, TextWithOverflowTooltip } from "@/components/ui/misc";
 import { FormDrawer } from "@/components/ui/dialog";
 import { ArrowRightLeft, Plus, Trash2 } from "lucide-react";
 import { toast } from "@/store/toastStore";
@@ -37,7 +37,7 @@ const BUILTINS = MAP_BUILTIN_FIELDS;
 function deliveryCell(r: Route) {
   if (r.destination === "integration" || r.destination === "webhook") return "—";
   if (r.delivery === "leads") return "Lead";
-  return <Badge variant="distributed">Pipeline</Badge>;
+  return "Pipeline";
 }
 
 export function RoutingPage() {

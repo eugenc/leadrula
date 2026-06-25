@@ -1,0 +1,1 @@
+-- no-op: cleared stale action_at values cannot be restored

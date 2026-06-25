@@ -1,56 +1,87 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { format, parse } from "date-fns";
 import { get, patch, post, put } from "@/lib/api";
+import { QUARTER_MINUTES } from "@/features/leads/customFieldDate";
 import type {
   AppointmentBooking,
   AppointmentCalendarMarker,
   AppointmentContractOption,
   AppointmentFreeSlot,
   BuyerAppointmentSlot,
-  BuyerAvailability,
+  BuyerBookingCalendar,
   ContractAppointmentSlot,
 } from "@/types";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 export { WEEKDAYS };
 
-export function useBuyerAvailability() {
+export function useBuyerCalendars() {
   return useQuery({
-    queryKey: ["buyer-availability"],
-    queryFn: () => get<BuyerAvailability>("/buyer/availability"),
-  });
-}
-
-export function useSaveBuyerAvailability() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: Partial<BuyerAvailability>) => put<BuyerAvailability>("/buyer/availability", body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["buyer-availability"] });
-      qc.invalidateQueries({ queryKey: ["buyer-appointment-slots"] });
-    },
-  });
-}
-
-export function useBuyerAppointmentSlots() {
-  return useQuery({
-    queryKey: ["buyer-appointment-slots"],
+    queryKey: ["buyer-booking-calendars"],
     queryFn: async () => {
-      const res = await get<{ items: BuyerAppointmentSlot[] }>("/buyer/appointment-slots");
+      const res = await get<{ items: BuyerBookingCalendar[] }>("/buyer/booking-calendars");
       return res.items ?? [];
     },
   });
 }
 
-export function useCreateBuyerSlot() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: { weekday: number; start_time: string; duration_min: number; capacity: number }) =>
-      post<BuyerAppointmentSlot>("/buyer/appointment-slots", body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["buyer-appointment-slots"] }),
+export function useBookingCalendar(calendarId: number | null) {
+  return useQuery({
+    queryKey: ["buyer-booking-calendar", calendarId],
+    queryFn: () => get<BuyerBookingCalendar>(`/buyer/booking-calendars/${calendarId}`),
+    enabled: !!calendarId,
   });
 }
 
-export function usePatchBuyerSlot() {
+export function useCreateBookingCalendar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; timezone: string }) =>
+      post<BuyerBookingCalendar>("/buyer/booking-calendars", body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["buyer-booking-calendars"] }),
+  });
+}
+
+export function useSaveBookingCalendar(calendarId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Partial<BuyerBookingCalendar>) =>
+      put<BuyerBookingCalendar>(`/buyer/booking-calendars/${calendarId}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["buyer-booking-calendar", calendarId] });
+      qc.invalidateQueries({ queryKey: ["buyer-booking-calendars"] });
+      qc.invalidateQueries({ queryKey: ["buyer-calendar-slots", calendarId] });
+    },
+  });
+}
+
+export function useCalendarSlots(calendarId: number | null) {
+  return useQuery({
+    queryKey: ["buyer-calendar-slots", calendarId],
+    queryFn: async () => {
+      const res = await get<{ items: BuyerAppointmentSlot[] }>(
+        `/buyer/booking-calendars/${calendarId}/slots`
+      );
+      return res.items ?? [];
+    },
+    enabled: !!calendarId,
+  });
+}
+
+export function useCreateCalendarSlot(calendarId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { weekday: number; start_time: string; duration_min: number; capacity: number }) =>
+      post<BuyerAppointmentSlot>(`/buyer/booking-calendars/${calendarId}/slots`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["buyer-calendar-slots", calendarId] });
+      qc.invalidateQueries({ queryKey: ["buyer-booking-calendars"] });
+      qc.invalidateQueries({ queryKey: ["buyer-booking-calendar", calendarId] });
+    },
+  });
+}
+
+export function usePatchCalendarSlot(calendarId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -59,17 +90,58 @@ export function usePatchBuyerSlot() {
     }: {
       id: number;
       body: { start_time?: string; duration_min?: number; capacity?: number; disabled?: boolean };
-    }) => patch<BuyerAppointmentSlot>(`/buyer/appointment-slots/${id}`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["buyer-appointment-slots"] }),
+    }) => patch<BuyerAppointmentSlot>(`/buyer/booking-calendars/${calendarId}/slots/${id}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["buyer-calendar-slots", calendarId] });
+      qc.invalidateQueries({ queryKey: ["buyer-booking-calendars"] });
+    },
   });
 }
 
-export function useCopyBuyerSlots() {
+export function useCopyCalendarSlots(calendarId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: { from_weekday: number; to_weekdays: number[] }) =>
-      post<{ items: BuyerAppointmentSlot[] }>("/buyer/appointment-slots/copy", body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["buyer-appointment-slots"] }),
+      post<{ items: BuyerAppointmentSlot[] }>(`/buyer/booking-calendars/${calendarId}/slots/copy`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["buyer-calendar-slots", calendarId] }),
+  });
+}
+
+export function useBuyerCalendarMarkers(calendarId: number | null, from: string, to: string) {
+  return useQuery({
+    queryKey: ["buyer-calendar-markers", calendarId, from, to],
+    queryFn: async () => {
+      const res = await get<{ items: AppointmentCalendarMarker[] }>(
+        `/buyer/booking-calendars/${calendarId}/markers?from=${from}&to=${to}`
+      );
+      return res.items ?? [];
+    },
+    enabled: !!calendarId && !!from && !!to,
+  });
+}
+
+export function useBuyerCalendarBookings(calendarId: number | null) {
+  return useQuery({
+    queryKey: ["buyer-calendar-appointments", calendarId],
+    queryFn: async () => {
+      const res = await get<{ items: AppointmentBooking[] }>(
+        `/buyer/booking-calendars/${calendarId}/appointments`
+      );
+      return res.items ?? [];
+    },
+    enabled: !!calendarId,
+  });
+}
+
+export function useSetContractAppointmentCalendar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ contractId, appointment_calendar_id }: { contractId: number; appointment_calendar_id: number }) =>
+      patch(`/buyer/contracts/${contractId}/appointment-calendar`, { appointment_calendar_id }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["buyer-contracts"] });
+      qc.invalidateQueries({ queryKey: ["contract-appointment-slots"] });
+    },
   });
 }
 
@@ -185,6 +257,64 @@ export function timeOptions15(): string[] {
     }
   }
   return out;
+}
+
+export type TimeHhmmParts = { hour12: number; minute: number; period: "AM" | "PM" };
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+export function timeHhmmToMinutes(t: string): number {
+  const [h, m] = t.split(":").map(Number);
+  return h * 60 + m;
+}
+
+export function minutesToTimeHhmm(m: number): string {
+  const h = Math.floor(m / 60) % 24;
+  const min = m % 60;
+  return `${pad2(h)}:${pad2(min)}`;
+}
+
+export function parseTimeHhmm(value: string): TimeHhmmParts {
+  const [h24, minute] = value.split(":").map(Number);
+  const period: "AM" | "PM" = h24 >= 12 ? "PM" : "AM";
+  const hour12 = h24 % 12 || 12;
+  const snapped = QUARTER_MINUTES.reduce((best, m) =>
+    Math.abs(m - minute) < Math.abs(best - minute) ? m : best
+  );
+  return { hour12, minute: snapped, period };
+}
+
+export function buildTimeHhmm(parts: TimeHhmmParts): string {
+  let h24 = parts.hour12 % 12;
+  if (parts.period === "PM") h24 += 12;
+  return `${pad2(h24)}:${pad2(parts.minute)}`;
+}
+
+export function formatTimeHhmm12(value: string): string {
+  const d = parse(value.slice(0, 5), "HH:mm", new Date());
+  return format(d, "h:mm a");
+}
+
+export function isStartValidForWindow(
+  start: string,
+  durationMin: number,
+  dayStart: string,
+  dayEnd: string
+): boolean {
+  const startMin = timeHhmmToMinutes(start);
+  const endMin = startMin + durationMin;
+  return startMin >= timeHhmmToMinutes(dayStart) && endMin <= timeHhmmToMinutes(dayEnd);
+}
+
+export function firstValidStartInWindow(
+  dayStart: string,
+  dayEnd: string,
+  durationMin: number
+): string | null {
+  const startMin = timeHhmmToMinutes(dayStart);
+  const latestStart = timeHhmmToMinutes(dayEnd) - durationMin;
+  if (latestStart < startMin) return null;
+  return minutesToTimeHhmm(startMin);
 }
 
 export const DEFAULT_WEEKLY_HOURS: Record<string, { start: string; end: string }> = {

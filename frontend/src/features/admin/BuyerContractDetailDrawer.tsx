@@ -23,6 +23,7 @@ import { ContractStatusBadge } from "@/features/admin/contractStatus";
 import { COMPENSATION_KINDS, formatCompTrigger } from "@/features/admin/contractCompensation";
 import { ContractReturnRulesEditor } from "@/features/admin/ContractReturnRulesEditor";
 import { BuyerContractFieldMapSection } from "@/features/admin/BuyerContractFieldMapSection";
+import { BuyerContractCalendarSection } from "@/features/appointments/BuyerContractCalendarSection";
 import { BuyerTriggerStageFields } from "@/features/admin/BuyerTriggerStageFields";
 import {
   BuyerParticipationDeliveryFields,
@@ -176,6 +177,12 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
                   <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Contract status</div>
                   <div className="mt-1 text-gray-700">{contract.status}</div>
                 </div>
+                {contract.lead_type === "Appointment" && (
+                  <BuyerContractCalendarSection
+                    contractId={contract.id}
+                    appointmentCalendarId={contract.appointment_calendar_id}
+                  />
+                )}
               </div>
             ),
             compensation: (

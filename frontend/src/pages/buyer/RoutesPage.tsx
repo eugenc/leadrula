@@ -11,7 +11,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
 import { IconButton } from "@/components/layout/IconButton";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
-import { Badge, Spinner, EmptyState, TextWithOverflowTooltip } from "@/components/ui/misc";
+import { Spinner, EmptyState, TextWithOverflowTooltip } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/misc";
 import { useAuthStore } from "@/store/authStore";
@@ -23,7 +23,7 @@ import type { Route } from "@/types";
 function deliveryCell(r: Route) {
   if (r.destination === "integration" || r.destination === "webhook") return "—";
   if (r.delivery === "leads") return "Lead";
-  return <Badge variant="distributed">Pipeline</Badge>;
+  return "Pipeline";
 }
 
 export function RoutesPage() {

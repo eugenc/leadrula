@@ -142,6 +142,12 @@ func bookingWindowOK(slotStart time.Time, now time.Time) bool {
 	return !slotStart.After(max)
 }
 
+func timeNowWeekdayRef(weekday int, loc *time.Location) time.Time {
+	now := time.Now().In(loc)
+	diff := int(time.Weekday(weekday)) - int(now.Weekday())
+	return now.AddDate(0, 0, diff)
+}
+
 func roundTo15Min(t time.Time) time.Time {
 	m := t.Minute()
 	rem := m % 15

@@ -46,6 +46,7 @@ type Lead struct {
 	AssigneeAvatarURL *string                   `json:"assignee_avatar_url,omitempty"`
 	PipelineName      *string                   `json:"pipeline_name,omitempty"`
 	StageName         *string                   `json:"stage_name,omitempty"`
+	StageType         *string                   `json:"stage_type,omitempty"`
 	StageEnteredAt    time.Time                 `json:"stage_entered_at"`
 	StageMoveCount    int                       `json:"stage_move_count"`
 	Tags              []string                  `json:"tags"`

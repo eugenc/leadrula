@@ -38,6 +38,7 @@ func (s *Service) listBookingsQuery(ctx context.Context, where string, args []an
 		FROM lead_appointment_bookings b
 		JOIN contracts c ON c.id = b.contract_id
 		JOIN leads l ON l.id = b.lead_id
+		JOIN buyer_appointment_slots sl ON sl.id = b.buyer_slot_id
 		JOIN accounts buyer ON buyer.id = c.buyer_id
 		JOIN accounts pub ON pub.id = c.publisher_id
 		WHERE l.deleted_at IS NULL AND %s

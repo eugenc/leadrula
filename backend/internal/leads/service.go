@@ -93,9 +93,20 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		}
 	}
 
-	if actionAt != nil {
+	actor := ActorFromPrincipal(p)
+	switch stage.StageType {
+	case pipelines.StageTypeAction:
 		if err := s.repo.SetActionAt(ctx, tx, leadID, actionAt); err != nil {
 			return nil, nil, err
+		}
+	case pipelines.StageTypeStandard:
+		if lead.ActionAt != nil {
+			if err := s.repo.SetActionAt(ctx, tx, leadID, nil); err != nil {
+				return nil, nil, err
+			}
+			if err := LogActionAtChange(ctx, tx, s.repo, leadID, lead.OwnerAccountID, actor, lead.ActionAt, nil); err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 	if disqReasonID != nil {

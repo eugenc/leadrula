@@ -119,6 +119,18 @@ func applyPipelineRoute(ctx context.Context, q database.Querier, deps RouteApply
 	if out.Returned {
 		return out.Emails, nil
 	}
+	updated := out.Lead
+	if updated == nil {
+		updated, err = deps.Repo.GetByID(ctx, q, leadID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if updated.ContractID != nil && updated.OwnerAccountID != updated.PublisherID && route.TargetStageID != nil {
+		if err := contracts.SyncPublisherStage(ctx, q, *updated.ContractID, leadID, updated.OwnerAccountID, *route.TargetStageID); err != nil {
+			return nil, err
+		}
+	}
 	if contractID != nil {
 		return nil, deps.Repo.SetStatusWithLog(ctx, q, leadID, ActorSystem("Route"), "distributed")
 	}

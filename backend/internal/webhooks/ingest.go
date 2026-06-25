@@ -201,12 +201,27 @@ func (s *Service) ingestPayload(ctx context.Context, wa *WebhookAuth, slug strin
 	if !forceProcess {
 		s.logDelivery(ctx, webhook.ID, firstEventID, firstLeadID, "success", rawJSON, "")
 	}
-	for _, ar := range results {
-		if ar.LeadInternalID != 0 {
-			applyInboundOriginRoutes(ctx, s.leadSvc, webhook, ar.LeadInternalID, flat)
-		}
+	seenLeadIDs := leadIDsForOriginRoutes(results)
+	for _, leadID := range seenLeadIDs {
+		applyInboundOriginRoutes(ctx, s.leadSvc, webhook, leadID, flat)
 	}
 	return &IngestResult{Status: "processed", Results: results}, nil
+}
+
+func leadIDsForOriginRoutes(results []ActionResult) []int64 {
+	seen := map[int64]struct{}{}
+	var ids []int64
+	for _, ar := range results {
+		if ar.LeadInternalID == 0 {
+			continue
+		}
+		if _, ok := seen[ar.LeadInternalID]; ok {
+			continue
+		}
+		seen[ar.LeadInternalID] = struct{}{}
+		ids = append(ids, ar.LeadInternalID)
+	}
+	return ids
 }
 
 type inboundOriginApplier interface {
@@ -593,6 +608,19 @@ func (s *Service) findLeadByExternalID(ctx context.Context, accountID int64, ext
 		var appErr *httpx.AppError
 		if err != nil && (!errors.As(err, &appErr) || appErr.Code != httpx.CodeNotFound) {
 			return nil, err
+		}
+	}
+	if sunbase {
+		for _, id := range candidates {
+			lead, err := s.leads.GetCollaborationLeadByExternalID(ctx, s.leads.Pool(), accountID, id)
+			if err == nil && lead != nil {
+				return lead, nil
+			}
+			lastErr = err
+			var appErr *httpx.AppError
+			if err != nil && (!errors.As(err, &appErr) || appErr.Code != httpx.CodeNotFound) {
+				return nil, err
+			}
 		}
 	}
 	if lastErr != nil {

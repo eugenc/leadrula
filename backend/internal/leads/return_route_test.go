@@ -201,6 +201,104 @@ func TestApplyPipelineRoute_preservesContractID(t *testing.T) {
 	}
 }
 
+func TestApplyPipelineRoute_clearsStalePublisherTracking(t *testing.T) {
+	pool := connectLeadsTestDB(t)
+	ctx := context.Background()
+	repo := NewRepository(pool)
+
+	f, err := loadDisqMoveFixture(ctx, pool)
+	if err != nil {
+		t.Skip("no buyer contract lead with disqualification stage in database")
+	}
+
+	var originStageID, buyerPipelineID int64
+	err = pool.QueryRow(ctx,
+		`SELECT ps.id, ps.pipeline_id FROM pipeline_stages ps
+		 WHERE ps.pipeline_id = (SELECT pipeline_id FROM leads WHERE id = $1)
+		   AND ps.id <> $2
+		 ORDER BY ps.position, ps.id LIMIT 1`,
+		f.leadID, f.disqStageID).Scan(&originStageID, &buyerPipelineID)
+	if err != nil {
+		t.Skip("buyer pipeline has no other stage")
+	}
+
+	var pubStageID int64
+	err = pool.QueryRow(ctx,
+		`SELECT id FROM pipeline_stages WHERE pipeline_id = $1 ORDER BY position, id LIMIT 1`,
+		f.sourcePipeline).Scan(&pubStageID)
+	if err != nil {
+		t.Skip("publisher pipeline has no stages")
+	}
+
+	var origOwner, origStage int64
+	var origContractID *int64
+	var origStatus string
+	var origPipelineID *int64
+	var origPubPipelineID, origPubStageID *int64
+	if err := pool.QueryRow(ctx,
+		`SELECT owner_account_id, stage_id, contract_id, status::text, pipeline_id,
+		        publisher_pipeline_id, publisher_stage_id
+		 FROM leads WHERE id = $1`,
+		f.leadID).Scan(&origOwner, &origStage, &origContractID, &origStatus, &origPipelineID, &origPubPipelineID, &origPubStageID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx,
+			`UPDATE leads SET owner_account_id=$2, stage_id=$3, contract_id=$4, status=$5::lead_status,
+			        pipeline_id=$6, publisher_pipeline_id=$7, publisher_stage_id=$8 WHERE id=$1`,
+			f.leadID, origOwner, origStage, origContractID, origStatus, origPipelineID, origPubPipelineID, origPubStageID)
+	})
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE leads SET owner_account_id=$2, stage_id=$3, pipeline_id=$4, contract_id=$5,
+		        status='distributed'::lead_status, publisher_pipeline_id=$6, publisher_stage_id=$7
+		 WHERE id=$1`,
+		f.leadID, f.ownerAccountID, originStageID, buyerPipelineID, f.contractID,
+		f.sourcePipeline, pubStageID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	targetPipelineID := buyerPipelineID
+	targetStageID := f.disqStageID
+	route := &routing.Route{
+		Delivery:         "leads_pipeline",
+		TargetPipelineID: &targetPipelineID,
+		TargetStageID:    &targetStageID,
+	}
+
+	tx, err = pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+
+	deps := RouteApplyDeps{Repo: repo}
+	if _, err := applyPipelineRoute(ctx, tx, deps, route, f.ownerAccountID, f.leadID); err != nil {
+		t.Fatalf("applyPipelineRoute: %v", err)
+	}
+
+	var pubPipelineID, pubStageIDOut *int64
+	var stageID int64
+	if err := tx.QueryRow(ctx,
+		`SELECT stage_id, publisher_pipeline_id, publisher_stage_id FROM leads WHERE id = $1`, f.leadID).
+		Scan(&stageID, &pubPipelineID, &pubStageIDOut); err != nil {
+		t.Fatal(err)
+	}
+	if stageID != f.disqStageID {
+		t.Fatalf("stage_id = %d, want %d", stageID, f.disqStageID)
+	}
+	if pubPipelineID != nil || pubStageIDOut != nil {
+		t.Fatalf("publisher tracking = %v,%v want cleared", pubPipelineID, pubStageIDOut)
+	}
+}
+
 func TestApplyPipelineRoute_resolvesContractFromDebit(t *testing.T) {
 	pool := connectLeadsTestDB(t)
 	ctx := context.Background()

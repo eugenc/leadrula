@@ -28,6 +28,11 @@ export function stageTypeLabel(type: StageType): string {
   return STAGE_TYPES.find((t) => t.value === type)?.label ?? type;
 }
 
+/** Action Date & Time applies only on Action pipeline stages. */
+export function showActionAtForStage(stageType: StageType | undefined): boolean {
+  return stageType === "action";
+}
+
 /**
  * Initial datetime-local value for the stage-move prompt. When moving from one
  * action stage to another, prefill the lead's existing action time, or the

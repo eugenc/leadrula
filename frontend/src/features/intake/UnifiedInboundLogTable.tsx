@@ -83,14 +83,14 @@ function MappedPayloadPanel({ mapped }: { mapped: Record<string, string> }) {
 function HTTPRequestPanel({ http }: { http: DeliveryRequestLog["http"] }) {
   return (
     <div className="space-y-2 rounded-md border border-gray-100 bg-gray-50 p-3">
-      <p className="font-mono text-xs text-gray-800">
+      <p className="break-all font-mono text-xs text-gray-800">
         {http.method} {http.url}
       </p>
       {http.headers && Object.keys(http.headers).length > 0 && (
         <div className="space-y-1">
           <p className="text-xs font-medium text-gray-500">Headers</p>
           {Object.entries(http.headers).map(([key, value]) => (
-            <div key={key} className="font-mono text-xs text-gray-600">
+            <div key={key} className="break-all font-mono text-xs text-gray-600">
               {key}: {value}
             </div>
           ))}
@@ -330,7 +330,7 @@ export function UnifiedInboundLogTable({
                   </TR>
                   {isExpanded && (
                     <tr>
-                      <td colSpan={7} className="px-4 py-2">
+                      <td colSpan={7} className="min-w-0 px-4 py-2">
                         <IntegrationDeliveryExpand detail={expandedIntegration} />
                         {d.error_message && !expandedIntegration?.last_error && (
                           <p className="mt-1 text-xs text-red-600">{d.error_message}</p>
@@ -382,7 +382,7 @@ export function UnifiedInboundLogTable({
                   </TR>
                   {isExpanded && (
                     <tr>
-                      <td colSpan={7} className="px-4 py-2">
+                      <td colSpan={7} className="min-w-0 px-4 py-2">
                         <div className="space-y-2 rounded-md border border-gray-100 bg-gray-50 p-3 text-xs text-gray-700">
                           <div>
                             <span className="font-medium text-gray-500">Trigger: </span>
@@ -517,7 +517,7 @@ export function UnifiedInboundLogTable({
                 </TR>
                 {isInbound && isExpanded && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-2">
+                    <td colSpan={7} className="min-w-0 px-4 py-2">
                       <p className="mb-1 text-xs font-medium text-gray-500">
                         {integrationLogMode && d.connection_name ? "Received from CRM" : "Payload"}
                       </p>
@@ -530,7 +530,7 @@ export function UnifiedInboundLogTable({
                 )}
                 {isOutbound && isExpanded && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-2">
+                    <td colSpan={7} className="min-w-0 px-4 py-2">
                       <IntegrationDeliveryExpand detail={expandedIntegration} />
                       {d.error_message && !expandedIntegration?.last_error && (
                         <p className="mt-1 text-xs text-red-600">{d.error_message}</p>

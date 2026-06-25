@@ -22,6 +22,7 @@ import {
 import type { AccountType, CustomField, Lead } from "@/types";
 import { formatMoney } from "@/lib/utils";
 import { formatCustomDateForDisplay, formatDatetimeForDisplay } from "./customFieldDate";
+import { showActionAtForStage } from "@/features/pipelines/stageTypes";
 
 export const PUBLISHER_STATUS_LABELS: Record<string, string> = {
   review: "In Review",
@@ -225,7 +226,9 @@ export function cellValue(
     case "tags":
       return (lead.tags ?? []).length ? (lead.tags ?? []).join(", ") : "—";
     case "action_at":
-      return formatDatetimeForDisplay(lead.action_at);
+      return showActionAtForStage(lead.stage_type)
+        ? formatDatetimeForDisplay(lead.action_at)
+        : "—";
     case "created_at":
       return format(new Date(lead.created_at), "MMM d, yyyy");
     case "stage_entered_at":

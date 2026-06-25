@@ -46,6 +46,7 @@ type Contract struct {
 	DistributionStrategy      string    `json:"distribution_strategy,omitempty"`
 	ParentContractID       *int64    `json:"parent_contract_id,omitempty"`
 	InviteToken            string    `json:"invite_token,omitempty"`
+	AppointmentCalendarID  *int64    `json:"appointment_calendar_id,omitempty"`
 	Participations         []Participation `json:"participations,omitempty"`
 	CreatedAt              time.Time `json:"created_at"`
 }
@@ -216,7 +217,7 @@ func scanBuyerContract(row pgx.Row, withPublisher bool) (*Contract, error) {
 		&c.SourcePipelineID, &c.SourceStageID, &c.BuyerPipelineID, &c.ReturnStageID,
 		&c.RatePerLead, &c.Status, &c.CapPeriod, &c.CapTotal, &c.CapMaxDaily,
 		&c.CreatedAt, &c.ContractType, &c.MirrorContractID, &c.AllowedDeliveryModes,
-		&delivery, &c.BuyerTargetStageID,
+		&delivery, &c.BuyerTargetStageID, &c.AppointmentCalendarID,
 	}
 	if withPublisher {
 		scan = append(scan, &c.PublisherName, &c.LeadCount)
@@ -238,7 +239,7 @@ func (s *Service) ListForBuyer(ctx context.Context, buyerID int64) ([]Contract, 
 		        c.source_pipeline_id, c.source_stage_id, c.buyer_pipeline_id, c.return_stage_id,
 		        c.rate_per_lead::float8, c.status, c.cap_period, c.cap_total, c.cap_max_daily,
 		        c.created_at, c.contract_type, c.mirror_contract_id, c.allowed_delivery_modes,
-		        COALESCE(cc.delivery, ''), cc.counterparty_stage_id,
+		        COALESCE(cc.delivery, ''), cc.counterparty_stage_id, c.appointment_calendar_id,
 		        a.name, `+contractLeadCountSubquery+`
 		 FROM contracts c
 		 JOIN accounts a ON a.id = c.publisher_id
@@ -267,7 +268,7 @@ func (s *Service) GetForBuyerContract(ctx context.Context, buyerID, contractID i
 		        c.source_pipeline_id, c.source_stage_id, c.buyer_pipeline_id, c.return_stage_id,
 		        c.rate_per_lead::float8, c.status, c.cap_period, c.cap_total, c.cap_max_daily,
 		        c.created_at, c.contract_type, c.mirror_contract_id, c.allowed_delivery_modes,
-		        COALESCE(cc.delivery, ''), cc.counterparty_stage_id
+		        COALESCE(cc.delivery, ''), cc.counterparty_stage_id, c.appointment_calendar_id
 		 FROM contracts c
 		 `+buyerContractCompLateral+`
 		 WHERE c.id = $1 AND c.buyer_id = $2 AND c.deleted_at IS NULL AND c.contract_type = 'sell'`,

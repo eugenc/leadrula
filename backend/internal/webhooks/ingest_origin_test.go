@@ -78,3 +78,23 @@ func TestApplyInboundOriginRoutes_zeroLeadID(t *testing.T) {
 		t.Fatal("expected no calls for zero lead id")
 	}
 }
+
+func TestLeadIDsForOriginRoutes_dedupesSameLead(t *testing.T) {
+	leadID := int64(42)
+	results := []ActionResult{
+		{LeadInternalID: leadID},
+		{LeadInternalID: leadID},
+		{LeadInternalID: 99},
+	}
+	ids := leadIDsForOriginRoutes(results)
+	if len(ids) != 2 {
+		t.Fatalf("ids = %v, want 2 unique lead ids", ids)
+	}
+	seen := map[int64]bool{}
+	for _, id := range ids {
+		seen[id] = true
+	}
+	if !seen[leadID] || !seen[99] {
+		t.Fatalf("ids = %v, want %d and 99", ids, leadID)
+	}
+}

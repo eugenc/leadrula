@@ -12,19 +12,20 @@ import (
 func (s *Service) ListPublisherContracts(ctx context.Context, publisherID int64) ([]AppointmentContract, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT c.id, c.name, c.buyer_id, COALESCE(b.name, ''),
-		        COALESCE(ba.timezone, b.timezone, 'UTC'),
-		        (ba.account_id IS NOT NULL AND ba.schedule::text NOT IN ('{}', 'null')
+		        COALESCE(bc.timezone, b.timezone, 'UTC'),
+		        (bc.id IS NOT NULL AND bc.schedule::text NOT IN ('{}', 'null')
 		         AND EXISTS(SELECT 1 FROM buyer_appointment_slots sl
-		                    WHERE sl.account_id = c.buyer_id AND sl.disabled_at IS NULL))
+		                    WHERE sl.calendar_id = bc.id AND sl.disabled_at IS NULL))
 		 FROM contracts c
 		 JOIN accounts b ON b.id = c.buyer_id
-		 INNER JOIN buyer_availability ba ON ba.account_id = c.buyer_id
+		 JOIN buyer_booking_calendars bc ON bc.id = c.appointment_calendar_id
 		 WHERE c.publisher_id = $1 AND c.lead_type = 'Appointment' AND c.status = 'active'
 		   AND c.deleted_at IS NULL AND c.buyer_id IS NOT NULL
-		   AND ba.schedule::text NOT IN ('{}', 'null')
+		   AND c.appointment_calendar_id IS NOT NULL
+		   AND bc.schedule::text NOT IN ('{}', 'null')
 		   AND EXISTS(
 		     SELECT 1 FROM buyer_appointment_slots sl
-		     WHERE sl.account_id = c.buyer_id AND sl.disabled_at IS NULL
+		     WHERE sl.calendar_id = bc.id AND sl.disabled_at IS NULL
 		   )
 		 ORDER BY b.name, c.name`, publisherID)
 	if err != nil {
@@ -42,23 +43,25 @@ func (s *Service) ListPublisherContracts(ctx context.Context, publisherID int64)
 	return out, rows.Err()
 }
 
-func (s *Service) ensureContractSlots(ctx context.Context, contractID, buyerID int64) error {
+func (s *Service) ensureContractSlots(ctx context.Context, contractID int64) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO contract_appointment_slots(contract_id, buyer_slot_id, enabled)
 		 SELECT $1, sl.id, true
 		 FROM buyer_appointment_slots sl
-		 WHERE sl.account_id = $2 AND sl.disabled_at IS NULL
-		 ON CONFLICT DO NOTHING`, contractID, buyerID)
+		 JOIN contracts c ON c.id = $1
+		 WHERE sl.calendar_id = c.appointment_calendar_id AND sl.disabled_at IS NULL
+		 ON CONFLICT DO NOTHING`, contractID)
 	return err
 }
 
 func (s *Service) ListContractSlots(ctx context.Context, publisherID, contractID int64) ([]ContractSlot, error) {
 	var buyerID int64
 	var leadType string
+	var calendarID *int64
 	err := s.pool.QueryRow(ctx,
-		`SELECT buyer_id, COALESCE(lead_type,'') FROM contracts
+		`SELECT buyer_id, COALESCE(lead_type,''), appointment_calendar_id FROM contracts
 		 WHERE id=$1 AND publisher_id=$2 AND deleted_at IS NULL`,
-		contractID, publisherID).Scan(&buyerID, &leadType)
+		contractID, publisherID).Scan(&buyerID, &leadType, &calendarID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("contract not found")
 	}
@@ -71,7 +74,10 @@ func (s *Service) ListContractSlots(ctx context.Context, publisherID, contractID
 	if buyerID == 0 {
 		return nil, httpx.Validation("contract has no buyer")
 	}
-	if err := s.ensureContractSlots(ctx, contractID, buyerID); err != nil {
+	if calendarID == nil || *calendarID == 0 {
+		return nil, httpx.Validation("contract has no appointment calendar")
+	}
+	if err := s.ensureContractSlots(ctx, contractID); err != nil {
 		return nil, err
 	}
 	rows, err := s.pool.Query(ctx,
@@ -80,8 +86,8 @@ func (s *Service) ListContractSlots(ctx context.Context, publisherID, contractID
 		        sl.disabled_at IS NOT NULL
 		 FROM buyer_appointment_slots sl
 		 LEFT JOIN contract_appointment_slots cs ON cs.buyer_slot_id = sl.id AND cs.contract_id = $1
-		 WHERE sl.account_id = $2
-		 ORDER BY sl.weekday, sl.start_time`, contractID, buyerID)
+		 WHERE sl.calendar_id = $3
+		 ORDER BY sl.weekday, sl.start_time`, contractID, buyerID, *calendarID)
 	if err != nil {
 		return nil, err
 	}
@@ -171,18 +177,23 @@ func (s *Service) ListFreeSlots(ctx context.Context, publisherID, contractID int
 	if err != nil {
 		return nil, err
 	}
-	ok, err := s.buyerConfigured(ctx, buyerID)
+	ok, err := s.contractCalendarConfigured(ctx, contractID)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
 		return nil, httpx.Validation("buyer has not configured availability")
 	}
-	avail, err := s.loadAvailability(ctx, buyerID)
+	calID, err := s.contractCalendarID(ctx, contractID)
 	if err != nil {
 		return nil, err
 	}
-	loc := loadLocation(avail.Timezone)
+	cal, err := s.loadCalendarByID(ctx, calID)
+	if err != nil {
+		return nil, err
+	}
+	_ = buyerID
+	loc := loadLocation(cal.Timezone)
 	date, err := parseDateParam(dateStr, loc)
 	if err != nil {
 		return nil, httpx.Validation(err.Error())
@@ -239,15 +250,18 @@ func (s *Service) countBookings(ctx context.Context, contractID int64, slotStart
 }
 
 func (s *Service) ListCalendarMarkers(ctx context.Context, publisherID, contractID int64, fromStr, toStr string) ([]CalendarDayMarker, error) {
-	buyerID, err := s.contractBuyerID(ctx, publisherID, contractID)
+	if _, err := s.contractBuyerID(ctx, publisherID, contractID); err != nil {
+		return nil, err
+	}
+	calID, err := s.contractCalendarID(ctx, contractID)
 	if err != nil {
 		return nil, err
 	}
-	avail, err := s.loadAvailability(ctx, buyerID)
+	cal, err := s.loadCalendarByID(ctx, calID)
 	if err != nil {
 		return nil, err
 	}
-	loc := loadLocation(avail.Timezone)
+	loc := loadLocation(cal.Timezone)
 	from, err := parseDateParam(fromStr, loc)
 	if err != nil {
 		return nil, httpx.Validation("invalid from date")
