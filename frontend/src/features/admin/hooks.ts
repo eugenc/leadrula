@@ -876,7 +876,7 @@ export function useBuyerContracts() {
   const accountId = useAuthStore((s) => s.user?.account_id);
   return useQuery({
     queryKey: ["buyer-contracts", accountId],
-    queryFn: () => get<Contract[]>(`/buyer/contracts`),
+    queryFn: async () => (await get<Contract[]>(`/buyer/contracts`)) ?? [],
     enabled: !!accountId,
   });
 }

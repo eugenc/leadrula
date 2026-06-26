@@ -692,6 +692,9 @@ func (h *Handler) buyerList(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, err)
 		return
 	}
+	if items == nil {
+		items = []Contract{}
+	}
 	httpx.JSON(w, http.StatusOK, items)
 }
 
