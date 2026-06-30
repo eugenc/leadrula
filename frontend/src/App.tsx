@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useAuthStore } from "@/store/authStore";
-import { RequireAuth, RequireAccountType } from "@/components/auth/guards";
+import { RequireAuth, RequireAccountType, RequireNavAccess } from "@/components/auth/guards";
 import { AppShell } from "@/components/layout/AppShell";
 import { Toaster } from "@/components/ui/toaster";
 
@@ -94,6 +94,7 @@ export default function App() {
 
             {/* Publisher */}
             <Route element={<RequireAccountType type="publisher" />}>
+              <Route element={<RequireNavAccess />}>
               <Route path="/p" element={<AppShell />}>
                 <Route index element={<Dashboard />} />
                 <Route path="board" element={<BoardPage />} />
@@ -135,10 +136,12 @@ export default function App() {
                   <Route path="api" element={<ApiKeysPage />} />
                 </Route>
               </Route>
+              </Route>
             </Route>
 
             {/* Buyer */}
             <Route element={<RequireAccountType type="buyer" />}>
+              <Route element={<RequireNavAccess />}>
               <Route path="/b" element={<AppShell />}>
                 <Route index element={<Dashboard />} />
                 <Route path="board" element={<BoardPage />} />
@@ -175,6 +178,7 @@ export default function App() {
                   <Route path="api" element={<ApiKeysPage />} />
                 </Route>
                 <Route path="settings/collaboration" element={<Navigate to="/b/collaboration" replace />} />
+              </Route>
               </Route>
             </Route>
           </Route>

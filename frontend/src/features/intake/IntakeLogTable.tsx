@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRoutingLog } from "@/features/admin/hooks";
 import { useAccountWebhookDeliveries, useWebhooks } from "@/features/webhooks/hooks";
 import { useAuthStore } from "@/store/authStore";
+import { ActionPipelinesRouting, canAction } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { FilterInput, FilterSelect } from "@/components/ui/input";
 import { Spinner, EmptyState, Badge } from "@/components/ui/misc";
@@ -234,8 +235,7 @@ export function IntakeLogTable({
   initialLogType = "all",
 }: IntakeLogTableProps) {
   const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.role === "admin";
-  const canReplayWebhooks = isAdmin;
+  const canReplayWebhooks = canAction(user, ActionPipelinesRouting);
 
   const [logType, setLogType] = useState<LogTypeFilter>(
     source === "buyer" && initialLogType === "intake" ? "all" : initialLogType

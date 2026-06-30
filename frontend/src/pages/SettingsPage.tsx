@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/misc";
 import { toast } from "@/store/toastStore";
 import { AvatarUpload, uploadError } from "@/features/admin/AvatarUpload";
 import { useUploadMyAvatar } from "@/features/admin/hooks";
+import { canNav, NavCollaboration } from "@/lib/permissions";
 import { formatRole } from "@/lib/utils";
 
 function Row({ label, value }: { label: string; value: string }) {
@@ -18,8 +19,8 @@ function Row({ label, value }: { label: string; value: string }) {
 export function SettingsPage() {
   const user = useAuthStore((s) => s.user);
   const upload = useUploadMyAvatar();
-  const isAdmin = user?.role === "admin";
-  const isBuyerAdmin = user?.account_type === "buyer" && isAdmin;
+  const showCollaborationLink =
+    user?.account_type === "buyer" && canNav(user, NavCollaboration);
 
   return (
     <div className="max-w-xl space-y-4">
@@ -46,7 +47,7 @@ export function SettingsPage() {
           />
         </Card>
 
-        {isBuyerAdmin && (
+        {showCollaborationLink && (
           <Card className="p-5">
             <h2 className="mb-1 text-sm font-semibold text-gray-800">Publisher collaboration</h2>
             <p className="mb-3 text-sm text-gray-500">

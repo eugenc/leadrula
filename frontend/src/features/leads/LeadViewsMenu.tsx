@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Dropdown, DropdownItem } from "@/components/ui/dropdown";
 import { Input, Label } from "@/components/ui/input";
+import { ActionSettingsAdmin, canAction } from "@/lib/permissions";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
@@ -41,7 +42,7 @@ export function LeadViewsMenu({
   sortDir = "desc",
   onViewApply,
 }: Props) {
-  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
+  const canManageShared = canAction(useAuthStore((s) => s.user), ActionSettingsAdmin);
   const [open, setOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editView, setEditView] = useState<SavedLeadView | null>(null);
@@ -63,11 +64,7 @@ export function LeadViewsMenu({
 
   async function switchView(view: SavedLeadView) {
     onViewApply?.(view);
-    try {
-      await setActiveId(view.public_id);
-    } catch (err) {
-      toast.error(errorMessage(err));
-    }
+    setActiveId(view.public_id);
     setOpen(false);
   }
 
@@ -110,7 +107,7 @@ export function LeadViewsMenu({
     const body = {
       name: trimmed,
       placement: placement === "list" ? "list" : "board",
-      shared: isAdmin && shared,
+      shared: canManageShared && shared,
       filters: draftFilters,
       ...(placement === "list" || placement === "board"
         ? { columns, sort, sort_dir: sortDir }
@@ -122,7 +119,7 @@ export function LeadViewsMenu({
         toast.success("View updated");
       } else {
         const created = await createView.mutateAsync(body);
-        await setActiveId(created.public_id);
+        setActiveId(created.public_id);
         onFiltersChange(created.filters);
         onViewApply?.(created);
         toast.success("View saved");
@@ -190,7 +187,7 @@ export function LeadViewsMenu({
           </>
         )}
         {views
-          .filter((v) => !v.is_builtin && (!v.shared || isAdmin))
+          .filter((v) => !v.is_builtin && (!v.shared || canManageShared))
           .map((v) => (
             <div key={`actions-${v.public_id}`} className="flex">
               <DropdownItem className="flex-1" onClick={() => openEdit(v)}>
@@ -200,7 +197,7 @@ export function LeadViewsMenu({
             </div>
           ))}
         {views
-          .filter((v) => !v.is_builtin && (!v.shared || isAdmin))
+          .filter((v) => !v.is_builtin && (!v.shared || canManageShared))
           .map((v) => (
             <DropdownItem
               key={`del-${v.public_id}`}
@@ -234,7 +231,7 @@ export function LeadViewsMenu({
             <Label>View name</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="My view" className="mt-1.5" autoFocus />
           </div>
-          {isAdmin && saveAsNew && (
+          {canManageShared && saveAsNew && (
             <label className="flex items-center gap-2 text-sm text-gray-700">
               <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} />
               Share with entire account

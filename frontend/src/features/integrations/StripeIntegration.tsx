@@ -7,6 +7,7 @@ import {
   useSaveStripeKeys,
 } from "@/features/admin/hooks";
 import { useAuthStore } from "@/store/authStore";
+import { ActionBilling, canAction } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Badge, Spinner } from "@/components/ui/misc";
@@ -61,7 +62,7 @@ const KEYS_STATUS_COPY: Record<
   },
 };
 
-function DirectBuyerBillingSection({ isAdmin }: { isAdmin: boolean }) {
+function DirectBuyerBillingSection({ canManageBilling }: { canManageBilling: boolean }) {
   const { data, isLoading, refetch } = useStripeKeysStatus();
   const saveKeys = useSaveStripeKeys();
   const [secretKey, setSecretKey] = useState("");
@@ -94,7 +95,7 @@ function DirectBuyerBillingSection({ isAdmin }: { isAdmin: boolean }) {
       {data?.publishable_key_prefix && (
         <p className="text-xs text-gray-400">Publishable key: {data.publishable_key_prefix}</p>
       )}
-      {isAdmin ? (
+      {canManageBilling ? (
         <div className="space-y-3">
           <div>
             <Label>Secret key</Label>
@@ -130,7 +131,7 @@ function DirectBuyerBillingSection({ isAdmin }: { isAdmin: boolean }) {
   );
 }
 
-function MarketplacePayoutSection({ isAdmin }: { isAdmin: boolean }) {
+function MarketplacePayoutSection({ canManageBilling }: { canManageBilling: boolean }) {
   const { data, isLoading } = useStripeConnectStatus();
   const connect = useStripeConnect();
 
@@ -146,7 +147,7 @@ function MarketplacePayoutSection({ isAdmin }: { isAdmin: boolean }) {
         <Badge variant={copy.variant}>{copy.label}</Badge>
       </div>
       <p className="text-sm text-gray-500">{copy.hint}</p>
-      {isAdmin ? (
+      {canManageBilling ? (
         <Button
           disabled={connect.isPending}
           onClick={() =>
@@ -194,13 +195,13 @@ export function StripeSetupDrawer({
   open: boolean;
   onClose: () => void;
 }) {
-  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
+  const canManageBilling = canAction(useAuthStore((s) => s.user), ActionBilling);
 
   return (
     <FormDrawer open={open} onClose={onClose} title="Stripe">
       <div className="space-y-6">
-        <DirectBuyerBillingSection isAdmin={isAdmin} />
-        <MarketplacePayoutSection isAdmin={isAdmin} />
+        <DirectBuyerBillingSection canManageBilling={canManageBilling} />
+        <MarketplacePayoutSection canManageBilling={canManageBilling} />
       </div>
     </FormDrawer>
   );

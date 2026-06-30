@@ -6,16 +6,20 @@ import {
 
 export type SortDir = "asc" | "desc";
 
+type ViewPlacement = "list" | "board";
+
 export interface ListUiState {
   sort: string;
   sort_dir: SortDir;
   columns: string[];
+  active_view_id?: string;
 }
 
 export interface BoardUiState {
   sort: string;
   sort_dir: SortDir;
   card_fields: string[];
+  active_view_id?: string;
 }
 
 function listKey(userId: string) {
@@ -106,4 +110,20 @@ export function defaultBoardUi(validColumnIds: string[]): BoardUiState {
     sort_dir: "desc",
     card_fields: normalizeBoardCardFields(DEFAULT_BOARD_CARD_FIELDS, validColumnIds),
   };
+}
+
+function uiKey(userId: string, placement: ViewPlacement) {
+  return placement === "list" ? listKey(userId) : boardKey(userId);
+}
+
+export function loadActiveViewId(userId: string, placement: ViewPlacement): string | null {
+  const stored = readJson<Partial<ListUiState & BoardUiState>>(uiKey(userId, placement));
+  const id = stored?.active_view_id;
+  return typeof id === "string" && id ? id : null;
+}
+
+export function saveActiveViewId(userId: string, placement: ViewPlacement, viewId: string) {
+  const key = uiKey(userId, placement);
+  const prev = readJson<Partial<ListUiState & BoardUiState>>(key) ?? {};
+  writeJson(key, { ...prev, active_view_id: viewId });
 }

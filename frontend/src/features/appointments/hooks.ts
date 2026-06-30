@@ -266,11 +266,18 @@ export function useBookAppointment() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: Record<string, unknown>) => post<AppointmentBooking>("/publisher/appointments/book", body),
-    onSuccess: () => {
+    onSuccess: (_data, body) => {
       qc.invalidateQueries({ queryKey: ["appointment-free-slots"] });
       qc.invalidateQueries({ queryKey: ["appointment-calendar-markers"] });
       qc.invalidateQueries({ queryKey: ["publisher-appointments"] });
       qc.invalidateQueries({ queryKey: ["buyer-appointments"] });
+      qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["lead"] });
+      const leadId = body.lead_id;
+      if (typeof leadId === "number") {
+        qc.invalidateQueries({ queryKey: ["lead", leadId] });
+        qc.invalidateQueries({ queryKey: ["lead-history", leadId] });
+      }
     },
   });
 }
@@ -315,10 +322,17 @@ export function useBuyerBookAppointment() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: Record<string, unknown>) => post<AppointmentBooking>("/buyer/appointments/book", body),
-    onSuccess: () => {
+    onSuccess: (_data, body) => {
       qc.invalidateQueries({ queryKey: ["buyer-appointment-free-slots"] });
       qc.invalidateQueries({ queryKey: ["buyer-appointment-calendar-markers"] });
       qc.invalidateQueries({ queryKey: ["buyer-appointments"] });
+      qc.invalidateQueries({ queryKey: ["leads"] });
+      qc.invalidateQueries({ queryKey: ["lead"] });
+      const leadId = body.lead_id;
+      if (typeof leadId === "number") {
+        qc.invalidateQueries({ queryKey: ["lead", leadId] });
+        qc.invalidateQueries({ queryKey: ["lead-history", leadId] });
+      }
     },
   });
 }

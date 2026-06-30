@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@/store/authStore";
+import { ActionSettingsAdmin, canAction } from "@/lib/permissions";
 import { Card, Switch } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/store/toastStore";
@@ -68,10 +69,10 @@ function PrefsTable({
 
 export function NotificationsSettingsPage() {
   const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.role === "admin";
+  const canManageAccount = canAction(user, ActionSettingsAdmin);
   const accountType = user?.account_type;
-  const showAccount = isAdmin && accountType !== "platform";
-  const showPersonal = !isAdmin;
+  const showAccount = canManageAccount && accountType !== "platform";
+  const showPersonal = !canManageAccount;
 
   const { data, isLoading } = useNotificationSettings();
   const update = useUpdateNotificationSettings();

@@ -1,6 +1,10 @@
 package auth
 
-import "context"
+import (
+	"context"
+
+	"github.com/echayko/leadrula/backend/internal/permissions"
+)
 
 // Principal is the authenticated user resolved to internal database IDs.
 type Principal struct {
@@ -10,13 +14,45 @@ type Principal struct {
 	AccountPublicID string
 	AccountType     string // publisher | buyer
 	Role            string // admin | user | follower
-	Impersonator             *Principal
-	SwitchedFrom             string // origin account public_id when in a switch session
-	SwitchedFromPublisherID  int64  // set when SwitchedFrom is a publisher account
+	Impersonator            *Principal
+	SwitchedFrom            string // origin account public_id when in a switch session
+	SwitchedFromPublisherID int64  // set when SwitchedFrom is a publisher account
+	Perms                   permissions.Effective
+	FullAccess              bool // impersonation / account switch oversight bypass
 }
 
 func (p *Principal) IsAdmin() bool    { return p.Role == "admin" }
 func (p *Principal) IsFollower() bool { return p.Role == "follower" }
+
+func (p *Principal) CanNav(key string) bool {
+	if p == nil {
+		return false
+	}
+	if p.FullAccess {
+		return true
+	}
+	return p.Perms.CanNav(key)
+}
+
+func (p *Principal) CanAction(key string) bool {
+	if p == nil {
+		return false
+	}
+	if p.FullAccess {
+		return true
+	}
+	return p.Perms.CanAction(key)
+}
+
+func (p *Principal) LeadScope() string {
+	if p == nil {
+		return permissions.LeadScopeAssigned
+	}
+	if p.FullAccess {
+		return permissions.LeadScopeAll
+	}
+	return p.Perms.LeadScope
+}
 
 // CollaborationPublisherID returns the impersonating publisher account id when the
 // principal is a publisher acting on a buyer account via collaboration.

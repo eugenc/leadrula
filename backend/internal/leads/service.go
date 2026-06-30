@@ -6,6 +6,7 @@ import (
 
 	"github.com/echayko/leadrula/backend/internal/accounts"
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/internal/billing"
 	"github.com/echayko/leadrula/backend/internal/contracts"
 	"github.com/echayko/leadrula/backend/internal/notifications"
@@ -560,10 +561,10 @@ func rejectPartialBulk(p *auth.Principal, requested, affected int) error {
 }
 
 func assertCanEdit(p *auth.Principal, l *Lead) error {
-	switch p.Role {
-	case "admin":
+	switch p.LeadScope() {
+	case permissions.LeadScopeAll:
 		return nil
-	case "user":
+	case permissions.LeadScopeAssigned, permissions.LeadScopeAssignedAndFollowed:
 		if l.AssignedUserID != nil && *l.AssignedUserID == p.UserID {
 			return nil
 		}

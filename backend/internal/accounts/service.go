@@ -14,6 +14,7 @@ import (
 
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/internal/database"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/internal/storage"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 )
@@ -133,11 +134,16 @@ func (s *Service) Me(ctx context.Context, p *auth.Principal) (map[string]any, er
 	if p.Impersonator != nil {
 		userRole = p.Role
 	}
+	effective := p.Perms
+	if p.FullAccess {
+		effective = permissions.FullAccess(p.AccountType)
+	}
 	res := map[string]any{
 		"user": map[string]any{
 			"id": u.PublicID, "email": u.Email, "full_name": u.FullName,
 			"role": userRole, "is_active": u.IsActive, "prefs": rawJSON(u.Prefs),
 			"avatar_url": avatarURLFromPrefs(u.Prefs),
+			"effective_permissions": permissions.ToMap(effective),
 		},
 		"account": accountMeFields(a),
 	}
@@ -158,7 +164,7 @@ func (s *Service) Me(ctx context.Context, p *auth.Principal) (map[string]any, er
 }
 
 func (s *Service) UpdateMyAccount(ctx context.Context, p *auth.Principal, params UpdateMyAccountParams) (*Account, error) {
-	if !p.IsAdmin() {
+	if !p.CanAction(permissions.ActionSettingsAdmin) {
 		return nil, httpx.Forbidden("admin role required")
 	}
 	if p.AccountType != "buyer" && p.AccountType != "publisher" {
@@ -300,7 +306,7 @@ func (s *Service) ConfirmPasswordReset(ctx context.Context, token, newPassword s
 	return s.repo.ConsumeReset(ctx, row.ID, row.UserID, hash)
 }
 
-func (s *Service) Invite(ctx context.Context, accountID int64, email, fullName, role string) (*Invite, error) {
+func (s *Service) Invite(ctx context.Context, accountID int64, email, fullName, role string, permRaw []byte) (*Invite, error) {
 	email = strings.TrimSpace(strings.ToLower(email))
 	fullName = strings.TrimSpace(fullName)
 	if email == "" {
@@ -323,7 +329,7 @@ func (s *Service) Invite(ctx context.Context, accountID int64, email, fullName, 
 
 	token := randomToken()
 	expires := time.Now().Add(72 * time.Hour)
-	inv, err := s.repo.CreateInvite(ctx, accountID, email, fullName, role, token, expires)
+	inv, err := s.repo.CreateInvite(ctx, accountID, email, fullName, role, token, expires, permRaw)
 	if err != nil {
 		return nil, err
 	}
@@ -574,6 +580,10 @@ func (s *Service) AcceptInvite(ctx context.Context, token, fullName, password st
 }
 
 func (s *Service) ListUsers(ctx context.Context, accountID int64) ([]UserListItem, error) {
+	acct, err := s.repo.GetAccount(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
 	members, err := s.repo.ListUsers(ctx, accountID)
 	if err != nil {
 		return nil, err
@@ -585,12 +595,15 @@ func (s *Service) ListUsers(ctx context.Context, accountID int64) ([]UserListIte
 
 	out := make([]UserListItem, 0, len(members)+len(invites))
 	for _, inv := range invites {
+		perms, effective := inviteListFields(inv, acct.Type)
 		out = append(out, UserListItem{
-			InviteID: inv.ID,
-			Email:    inv.Email,
-			FullName: inv.FullName,
-			Role:     inv.Role,
-			Status:   "pending",
+			InviteID:             inv.ID,
+			Email:                inv.Email,
+			FullName:             inv.FullName,
+			Role:                 inv.Role,
+			Status:               "pending",
+			Permissions:          perms,
+			EffectivePermissions: effective,
 		})
 	}
 	for _, u := range members {
@@ -598,14 +611,17 @@ func (s *Service) ListUsers(ctx context.Context, accountID int64) ([]UserListIte
 		if !u.IsActive {
 			status = "inactive"
 		}
+		perms, effective := userListFields(u, acct.Type)
 		out = append(out, UserListItem{
-			ID:        u.ID,
-			PublicID:  u.PublicID,
-			Email:     u.Email,
-			FullName:  u.FullName,
-			Role:      u.Role,
-			Status:    status,
-			AvatarURL: avatarURLFromPrefs(u.Prefs),
+			ID:                   u.ID,
+			PublicID:             u.PublicID,
+			Email:                u.Email,
+			FullName:             u.FullName,
+			Role:                 u.Role,
+			Status:               status,
+			AvatarURL:            avatarURLFromPrefs(u.Prefs),
+			Permissions:          perms,
+			EffectivePermissions: effective,
 		})
 	}
 
@@ -631,6 +647,26 @@ func (s *Service) ListUsers(ctx context.Context, accountID int64) ([]UserListIte
 }
 
 func (s *Service) UpdateUser(ctx context.Context, accountID, userID int64, p UpdateUserParams) (*UserListItem, error) {
+	existing, err := s.repo.GetUserInAccount(ctx, accountID, userID)
+	if err != nil {
+		if err == ErrNotFound {
+			return nil, httpx.NotFound("user not found")
+		}
+		return nil, err
+	}
+	acct, err := s.repo.GetAccount(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if p.Permissions != nil {
+		var o permissions.Overrides
+		if err := json.Unmarshal(*p.Permissions, &o); err != nil {
+			return nil, httpx.Validation("invalid permissions")
+		}
+		if err := permissions.ValidateOverrides(acct.Type, o); err != nil {
+			return nil, httpx.Validation(err.Error())
+		}
+	}
 	if p.Email != nil {
 		email := strings.TrimSpace(strings.ToLower(*p.Email))
 		if email == "" {
@@ -648,6 +684,18 @@ func (s *Service) UpdateUser(ctx context.Context, accountID, userID int64, p Upd
 		p.FullName = &name
 	}
 
+	newRole := existing.Role
+	if p.Role != nil {
+		newRole = *p.Role
+	}
+	newPerms := existing.Permissions
+	if p.Permissions != nil {
+		newPerms = *p.Permissions
+	}
+	if err := s.ensureFullAdminRemains(ctx, accountID, userID, newRole, newPerms); err != nil {
+		return nil, err
+	}
+
 	u, err := s.repo.UpdateUser(ctx, accountID, userID, p)
 	if err != nil {
 		if err == ErrNotFound {
@@ -663,14 +711,17 @@ func (s *Service) UpdateUser(ctx context.Context, accountID, userID int64, p Upd
 	if !u.IsActive {
 		status = "inactive"
 	}
+	perms, effective := userListFields(*u, acct.Type)
 	return &UserListItem{
-		ID:        u.ID,
-		PublicID:  u.PublicID,
-		Email:     u.Email,
-		FullName:  u.FullName,
-		Role:      u.Role,
-		Status:    status,
-		AvatarURL: avatarURLFromPrefs(u.Prefs),
+		ID:                   u.ID,
+		PublicID:             u.PublicID,
+		Email:                u.Email,
+		FullName:             u.FullName,
+		Role:                 u.Role,
+		Status:               status,
+		AvatarURL:            avatarURLFromPrefs(u.Prefs),
+		Permissions:          perms,
+		EffectivePermissions: effective,
 	}, nil
 }
 
@@ -690,12 +741,16 @@ func (s *Service) DeleteUser(ctx context.Context, accountID, actorUserID, userID
 		return nil
 	}
 
-	if u.Role == "admin" {
-		adminIDs, err := s.repo.ActiveAdminIDs(ctx, accountID)
+	acct, err := s.repo.GetAccount(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	if permissions.Resolve(u.Role, acct.Type, u.Permissions).IsFullAdmin() {
+		remaining, err := s.countFullAccessAdmins(ctx, accountID, userID)
 		if err != nil {
 			return err
 		}
-		if len(adminIDs) == 1 && adminIDs[0] == userID {
+		if remaining == 0 {
 			return httpx.BusinessRule("cannot remove the last admin")
 		}
 	}
@@ -759,7 +814,32 @@ func (s *Service) UpdateInvite(ctx context.Context, accountID, inviteID int64, p
 		role = p.Role
 	}
 
-	updated, err := s.repo.UpdateInvite(ctx, accountID, inviteID, email, fullName, role, token, expires)
+	acct, err := s.repo.GetAccount(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if p.Permissions != nil {
+		var o permissions.Overrides
+		if err := json.Unmarshal(*p.Permissions, &o); err != nil {
+			return nil, httpx.Validation("invalid permissions")
+		}
+		if err := permissions.ValidateOverrides(acct.Type, o); err != nil {
+			return nil, httpx.Validation(err.Error())
+		}
+	}
+	newRole := inv.Role
+	if role != nil {
+		newRole = *role
+	}
+	newPerms := inv.Permissions
+	if p.Permissions != nil {
+		newPerms = *p.Permissions
+	}
+	if err := s.ensureFullAdminRemainsWithInvite(ctx, accountID, inviteID, newRole, newPerms); err != nil {
+		return nil, err
+	}
+
+	updated, err := s.repo.UpdateInvite(ctx, accountID, inviteID, email, fullName, role, token, expires, p.Permissions)
 	if err != nil {
 		if err == ErrNotFound {
 			return nil, httpx.NotFound("invite not found")
@@ -775,12 +855,15 @@ func (s *Service) UpdateInvite(ctx context.Context, accountID, inviteID int64, p
 		_ = s.mail.SendInvite(updated.Email, updated.FullName, sendToken)
 	}
 
+	perms, effective := inviteListFields(*updated, acct.Type)
 	return &UserListItem{
-		InviteID: updated.ID,
-		Email:    updated.Email,
-		FullName: updated.FullName,
-		Role:     updated.Role,
-		Status:   "pending",
+		InviteID:             updated.ID,
+		Email:                updated.Email,
+		FullName:             updated.FullName,
+		Role:                 updated.Role,
+		Status:               "pending",
+		Permissions:          perms,
+		EffectivePermissions: effective,
 	}, nil
 }
 
@@ -805,7 +888,7 @@ func (s *Service) ResendInvite(ctx context.Context, accountID, inviteID int64) e
 
 	token := randomToken()
 	expires := time.Now().Add(72 * time.Hour)
-	if _, err := s.repo.UpdateInvite(ctx, accountID, inviteID, nil, nil, nil, &token, &expires); err != nil {
+	if _, err := s.repo.UpdateInvite(ctx, accountID, inviteID, nil, nil, nil, &token, &expires, nil); err != nil {
 		return err
 	}
 	return s.sendInviteEmail(inv.Email, inv.FullName, token)

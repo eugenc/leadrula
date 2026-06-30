@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/internal/integrations/providers"
 	"github.com/echayko/leadrula/backend/internal/webhooks"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
@@ -60,7 +61,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/google-maps/satellite-map", h.googleMapsSatelliteMap)
 
 	r.Group(func(r chi.Router) {
-		r.Use(auth.RequireRole("admin"))
+		r.Use(auth.RequirePermission(permissions.ActionSettingsAdmin))
 		r.Post("/integrations/connections", h.createConnection)
 		r.Post("/integrations/connections/test", h.testConnection)
 		r.Post("/integrations/ghl/metadata", h.postGHLMetadata)

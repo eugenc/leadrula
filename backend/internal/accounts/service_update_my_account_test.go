@@ -13,11 +13,22 @@ import (
 
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/internal/database"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/go-chi/chi/v5"
 )
 
 func strPtr(s string) *string { return &s }
+
+func adminPrincipal(accountType string, accountID int64, accountPublicID string) *auth.Principal {
+	return &auth.Principal{
+		Role:            "admin",
+		AccountType:     accountType,
+		AccountID:       accountID,
+		AccountPublicID: accountPublicID,
+		Perms:           permissions.FullAccess(accountType),
+	}
+}
 
 func TestUpdateMyAccount_validation(t *testing.T) {
 	svc := NewService(nil, nil, nil, nil)
@@ -37,31 +48,31 @@ func TestUpdateMyAccount_validation(t *testing.T) {
 		},
 		{
 			name:     "platform account",
-			p:        &auth.Principal{Role: "admin", AccountType: "platform"},
+			p:        adminPrincipal("platform", 0, ""),
 			params:   UpdateMyAccountParams{Timezone: strPtr("America/New_York")},
 			wantCode: httpx.CodeValidation,
 		},
 		{
 			name:     "invalid timezone",
-			p:        &auth.Principal{Role: "admin", AccountType: "buyer", AccountID: 1},
+			p:        adminPrincipal("buyer", 1, ""),
 			params:   UpdateMyAccountParams{Timezone: strPtr("Invalid/Zone")},
 			wantCode: httpx.CodeValidation,
 		},
 		{
 			name:     "empty timezone",
-			p:        &auth.Principal{Role: "admin", AccountType: "publisher", AccountPublicID: "pub-id"},
+			p:        adminPrincipal("publisher", 0, "pub-id"),
 			params:   UpdateMyAccountParams{Timezone: strPtr("  ")},
 			wantCode: httpx.CodeValidation,
 		},
 		{
 			name:     "empty patch",
-			p:        &auth.Principal{Role: "admin", AccountType: "buyer", AccountID: 1},
+			p:        adminPrincipal("buyer", 1, ""),
 			params:   UpdateMyAccountParams{},
 			wantCode: httpx.CodeValidation,
 		},
 		{
 			name:     "invalid contact email",
-			p:        &auth.Principal{Role: "admin", AccountType: "buyer", AccountID: 1},
+			p:        adminPrincipal("buyer", 1, ""),
 			params:   UpdateMyAccountParams{ContactEmail: strPtr("not-an-email")},
 			wantCode: httpx.CodeValidation,
 		},
@@ -133,12 +144,7 @@ func TestPatchMyAccount_handler(t *testing.T) {
 		strings.NewReader(`{"timezone":"America/Los_Angeles","website":"https://example.com","phone":"555-0100"}`),
 	)
 	patchReq.Header.Set("Content-Type", "application/json")
-	patchReq = patchReq.WithContext(auth.WithPrincipal(patchReq.Context(), &auth.Principal{
-		AccountID:       accountID,
-		AccountPublicID: accountPublicID,
-		AccountType:     "publisher",
-		Role:            "admin",
-	}))
+	patchReq = patchReq.WithContext(auth.WithPrincipal(patchReq.Context(), adminPrincipal("publisher", accountID, accountPublicID)))
 	patchRec := httptest.NewRecorder()
 	h.patchMyAccount(patchRec, patchReq)
 	if patchRec.Code != http.StatusOK {

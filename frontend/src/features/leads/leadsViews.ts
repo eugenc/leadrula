@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { get, patch, post, del, ns } from "@/lib/api";
-import type { Me } from "@/types";
+import { useAuthStore } from "@/store/authStore";
+import { loadActiveViewId, saveActiveViewId } from "./leadsUiStorage";
 import {
   DEFAULT_VISIBLE_COLUMNS,
 } from "./leadsListColumns";
@@ -221,25 +222,38 @@ export function useDeleteLeadView() {
 }
 
 export function useActiveViewId(placement: ViewPlacement) {
-  const qc = useQueryClient();
-  const prefKey = placement === "list" ? "active_list_view_id" : "active_board_view_id";
+  const userId = useAuthStore((s) => s.user?.id);
+  const { data: apiViews, isLoading: viewsLoading } = useSavedLeadViews(placement);
+  const views = useMemo(() => mergeViews(apiViews, placement), [apiViews, placement]);
+  const [activeId, setActiveIdState] = useState("all");
+  const hydrated = useRef(false);
 
-  const { data: me, isLoading } = useQuery({
-    queryKey: ["me"],
-    queryFn: () => get<Me>("/auth/me"),
-  });
+  useEffect(() => {
+    hydrated.current = false;
+  }, [userId, placement]);
 
-  const activeId = useMemo(() => {
-    const id = me?.user.prefs?.[prefKey];
-    return typeof id === "string" ? id : "all";
-  }, [me, prefKey]);
+  useEffect(() => {
+    if (!userId || viewsLoading || hydrated.current) return;
+    const stored = loadActiveViewId(userId, placement) ?? "all";
+    const valid = views.some((v) => v.public_id === stored) ? stored : "all";
+    setActiveIdState(valid);
+    if (valid !== stored) saveActiveViewId(userId, placement, valid);
+    hydrated.current = true;
+  }, [userId, placement, viewsLoading, views]);
 
-  const setActiveId = useMutation({
-    mutationFn: (viewId: string) => patch<Record<string, unknown>>("/auth/me/prefs", { [prefKey]: viewId }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
-  });
+  const setActiveId = useCallback(
+    (viewId: string) => {
+      setActiveIdState(viewId);
+      if (userId) saveActiveViewId(userId, placement, viewId);
+    },
+    [userId, placement]
+  );
 
-  return { activeId, setActiveId: setActiveId.mutateAsync, isLoading };
+  return {
+    activeId,
+    setActiveId,
+    isLoading: !userId || viewsLoading || !hydrated.current,
+  };
 }
 
 export function mergeViews(apiViews: SavedLeadView[] | undefined, placement: ViewPlacement): SavedLeadView[] {

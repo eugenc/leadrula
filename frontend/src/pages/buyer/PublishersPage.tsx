@@ -16,6 +16,7 @@ import { Spinner, EmptyState, Card } from "@/components/ui/misc";
 import { FormDrawer } from "@/components/ui/dialog";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
+import { ActionContractsPartners, canAction } from "@/lib/permissions";
 import { useAuthStore } from "@/store/authStore";
 import { Link2 } from "lucide-react";
 import type { Partnership } from "@/types";
@@ -71,7 +72,7 @@ export function PublishersPage() {
   const accept = useAcceptPartnership();
   const reject = useRejectPartnership();
   const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.role === "admin";
+  const canManagePartners = canAction(user, ActionContractsPartners);
   const [selectedPublisherId, setSelectedPublisherId] = useState<number | null>(null);
   const [selectedLeadCount, setSelectedLeadCount] = useState(0);
   const [linkOpen, setLinkOpen] = useState(false);
@@ -100,7 +101,7 @@ export function PublishersPage() {
     <>
       <PageHeader
         action={
-          isAdmin ? (
+          canManagePartners ? (
             <Button variant="secondary" onClick={() => setLinkOpen(true)}>
               <Link2 className="h-4 w-4" /> Link Publisher
             </Button>
@@ -108,7 +109,7 @@ export function PublishersPage() {
         }
       />
       <PageBody>
-        {isAdmin && (
+        {canManagePartners && (
           <PendingPartnerships
             items={partnerships ?? []}
             onAccept={(id) =>
@@ -162,7 +163,7 @@ export function PublishersPage() {
         <PublisherDetailDrawer
           publisherId={selectedPublisherId}
           leadCount={selectedLeadCount}
-          isAdmin={!!isAdmin}
+          canManagePartners={!!canManagePartners}
           onClose={() => setSelectedPublisherId(null)}
         />
 

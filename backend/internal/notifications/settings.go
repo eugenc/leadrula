@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 )
 
@@ -31,7 +32,7 @@ func (s *Service) GetSettings(ctx context.Context, p *auth.Principal) (*Settings
 	resp := &SettingsResponse{
 		Personal: fillDefaults(userNotifPrefsFromRaw(u.Prefs), personalEvents()),
 	}
-	if p.IsAdmin() && acct.Type != "platform" {
+	if p.CanAction(permissions.ActionSettingsAdmin) && acct.Type != "platform" {
 		raw, err := s.accounts.GetNotificationPrefs(ctx, s.pool, p.AccountID)
 		if err != nil {
 			return nil, err
@@ -48,7 +49,7 @@ func (s *Service) PatchSettings(ctx context.Context, p *auth.Principal, patch Se
 	}
 
 	if patch.Account != nil {
-		if !p.IsAdmin() {
+		if !p.CanAction(permissions.ActionSettingsAdmin) {
 			return nil, httpx.Forbidden("admin role required")
 		}
 		if acct.Type == "platform" {

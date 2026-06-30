@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/go-chi/chi/v5"
 )
@@ -21,34 +22,34 @@ func NewHandler(svc *Service) *Handler {
 
 func (h *Handler) RegisterPublisherRoutes(r chi.Router) {
 	r.Route("/collaboration", func(r chi.Router) {
-		r.With(auth.RequireRole("admin")).Get("/summaries", h.listSummaries)
-		r.With(auth.RequireRole("admin")).Get("/buyers/{buyerId}", h.publisherStatus)
-		r.With(auth.RequireRole("admin")).Post("/buyers/{buyerId}/request", h.publisherRequest)
-		r.With(auth.RequireRole("admin")).Post("/buyers/{buyerId}/accept", h.publisherAccept)
-		r.With(auth.RequireRole("admin")).Post("/buyers/{buyerId}/reject", h.publisherReject)
-		r.With(auth.RequireRole("admin")).Post("/accept", h.publisherAcceptByPublicID)
-		r.With(auth.RequireRole("admin")).Post("/reject", h.publisherRejectByPublicID)
-		r.With(auth.RequireRole("admin")).Get("/logs/actors", h.publisherLogActors)
-		r.With(auth.RequireRole("admin")).Get("/logs", h.publisherLogs)
+		r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Get("/summaries", h.listSummaries)
+		r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Get("/buyers/{buyerId}", h.publisherStatus)
+		r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Post("/buyers/{buyerId}/request", h.publisherRequest)
+		r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Post("/buyers/{buyerId}/accept", h.publisherAccept)
+		r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Post("/buyers/{buyerId}/reject", h.publisherReject)
+		r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Post("/accept", h.publisherAcceptByPublicID)
+		r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Post("/reject", h.publisherRejectByPublicID)
+		r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Get("/logs/actors", h.publisherLogActors)
+		r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Get("/logs", h.publisherLogs)
 	})
 }
 
 func (h *Handler) RegisterBuyerRoutes(r chi.Router) {
 	r.Get("/publisher", h.buyerPublisher)
-	r.With(auth.RequireRole("admin")).Get("/logs/actors", h.buyerLogActors)
-	r.With(auth.RequireRole("admin")).Get("/logs", h.buyerLogs)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Get("/logs/actors", h.buyerLogActors)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Get("/logs", h.buyerLogs)
 	r.Route("/collaboration", func(r chi.Router) {
-		r.With(auth.RequireRole("admin")).Get("/", h.buyerStatus)
-		r.With(auth.RequireRole("admin")).Post("/invite", h.buyerInvite)
-		r.With(auth.RequireRole("admin")).Post("/accept", h.buyerAccept)
-		r.With(auth.RequireRole("admin")).Post("/reject", h.buyerReject)
-		r.With(auth.RequireRole("admin")).Delete("/", h.buyerRevoke)
+		r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Get("/", h.buyerStatus)
+		r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Post("/invite", h.buyerInvite)
+		r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Post("/accept", h.buyerAccept)
+		r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Post("/reject", h.buyerReject)
+		r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Delete("/", h.buyerRevoke)
 		r.Route("/publishers/{publisherId}", func(r chi.Router) {
-			r.With(auth.RequireRole("admin")).Get("/", h.buyerPublisherCollabStatus)
-			r.With(auth.RequireRole("admin")).Post("/invite", h.buyerPublisherInvite)
-			r.With(auth.RequireRole("admin")).Post("/accept", h.buyerPublisherAccept)
-			r.With(auth.RequireRole("admin")).Post("/reject", h.buyerPublisherReject)
-			r.With(auth.RequireRole("admin")).Delete("/", h.buyerPublisherRevoke)
+			r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Get("/", h.buyerPublisherCollabStatus)
+			r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Post("/invite", h.buyerPublisherInvite)
+			r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Post("/accept", h.buyerPublisherAccept)
+			r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Post("/reject", h.buyerPublisherReject)
+			r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Delete("/", h.buyerPublisherRevoke)
 		})
 	})
 }

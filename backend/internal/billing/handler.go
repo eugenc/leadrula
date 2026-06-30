@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/go-chi/chi/v5"
 	"github.com/stripe/stripe-go/v78"
@@ -29,15 +30,15 @@ func (h *Handler) RegisterPublisher(r chi.Router) {
 	r.Get("/billing/disputes", h.pubDisputes)
 	h.registerDisputeWorkflow(r)
 	// Publisher opens a return dispute from a returned lead (admin only).
-	r.With(auth.RequireRole("admin")).Post("/leads/{id}/dispute", h.openReturnDispute)
-	r.With(auth.RequireRole("admin")).Post("/billing/invoices", h.createInvoice)
-	r.With(auth.RequireRole("admin")).Get("/billing/invoices", h.pubInvoices)
-	r.With(auth.RequireRole("admin")).Post("/billing/invoices/{id}/mark-paid", h.markInvoicePaid)
-	r.With(auth.RequireRole("admin")).Post("/billing/invoices/{id}/void", h.voidInvoice)
-	r.With(auth.RequireRole("admin")).Post("/billing/stripe/connect", h.connectStripe)
-	r.With(auth.RequireRole("admin")).Get("/billing/stripe/status", h.stripeStatus)
-	r.With(auth.RequireRole("admin")).Post("/billing/stripe/keys", h.saveStripeKeys)
-	r.With(auth.RequireRole("admin")).Get("/billing/stripe/keys/status", h.stripeKeysStatus)
+	r.With(auth.RequirePermission(permissions.ActionBilling)).Post("/leads/{id}/dispute", h.openReturnDispute)
+	r.With(auth.RequirePermission(permissions.ActionBilling)).Post("/billing/invoices", h.createInvoice)
+	r.Get("/billing/invoices", h.pubInvoices)
+	r.With(auth.RequirePermission(permissions.ActionBilling)).Post("/billing/invoices/{id}/mark-paid", h.markInvoicePaid)
+	r.With(auth.RequirePermission(permissions.ActionBilling)).Post("/billing/invoices/{id}/void", h.voidInvoice)
+	r.With(auth.RequirePermission(permissions.ActionBilling)).Post("/billing/stripe/connect", h.connectStripe)
+	r.Get("/billing/stripe/status", h.stripeStatus)
+	r.With(auth.RequirePermission(permissions.ActionBilling)).Post("/billing/stripe/keys", h.saveStripeKeys)
+	r.Get("/billing/stripe/keys/status", h.stripeKeysStatus)
 }
 
 // RegisterPublic mounts unauthenticated billing callbacks.

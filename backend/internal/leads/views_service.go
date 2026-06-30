@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 )
 
@@ -79,7 +80,7 @@ func canEditView(p *auth.Principal, v *SavedView) bool {
 		return false
 	}
 	if v.OwnerUserID == nil {
-		return p.Role == "admin"
+		return p.CanAction(permissions.ActionSettingsAdmin)
 	}
 	return *v.OwnerUserID == p.UserID
 }
@@ -106,7 +107,7 @@ func (s *Service) CreateView(ctx context.Context, p *auth.Principal, in CreateVi
 	if placement != "list" && placement != "board" && placement != "both" {
 		return nil, httpx.Validation("invalid placement")
 	}
-	if in.Shared && p.Role != "admin" {
+	if in.Shared && !p.CanAction(permissions.ActionSettingsAdmin) {
 		return nil, httpx.Forbidden("only admins can create shared views")
 	}
 	var ownerID *int64

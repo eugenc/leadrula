@@ -40,44 +40,50 @@ type User struct {
 	Role        string    `json:"role"`
 	IsActive    bool      `json:"is_active"`
 	Prefs       []byte    `json:"-"`
+	Permissions []byte    `json:"-"`
 	LastLoginAt *time.Time `json:"last_login_at,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
 type Invite struct {
-	ID        int64     `json:"-"`
-	AccountID int64     `json:"-"`
-	Email     string    `json:"email"`
-	FullName  string    `json:"full_name"`
-	Role      string    `json:"role"`
-	Token     string    `json:"-"`
-	ExpiresAt time.Time `json:"expires_at"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          int64     `json:"-"`
+	AccountID   int64     `json:"-"`
+	Email       string    `json:"email"`
+	FullName    string    `json:"full_name"`
+	Role        string    `json:"role"`
+	Permissions []byte    `json:"-"`
+	Token       string    `json:"-"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // UserListItem is a member or pending invite for the admin users table.
 type UserListItem struct {
-	ID        int64   `json:"id"`
-	InviteID  int64   `json:"invite_id"`
-	PublicID  string  `json:"public_id,omitempty"`
-	Email     string  `json:"email"`
-	FullName  string  `json:"full_name"`
-	Role      string  `json:"role"`
-	Status    string  `json:"status"`
-	AvatarURL *string `json:"avatar_url,omitempty"`
+	ID                   int64          `json:"id"`
+	InviteID             int64          `json:"invite_id"`
+	PublicID             string         `json:"public_id,omitempty"`
+	Email                string         `json:"email"`
+	FullName             string         `json:"full_name"`
+	Role                 string         `json:"role"`
+	Status               string         `json:"status"`
+	AvatarURL            *string        `json:"avatar_url,omitempty"`
+	Permissions          map[string]any `json:"permissions,omitempty"`
+	EffectivePermissions map[string]any `json:"effective_permissions,omitempty"`
 }
 
 type UpdateUserParams struct {
-	Role     *string
-	FullName *string
-	Email    *string
-	IsActive *bool
+	Role        *string
+	FullName    *string
+	Email       *string
+	IsActive    *bool
+	Permissions *[]byte
 }
 
 type UpdateInviteParams struct {
-	FullName *string
-	Email    *string
-	Role     *string
+	FullName    *string
+	Email       *string
+	Role        *string
+	Permissions *[]byte
 }
 
 type UpdateBuyerParams struct {

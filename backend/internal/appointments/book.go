@@ -153,9 +153,6 @@ func (s *Service) bookAppointment(ctx context.Context, p *auth.Principal, params
 		}
 	}
 
-	if err := s.leads.SetActionAt(ctx, tx, leadID, &slotStart); err != nil {
-		return nil, err
-	}
 	if _, err := tx.Exec(ctx, `DELETE FROM lead_appointment_bookings WHERE lead_id=$1`, leadID); err != nil {
 		return nil, err
 	}
@@ -194,6 +191,18 @@ func (s *Service) bookAppointment(ctx context.Context, p *auth.Principal, params
 		if err := s.leads.SetPreassignedBuyer(ctx, p.AccountID, leadID, &buyerID); err != nil {
 			return nil, err
 		}
+	}
+
+	updatedLead, err := s.leads.GetByID(ctx, tx, leadID)
+	if err != nil {
+		return nil, err
+	}
+	priorActionAt := updatedLead.ActionAt
+	if err := s.leads.SetActionAt(ctx, tx, leadID, &slotStart); err != nil {
+		return nil, err
+	}
+	if err := leads.LogActionAtChange(ctx, tx, s.leads, leadID, updatedLead.OwnerAccountID, leads.ActorFromPrincipal(p), priorActionAt, &slotStart); err != nil {
+		return nil, err
 	}
 
 	leadName := strings.TrimSpace(lead.FirstName + " " + lead.LastName)

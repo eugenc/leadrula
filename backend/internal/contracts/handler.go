@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/go-chi/chi/v5"
 )
@@ -28,7 +29,7 @@ func (h *Handler) RegisterPublisher(r chi.Router) {
 	r.Get("/payouts/ledger", h.payoutLedger)
 
 	r.Group(func(r chi.Router) {
-		r.Use(auth.RequireRole("admin"))
+		r.Use(auth.RequirePermission(permissions.ActionContractsPartners))
 		r.Post("/contracts", h.create)
 		r.Patch("/contracts/{id}", h.update)
 		r.Delete("/contracts/{id}", h.delete)
@@ -56,12 +57,12 @@ func (h *Handler) RegisterBuyer(r chi.Router) {
 	r.Get("/contracts", h.buyerList)
 	r.Get("/participations", h.buyerListParticipations)
 	r.Get("/participations/{id}", h.buyerGetParticipation)
-	r.With(auth.RequireRole("admin")).Post("/participations/{id}/accept", h.buyerAcceptParticipation)
-	r.With(auth.RequireRole("admin")).Post("/participations/{id}/decline", h.buyerDeclineParticipation)
-	r.With(auth.RequireRole("admin")).Post("/participations/{id}/counter", h.buyerCounterParticipation)
-	r.With(auth.RequireRole("admin")).Patch("/participations/{id}", h.buyerUpdateParticipationDelivery)
-	r.With(auth.RequireRole("admin")).Patch("/participations/{id}/status", h.buyerUpdateParticipationStatus)
-	r.With(auth.RequireRole("admin")).Post("/contract-invites/{token}/attach", h.buyerAttachInvite)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Post("/participations/{id}/accept", h.buyerAcceptParticipation)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Post("/participations/{id}/decline", h.buyerDeclineParticipation)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Post("/participations/{id}/counter", h.buyerCounterParticipation)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Patch("/participations/{id}", h.buyerUpdateParticipationDelivery)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Patch("/participations/{id}/status", h.buyerUpdateParticipationStatus)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Post("/contract-invites/{token}/attach", h.buyerAttachInvite)
 	r.Get("/contracts/{id}/publisher-stages", h.buyerPublisherStages)
 	r.Get("/contracts/{id}/return-rules", h.buyerListRules)
 	r.Get("/contracts/{id}/compensations", h.buyerListCompensations)
@@ -70,21 +71,21 @@ func (h *Handler) RegisterBuyer(r chi.Router) {
 	r.Get("/participations/{id}/compensations", h.buyerListParticipationCompensations)
 	r.Get("/participations/{id}/field-map", h.buyerListParticipationFieldMap)
 	r.Get("/participations/{id}/field-map/options", h.buyerParticipationFieldMapOptions)
-	r.With(auth.RequireRole("admin")).Patch("/contracts/{id}/delivery", h.buyerUpdateContractDelivery)
-	r.With(auth.RequireRole("admin")).Post("/contracts/{id}/return-rules", h.buyerAddRule)
-	r.With(auth.RequireRole("admin")).Patch("/contracts/{id}/return-rules/{ruleId}", h.buyerUpdateRule)
-	r.With(auth.RequireRole("admin")).Delete("/contracts/{id}/return-rules/{ruleId}", h.buyerDeleteRule)
-	r.With(auth.RequireRole("admin")).Patch("/contracts/{id}/compensations/{compId}", h.buyerPatchContractCompensation)
-	r.With(auth.RequireRole("admin")).Patch("/participations/{id}/compensations/{compId}", h.buyerPatchParticipationCompensation)
-	r.With(auth.RequireRole("admin")).Post("/contracts/{id}/field-map", h.buyerAddContractFieldMap)
-	r.With(auth.RequireRole("admin")).Delete("/contracts/{id}/field-map/{mapId}", h.buyerDeleteContractFieldMap)
-	r.With(auth.RequireRole("admin")).Post("/participations/{id}/field-map", h.buyerAddParticipationFieldMap)
-	r.With(auth.RequireRole("admin")).Delete("/participations/{id}/field-map/{mapId}", h.buyerDeleteParticipationFieldMap)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Patch("/contracts/{id}/delivery", h.buyerUpdateContractDelivery)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Post("/contracts/{id}/return-rules", h.buyerAddRule)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Patch("/contracts/{id}/return-rules/{ruleId}", h.buyerUpdateRule)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Delete("/contracts/{id}/return-rules/{ruleId}", h.buyerDeleteRule)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Patch("/contracts/{id}/compensations/{compId}", h.buyerPatchContractCompensation)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Patch("/participations/{id}/compensations/{compId}", h.buyerPatchParticipationCompensation)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Post("/contracts/{id}/field-map", h.buyerAddContractFieldMap)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Delete("/contracts/{id}/field-map/{mapId}", h.buyerDeleteContractFieldMap)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Post("/participations/{id}/field-map", h.buyerAddParticipationFieldMap)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Delete("/participations/{id}/field-map/{mapId}", h.buyerDeleteParticipationFieldMap)
 	r.Get("/participations/{id}/return-routes", h.buyerListParticipationReturnRoutes)
 	r.Get("/participations/{id}/publisher-stages", h.buyerListParticipationPublisherStages)
-	r.With(auth.RequireRole("admin")).Post("/participations/{id}/return-routes", h.buyerAddParticipationReturnRoute)
-	r.With(auth.RequireRole("admin")).Patch("/participations/{id}/return-routes/{ruleId}", h.buyerUpdateParticipationReturnRoute)
-	r.With(auth.RequireRole("admin")).Delete("/participations/{id}/return-routes/{ruleId}", h.buyerDeleteParticipationReturnRoute)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Post("/participations/{id}/return-routes", h.buyerAddParticipationReturnRoute)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Patch("/participations/{id}/return-routes/{ruleId}", h.buyerUpdateParticipationReturnRoute)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Delete("/participations/{id}/return-routes/{ruleId}", h.buyerDeleteParticipationReturnRoute)
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {

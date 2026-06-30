@@ -67,6 +67,48 @@ func RequireRole(roles ...string) func(http.Handler) http.Handler {
 	}
 }
 
+// RequirePermission rejects principals lacking an action permission.
+func RequirePermission(action string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			p := FromContext(r.Context())
+			if p == nil || !p.CanAction(action) {
+				httpx.Err(w, http.StatusForbidden, httpx.CodeForbidden, "insufficient permissions")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireNav rejects principals lacking nav access to a section.
+func RequireNav(navKey string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			p := FromContext(r.Context())
+			if p == nil || !p.CanNav(navKey) {
+				httpx.Err(w, http.StatusForbidden, httpx.CodeForbidden, "insufficient permissions")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequirePermissionOnMutations applies RequirePermission only for non-GET/HEAD requests.
+func RequirePermissionOnMutations(action string) func(http.Handler) http.Handler {
+	check := RequirePermission(action)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+				next.ServeHTTP(w, r)
+				return
+			}
+			check(next).ServeHTTP(w, r)
+		})
+	}
+}
+
 type statusRecorder struct {
 	http.ResponseWriter
 	status int

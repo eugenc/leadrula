@@ -2,8 +2,9 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuthStore } from "@/store/authStore";
 import { PageBody } from "@/components/layout/PageBody";
 import { cn } from "@/lib/utils";
+import { ActionSettingsAdmin, canAction } from "@/lib/permissions";
 
-type Tab = { to: string; label: string; end: boolean; adminOnly?: boolean };
+type Tab = { to: string; label: string; end: boolean; settingsAdmin?: boolean };
 
 function prefixFromPath(pathname: string): string {
   if (pathname.startsWith("/platform/")) return "/platform";
@@ -15,25 +16,25 @@ function tabsForAccount(accountType: string, prefix: string): Tab[] {
   if (accountType === "platform") {
     return [
       { to: `${prefix}/settings`, label: "Profile", end: true },
-      { to: `${prefix}/settings/users`, label: "Users", end: false, adminOnly: true },
+      { to: `${prefix}/settings/users`, label: "Users", end: false, settingsAdmin: true },
     ];
   }
   return [
     { to: `${prefix}/settings`, label: "Profile", end: true },
-    { to: `${prefix}/settings/business`, label: "Business", end: false, adminOnly: true },
+    { to: `${prefix}/settings/business`, label: "Business", end: false, settingsAdmin: true },
     { to: `${prefix}/settings/notifications`, label: "Notifications", end: false },
-    { to: `${prefix}/settings/users`, label: "Users", end: false, adminOnly: true },
-    { to: `${prefix}/settings/api`, label: "API", end: false, adminOnly: true },
+    { to: `${prefix}/settings/users`, label: "Users", end: false, settingsAdmin: true },
+    { to: `${prefix}/settings/api`, label: "API", end: false, settingsAdmin: true },
   ];
 }
 
 export function SettingsLayout() {
   const { pathname } = useLocation();
   const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.role === "admin";
   const prefix = prefixFromPath(pathname);
   const accountType = user?.account_type ?? "publisher";
-  const tabs = tabsForAccount(accountType, prefix).filter((t) => !t.adminOnly || isAdmin);
+  const canSettingsAdmin = canAction(user, ActionSettingsAdmin);
+  const tabs = tabsForAccount(accountType, prefix).filter((t) => !t.settingsAdmin || canSettingsAdmin);
 
   return (
     <PageBody>

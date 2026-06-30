@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/internal/database"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 )
@@ -147,12 +148,10 @@ type ImportLeadsResult struct {
 }
 
 func assertCanCreate(p *auth.Principal) error {
-	switch p.Role {
-	case "admin", "user":
-		return nil
-	default:
+	if permissions.IsFollowedOnly(p.LeadScope()) {
 		return httpx.Forbidden("insufficient role to create leads")
 	}
+	return nil
 }
 
 func validateCreateInput(in *CreateLeadInput) error {
@@ -384,7 +383,7 @@ func (s *Service) insertLead(ctx context.Context, p *auth.Principal, in CreateLe
 		}
 	}
 
-	if in.AssignedUserID != nil && p.Role == "admin" {
+	if in.AssignedUserID != nil && p.LeadScope() == permissions.LeadScopeAll {
 		if err := s.repo.setAssignee(ctx, tx, p.AccountID, leadID, in.AssignedUserID); err != nil {
 			return 0, err
 		}

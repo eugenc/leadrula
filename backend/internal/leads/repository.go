@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/internal/collaboration"
 	"github.com/echayko/leadrula/backend/internal/customfields"
 	"github.com/echayko/leadrula/backend/internal/database"
@@ -282,17 +283,23 @@ func (r *Repository) CollaborationLeadAllowed(ctx context.Context, p *auth.Princ
 }
 
 func (r *Repository) visible(ctx context.Context, p *auth.Principal, l *Lead) bool {
-	switch p.Role {
-	case "admin":
+	switch p.LeadScope() {
+	case permissions.LeadScopeAll:
 		return true
-	case "user":
+	case permissions.LeadScopeAssigned:
 		return l.AssignedUserID != nil && *l.AssignedUserID == p.UserID
-	case "follower":
+	case permissions.LeadScopeAssignedAndFollowed:
+		if l.AssignedUserID != nil && *l.AssignedUserID == p.UserID {
+			return true
+		}
+		var ok bool
+		_ = r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM lead_followers WHERE lead_id=$1 AND user_id=$2)`, l.ID, p.UserID).Scan(&ok)
+		return ok
+	default:
 		var ok bool
 		_ = r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM lead_followers WHERE lead_id=$1 AND user_id=$2)`, l.ID, p.UserID).Scan(&ok)
 		return ok
 	}
-	return false
 }
 
 type ListFilters struct {
@@ -379,13 +386,16 @@ func (r *Repository) appendListFilters(p *auth.Principal, f ListFilters, where s
 		where += fmt.Sprintf(" AND %s $%d", cond, len(args))
 	}
 
-	switch p.Role {
-	case "user":
+	switch p.LeadScope() {
+	case permissions.LeadScopeAssigned:
 		args = append(args, p.UserID)
 		where += fmt.Sprintf(" AND l.assigned_user_id = $%d", len(args))
-	case "follower":
+	case permissions.LeadScopeFollowed:
 		args = append(args, p.UserID)
 		where += fmt.Sprintf(" AND l.id IN (SELECT lead_id FROM lead_followers WHERE user_id = $%d)", len(args))
+	case permissions.LeadScopeAssignedAndFollowed:
+		args = append(args, p.UserID, p.UserID)
+		where += fmt.Sprintf(" AND (l.assigned_user_id = $%d OR l.id IN (SELECT lead_id FROM lead_followers WHERE user_id = $%d))", len(args)-1, len(args))
 	}
 
 	if len(f.Conditions) > 0 {

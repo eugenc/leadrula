@@ -10,6 +10,7 @@ import (
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/internal/database"
 	"github.com/echayko/leadrula/backend/internal/handlerid"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -49,15 +50,16 @@ func (r *Repository) Pool() *pgxpool.Pool { return r.pool }
 func (r *Repository) LoadPrincipal(ctx context.Context, userPublicID string) (*auth.Principal, error) {
 	const q = `
 		SELECT u.id, u.public_id, u.account_id, a.public_id, a.type, u.role, u.is_active,
-		       a.operational_status
+		       a.operational_status, u.permissions
 		FROM users u JOIN accounts a ON a.id = u.account_id
 		WHERE u.public_id = $1 AND a.deleted_at IS NULL`
 	p := &auth.Principal{}
 	var active bool
 	var opStatus string
+	var permRaw []byte
 	err := r.pool.QueryRow(ctx, q, userPublicID).Scan(
 		&p.UserID, &p.UserPublicID, &p.AccountID, &p.AccountPublicID,
-		&p.AccountType, &p.Role, &active, &opStatus)
+		&p.AccountType, &p.Role, &active, &opStatus, &permRaw)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -67,6 +69,7 @@ func (r *Repository) LoadPrincipal(ctx context.Context, userPublicID string) (*a
 	if !active || opStatus == AccountStatusSuspended {
 		return nil, ErrNotFound
 	}
+	p.Perms = permissions.Resolve(p.Role, p.AccountType, permRaw)
 	return p, nil
 }
 
@@ -353,21 +356,20 @@ func (r *Repository) SoftDeleteAccount(ctx context.Context, publicID, accountTyp
 	return nil
 }
 
+const userCols = `id, public_id, account_id, email, full_name, role, is_active, prefs, permissions, last_login_at, created_at`
+
 func (r *Repository) GetUser(ctx context.Context, id int64) (*User, error) {
-	const q = `SELECT id, public_id, account_id, email, full_name, role, is_active, prefs, last_login_at, created_at
-		FROM users WHERE id = $1`
+	const q = `SELECT ` + userCols + ` FROM users WHERE id = $1`
 	return scanUser(r.pool.QueryRow(ctx, q, id))
 }
 
 func (r *Repository) GetUserInAccount(ctx context.Context, accountID, userID int64) (*User, error) {
-	const q = `SELECT id, public_id, account_id, email, full_name, role, is_active, prefs, last_login_at, created_at
-		FROM users WHERE id = $1 AND account_id = $2`
+	const q = `SELECT ` + userCols + ` FROM users WHERE id = $1 AND account_id = $2`
 	return scanUser(r.pool.QueryRow(ctx, q, userID, accountID))
 }
 
 func (r *Repository) ListUsers(ctx context.Context, accountID int64) ([]User, error) {
-	const q = `SELECT id, public_id, account_id, email, full_name, role, is_active, prefs, last_login_at, created_at
-		FROM users WHERE account_id = $1 ORDER BY created_at`
+	const q = `SELECT ` + userCols + ` FROM users WHERE account_id = $1 ORDER BY created_at`
 	rows, err := r.pool.Query(ctx, q, accountID)
 	if err != nil {
 		return nil, err
@@ -390,10 +392,11 @@ func (r *Repository) UpdateUser(ctx context.Context, accountID, userID int64, p 
 			role = COALESCE($3, role),
 			full_name = COALESCE($4, full_name),
 			email = COALESCE($5, email),
-			is_active = COALESCE($6, is_active)
+			is_active = COALESCE($6, is_active),
+			permissions = COALESCE($7, permissions)
 		WHERE id = $1 AND account_id = $2
-		RETURNING id, public_id, account_id, email, full_name, role, is_active, prefs, last_login_at, created_at`
-	return scanUser(r.pool.QueryRow(ctx, q, userID, accountID, p.Role, p.FullName, p.Email, p.IsActive))
+		RETURNING ` + userCols
+	return scanUser(r.pool.QueryRow(ctx, q, userID, accountID, p.Role, p.FullName, p.Email, p.IsActive, p.Permissions))
 }
 
 func (r *Repository) UpdatePrefs(ctx context.Context, userID int64, prefs []byte) error {
@@ -413,18 +416,21 @@ func (r *Repository) ClearUserLiveRefs(ctx context.Context, accountID, userID in
 
 // Invites
 
-func (r *Repository) CreateInvite(ctx context.Context, accountID int64, email, fullName, role, token string, expires time.Time) (*Invite, error) {
-	const q = `INSERT INTO invites(account_id, email, full_name, role, token, expires_at)
-		VALUES ($1,$2,$3,$4,$5,$6)
-		RETURNING id, account_id, email, full_name, role, expires_at, created_at`
+func (r *Repository) CreateInvite(ctx context.Context, accountID int64, email, fullName, role, token string, expires time.Time, permRaw []byte) (*Invite, error) {
+	if len(permRaw) == 0 {
+		permRaw = []byte("{}")
+	}
+	const q = `INSERT INTO invites(account_id, email, full_name, role, token, expires_at, permissions)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		RETURNING id, account_id, email, full_name, role, expires_at, created_at, permissions`
 	inv := &Invite{}
-	err := r.pool.QueryRow(ctx, q, accountID, email, fullName, role, token, expires).Scan(
-		&inv.ID, &inv.AccountID, &inv.Email, &inv.FullName, &inv.Role, &inv.ExpiresAt, &inv.CreatedAt)
+	err := r.pool.QueryRow(ctx, q, accountID, email, fullName, role, token, expires, permRaw).Scan(
+		&inv.ID, &inv.AccountID, &inv.Email, &inv.FullName, &inv.Role, &inv.ExpiresAt, &inv.CreatedAt, &inv.Permissions)
 	return inv, err
 }
 
 func (r *Repository) ListPendingInvites(ctx context.Context, accountID int64) ([]Invite, error) {
-	const q = `SELECT id, account_id, email, full_name, role, expires_at, created_at
+	const q = `SELECT id, account_id, email, full_name, role, expires_at, created_at, permissions
 		FROM invites
 		WHERE account_id = $1 AND accepted_at IS NULL AND expires_at > now()
 		ORDER BY created_at`
@@ -436,7 +442,7 @@ func (r *Repository) ListPendingInvites(ctx context.Context, accountID int64) ([
 	var out []Invite
 	for rows.Next() {
 		inv := Invite{}
-		if err := rows.Scan(&inv.ID, &inv.AccountID, &inv.Email, &inv.FullName, &inv.Role, &inv.ExpiresAt, &inv.CreatedAt); err != nil {
+		if err := rows.Scan(&inv.ID, &inv.AccountID, &inv.Email, &inv.FullName, &inv.Role, &inv.ExpiresAt, &inv.CreatedAt, &inv.Permissions); err != nil {
 			return nil, err
 		}
 		out = append(out, inv)
@@ -445,12 +451,12 @@ func (r *Repository) ListPendingInvites(ctx context.Context, accountID int64) ([
 }
 
 func (r *Repository) FindPendingInviteByEmail(ctx context.Context, accountID int64, email string) (*Invite, error) {
-	const q = `SELECT id, account_id, email, full_name, role, expires_at, created_at
+	const q = `SELECT id, account_id, email, full_name, role, expires_at, created_at, permissions
 		FROM invites
 		WHERE account_id = $1 AND email = $2 AND accepted_at IS NULL AND expires_at > now()`
 	inv := &Invite{}
 	err := r.pool.QueryRow(ctx, q, accountID, email).Scan(
-		&inv.ID, &inv.AccountID, &inv.Email, &inv.FullName, &inv.Role, &inv.ExpiresAt, &inv.CreatedAt)
+		&inv.ID, &inv.AccountID, &inv.Email, &inv.FullName, &inv.Role, &inv.ExpiresAt, &inv.CreatedAt, &inv.Permissions)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -461,12 +467,12 @@ func (r *Repository) FindPendingInviteByEmail(ctx context.Context, accountID int
 }
 
 func (r *Repository) GetPendingInvite(ctx context.Context, accountID, inviteID int64) (*InviteRow, error) {
-	const q = `SELECT id, account_id, email, full_name, role, token, expires_at, false
+	const q = `SELECT id, account_id, email, full_name, role, token, expires_at, false, permissions
 		FROM invites
 		WHERE id = $1 AND account_id = $2 AND accepted_at IS NULL AND expires_at > now()`
 	row := &InviteRow{}
 	err := r.pool.QueryRow(ctx, q, inviteID, accountID).Scan(
-		&row.ID, &row.AccountID, &row.Email, &row.FullName, &row.Role, &row.Token, &row.ExpiresAt, &row.Accepted)
+		&row.ID, &row.AccountID, &row.Email, &row.FullName, &row.Role, &row.Token, &row.ExpiresAt, &row.Accepted, &row.Permissions)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -476,19 +482,20 @@ func (r *Repository) GetPendingInvite(ctx context.Context, accountID, inviteID i
 	return row, nil
 }
 
-func (r *Repository) UpdateInvite(ctx context.Context, accountID, inviteID int64, email, fullName, role, token *string, expires *time.Time) (*Invite, error) {
+func (r *Repository) UpdateInvite(ctx context.Context, accountID, inviteID int64, email, fullName, role, token *string, expires *time.Time, permRaw *[]byte) (*Invite, error) {
 	const q = `
 		UPDATE invites SET
 			email = COALESCE($3, email),
 			full_name = COALESCE($4, full_name),
 			role = COALESCE($5, role),
 			token = COALESCE($6, token),
-			expires_at = COALESCE($7, expires_at)
+			expires_at = COALESCE($7, expires_at),
+			permissions = COALESCE($8, permissions)
 		WHERE id = $1 AND account_id = $2 AND accepted_at IS NULL
-		RETURNING id, account_id, email, full_name, role, expires_at, created_at`
+		RETURNING id, account_id, email, full_name, role, expires_at, created_at, permissions`
 	inv := &Invite{}
-	err := r.pool.QueryRow(ctx, q, inviteID, accountID, email, fullName, role, token, expires).Scan(
-		&inv.ID, &inv.AccountID, &inv.Email, &inv.FullName, &inv.Role, &inv.ExpiresAt, &inv.CreatedAt)
+	err := r.pool.QueryRow(ctx, q, inviteID, accountID, email, fullName, role, token, expires, permRaw).Scan(
+		&inv.ID, &inv.AccountID, &inv.Email, &inv.FullName, &inv.Role, &inv.ExpiresAt, &inv.CreatedAt, &inv.Permissions)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -539,7 +546,7 @@ func (r *Repository) CreateBuyer(ctx context.Context, p CreateBuyerParams, token
 
 	adminName := strings.TrimSpace(p.AdminFirstName + " " + p.AdminLastName)
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO invites(account_id, email, full_name, role, token, expires_at) VALUES ($1,$2,$3,'admin',$4,$5)`,
+		`INSERT INTO invites(account_id, email, full_name, role, token, expires_at, permissions) VALUES ($1,$2,$3,'admin',$4,$5,'{}')`,
 		a.ID, p.AdminEmail, adminName, token, expires); err != nil {
 		return nil, err
 	}
@@ -634,22 +641,23 @@ func (r *Repository) CreateBuyerWithExistingAdmin(ctx context.Context, p CreateB
 }
 
 type InviteRow struct {
-	ID        int64
-	AccountID int64
-	Email     string
-	FullName  string
-	Role      string
-	Token     string
-	ExpiresAt time.Time
-	Accepted  bool
+	ID          int64
+	AccountID   int64
+	Email       string
+	FullName    string
+	Role        string
+	Token       string
+	ExpiresAt   time.Time
+	Accepted    bool
+	Permissions []byte
 }
 
 func (r *Repository) FindInviteByToken(ctx context.Context, token string) (*InviteRow, error) {
-	const q = `SELECT id, account_id, email, full_name, role, token, expires_at, (accepted_at IS NOT NULL)
+	const q = `SELECT id, account_id, email, full_name, role, token, expires_at, (accepted_at IS NOT NULL), permissions
 		FROM invites WHERE token = $1`
 	row := &InviteRow{}
 	err := r.pool.QueryRow(ctx, q, token).Scan(
-		&row.ID, &row.AccountID, &row.Email, &row.FullName, &row.Role, &row.Token, &row.ExpiresAt, &row.Accepted)
+		&row.ID, &row.AccountID, &row.Email, &row.FullName, &row.Role, &row.Token, &row.ExpiresAt, &row.Accepted, &row.Permissions)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -667,11 +675,15 @@ func (r *Repository) AcceptInvite(ctx context.Context, inv *InviteRow, fullName,
 	}
 	defer tx.Rollback(ctx)
 
+	permRaw := inv.Permissions
+	if len(permRaw) == 0 {
+		permRaw = []byte("{}")
+	}
 	var publicID string
 	err = tx.QueryRow(ctx,
-		`INSERT INTO users(account_id, email, password_hash, full_name, role)
-		 VALUES ($1,$2,$3,$4,$5) RETURNING public_id`,
-		inv.AccountID, inv.Email, passwordHash, fullName, inv.Role).Scan(&publicID)
+		`INSERT INTO users(account_id, email, password_hash, full_name, role, permissions)
+		 VALUES ($1,$2,$3,$4,$5,$6) RETURNING public_id`,
+		inv.AccountID, inv.Email, passwordHash, fullName, inv.Role, permRaw).Scan(&publicID)
 	if err != nil {
 		return "", err
 	}
@@ -989,7 +1001,7 @@ func (r *Repository) CreatePublisher(ctx context.Context, p CreatePublisherParam
 
 	adminName := strings.TrimSpace(p.AdminFirstName + " " + p.AdminLastName)
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO invites(account_id, email, full_name, role, token, expires_at) VALUES ($1,$2,$3,'admin',$4,$5)`,
+		`INSERT INTO invites(account_id, email, full_name, role, token, expires_at, permissions) VALUES ($1,$2,$3,'admin',$4,$5,'{}')`,
 		a.ID, p.AdminEmail, adminName, token, expires); err != nil {
 		return nil, err
 	}
@@ -1007,7 +1019,7 @@ func (r *Repository) CreatePublisher(ctx context.Context, p CreatePublisherParam
 func scanUser(row pgx.Row) (*User, error) {
 	u := &User{}
 	err := row.Scan(&u.ID, &u.PublicID, &u.AccountID, &u.Email, &u.FullName,
-		&u.Role, &u.IsActive, &u.Prefs, &u.LastLoginAt, &u.CreatedAt)
+		&u.Role, &u.IsActive, &u.Prefs, &u.Permissions, &u.LastLoginAt, &u.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound

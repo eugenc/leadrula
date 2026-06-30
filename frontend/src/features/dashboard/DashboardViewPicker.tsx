@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@/store/authStore";
+import { ActionSettingsAdmin, canAction } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Input, Label, FilterSelect } from "@/components/ui/input";
 import { Card } from "@/components/ui/misc";
@@ -37,7 +38,7 @@ export function DashboardViewPicker({
 }) {
   const user = useAuthStore((s) => s.user);
   const isBuyer = user?.account_type === "buyer";
-  const isAdmin = user?.role === "admin";
+  const canManageViews = canAction(user, ActionSettingsAdmin);
   const catalog = widgetCatalog(!!isBuyer);
 
   const { data: views } = useDashboardViews();
@@ -194,7 +195,7 @@ export function DashboardViewPicker({
             ))}
           </FilterSelect>
 
-          {isAdmin && (
+          {canManageViews && (
             <>
               <Button variant="secondary" size="sm" onClick={editCurrent}>
                 <Settings2 className="h-4 w-4" />
@@ -238,7 +239,7 @@ export function DashboardViewPicker({
         </div>
       </div>
 
-      {configureOpen && isAdmin && (
+      {configureOpen && canManageViews && (
         <Card className="p-4">
           <div className="mb-4">
             <Label>View name</Label>

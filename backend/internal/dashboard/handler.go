@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/go-chi/chi/v5"
 )
@@ -18,9 +19,9 @@ func NewHandler(svc *Service) *Handler {
 
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/dashboard/views", h.listViews)
-	r.With(auth.RequireRole("admin")).Post("/dashboard/views", h.createView)
-	r.With(auth.RequireRole("admin")).Patch("/dashboard/views/{viewId}", h.updateView)
-	r.With(auth.RequireRole("admin")).Delete("/dashboard/views/{viewId}", h.deleteView)
+	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Post("/dashboard/views", h.createView)
+	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Patch("/dashboard/views/{viewId}", h.updateView)
+	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Delete("/dashboard/views/{viewId}", h.deleteView)
 }
 
 func (h *Handler) listViews(w http.ResponseWriter, r *http.Request) {

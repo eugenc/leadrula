@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/go-chi/chi/v5"
 )
@@ -23,7 +24,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/stages/{id}/disqualification-reasons", h.listStageReasons)
 
 	r.Group(func(r chi.Router) {
-		r.Use(auth.RequireRole("admin"))
+		r.Use(auth.RequirePermission(permissions.ActionPipelinesRouting))
 		r.Post("/pipelines", h.create)
 		r.Patch("/pipelines/{id}", h.update)
 		r.Delete("/pipelines/{id}", h.delete)

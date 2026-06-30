@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select, FilterSelect } from "@/components/ui/input";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { useAuthStore } from "@/store/authStore";
+import { canCreateLead, canSeeAllLeads } from "@/lib/permissions";
 import { useUIStore } from "@/store/uiStore";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
@@ -37,7 +38,7 @@ interface Props {
 
 export function NewLeadDrawer({ open, onClose }: Props) {
   const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.role === "admin";
+  const canAssignOthers = canSeeAllLeads(user);
   const openDetail = useUIStore((s) => s.openDetail);
   const create = useCreateLead();
 
@@ -141,7 +142,7 @@ export function NewLeadDrawer({ open, onClose }: Props) {
       body.pipeline_id = pipelineId;
       body.stage_id = stageId;
     }
-    if (isAdmin && assigneeId) body.assigned_user_id = assigneeId;
+    if (canAssignOthers && assigneeId) body.assigned_user_id = assigneeId;
     if (finalTags.length) body.tags = finalTags;
     if (Object.keys(cv).length) body.custom_values = cv;
 
@@ -214,7 +215,7 @@ export function NewLeadDrawer({ open, onClose }: Props) {
                 </div>
               )}
             </div>
-            {isAdmin && (
+            {canAssignOthers && (
               <div>
                 <Label>Assigned To</Label>
                 <FilterSelect

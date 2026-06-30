@@ -5,13 +5,14 @@ import { PublisherDetailDrawer } from "@/features/admin/PublisherDetailDrawer";
 import { collabBadgeClass, collabLabel } from "@/features/collaboration/collaborationStatus";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Spinner, EmptyState } from "@/components/ui/misc";
+import { ActionContractsPartners, canAction } from "@/lib/permissions";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/lib/utils";
 
 export function CollaborationAccessTab() {
   const { data: publishers, isLoading } = usePublishers();
   const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.role === "admin";
+  const canManagePartners = canAction(user, ActionContractsPartners);
   const [selectedPublisherId, setSelectedPublisherId] = useState<number | null>(null);
   const [selectedLeadCount, setSelectedLeadCount] = useState(0);
 
@@ -71,7 +72,7 @@ export function CollaborationAccessTab() {
       <PublisherDetailDrawer
         publisherId={selectedPublisherId}
         leadCount={selectedLeadCount}
-        isAdmin={!!isAdmin}
+        canManagePartners={!!canManagePartners}
         onClose={() => setSelectedPublisherId(null)}
       />
     </>

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { DrawerBody, Sheet } from "@/components/ui/dialog";
 import { EmptyState, Spinner } from "@/components/ui/misc";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
+import { ActionAppointmentsManage, canAction } from "@/lib/permissions";
 import { useAuthStore } from "@/store/authStore";
 import {
   AVAILABILITY_DRAWER_WIDTH,
@@ -17,7 +18,7 @@ import type { BuyerBookingCalendar } from "@/types";
 
 export function BuyerCalendarsPage() {
   const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.role === "admin";
+  const canManageCalendars = canAction(user, ActionAppointmentsManage);
   const { data: calendars = [], isLoading } = useBuyerCalendars();
   const [drawerCalendarId, setDrawerCalendarId] = useState<number | null>(null);
   const [showWizard, setShowWizard] = useState(false);
@@ -33,7 +34,7 @@ export function BuyerCalendarsPage() {
       <PageHeader
         title="Calendars"
         action={
-          isAdmin ? (
+          canManageCalendars ? (
             <Button type="button" onClick={openWizard}>
               Add calendar
             </Button>
@@ -46,7 +47,7 @@ export function BuyerCalendarsPage() {
         ) : (
           <CalendarsList
             calendars={calendars}
-            isAdmin={isAdmin}
+            canManageCalendars={canManageCalendars}
             onOpen={(id) => setDrawerCalendarId(id)}
             onAdd={openWizard}
           />
@@ -66,7 +67,7 @@ export function BuyerCalendarsPage() {
             <h2 className="mb-4 text-lg font-bold text-gray-800">
               {calendars.find((c) => c.id === drawerCalendarId)?.name ?? "Calendar"}
             </h2>
-            <BuyerAvailabilityEditor calendarId={drawerCalendarId} readOnly={!isAdmin} />
+            <BuyerAvailabilityEditor calendarId={drawerCalendarId} readOnly={!canManageCalendars} />
           </DrawerBody>
         )}
       </Sheet>
@@ -76,12 +77,12 @@ export function BuyerCalendarsPage() {
 
 function CalendarsList({
   calendars,
-  isAdmin,
+  canManageCalendars,
   onOpen,
   onAdd,
 }: {
   calendars: BuyerBookingCalendar[];
-  isAdmin: boolean;
+  canManageCalendars: boolean;
   onOpen: (id: number) => void;
   onAdd: () => void;
 }) {
@@ -89,9 +90,9 @@ function CalendarsList({
     return (
       <EmptyState
         title="No calendars yet."
-        subtitle={isAdmin ? "Create your first booking calendar." : undefined}
+        subtitle={canManageCalendars ? "Create your first booking calendar." : undefined}
         action={
-          isAdmin ? (
+          canManageCalendars ? (
             <Button type="button" onClick={onAdd}>
               Add calendar
             </Button>

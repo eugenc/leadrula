@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 )
 
 // ResolvePrincipal loads the real user and applies switch or impersonation claims when present.
@@ -91,6 +92,8 @@ func (s *Service) resolveSwitch(ctx context.Context, real *auth.Principal, claim
 		AccountType:     targetType,
 		Role:            "admin",
 		SwitchedFrom:    claims.SwitchedFrom,
+		FullAccess:      true,
+		Perms:           permissions.FullAccess(targetType),
 	}
 	if originType == "publisher" && targetType == "buyer" {
 		principal.SwitchedFromPublisherID = originID
@@ -122,6 +125,8 @@ func (s *Service) resolveImpersonation(ctx context.Context, real *auth.Principal
 		AccountType:     "buyer",
 		Role:            "admin",
 		Impersonator:    &impersonator,
+		FullAccess:      true,
+		Perms:           permissions.FullAccess("buyer"),
 	}, nil
 }
 

@@ -51,12 +51,12 @@ function partnershipBadgeClass(status: string) {
 export function PublisherDetailDrawer({
   publisherId,
   leadCount,
-  isAdmin,
+  canManagePartners,
   onClose,
 }: {
   publisherId: number | null;
   leadCount: number;
-  isAdmin: boolean;
+  canManagePartners: boolean;
   onClose: () => void;
 }) {
   return (
@@ -65,7 +65,7 @@ export function PublisherDetailDrawer({
         <DrawerContent
           publisherId={publisherId}
           leadCount={leadCount}
-          isAdmin={isAdmin}
+          canManagePartners={canManagePartners}
           onClose={onClose}
         />
       )}
@@ -76,12 +76,12 @@ export function PublisherDetailDrawer({
 function DrawerContent({
   publisherId,
   leadCount,
-  isAdmin,
+  canManagePartners,
   onClose,
 }: {
   publisherId: number;
   leadCount: number;
-  isAdmin: boolean;
+  canManagePartners: boolean;
   onClose: () => void;
 }) {
   const { data: publisher, isLoading } = usePublisher(publisherId);
@@ -135,7 +135,7 @@ function DrawerContent({
               You can receive leads from this publisher once a contract is in place.
             </p>
           )}
-          {isAdmin && partnership && partnershipStatus === "pending_buyer" && (
+          {canManagePartners && partnership && partnershipStatus === "pending_buyer" && (
             <div className="mt-2 flex gap-2">
               <Button
                 size="sm"
@@ -179,14 +179,14 @@ function DrawerContent({
             </span>
           </div>
 
-          {isAdmin && collabStatus === "active" && (
+          {canManagePartners && collabStatus === "active" && (
             <p className="text-sm text-gray-700">
               <strong>{collab?.publisher_name ?? publisher.name}</strong> can log in and manage this
               account as admin.
             </p>
           )}
 
-          {isAdmin && collabStatus === "pending_buyer" && (
+          {canManagePartners && collabStatus === "pending_buyer" && (
             <div className="flex gap-2">
               <Button
                 size="sm"
@@ -216,7 +216,7 @@ function DrawerContent({
             </div>
           )}
 
-          {isAdmin && (collabStatus === "none" || collabStatus === "revoked") && (
+          {canManagePartners && (collabStatus === "none" || collabStatus === "revoked") && (
             <div className="space-y-2.5">
               <p className="text-sm text-gray-500">
                 Invite a publisher admin by email. They must accept before access is granted.
@@ -293,7 +293,7 @@ function DrawerContent({
         </div>
       </DrawerBody>
 
-      {isAdmin && collabStatus === "active" && (
+      {canManagePartners && collabStatus === "active" && (
         <DrawerFooter>
           <Button
             variant="danger"

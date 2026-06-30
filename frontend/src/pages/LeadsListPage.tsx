@@ -39,6 +39,12 @@ import { Dropdown, DropdownItem } from "@/components/ui/dropdown";
 import { PageBody } from "@/components/layout/PageBody";
 import { useUIStore } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
+import {
+  ActionContractsPartners,
+  canAction,
+  canCreateLead,
+  canSeeAllLeads,
+} from "@/lib/permissions";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -79,10 +85,11 @@ const statusVariant: Record<
 
 export function LeadsListPage() {
   const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.role === "admin";
+  const canManageAllLeads = canSeeAllLeads(user);
+  const canAssignBuyer = canAction(user, ActionContractsPartners);
   const isPublisher = user?.account_type === "publisher";
   const isBuyer = user?.account_type === "buyer";
-  const canCreate = user?.role === "admin" || user?.role === "user";
+  const canCreate = canCreateLead(user);
 
   const [newLeadOpen, setNewLeadOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -160,12 +167,12 @@ export function LeadsListPage() {
   const selectedCount = selectAllMatching ? total : selected.size;
   const hasSelection = selectAllMatching || selected.size > 0;
   const showSelectAllBanner =
-    isAdmin &&
+    canManageAllLeads &&
     !selectAllMatching &&
     selected.size === leads.length &&
     leads.length > 0 &&
     total > leads.length;
-  const showAllSelectedBanner = isAdmin && selectAllMatching && total > 0;
+  const showAllSelectedBanner = canManageAllLeads && selectAllMatching && total > 0;
 
   function clearSelection() {
     setSelected(new Set());
@@ -330,7 +337,7 @@ export function LeadsListPage() {
                 </Button>
               </>
             )}
-            {isAdmin && hasSelection && (
+            {canManageAllLeads && hasSelection && (
               <div className="hidden sm:contents">
               <Dropdown
                 open={bulkOpen}
@@ -342,15 +349,19 @@ export function LeadsListPage() {
                   </Button>
                 }
               >
-                <DropdownItem onClick={() => { setAssignTarget(0); setAssignOpen("user"); setBulkOpen(false); }}>
-                  <UserPlus className="mr-2 inline h-4 w-4" />
-                  Assign to user
-                </DropdownItem>
-                <DropdownItem onClick={() => { setAssignTarget(0); setAssignOpen("follower"); setBulkOpen(false); }}>
-                  <Users className="mr-2 inline h-4 w-4" />
-                  Add follower
-                </DropdownItem>
-                {isPublisher && (
+                {canManageAllLeads && (
+                  <DropdownItem onClick={() => { setAssignTarget(0); setAssignOpen("user"); setBulkOpen(false); }}>
+                    <UserPlus className="mr-2 inline h-4 w-4" />
+                    Assign to user
+                  </DropdownItem>
+                )}
+                {canManageAllLeads && (
+                  <DropdownItem onClick={() => { setAssignTarget(0); setAssignOpen("follower"); setBulkOpen(false); }}>
+                    <Users className="mr-2 inline h-4 w-4" />
+                    Add follower
+                  </DropdownItem>
+                )}
+                {isPublisher && canAssignBuyer && (
                   <DropdownItem onClick={() => { setAssignTarget(0); setAssignOpen("buyer"); setBulkOpen(false); }}>
                     <Building2 className="mr-2 inline h-4 w-4" />
                     Assign to buyer
@@ -444,7 +455,7 @@ export function LeadsListPage() {
             <Table>
               <THead>
                 <tr>
-                  {isAdmin && (
+                  {canManageAllLeads && (
                     <TH className="w-10 min-w-10">
                       <input
                         type="checkbox"
@@ -491,7 +502,7 @@ export function LeadsListPage() {
               <TBody>
                 {leads.map((l) => (
                   <TR key={l.id} onClick={() => openDetail(l.id)}>
-                    {isAdmin && (
+                    {canManageAllLeads && (
                       <TD className="w-10 min-w-10">
                         <div onClick={(e) => e.stopPropagation()}>
                           <input

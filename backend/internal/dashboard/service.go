@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 )
 
@@ -33,7 +34,7 @@ type CreateInput struct {
 }
 
 func (s *Service) CreateView(ctx context.Context, p *auth.Principal, in CreateInput) (*View, error) {
-	if p.Role != "admin" {
+	if !p.CanAction(permissions.ActionSettingsAdmin) {
 		return nil, httpx.Forbidden("only admins can create dashboard views")
 	}
 	name := strings.TrimSpace(in.Name)
@@ -119,7 +120,7 @@ func canEditView(p *auth.Principal, v *View) bool {
 	if v.AccountID != p.AccountID {
 		return false
 	}
-	if p.Role != "admin" {
+	if !p.CanAction(permissions.ActionSettingsAdmin) {
 		return false
 	}
 	return v.OwnerUserID == nil

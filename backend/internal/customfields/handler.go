@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/go-chi/chi/v5"
 )
@@ -19,7 +20,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/custom-field-folders", h.listFolders)
 
 	r.Group(func(r chi.Router) {
-		r.Use(auth.RequireRole("admin"))
+		r.Use(auth.RequirePermission(permissions.ActionPipelinesRouting))
 		r.Post("/custom-fields", h.createField)
 		r.Post("/custom-fields/import", h.importFields)
 		r.Post("/custom-fields/layout", h.saveLayout)

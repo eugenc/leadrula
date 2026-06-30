@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useMe, useUpdateMyAccount } from "@/features/leads/hooks";
+import { ActionSettingsAdmin, canAction } from "@/lib/permissions";
 import { useAuthStore } from "@/store/authStore";
 import { Card } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
@@ -140,7 +141,7 @@ const emptyAccount: Me["account"] = {
 
 export function BusinessSettingsPage() {
   const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.role === "admin";
+  const canManageBusiness = canAction(user, ActionSettingsAdmin);
   const accountType = user?.account_type;
   const prefix = accountType === "publisher" ? "/p" : "/b";
   const { data: me } = useMe();
@@ -153,7 +154,7 @@ export function BusinessSettingsPage() {
     if (me?.account) setForm(accountToForm(me.account));
   }, [me?.account]);
 
-  if (!isAdmin) {
+  if (!canManageBusiness) {
     return <Navigate to={`${prefix}/settings`} replace />;
   }
 

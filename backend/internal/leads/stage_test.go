@@ -8,6 +8,7 @@ import (
 
 	"github.com/echayko/leadrula/backend/internal/accounts"
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/internal/billing"
 	"github.com/echayko/leadrula/backend/internal/config"
 	"github.com/echayko/leadrula/backend/internal/contracts"
@@ -35,17 +36,39 @@ func TestAssertCanEdit(t *testing.T) {
 	assigned := int64(42)
 	lead := &Lead{AssignedUserID: &assigned}
 
-	if err := assertCanEdit(&auth.Principal{Role: "admin"}, lead); err != nil {
-		t.Fatalf("admin: %v", err)
+	if err := assertCanEdit(&auth.Principal{FullAccess: true}, lead); err != nil {
+		t.Fatalf("all scope: %v", err)
 	}
-	if err := assertCanEdit(&auth.Principal{Role: "user", UserID: 42}, lead); err != nil {
+	if err := assertCanEdit(&auth.Principal{
+		UserID: 42,
+		Perms:  permissions.Effective{LeadScope: permissions.LeadScopeAssigned},
+	}, lead); err != nil {
 		t.Fatalf("assigned user: %v", err)
 	}
-	if err := assertCanEdit(&auth.Principal{Role: "user", UserID: 99}, lead); err == nil {
+	if err := assertCanEdit(&auth.Principal{
+		UserID: 99,
+		Perms:  permissions.Effective{LeadScope: permissions.LeadScopeAssigned},
+	}, lead); err == nil {
 		t.Fatal("expected forbidden for non-assigned user")
 	}
-	if err := assertCanEdit(&auth.Principal{Role: "viewer"}, lead); err == nil {
-		t.Fatal("expected forbidden for viewer")
+	if err := assertCanEdit(&auth.Principal{
+		Perms: permissions.Effective{LeadScope: permissions.LeadScopeFollowed},
+	}, lead); err == nil {
+		t.Fatal("expected forbidden for followed scope")
+	}
+	other := int64(99)
+	followedOnly := &Lead{AssignedUserID: &other}
+	if err := assertCanEdit(&auth.Principal{
+		UserID: 42,
+		Perms:  permissions.Effective{LeadScope: permissions.LeadScopeAssignedAndFollowed},
+	}, followedOnly); err == nil {
+		t.Fatal("expected forbidden for followed-only lead under union scope")
+	}
+	if err := assertCanEdit(&auth.Principal{
+		UserID: 42,
+		Perms:  permissions.Effective{LeadScope: permissions.LeadScopeAssignedAndFollowed},
+	}, lead); err != nil {
+		t.Fatalf("assigned lead under union scope: %v", err)
 	}
 }
 

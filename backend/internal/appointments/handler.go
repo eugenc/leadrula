@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/go-chi/chi/v5"
 )
@@ -17,13 +18,13 @@ func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 
 func (h *Handler) RegisterBuyer(r chi.Router) {
 	r.Get("/booking-calendars", h.listBookingCalendars)
-	r.With(auth.RequireRole("admin")).Post("/booking-calendars", h.createBookingCalendar)
+	r.With(auth.RequirePermission(permissions.ActionAppointmentsManage)).Post("/booking-calendars", h.createBookingCalendar)
 	r.Get("/booking-calendars/{calendarId}", h.getBookingCalendar)
-	r.With(auth.RequireRole("admin")).Put("/booking-calendars/{calendarId}", h.putBookingCalendar)
+	r.With(auth.RequirePermission(permissions.ActionAppointmentsManage)).Put("/booking-calendars/{calendarId}", h.putBookingCalendar)
 	r.Get("/booking-calendars/{calendarId}/slots", h.listCalendarSlots)
-	r.With(auth.RequireRole("admin")).Post("/booking-calendars/{calendarId}/slots", h.createCalendarSlot)
-	r.With(auth.RequireRole("admin")).Patch("/booking-calendars/{calendarId}/slots/{slotId}", h.patchCalendarSlot)
-	r.With(auth.RequireRole("admin")).Post("/booking-calendars/{calendarId}/slots/copy", h.copyCalendarSlots)
+	r.With(auth.RequirePermission(permissions.ActionAppointmentsManage)).Post("/booking-calendars/{calendarId}/slots", h.createCalendarSlot)
+	r.With(auth.RequirePermission(permissions.ActionAppointmentsManage)).Patch("/booking-calendars/{calendarId}/slots/{slotId}", h.patchCalendarSlot)
+	r.With(auth.RequirePermission(permissions.ActionAppointmentsManage)).Post("/booking-calendars/{calendarId}/slots/copy", h.copyCalendarSlots)
 	r.Get("/booking-calendars/{calendarId}/markers", h.listBuyerCalendarMarkers)
 	r.Get("/booking-calendars/{calendarId}/appointments", h.listBuyerCalendarAppointments)
 
@@ -32,7 +33,7 @@ func (h *Handler) RegisterBuyer(r chi.Router) {
 	r.Get("/appointments/slots", h.listBuyerFreeSlots)
 	r.Get("/appointments/calendar-markers", h.listBuyerAppointmentCalendarMarkers)
 	r.With(auth.RequireRole("admin", "user")).Post("/appointments/book", h.bookAsBuyer)
-	r.With(auth.RequireRole("admin")).Patch("/contracts/{id}/appointment-calendar", h.setContractAppointmentCalendar)
+	r.With(auth.RequirePermission(permissions.ActionAppointmentsManage)).Patch("/contracts/{id}/appointment-calendar", h.setContractAppointmentCalendar)
 }
 
 func (h *Handler) RegisterPublisher(r chi.Router) {
@@ -42,7 +43,7 @@ func (h *Handler) RegisterPublisher(r chi.Router) {
 	r.Get("/appointments/booked", h.listPublisherBookings)
 	r.With(auth.RequireRole("admin", "user")).Post("/appointments/book", h.book)
 	r.Get("/contracts/{id}/appointment-slots", h.listContractSlots)
-	r.With(auth.RequireRole("admin")).Put("/contracts/{id}/appointment-slots", h.putContractSlots)
+	r.With(auth.RequirePermission(permissions.ActionAppointmentsManage)).Put("/contracts/{id}/appointment-slots", h.putContractSlots)
 }
 
 func (h *Handler) listBookingCalendars(w http.ResponseWriter, r *http.Request) {

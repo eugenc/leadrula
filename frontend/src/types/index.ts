@@ -1,6 +1,12 @@
 export type AccountType = "publisher" | "buyer" | "platform";
 export type Role = "admin" | "user" | "follower";
 
+export interface EffectivePermissionsPayload {
+  nav: Record<string, boolean>;
+  lead_scope: string;
+  actions: Record<string, boolean>;
+}
+
 export interface CurrentUser {
   id: string;
   email: string;
@@ -9,6 +15,7 @@ export interface CurrentUser {
   account_type: AccountType;
   account_id: string;
   avatar_url?: string | null;
+  effective_permissions?: EffectivePermissionsPayload;
   impersonating?: boolean;
   buyer_account_name?: string;
   impersonator?: { id: string; full_name?: string; account_id: string };
@@ -26,6 +33,7 @@ export interface Me {
     is_active: boolean;
     prefs: Record<string, unknown>;
     avatar_url?: string | null;
+    effective_permissions?: EffectivePermissionsPayload;
   };
   account: {
     id: string;
@@ -1170,6 +1178,8 @@ export interface UserRow {
   role: Role;
   status: UserStatus;
   avatar_url?: string | null;
+  permissions?: Record<string, unknown>;
+  effective_permissions?: EffectivePermissionsPayload;
 }
 
 export interface ApiKey {

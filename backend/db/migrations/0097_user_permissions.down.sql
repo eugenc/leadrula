@@ -1,0 +1,2 @@
+ALTER TABLE invites DROP COLUMN IF EXISTS permissions;
+ALTER TABLE users DROP COLUMN IF EXISTS permissions;

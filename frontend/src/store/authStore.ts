@@ -38,7 +38,7 @@ interface AuthState {
   setTokens: (access: string, refresh: string) => void;
   setUserAvatar: (url: string | null) => void;
   syncUserProfile: (
-    patch: Partial<Pick<CurrentUser, "full_name" | "email" | "role" | "avatar_url">>
+    patch: Partial<Pick<CurrentUser, "full_name" | "email" | "role" | "avatar_url" | "effective_permissions">>
   ) => void;
   syncFromMe: (patch: Partial<CurrentUser>) => void;
   startImpersonation: (access: string, user: CurrentUser, buyerAccountName: string) => void;
@@ -148,7 +148,14 @@ export const useAuthStore = create<AuthState>()(
 );
 
 export function userFromMe(me: {
-  user: { id: string; email: string; full_name: string; role: Role; avatar_url?: string | null };
+  user: {
+    id: string;
+    email: string;
+    full_name: string;
+    role: Role;
+    avatar_url?: string | null;
+    effective_permissions?: CurrentUser["effective_permissions"];
+  };
   account: { id: string; type: AccountType; name: string };
   impersonating?: boolean;
   buyer_account_name?: string;
@@ -163,6 +170,7 @@ export function userFromMe(me: {
     account_type: me.account.type,
     account_id: me.account.id,
     avatar_url: me.user.avatar_url,
+    effective_permissions: me.user.effective_permissions,
     impersonating: me.impersonating,
     buyer_account_name: me.buyer_account_name,
     is_switched: me.is_switched,

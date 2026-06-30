@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -219,10 +220,10 @@ func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api-keys", h.list)
-	r.With(auth.RequireRole("admin")).Post("/api-keys", h.create)
-	r.With(auth.RequireRole("admin")).Patch("/api-keys/{id}", h.update)
-	r.With(auth.RequireRole("admin")).Post("/api-keys/{id}/rotate", h.rotate)
-	r.With(auth.RequireRole("admin")).Delete("/api-keys/{id}", h.revoke)
+	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Post("/api-keys", h.create)
+	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Patch("/api-keys/{id}", h.update)
+	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Post("/api-keys/{id}/rotate", h.rotate)
+	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Delete("/api-keys/{id}", h.revoke)
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {

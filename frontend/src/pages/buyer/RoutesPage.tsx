@@ -14,6 +14,7 @@ import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Spinner, EmptyState, TextWithOverflowTooltip } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/misc";
+import { ActionPipelinesRouting, canAction } from "@/lib/permissions";
 import { useAuthStore } from "@/store/authStore";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "@/store/toastStore";
@@ -27,7 +28,7 @@ function deliveryCell(r: Route) {
 }
 
 export function RoutesPage() {
-  const isAdmin = useAuthStore((s) => s.user?.role === "admin");
+  const canManageRoutes = canAction(useAuthStore((s) => s.user), ActionPipelinesRouting);
   const { data: routes, isLoading } = useBuyerRoutes();
   const createRoute = useCreateBuyerRoute();
   const updateRoute = useUpdateBuyerRoute();
@@ -41,7 +42,7 @@ export function RoutesPage() {
     <>
       <PageHeader
         action={
-          isAdmin ? (
+          canManageRoutes ? (
             <Button onClick={() => setDrawerRoute(null)}>
               <Plus className="h-4 w-4" /> New Route
             </Button>
@@ -74,7 +75,7 @@ export function RoutesPage() {
                   <TR
                     key={r.id}
                     onClick={() => {
-                      if (editable && isAdmin) setDrawerRoute(r);
+                      if (editable && canManageRoutes) setDrawerRoute(r);
                     }}
                   >
                     <TD className="font-semibold">{r.name}</TD>
@@ -85,7 +86,7 @@ export function RoutesPage() {
                     </TD>
                     <TD>{deliveryCell(r)}</TD>
                     <TD>
-                      {editable && isAdmin ? (
+                      {editable && canManageRoutes ? (
                         <div onClick={(e) => e.stopPropagation()}>
                           <Switch
                             checked={r.is_active}
@@ -102,7 +103,7 @@ export function RoutesPage() {
                       )}
                     </TD>
                     <TD>
-                      {editable && isAdmin && (
+                      {editable && canManageRoutes && (
                         <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
                           <IconButton
                             variant="danger"
@@ -123,7 +124,7 @@ export function RoutesPage() {
         )}
       </PageBody>
 
-      {isAdmin && (
+      {canManageRoutes && (
         <RouteDrawer
           accountType="buyer"
           route={drawerRoute ?? null}

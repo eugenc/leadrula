@@ -58,6 +58,7 @@ export function AppShell() {
       email: me.user.email,
       role: me.user.role,
       avatar_url: me.user.avatar_url,
+      effective_permissions: me.user.effective_permissions,
     });
     syncFromMe({
       is_switched: me.is_switched,

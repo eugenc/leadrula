@@ -1,0 +1,2 @@
+ALTER TABLE users ADD COLUMN permissions JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE invites ADD COLUMN permissions JSONB NOT NULL DEFAULT '{}';

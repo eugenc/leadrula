@@ -2,6 +2,7 @@ import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
 import { cn } from "@/lib/utils";
+import { canNav } from "@/lib/permissions";
 import { queryClient } from "@/lib/queryClient";
 import { Logo } from "@/components/layout/Logo";
 import {
@@ -32,7 +33,7 @@ interface Item {
   to: string;
   label: string;
   icon: LucideIcon;
-  adminOnly?: boolean;
+  navKey: string;
 }
 
 interface NavGroup {
@@ -41,131 +42,131 @@ interface NavGroup {
 }
 
 const publisherNav: NavGroup[] = [
-  { items: [{ to: "/p", label: "Dashboard", icon: LayoutDashboard }] },
+  { items: [{ to: "/p", label: "Dashboard", icon: LayoutDashboard, navKey: "dashboard" }] },
   {
     label: "Leads",
     items: [
-      { to: "/p/leads", label: "Leads", icon: List },
-      { to: "/p/fields", label: "Custom Fields", icon: Tags, adminOnly: true },
+      { to: "/p/leads", label: "Leads", icon: List, navKey: "leads" },
+      { to: "/p/fields", label: "Custom Fields", icon: Tags, navKey: "fields" },
     ],
   },
   {
     label: "Appointments",
     items: [
-      { to: "/p/appointments", label: "Appointments", icon: CalendarClock },
-      { to: "/p/calendar", label: "Calendars", icon: Calendar },
+      { to: "/p/appointments", label: "Appointments", icon: CalendarClock, navKey: "appointments" },
+      { to: "/p/calendar", label: "Calendars", icon: Calendar, navKey: "calendars" },
     ],
   },
   {
     label: "Calls",
-    items: [{ to: "/p/calls", label: "Calls", icon: Phone }],
+    items: [{ to: "/p/calls", label: "Calls", icon: Phone, navKey: "calls" }],
   },
   {
     label: "Pipeline",
     items: [
-      { to: "/p/board", label: "Pipeline", icon: KanbanSquare },
-      { to: "/p/pipelines", label: "Pipelines", icon: GitBranch, adminOnly: true },
+      { to: "/p/board", label: "Pipeline", icon: KanbanSquare, navKey: "board" },
+      { to: "/p/pipelines", label: "Pipelines", icon: GitBranch, navKey: "pipelines" },
     ],
   },
   {
     label: "Buyers",
     items: [
-      { to: "/p/buyers", label: "Buyers", icon: Building2, adminOnly: true },
-      { to: "/p/contracts", label: "Contracts", icon: FileText, adminOnly: true },
-      { to: "/p/collaboration", label: "Collaboration", icon: Handshake, adminOnly: true },
+      { to: "/p/buyers", label: "Buyers", icon: Building2, navKey: "buyers" },
+      { to: "/p/contracts", label: "Contracts", icon: FileText, navKey: "contracts" },
+      { to: "/p/collaboration", label: "Collaboration", icon: Handshake, navKey: "collaboration" },
     ],
   },
   {
     label: "Routing",
     items: [
-      { to: "/p/sources", label: "Sources", icon: Import, adminOnly: true },
-      { to: "/p/webhooks", label: "Webhooks", icon: Webhook, adminOnly: true },
-      { to: "/p/routing", label: "Routing", icon: Route, adminOnly: true },
-      { to: "/p/log", label: "Logs", icon: Logs, adminOnly: true },
+      { to: "/p/sources", label: "Sources", icon: Import, navKey: "sources" },
+      { to: "/p/webhooks", label: "Webhooks", icon: Webhook, navKey: "webhooks" },
+      { to: "/p/routing", label: "Routing", icon: Route, navKey: "routing" },
+      { to: "/p/log", label: "Logs", icon: Logs, navKey: "logs" },
     ],
   },
 ];
 
 const publisherSettings: NavGroup = {
   items: [
-    { to: "/p/settings", label: "Settings", icon: Settings },
-    { to: "/p/billing", label: "Billing", icon: CreditCard },
+    { to: "/p/settings", label: "Settings", icon: Settings, navKey: "settings" },
+    { to: "/p/billing", label: "Billing", icon: CreditCard, navKey: "billing" },
   ],
 };
 
 const publisherBottomNav: NavGroup = {
-  items: [{ to: "/p/integrations", label: "Integrations", icon: Plug, adminOnly: true }],
+  items: [{ to: "/p/integrations", label: "Integrations", icon: Plug, navKey: "integrations" }],
 };
 
 const buyerNav: NavGroup[] = [
-  { items: [{ to: "/b", label: "Dashboard", icon: LayoutDashboard }] },
+  { items: [{ to: "/b", label: "Dashboard", icon: LayoutDashboard, navKey: "dashboard" }] },
   {
     label: "Leads",
     items: [
-      { to: "/b/leads", label: "Leads", icon: List },
-      { to: "/b/fields", label: "Custom Fields", icon: Tags, adminOnly: true },
+      { to: "/b/leads", label: "Leads", icon: List, navKey: "leads" },
+      { to: "/b/fields", label: "Custom Fields", icon: Tags, navKey: "fields" },
     ],
   },
   {
     label: "Appointments",
     items: [
-      { to: "/b/appointments", label: "Appointments", icon: CalendarClock },
-      { to: "/b/calendar", label: "Calendars", icon: Calendar },
+      { to: "/b/appointments", label: "Appointments", icon: CalendarClock, navKey: "appointments" },
+      { to: "/b/calendar", label: "Calendars", icon: Calendar, navKey: "calendars" },
     ],
   },
   {
     label: "Calls",
-    items: [{ to: "/b/calls", label: "Calls", icon: Phone }],
+    items: [{ to: "/b/calls", label: "Calls", icon: Phone, navKey: "calls" }],
   },
   {
     label: "Pipeline",
     items: [
-      { to: "/b/board", label: "Pipeline", icon: KanbanSquare },
-      { to: "/b/pipelines", label: "Pipelines", icon: GitBranch, adminOnly: true },
+      { to: "/b/board", label: "Pipeline", icon: KanbanSquare, navKey: "board" },
+      { to: "/b/pipelines", label: "Pipelines", icon: GitBranch, navKey: "pipelines" },
     ],
   },
   {
     label: "Publishers",
     items: [
-      { to: "/b/publishers", label: "Publishers", icon: Building2 },
-      { to: "/b/contract", label: "Contracts", icon: FileText },
-      { to: "/b/collaboration", label: "Collaboration", icon: Handshake, adminOnly: true },
+      { to: "/b/publishers", label: "Publishers", icon: Building2, navKey: "publishers" },
+      { to: "/b/contract", label: "Contracts", icon: FileText, navKey: "contracts" },
+      { to: "/b/collaboration", label: "Collaboration", icon: Handshake, navKey: "collaboration" },
     ],
   },
   {
     label: "Routing",
     items: [
-      { to: "/b/routes", label: "Routes", icon: Route },
-      { to: "/b/webhooks", label: "Webhooks", icon: Webhook, adminOnly: true },
-      { to: "/b/logs", label: "Logs", icon: Logs, adminOnly: true },
+      { to: "/b/routes", label: "Routes", icon: Route, navKey: "routes" },
+      { to: "/b/webhooks", label: "Webhooks", icon: Webhook, navKey: "webhooks" },
+      { to: "/b/logs", label: "Logs", icon: Logs, navKey: "logs" },
     ],
   },
 ];
 
 const buyerSettings: NavGroup = {
   items: [
-    { to: "/b/settings", label: "Settings", icon: Settings },
-    { to: "/b/billing", label: "Billing", icon: CreditCard },
+    { to: "/b/settings", label: "Settings", icon: Settings, navKey: "settings" },
+    { to: "/b/billing", label: "Billing", icon: CreditCard, navKey: "billing" },
   ],
 };
 
 const buyerBottomNav: NavGroup = {
-  items: [{ to: "/b/integrations", label: "Integrations", icon: Plug, adminOnly: true }],
+  items: [{ to: "/b/integrations", label: "Integrations", icon: Plug, navKey: "integrations" }],
 };
 
 const platformNav: NavGroup[] = [
-  { items: [{ to: "/platform", label: "Dashboard", icon: LayoutDashboard }] },
+  { items: [{ to: "/platform", label: "Dashboard", icon: LayoutDashboard, navKey: "dashboard" }] },
   {
     label: "Accounts",
     items: [
-      { to: "/platform/publishers", label: "Publishers", icon: Building2 },
-      { to: "/platform/buyers", label: "Buyers", icon: Users },
+      { to: "/platform/publishers", label: "Publishers", icon: Building2, navKey: "publishers" },
+      { to: "/platform/buyers", label: "Buyers", icon: Users, navKey: "buyers" },
     ],
   },
 ];
 
 const platformSettings: NavGroup = {
-  items: [{ to: "/platform/settings", label: "Settings", icon: Settings }],
+  items: [{ to: "/platform/settings", label: "Settings", icon: Settings, navKey: "settings" }],
 };
 
 const dashboardPaths = new Set(["/p", "/b", "/platform"]);
@@ -195,14 +196,14 @@ function NavItem({ item }: { item: Item }) {
 
 function NavGroupSection({
   group,
-  isAdmin,
+  user,
   pathname,
 }: {
   group: NavGroup;
-  isAdmin: boolean;
+  user: NonNullable<ReturnType<typeof useAuthStore.getState>["user"]>;
   pathname: string;
 }) {
-  const visible = group.items.filter((i) => !i.adminOnly || isAdmin);
+  const visible = group.items.filter((i) => canNav(user, i.navKey));
   if (visible.length === 0) return null;
 
   const childActive = visible.some(
@@ -237,7 +238,6 @@ export function Sidebar() {
   const { pathname } = useLocation();
   if (!user) return null;
 
-  const isAdmin = user.role === "admin";
   const groups =
     user.account_type === "platform"
       ? platformNav
@@ -271,14 +271,12 @@ export function Sidebar() {
       </div>
       <nav className="flex-1 overflow-y-auto px-2">
         {groups.map((group, i) => (
-          <NavGroupSection key={group.label ?? i} group={group} isAdmin={isAdmin} pathname={pathname} />
+          <NavGroupSection key={group.label ?? i} group={group} user={user} pathname={pathname} />
         ))}
       </nav>
       <div className="mt-auto border-t border-gray-100 px-2 pb-2 pt-2">
-        <NavGroupSection group={settings} isAdmin={isAdmin} pathname={pathname} />
-        {bottomNav && (
-          <NavGroupSection group={bottomNav} isAdmin={isAdmin} pathname={pathname} />
-        )}
+        <NavGroupSection group={settings} user={user} pathname={pathname} />
+        {bottomNav && <NavGroupSection group={bottomNav} user={user} pathname={pathname} />}
         <div className="mt-2 border-t border-gray-100 pt-2 lg:hidden">
           <button
             type="button"

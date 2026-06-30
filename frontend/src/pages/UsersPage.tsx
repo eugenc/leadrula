@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useUsersList, useInviteUser, useResendInvite } from "@/features/admin/hooks";
 import { UserDetailDrawer } from "@/features/admin/UserDetailDrawer";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -13,6 +13,9 @@ import { Mail, Plus } from "lucide-react";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import { formatRole } from "@/lib/utils";
+import { deltaFromEffective, presetForRole } from "@/lib/permissions";
+import { PermissionsEditor } from "@/features/admin/PermissionsEditor";
+import { useAuthStore } from "@/store/authStore";
 import type { Role, UserRow } from "@/types";
 
 const ROLES: { value: Role; label: string }[] = [
@@ -36,6 +39,7 @@ function statusBadge(u: UserRow) {
 }
 
 export function UsersPage() {
+  const accountType = useAuthStore((s) => s.user?.account_type ?? "publisher");
   const { data: users, isLoading } = useUsersList();
   const invite = useInviteUser();
   const resend = useResendInvite();
@@ -43,6 +47,19 @@ export function UsersPage() {
   const [resendingId, setResendingId] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ email: "", full_name: "", role: "user" as Role });
+  const [effective, setEffective] = useState(() => presetForRole("user", accountType));
+
+  const rolePreset = useMemo(() => presetForRole(form.role, accountType), [form.role, accountType]);
+
+  function onRoleChange(role: Role) {
+    setForm((f) => ({ ...f, role }));
+    setEffective(presetForRole(role, accountType));
+  }
+
+  function resetInviteForm() {
+    setForm({ email: "", full_name: "", role: "user" });
+    setEffective(presetForRole("user", accountType));
+  }
 
   return (
     <>
@@ -102,56 +119,75 @@ export function UsersPage() {
         )}
       </PageBody>
 
-        <UserDetailDrawer user={selectedUser} onClose={() => setSelectedUser(null)} />
+      <UserDetailDrawer user={selectedUser} onClose={() => setSelectedUser(null)} />
 
-        <FormDrawer
-          open={open}
-          onClose={() => setOpen(false)}
-          title="Invite User"
-          footer={
-            <>
-              <Button variant="secondary" onClick={() => setOpen(false)}>
-                Cancel
-              </Button>
-              <Button
-                disabled={!form.email || !form.full_name}
-                onClick={() =>
-                  invite.mutate(form, {
+      <FormDrawer
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Invite User"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={!form.email || !form.full_name || invite.isPending}
+              onClick={() =>
+                invite.mutate(
+                  {
+                    ...form,
+                    permissions: deltaFromEffective(form.role, accountType, effective),
+                  },
+                  {
                     onSuccess: () => {
                       toast.success("Invite sent");
                       setOpen(false);
-                      setForm({ email: "", full_name: "", role: "user" });
+                      resetInviteForm();
                     },
                     onError: (e) => toast.error(errorMessage(e)),
-                  })
-                }
-              >
-                Send Invite
-              </Button>
-            </>
-          }
-        >
-          <div className="space-y-3">
-            <div>
-              <Label>Full Name</Label>
-              <Input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
-            </div>
-            <div>
-              <Label>Email</Label>
-              <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-            </div>
-            <div>
-              <Label>Role</Label>
-              <Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as Role })}>
-                {ROLES.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
-                  </option>
-                ))}
-              </Select>
-            </div>
+                  }
+                )
+              }
+            >
+              Send Invite
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <Label>Full Name</Label>
+            <Input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} />
           </div>
-        </FormDrawer>
+          <div>
+            <Label>Email</Label>
+            <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          </div>
+          <div>
+            <Label>Role</Label>
+            <Select value={form.role} onChange={(e) => onRoleChange(e.target.value as Role)}>
+              {ROLES.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <PermissionsEditor
+            role={form.role}
+            accountType={accountType}
+            effective={effective}
+            onChange={setEffective}
+          />
+          <button
+            type="button"
+            className="text-sm text-jade-700 hover:underline"
+            onClick={() => setEffective(rolePreset)}
+          >
+            Reset to role defaults
+          </button>
+        </div>
+      </FormDrawer>
     </>
   );
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/echayko/leadrula/backend/internal/apikeys"
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/go-chi/chi/v5"
 )
@@ -84,19 +85,19 @@ func (h *Handler) RegisterQueueRoutes(r chi.Router) {
 	r.Get("/integration-deliveries/{id}", h.getIntegrationDelivery)
 	r.Post("/integration-deliveries/{id}/retry", h.retryIntegrationDelivery)
 	r.Get("/intake-queue", h.listQueue)
-	r.With(auth.RequireRole("admin")).Post("/intake-queue/{id}/route", h.route)
-	r.With(auth.RequireRole("admin")).Post("/intake-queue/{id}/reject", h.reject)
-	r.With(auth.RequireRole("admin")).Post("/intake-queue/{id}/map-field", h.mapField)
-	r.With(auth.RequireRole("admin")).Post("/intake-queue/{id}/rerun", h.rerun)
+	r.With(auth.RequirePermission(permissions.ActionPipelinesRouting)).Post("/intake-queue/{id}/route", h.route)
+	r.With(auth.RequirePermission(permissions.ActionPipelinesRouting)).Post("/intake-queue/{id}/reject", h.reject)
+	r.With(auth.RequirePermission(permissions.ActionPipelinesRouting)).Post("/intake-queue/{id}/map-field", h.mapField)
+	r.With(auth.RequirePermission(permissions.ActionPipelinesRouting)).Post("/intake-queue/{id}/rerun", h.rerun)
 }
 
 // RegisterBuyerRoutes mounts buyer contract routing log routes.
 func (h *Handler) RegisterBuyerRoutes(r chi.Router) {
-	r.With(auth.RequireRole("admin")).Get("/routing-log", h.listRoutingLog)
-	r.With(auth.RequireRole("admin")).Get("/inbound-log", h.listInboundLog)
-	r.With(auth.RequireRole("admin")).Get("/integration-deliveries/{id}", h.getIntegrationDelivery)
-	r.With(auth.RequireRole("admin")).Post("/integration-deliveries/{id}/retry", h.retryIntegrationDelivery)
-	r.With(auth.RequireRole("admin")).Post("/routing-log/{id}/map-field", h.mapBuyerRoutingLogField)
+	r.With(auth.RequirePermission(permissions.ActionPipelinesRouting)).Get("/routing-log", h.listRoutingLog)
+	r.With(auth.RequirePermission(permissions.ActionPipelinesRouting)).Get("/inbound-log", h.listInboundLog)
+	r.With(auth.RequirePermission(permissions.ActionPipelinesRouting)).Get("/integration-deliveries/{id}", h.getIntegrationDelivery)
+	r.With(auth.RequirePermission(permissions.ActionPipelinesRouting)).Post("/integration-deliveries/{id}/retry", h.retryIntegrationDelivery)
+	r.With(auth.RequirePermission(permissions.ActionPipelinesRouting)).Post("/routing-log/{id}/map-field", h.mapBuyerRoutingLogField)
 }
 
 func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {

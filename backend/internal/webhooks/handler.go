@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/go-chi/chi/v5"
 )
@@ -31,7 +32,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/webhooks/{id}/outbound-triggers", h.listTriggers)
 
 	r.Group(func(r chi.Router) {
-		r.Use(auth.RequireRole("admin"))
+		r.Use(auth.RequirePermission(permissions.ActionPipelinesRouting))
 		r.Post("/webhooks", h.create)
 		r.Patch("/webhooks/{id}", h.update)
 		r.Delete("/webhooks/{id}", h.delete)

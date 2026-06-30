@@ -1,12 +1,13 @@
 import { NavLink } from "react-router-dom";
 import { LayoutDashboard, List, KanbanSquare } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
+import { canNav, NavBoard, NavDashboard, NavLeads } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
 const tabs = [
-  { label: "Dashboard", icon: LayoutDashboard, segment: "" },
-  { label: "Leads", icon: List, segment: "leads" },
-  { label: "Pipeline", icon: KanbanSquare, segment: "board" },
+  { label: "Dashboard", icon: LayoutDashboard, segment: "", navKey: NavDashboard },
+  { label: "Leads", icon: List, segment: "leads", navKey: NavLeads },
+  { label: "Pipeline", icon: KanbanSquare, segment: "board", navKey: NavBoard },
 ] as const;
 
 export function BottomTabBar() {
@@ -14,6 +15,7 @@ export function BottomTabBar() {
   if (!user || user.account_type === "platform") return null;
 
   const prefix = user.account_type === "buyer" ? "/b" : "/p";
+  const visible = tabs.filter((t) => canNav(user, t.navKey));
 
   return (
     <nav
@@ -21,7 +23,7 @@ export function BottomTabBar() {
       style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
     >
       <div className="flex h-14 items-stretch">
-        {tabs.map(({ label, icon: Icon, segment }) => {
+        {visible.map(({ label, icon: Icon, segment }) => {
           const to = segment ? `${prefix}/${segment}` : prefix;
           return (
             <NavLink

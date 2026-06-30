@@ -20,6 +20,13 @@ import { stageColorBorder, stageColorFill } from "@/features/pipelines/stageColo
 import { cn, formatMoney } from "@/lib/utils";
 import { useUIStore } from "@/store/uiStore";
 import { useAuthStore } from "@/store/authStore";
+import {
+  ActionBilling,
+  ActionContractsPartners,
+  canAction,
+  canEditLead,
+  canSeeAllLeads,
+} from "@/lib/permissions";
 import { toast } from "@/store/toastStore";
 import { errorMessage, apiError } from "@/lib/api";
 import {
@@ -188,7 +195,7 @@ export function LeadDetailDrawer() {
 
 function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.role === "admin";
+  const canEdit = canEditLead(user, lead);
   const [tab, setTab] = useState<DrawerTab>("details");
   const edgeTouchStart = useRef<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -344,7 +351,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
         {tab === "call" && <LeadCallTab leadId={lead.id} accountType={user?.account_type} />}
       </DrawerBody>
 
-      {isAdmin && (
+      {canEdit && (
         <div className="border-t border-gray-100 px-5 py-4">
           <Button variant="danger" size="sm" onClick={() => setConfirmDelete(true)}>
             Delete lead
@@ -365,13 +372,13 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
 
 function LeadHeader({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   const user = useAuthStore((s) => s.user);
-  const isAdmin = user?.role === "admin";
+  const canAssignOthers = canSeeAllLeads(user);
   const update = useUpdateLead();
   const setAction = useSetActionAt();
   const { data: users } = useUsers();
 
   const canEditPreassignedBuyer =
-    isAdmin &&
+    canAction(user, ActionContractsPartners) &&
     user?.account_type === "publisher" &&
     lead.status === "review" &&
     !lead.contract_id &&
@@ -507,7 +514,7 @@ function LeadHeader({ lead, onClose }: { lead: Lead; onClose: () => void }) {
         <div className="mt-1 flex flex-col gap-4 sm:flex-row sm:items-start">
           <div className="min-w-0 flex-1">
             <Label>Assigned</Label>
-            {isAdmin ? (
+            {canAssignOthers ? (
               <Select
                 value={lead.assigned_user_id != null ? String(lead.assigned_user_id) : ""}
                 onChange={(e) =>
@@ -588,9 +595,7 @@ function LeadHeader({ lead, onClose }: { lead: Lead; onClose: () => void }) {
 
 function LeadPipelineHeader({ lead, collapsed = false }: { lead: Lead; collapsed?: boolean }) {
   const user = useAuthStore((s) => s.user);
-  const canEditPipeline =
-    user?.role === "admin" ||
-    (user?.role === "user" && lead.assigned_user_id === Number(user.id));
+  const canEditPipeline = canEditLead(user, lead);
 
   const changeStage = useChangeStage();
   const { data: pipelines } = usePipelines();
@@ -1335,7 +1340,7 @@ function RedistributeBox({ lead }: { lead: Lead }) {
       <p className="text-xs text-gray-400">
         Send this returned lead to another buyer from the Contracts page.
       </p>
-      {user?.role === "admin" && (
+      {canAction(user, ActionBilling) && (
         <Button size="sm" variant="outline" className="mt-2" onClick={() => setDisputing(true)}>
           Dispute return
         </Button>

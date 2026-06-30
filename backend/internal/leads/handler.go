@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/internal/pipelines"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/go-chi/chi/v5"
@@ -27,7 +28,7 @@ func (h *Handler) RegisterBuyer(r chi.Router) {
 // RegisterPublisher mounts the lead routes plus publisher-only extras.
 func (h *Handler) RegisterPublisher(r chi.Router) {
 	h.registerCommon(r)
-	r.With(auth.RequireRole("admin")).Post("/leads/{id}/redistribute", h.redistribute)
+	r.With(auth.RequirePermission(permissions.ActionContractsPartners)).Post("/leads/{id}/redistribute", h.redistribute)
 }
 
 func (h *Handler) registerCommon(r chi.Router) {
@@ -39,8 +40,8 @@ func (h *Handler) registerCommon(r chi.Router) {
 	r.Get("/leads/tags", h.listTags)
 	r.With(auth.RequireRole("admin", "user")).Post("/leads", h.create)
 	r.With(auth.RequireRole("admin", "user")).Post("/leads/import", h.importLeads)
-	r.With(auth.RequireRole("admin")).Post("/leads/bulk", h.bulk)
-	r.With(auth.RequireRole("admin")).Delete("/leads/{id}", h.delete)
+	r.With(auth.RequireRole("admin", "user")).Post("/leads/bulk", h.bulk)
+	r.With(auth.RequireRole("admin", "user")).Delete("/leads/{id}", h.delete)
 	r.Get("/leads/{id}", h.get)
 	r.Patch("/leads/{id}", h.update)
 	r.Patch("/leads/{id}/stage", h.changeStage)
@@ -282,7 +283,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if body.ClearPreassignedBuyer || body.PreassignedBuyerID != nil {
-		if p.Role != "admin" {
+		if !p.CanAction(permissions.ActionContractsPartners) {
 			httpx.WriteError(w, httpx.Forbidden("only admins can pre-assign buyers"))
 			return
 		}

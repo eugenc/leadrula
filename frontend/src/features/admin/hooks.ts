@@ -326,6 +326,7 @@ export function useUpdateUser() {
           email: data.email,
           role: data.role,
           avatar_url: data.avatar_url,
+          effective_permissions: data.effective_permissions,
         });
       }
     },

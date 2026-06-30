@@ -1,11 +1,13 @@
 package accounts
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/go-chi/chi/v5"
 )
@@ -33,7 +35,7 @@ func (h *Handler) RegisterMeRoute(r chi.Router) {
 	r.Get("/auth/me", h.me)
 	r.Patch("/auth/me/prefs", h.patchPrefs)
 	r.Post("/auth/me/avatar", h.uploadMyAvatar)
-	r.With(auth.RequireRole("admin")).Patch("/auth/me/account", h.patchMyAccount)
+	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Patch("/auth/me/account", h.patchMyAccount)
 }
 
 // RegisterSwitchRoutes mounts account switching endpoints.
@@ -60,13 +62,13 @@ func (h *Handler) RegisterPlatformRoutes(r chi.Router) {
 // RegisterUserRoutes mounts user/invite management for an account namespace.
 func (h *Handler) RegisterUserRoutes(r chi.Router) {
 	r.Get("/users", h.listUsers)
-	r.With(auth.RequireRole("admin")).Post("/users/invite", h.invite)
-	r.With(auth.RequireRole("admin")).Patch("/users/invites/{inviteId}", h.updateInvite)
-	r.With(auth.RequireRole("admin")).Delete("/users/invites/{inviteId}", h.deleteInvite)
-	r.With(auth.RequireRole("admin")).Post("/users/invites/{inviteId}/resend", h.resendInvite)
-	r.With(auth.RequireRole("admin")).Patch("/users/{id}", h.updateUser)
-	r.With(auth.RequireRole("admin")).Delete("/users/{id}", h.deleteUser)
-	r.With(auth.RequireRole("admin")).Post("/users/{id}/avatar", h.uploadUserAvatar)
+	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Post("/users/invite", h.invite)
+	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Patch("/users/invites/{inviteId}", h.updateInvite)
+	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Delete("/users/invites/{inviteId}", h.deleteInvite)
+	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Post("/users/invites/{inviteId}/resend", h.resendInvite)
+	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Patch("/users/{id}", h.updateUser)
+	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Delete("/users/{id}", h.deleteUser)
+	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Post("/users/{id}/avatar", h.uploadUserAvatar)
 }
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
@@ -231,14 +233,20 @@ func (h *Handler) listUsers(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) invite(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
-		Email    string `json:"email"`
-		FullName string `json:"full_name"`
-		Role     string `json:"role"`
+		Email       string          `json:"email"`
+		FullName    string          `json:"full_name"`
+		Role        string          `json:"role"`
+		Permissions json.RawMessage `json:"permissions"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	inv, err := h.svc.Invite(r.Context(), p.AccountID, body.Email, body.FullName, body.Role)
+	permRaw, err := parsePermissionsInput(body.Permissions, p.AccountType)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	inv, err := h.svc.Invite(r.Context(), p.AccountID, body.Email, body.FullName, body.Role, permRaw)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -254,16 +262,27 @@ func (h *Handler) updateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Role     *string `json:"role"`
-		FullName *string `json:"full_name"`
-		Email    *string `json:"email"`
-		IsActive *bool   `json:"is_active"`
+		Role        *string         `json:"role"`
+		FullName    *string         `json:"full_name"`
+		Email       *string         `json:"email"`
+		IsActive    *bool           `json:"is_active"`
+		Permissions json.RawMessage `json:"permissions"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
+	var permBytes *[]byte
+	if len(body.Permissions) > 0 {
+		raw, err := parsePermissionsInput(body.Permissions, p.AccountType)
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		permBytes = &raw
+	}
 	u, err := h.svc.UpdateUser(r.Context(), p.AccountID, id, UpdateUserParams{
 		Role: body.Role, FullName: body.FullName, Email: body.Email, IsActive: body.IsActive,
+		Permissions: permBytes,
 	})
 	if err != nil {
 		httpx.WriteError(w, err)
@@ -294,15 +313,25 @@ func (h *Handler) updateInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		FullName *string `json:"full_name"`
-		Email    *string `json:"email"`
-		Role     *string `json:"role"`
+		FullName    *string         `json:"full_name"`
+		Email       *string         `json:"email"`
+		Role        *string         `json:"role"`
+		Permissions json.RawMessage `json:"permissions"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
+	var permBytes *[]byte
+	if len(body.Permissions) > 0 {
+		raw, err := parsePermissionsInput(body.Permissions, p.AccountType)
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		permBytes = &raw
+	}
 	item, err := h.svc.UpdateInvite(r.Context(), p.AccountID, inviteID, UpdateInviteParams{
-		FullName: body.FullName, Email: body.Email, Role: body.Role,
+		FullName: body.FullName, Email: body.Email, Role: body.Role, Permissions: permBytes,
 	})
 	if err != nil {
 		httpx.WriteError(w, err)

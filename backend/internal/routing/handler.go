@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
+	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/go-chi/chi/v5"
 )
@@ -19,7 +20,7 @@ func (h *Handler) RegisterBuyer(r chi.Router) {
 	r.Get("/routes", h.buyerListRoutes)
 
 	r.Group(func(r chi.Router) {
-		r.Use(auth.RequireRole("admin"))
+		r.Use(auth.RequirePermission(permissions.ActionPipelinesRouting))
 		r.Post("/routes", h.buyerCreateRoute)
 		r.Patch("/routes/{id}", h.buyerUpdateRoute)
 		r.Delete("/routes/{id}", h.buyerDeleteRoute)
@@ -36,7 +37,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/routes/{id}/field-map/options", h.getRouteFieldMapOptions)
 
 	r.Group(func(r chi.Router) {
-		r.Use(auth.RequireRole("admin"))
+		r.Use(auth.RequirePermission(permissions.ActionPipelinesRouting))
 		r.Post("/sources", h.createSource)
 		r.Patch("/sources/{id}", h.updateSource)
 		r.Delete("/sources/{id}", h.deleteSource)
