@@ -405,6 +405,11 @@ function BookingSlotsPanel({
   savePending?: boolean;
 }) {
   const days = openWeekdays(schedule);
+  const [durationDraft, setDurationDraft] = useState(String(globalDurationMin));
+
+  useEffect(() => {
+    setDurationDraft(String(globalDurationMin));
+  }, [globalDurationMin]);
 
   function addSlot(weekday: number) {
     const dayHours = schedule[WEEKDAY_KEYS[weekday]]!;
@@ -424,9 +429,37 @@ function BookingSlotsPanel({
   }
 
   function handleDurationInput(raw: string) {
+    setDurationDraft(raw);
     const next = Number(raw);
-    if (next < MIN_SLOT_DURATION_MIN || next > MAX_SLOT_DURATION_MIN) return;
-    onGlobalDurationChange(next);
+    if (
+      raw !== "" &&
+      !Number.isNaN(next) &&
+      next >= MIN_SLOT_DURATION_MIN &&
+      next <= MAX_SLOT_DURATION_MIN
+    ) {
+      onGlobalDurationChange(next);
+    }
+  }
+
+  function handleDurationBlur() {
+    const trimmed = durationDraft.trim();
+    if (!trimmed) {
+      setDurationDraft(String(globalDurationMin));
+      return;
+    }
+    const next = Number(trimmed);
+    if (Number.isNaN(next)) {
+      setDurationDraft(String(globalDurationMin));
+      return;
+    }
+    const clamped = Math.min(
+      MAX_SLOT_DURATION_MIN,
+      Math.max(MIN_SLOT_DURATION_MIN, Math.round(next))
+    );
+    setDurationDraft(String(clamped));
+    if (clamped !== globalDurationMin) {
+      onGlobalDurationChange(clamped);
+    }
   }
 
   if (!days.length) {
@@ -445,8 +478,9 @@ function BookingSlotsPanel({
             min={MIN_SLOT_DURATION_MIN}
             max={MAX_SLOT_DURATION_MIN}
             disabled={readOnly}
-            value={globalDurationMin}
+            value={durationDraft}
             onChange={(e) => handleDurationInput(e.target.value)}
+            onBlur={handleDurationBlur}
           />
         </div>
         <div>
@@ -511,6 +545,7 @@ function BookingSlotsPanel({
                       !readOnly ? (
                         <CopyToWeekdaysPopover
                           sourceWeekday={s.weekday}
+                          targetWeekdays={openWeekdays(schedule)}
                           disabled={savePending}
                           onApply={(toWeekdays) => onCopy(s, toWeekdays)}
                         />
@@ -562,26 +597,29 @@ export function BuyerAvailabilityEditor({
 
   const [schedule, setSchedule] = useState<Schedule>({});
   const [timezone, setTimezone] = useState("America/New_York");
+  const [location, setLocation] = useState("");
   const [bufferMin, setBufferMin] = useState(0);
   const [slotDurationMin, setSlotDurationMin] = useState(DEFAULT_SLOT_DURATION_MIN);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const savedSnapshot = useRef<{ schedule: Schedule; timezone: string; bufferMin: number } | null>(null);
-  const stateRef = useRef({ schedule, timezone, bufferMin });
+  const savedSnapshot = useRef<{ schedule: Schedule; timezone: string; location: string; bufferMin: number } | null>(null);
+  const stateRef = useRef({ schedule, timezone, location, bufferMin });
   const slotsInitialized = useRef(false);
 
   useEffect(() => {
-    stateRef.current = { schedule, timezone, bufferMin };
-  }, [schedule, timezone, bufferMin]);
+    stateRef.current = { schedule, timezone, location, bufferMin };
+  }, [schedule, timezone, location, bufferMin]);
 
   useEffect(() => {
     if (!calendar) return;
     const sched = (calendar.schedule as Schedule) ?? {};
     setSchedule(sched);
     setTimezone(calendar.timezone);
+    setLocation(calendar.location ?? "");
     setBufferMin(calendar.buffer_min);
     savedSnapshot.current = {
       schedule: sched,
       timezone: calendar.timezone,
+      location: calendar.location ?? "",
       bufferMin: calendar.buffer_min,
     };
     slotsInitialized.current = false;
@@ -595,34 +633,44 @@ export function BuyerAvailabilityEditor({
     slotsInitialized.current = true;
   }, [slots]);
 
+  const persistIfDirty = useCallback(() => {
+    if (readOnly || !calendar) return;
+    const { schedule: sched, timezone: tz, location: loc, bufferMin: buf } = stateRef.current;
+    if (scheduleHasInvalidHours(sched)) return;
+    const snap = savedSnapshot.current;
+    if (
+      snap &&
+      snap.timezone === tz &&
+      snap.location === loc &&
+      snap.bufferMin === buf &&
+      schedulesEqual(snap.schedule, sched)
+    ) {
+      return;
+    }
+    saveAvail.mutate(
+      { schedule: sched, timezone: tz, location: loc, buffer_min: buf },
+      {
+        onSuccess: () => {
+          savedSnapshot.current = { schedule: sched, timezone: tz, location: loc, bufferMin: buf };
+        },
+        onError: (e) => toast.error(errorMessage(e)),
+      }
+    );
+  }, [readOnly, calendar, saveAvail]);
+
   const scheduleSave = useCallback(() => {
     if (readOnly || !calendar) return;
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      const { schedule: sched, timezone: tz, bufferMin: buf } = stateRef.current;
-      if (scheduleHasInvalidHours(sched)) return;
-      const snap = savedSnapshot.current;
-      if (
-        snap &&
-        snap.timezone === tz &&
-        snap.bufferMin === buf &&
-        schedulesEqual(snap.schedule, sched)
-      ) {
-        return;
-      }
-      saveAvail.mutate(
-        { schedule: sched, timezone: tz, buffer_min: buf },
-        {
-          onSuccess: () => {
-            savedSnapshot.current = { schedule: sched, timezone: tz, bufferMin: buf };
-          },
-          onError: (e) => toast.error(errorMessage(e)),
-        }
-      );
-    }, SAVE_DEBOUNCE_MS);
-  }, [readOnly, calendar, saveAvail]);
+    saveTimer.current = setTimeout(persistIfDirty, SAVE_DEBOUNCE_MS);
+  }, [readOnly, calendar, persistIfDirty]);
 
-  useEffect(() => () => clearTimeout(saveTimer.current), []);
+  const flushSave = useCallback(() => {
+    clearTimeout(saveTimer.current);
+    saveTimer.current = undefined;
+    persistIfDirty();
+  }, [persistIfDirty]);
+
+  useEffect(() => () => flushSave(), [flushSave]);
 
   function handleBlurSave() {
     scheduleSave();
@@ -789,6 +837,23 @@ export function BuyerAvailabilityEditor({
             </option>
           ))}
         </Select>
+      </div>
+
+      <div>
+        <Label>Location</Label>
+        <Input
+          value={location}
+          disabled={readOnly}
+          placeholder="e.g. Orlando showroom"
+          onChange={(e) => {
+            const v = e.target.value;
+            setLocation(v);
+            stateRef.current = { ...stateRef.current, location: v };
+            scheduleSave();
+          }}
+          onBlur={handleBlurSave}
+        />
+        <p className="mt-1 text-xs text-gray-400">Shown to publishers when booking appointments.</p>
       </div>
 
       <div>

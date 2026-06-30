@@ -29,13 +29,37 @@ type BookParams struct {
 }
 
 func (s *Service) Book(ctx context.Context, p *auth.Principal, params BookParams) (*BookingRow, error) {
+	return s.bookAppointment(ctx, p, params, false)
+}
+
+func (s *Service) BookAsBuyer(ctx context.Context, p *auth.Principal, params BookParams) (*BookingRow, error) {
+	params.DeliveryMode = "contract"
+	return s.bookAppointment(ctx, p, params, true)
+}
+
+func (s *Service) bookAppointment(ctx context.Context, p *auth.Principal, params BookParams, asBuyer bool) (*BookingRow, error) {
 	if params.DeliveryMode != "contract" && params.DeliveryMode != "publisher_pipeline" {
 		return nil, httpx.Validation("delivery_mode must be contract or publisher_pipeline")
 	}
 	if params.DeliveryMode == "publisher_pipeline" && (params.PublisherPipelineID == 0 || params.PublisherStageID == 0) {
 		return nil, httpx.Validation("publisher pipeline and stage required")
 	}
-	buyerID, err := s.contractBuyerID(ctx, p.AccountID, params.ContractID)
+	var buyerID int64
+	var contractSlots []ContractSlot
+	var err error
+	if asBuyer {
+		if err := s.contractOwnedByBuyer(ctx, p.AccountID, params.ContractID); err != nil {
+			return nil, err
+		}
+		buyerID = p.AccountID
+		contractSlots, err = s.ListContractSlotsForBuyer(ctx, p.AccountID, params.ContractID)
+	} else {
+		buyerID, err = s.contractBuyerID(ctx, p.AccountID, params.ContractID)
+		if err != nil {
+			return nil, err
+		}
+		contractSlots, err = s.ListContractSlots(ctx, p.AccountID, params.ContractID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -59,10 +83,6 @@ func (s *Service) Book(ctx context.Context, p *auth.Principal, params BookParams
 	slotStart := params.SlotStart.In(loc)
 	if !bookingWindowOK(slotStart, time.Now()) {
 		return nil, httpx.Validation("slot is outside booking window")
-	}
-	contractSlots, err := s.ListContractSlots(ctx, p.AccountID, params.ContractID)
-	if err != nil {
-		return nil, err
 	}
 	var match *ContractSlot
 	for i := range contractSlots {
@@ -89,7 +109,7 @@ func (s *Service) Book(ctx context.Context, p *auth.Principal, params BookParams
 	}
 	defer tx.Rollback(ctx)
 
-	booked, err := s.countBookingsTx(ctx, tx, params.ContractID, slotStart)
+	booked, err := s.countSlotOccupancyTx(ctx, tx, params.BuyerSlotID, slotStart)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +125,11 @@ func (s *Service) Book(ctx context.Context, p *auth.Principal, params BookParams
 		if err != nil {
 			return nil, err
 		}
-		if lead.PublisherID != p.AccountID && lead.OwnerAccountID != p.AccountID {
+		if asBuyer {
+			if lead.OwnerAccountID != p.AccountID {
+				return nil, httpx.NotFound("lead not found")
+			}
+		} else if lead.PublisherID != p.AccountID && lead.OwnerAccountID != p.AccountID {
 			return nil, httpx.NotFound("lead not found")
 		}
 	} else {
@@ -115,7 +139,11 @@ func (s *Service) Book(ctx context.Context, p *auth.Principal, params BookParams
 		if strings.TrimSpace(params.Phone) == "" && strings.TrimSpace(params.Email) == "" {
 			return nil, httpx.Validation("phone or email is required")
 		}
-		leadID, err = s.createLeadForBooking(ctx, tx, p, params)
+		if asBuyer {
+			leadID, err = s.createLeadForBuyerBooking(ctx, tx, p, params.ContractID, params)
+		} else {
+			leadID, err = s.createLeadForBooking(ctx, tx, p, params)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -156,7 +184,7 @@ func (s *Service) Book(ctx context.Context, p *auth.Principal, params BookParams
 			return nil, err
 		}
 		emails = append(emails, em...)
-	} else if params.DeliveryMode == "publisher_pipeline" && lead.Status == "review" && lead.OwnerAccountID == p.AccountID {
+	} else if !asBuyer && params.DeliveryMode == "publisher_pipeline" && lead.Status == "review" && lead.OwnerAccountID == p.AccountID {
 		if err := s.leads.PlaceInPipeline(ctx, tx, leadID, p.AccountID, params.PublisherPipelineID, params.PublisherStageID, nil); err != nil {
 			return nil, err
 		}
@@ -196,11 +224,9 @@ func (s *Service) Book(ctx context.Context, p *auth.Principal, params BookParams
 	return s.getBookingByID(ctx, bookingID)
 }
 
-func (s *Service) countBookingsTx(ctx context.Context, tx pgx.Tx, contractID int64, slotStart time.Time) (int, error) {
+func (s *Service) countSlotOccupancyTx(ctx context.Context, tx pgx.Tx, buyerSlotID int64, slotStart time.Time) (int, error) {
 	var n int
-	err := tx.QueryRow(ctx,
-		`SELECT COUNT(*)::int FROM lead_appointment_bookings
-		 WHERE contract_id=$1 AND slot_start=$2`, contractID, slotStart).Scan(&n)
+	err := tx.QueryRow(ctx, slotOccupancySQL, buyerSlotID, slotStart).Scan(&n)
 	return n, err
 }
 
@@ -214,6 +240,43 @@ func (s *Service) createLeadForBooking(ctx context.Context, tx pgx.Tx, p *auth.P
 	})
 	source := strings.TrimSpace(params.Source)
 	leadID, _, err := s.leads.InsertLead(ctx, tx, p.AccountID, p.AccountID, source, raw)
+	if err != nil {
+		return 0, err
+	}
+	for field, val := range map[string]string{
+		"first_name": params.FirstName,
+		"last_name":  params.LastName,
+		"phone":      params.Phone,
+		"email":      params.Email,
+		"source":     source,
+	} {
+		if strings.TrimSpace(val) == "" {
+			continue
+		}
+		if err := s.leads.SetBuiltinField(ctx, tx, leadID, field, val); err != nil {
+			return 0, err
+		}
+	}
+	if err := s.leads.LogLeadCreated(ctx, tx, leadID, p.AccountID, leads.ActorFromPrincipal(p), source); err != nil {
+		return 0, err
+	}
+	return leadID, nil
+}
+
+func (s *Service) createLeadForBuyerBooking(ctx context.Context, tx pgx.Tx, p *auth.Principal, contractID int64, params BookParams) (int64, error) {
+	var publisherID int64
+	if err := tx.QueryRow(ctx, `SELECT publisher_id FROM contracts WHERE id=$1`, contractID).Scan(&publisherID); err != nil {
+		return 0, err
+	}
+	raw, _ := json.Marshal(map[string]string{
+		"first_name": params.FirstName,
+		"last_name":  params.LastName,
+		"phone":      params.Phone,
+		"email":      params.Email,
+		"source":     params.Source,
+	})
+	source := strings.TrimSpace(params.Source)
+	leadID, _, err := s.leads.InsertLead(ctx, tx, p.AccountID, publisherID, source, raw)
 	if err != nil {
 		return 0, err
 	}

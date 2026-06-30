@@ -13,6 +13,7 @@ import {
   startOfWeek,
 } from "date-fns";
 import { cn } from "@/lib/utils";
+import { errorMessage } from "@/lib/api";
 import { PageBody } from "@/components/layout/PageBody";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -56,7 +57,7 @@ export function PublisherCalendarsPage() {
   const monthStart = format(startOfMonth(month), "yyyy-MM-dd");
   const monthEnd = format(endOfMonth(month), "yyyy-MM-dd");
   const { data: markers = [] } = useCalendarMarkers(selectedContractId, monthStart, monthEnd);
-  const { data: freeSlots = [], isLoading: loadingSlots } = useFreeSlots(selectedContractId, selectedDate);
+  const { data: freeSlots = [], isLoading: loadingSlots, isError: slotsError, error: slotsErr } = useFreeSlots(selectedContractId, selectedDate);
 
   const buyers = useMemo(() => {
     const map = new Map<number, { buyer_id: number; buyer_name: string; contracts: AppointmentContractOption[] }>();
@@ -187,6 +188,11 @@ export function PublisherCalendarsPage() {
                       })}
                       </div>
                     </div>
+                    {selectedContract.location?.trim() && (
+                      <p className="mt-2 text-xs text-gray-400">
+                        Location: {selectedContract.location.trim()}
+                      </p>
+                    )}
                   </div>
 
                   <div className="w-52 shrink-0 border-l border-gray-100 pl-3">
@@ -195,6 +201,8 @@ export function PublisherCalendarsPage() {
                     </div>
                     {loadingSlots ? (
                       <Spinner className="h-5 w-5" />
+                    ) : slotsError ? (
+                      <p className="text-sm text-red-600">{errorMessage(slotsErr)}</p>
                     ) : !freeSlots.length ? (
                       <p className="text-sm text-gray-400">No free slots.</p>
                     ) : (

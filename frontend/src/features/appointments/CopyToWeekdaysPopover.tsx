@@ -5,17 +5,23 @@ import { Dropdown } from "@/components/ui/dropdown";
 import { IconButton } from "@/components/layout/IconButton";
 import { WEEKDAYS } from "@/features/appointments/hooks";
 
+const ALL_WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
+
 export function CopyToWeekdaysPopover({
   sourceWeekday,
+  targetWeekdays,
   onApply,
   disabled,
 }: {
   sourceWeekday: number;
+  targetWeekdays?: number[];
   onApply: (toWeekdays: number[]) => void;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [targets, setTargets] = useState<number[]>([]);
+  const candidates = (targetWeekdays ?? ALL_WEEKDAYS).filter((i) => i !== sourceWeekday);
+  const triggerDisabled = disabled || candidates.length === 0;
 
   function close() {
     setOpen(false);
@@ -37,18 +43,20 @@ export function CopyToWeekdaysPopover({
       trigger={
         <IconButton
           aria-label={`Copy ${WEEKDAYS[sourceWeekday]} to other days`}
-          disabled={disabled}
-          onClick={() => !disabled && setOpen((o) => !o)}
+          disabled={triggerDisabled}
+          onClick={() => !triggerDisabled && setOpen((o) => !o)}
         >
           <Copy className="h-4 w-4" />
         </IconButton>
       }
     >
       <p className="mb-2 text-xs font-medium text-gray-500">Copy to</p>
-      <div className="mb-3 space-y-1">
-        {WEEKDAYS.map((label, i) =>
-          i === sourceWeekday ? null : (
-            <label key={label} className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
+      {candidates.length === 0 ? (
+        <p className="mb-3 text-sm text-gray-500">No other open days</p>
+      ) : (
+        <div className="mb-3 space-y-1">
+          {candidates.map((i) => (
+            <label key={i} className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
               <input
                 type="checkbox"
                 checked={targets.includes(i)}
@@ -56,11 +64,11 @@ export function CopyToWeekdaysPopover({
                   setTargets((prev) => (e.target.checked ? [...prev, i] : prev.filter((d) => d !== i)))
                 }
               />
-              {label}
+              {WEEKDAYS[i]}
             </label>
-          )
-        )}
-      </div>
+          ))}
+        </div>
+      )}
       <Button type="button" className="h-8 w-full text-xs" disabled={!targets.length} onClick={apply}>
         Apply
       </Button>

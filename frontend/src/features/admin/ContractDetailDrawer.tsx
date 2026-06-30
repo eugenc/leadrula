@@ -432,7 +432,7 @@ function DraftDrawerContent({
               <CreateContractCompensationList
                 buyerId={form.buyer_id}
                 contractType={form.contract_type}
-                buyerPipelineId={deliveryDraft.counterparty_pipeline_id}
+                buyerPipelineId={contract.buyer_pipeline_id ?? 0}
                 leadType={form.lead_type}
                 items={compDrafts}
                 onChange={setCompDrafts}
@@ -449,8 +449,6 @@ function DraftDrawerContent({
                   </div>
                 ) : (
                   <ContractDeliverySection
-                    buyerId={form.buyer_id}
-                    contractType={form.contract_type}
                     value={deliveryDraft}
                     onChange={setDeliveryDraft}
                   />
@@ -464,7 +462,7 @@ function DraftDrawerContent({
             criteria: (
               <ContractLeadCriteriaSection
                 buyerId={form.buyer_id}
-                buyerPipelineId={deliveryDraft.counterparty_pipeline_id}
+                buyerPipelineId={contract.buyer_pipeline_id ?? 0}
                 contractType={form.contract_type}
                 value={leadCriteria}
                 onChange={setLeadCriteria}
@@ -540,8 +538,6 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
     contract.id,
     contract.source_pipeline_id ?? 0,
     contract.source_stage_id ?? 0,
-    contract.return_stage_id ?? 0,
-    contract.buyer_pipeline_id ?? 0,
     JSON.stringify(contract.allowed_delivery_modes ?? []),
     contract.distribution_strategy ?? "",
   ].join("|");
@@ -558,15 +554,12 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
     offerDraft.distribution_strategy === savedOffer.distribution_strategy &&
     (!openOfferPipelineRequired(offerDraft.allowed_delivery_modes) ||
       (deliveryDraft.source_pipeline_id === savedDelivery.source_pipeline_id &&
-        deliveryDraft.source_stage_id === savedDelivery.source_stage_id &&
-        deliveryDraft.return_stage_id === savedDelivery.return_stage_id));
+        deliveryDraft.source_stage_id === savedDelivery.source_stage_id));
 
   const deliveryUnchanged =
     deliveryDraft.delivery === savedDelivery.delivery &&
     deliveryDraft.source_pipeline_id === savedDelivery.source_pipeline_id &&
-    deliveryDraft.source_stage_id === savedDelivery.source_stage_id &&
-    deliveryDraft.counterparty_pipeline_id === savedDelivery.counterparty_pipeline_id &&
-    deliveryDraft.return_stage_id === savedDelivery.return_stage_id;
+    deliveryDraft.source_stage_id === savedDelivery.source_stage_id;
 
   const unchanged =
     name.trim() === contract.name &&
@@ -589,7 +582,6 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
       distribution_strategy: offerDraft.distribution_strategy,
       source_pipeline_id: deliveryDraft.source_pipeline_id || null,
       source_stage_id: deliveryDraft.source_stage_id || null,
-      return_stage_id: deliveryDraft.return_stage_id || null,
     };
   }
 
@@ -788,8 +780,6 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
                 ) : (
                   <>
                     <ContractDeliverySection
-                      buyerId={contract.buyer_id ?? 0}
-                      contractType={contract.contract_type}
                       value={deliveryDraft}
                       onChange={setDeliveryDraft}
                     />
@@ -836,7 +826,7 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
               <>
                 <ContractLeadCriteriaSection
                   buyerId={contract.buyer_id ?? 0}
-                  buyerPipelineId={deliveryDraft.counterparty_pipeline_id}
+                  buyerPipelineId={contract.buyer_pipeline_id ?? 0}
                   contractType={contract.contract_type ?? "sell"}
                   value={leadCriteria}
                   onChange={setLeadCriteria}

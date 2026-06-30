@@ -23,10 +23,11 @@ function ReturnRouteRow({
   sortedPublisher,
   onUpdate,
 }: {
-  rule: { id: number; buyer_stage_id: number; buyer_stage_name?: string; return_stage_id: number };
+  rule: { id: number; buyer_stage_id: number; buyer_stage_name?: string; return_stage_id?: number | null };
   sortedPublisher: { id: number; name: string }[];
   onUpdate: (ruleId: number, returnStageId: number) => void;
 }) {
+  const pending = !rule.return_stage_id;
   return (
     <div className="flex flex-wrap items-end gap-2 rounded-md border border-gray-100 px-3 py-2">
       <div className="min-w-[120px] flex-1">
@@ -37,16 +38,27 @@ function ReturnRouteRow({
       </div>
       <div className="min-w-[120px] flex-1">
         <div className="mb-1 text-xs font-semibold text-gray-500">Return destination</div>
-        <Select
-          value={rule.return_stage_id}
-          onChange={(e) => onUpdate(rule.id, Number(e.target.value))}
-        >
-          {sortedPublisher.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </Select>
+        {pending ? (
+          <Select value={0} onChange={(e) => onUpdate(rule.id, Number(e.target.value))}>
+            <option value={0}>Pending — select stage…</option>
+            {sortedPublisher.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </Select>
+        ) : (
+          <Select
+            value={rule.return_stage_id ?? 0}
+            onChange={(e) => onUpdate(rule.id, Number(e.target.value))}
+          >
+            {sortedPublisher.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </Select>
+        )}
       </div>
     </div>
   );
@@ -79,13 +91,10 @@ function OpenOfferReturnRoutes({
   const { data: rules, isLoading: rulesLoading } = useContractParticipationReturnRoutes(contractId);
   const updateDestination = useUpdateParticipationReturnRuleDestination();
 
-  const defaultStageName =
-    publisherStages?.find((s) => s.id === delivery.return_stage_id)?.name ?? "the Delivery default";
-
-  if (!delivery.source_pipeline_id || !delivery.return_stage_id) {
+  if (!delivery.source_pipeline_id) {
     return (
       <p className="text-sm text-gray-500">
-        Configure source pipeline and return destination under Delivery before mapping buyer return routes.
+        Configure source pipeline under Delivery before mapping buyer return routes.
       </p>
     );
   }
@@ -102,7 +111,7 @@ function OpenOfferReturnRoutes({
     <div>
       <p className="mb-3 text-xs text-gray-400">
         Buyers pick return start stages when they accept. Map each buyer return start stage to a stage on your
-        pipeline. New buyer return routes default to {defaultStageName}.
+        pipeline.
       </p>
       {groups.length === 0 ? (
         <p className="text-sm text-gray-500">No buyer return routes yet. Routes appear after buyers accept.</p>
@@ -147,13 +156,10 @@ function DirectContractReturnRoutes({
   const { data: rules, isLoading: rulesLoading } = useReturnRules(contractId, false);
   const updateDestination = useUpdateContractReturnRuleDestination();
 
-  const defaultStageName =
-    publisherStages?.find((s) => s.id === delivery.return_stage_id)?.name ?? "the Delivery default";
-
-  if (!delivery.source_pipeline_id || !delivery.return_stage_id) {
+  if (!delivery.source_pipeline_id) {
     return (
       <p className="text-sm text-gray-500">
-        Configure source pipeline and return destination under Delivery before mapping buyer return routes.
+        Configure source pipeline under Delivery before mapping buyer return routes.
       </p>
     );
   }
@@ -170,7 +176,7 @@ function DirectContractReturnRoutes({
     <div>
       <p className="mb-3 text-xs text-gray-400">
         The buyer configures trigger stages on their contract. Map each buyer return start stage to a stage on your
-        pipeline. New buyer return routes default to {defaultStageName}.
+        pipeline.
       </p>
       {routeList.length === 0 ? (
         <p className="text-sm text-gray-500">No return routes yet. The buyer configures trigger stages on their contract.</p>

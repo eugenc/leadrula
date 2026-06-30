@@ -19,12 +19,12 @@ func pipelineDeliveryAllowed(modes []string) bool {
 	return false
 }
 
-func validateOfferPipelineConfig(modes []string, sourcePipelineID, sourceStageID, returnStageID int64) error {
+func validateOfferPipelineConfig(modes []string, sourcePipelineID, sourceStageID int64) error {
 	if !pipelineDeliveryAllowed(modes) {
 		return nil
 	}
-	if sourcePipelineID == 0 || sourceStageID == 0 || returnStageID == 0 {
-		return httpx.Validation("source_pipeline_id, source_stage_id, and return_stage_id are required when pipeline delivery is allowed")
+	if sourcePipelineID == 0 || sourceStageID == 0 {
+		return httpx.Validation("source_pipeline_id and source_stage_id are required when pipeline delivery is allowed")
 	}
 	return nil
 }
@@ -58,7 +58,7 @@ func validateOfferParams(p CreateParams) error {
 			return err
 		}
 	}
-	return validateOfferPipelineConfig(p.AllowedDeliveryModes, p.SourcePipelineID, p.SourceStageID, p.ReturnStageID)
+	return validateOfferPipelineConfig(p.AllowedDeliveryModes, p.SourcePipelineID, p.SourceStageID)
 }
 
 func (s *Service) enrichOffer(ctx context.Context, c *Contract) error {
@@ -195,7 +195,7 @@ func (s *Service) UpdateOffer(ctx context.Context, publisherID, contractID int64
 	if p.ReturnStageID != nil {
 		returnStageID = *p.ReturnStageID
 	}
-	if err := validateOfferPipelineConfig(modes, sourcePipelineID, sourceStageID, returnStageID); err != nil {
+	if err := validateOfferPipelineConfig(modes, sourcePipelineID, sourceStageID); err != nil {
 		return nil, err
 	}
 	_, err = s.pool.Exec(ctx,

@@ -53,10 +53,14 @@ func loadReturnRules(ctx context.Context, q database.Querier, contractID int64, 
 	var out []returnRuleStage
 	for rows.Next() {
 		var r returnRuleStage
-		if err := rows.Scan(&r.buyerStageID, &r.returnStageID); err != nil {
+		var returnStageID *int64
+		if err := rows.Scan(&r.buyerStageID, &returnStageID); err != nil {
 			return nil, err
 		}
-		out = append(out, r)
+		if returnStageID != nil && *returnStageID > 0 {
+			r.returnStageID = *returnStageID
+			out = append(out, r)
+		}
 	}
 	return out, rows.Err()
 }

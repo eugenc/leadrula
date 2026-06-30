@@ -11,11 +11,11 @@ type Props = {
   buyerStages: Stage[];
   publisherStages: Stage[];
   rules: ReturnRule[];
-  defaultReturnStageId: number;
+  defaultReturnStageId?: number;
   loading?: boolean;
   description?: string;
-  onAdd: (buyerStageId: number, returnStageId: number) => void;
-  onUpdate: (ruleId: number, buyerStageId: number, returnStageId: number) => void;
+  onAdd: (buyerStageId: number, returnStageId?: number) => void;
+  onUpdate: (ruleId: number, buyerStageId: number, returnStageId?: number) => void;
   onDelete: (ruleId: number) => void;
 };
 
@@ -43,7 +43,7 @@ export function ContractReturnRulesEditor({
 }: Props) {
   const [draftOpen, setDraftOpen] = useState(false);
   const [addFrom, setAddFrom] = useState(0);
-  const [addTo, setAddTo] = useState(defaultReturnStageId);
+  const [addTo, setAddTo] = useState(defaultReturnStageId ?? 0);
 
   const sortedBuyer = sortStages(buyerStages);
   const sortedPublisher = sortStages(publisherStages);
@@ -67,7 +67,7 @@ export function ContractReturnRulesEditor({
   function closeDraft() {
     setDraftOpen(false);
     setAddFrom(0);
-    setAddTo(defaultReturnStageId);
+    setAddTo(defaultReturnStageId ?? 0);
   }
 
   function openDraft() {
@@ -83,7 +83,7 @@ export function ContractReturnRulesEditor({
     if (side === "buyer") {
       const from = addFrom || availableFrom[0]?.id;
       if (!from) return;
-      onAdd(from, defaultReturnStageId);
+      onAdd(from);
     } else {
       const to = addTo || defaultReturnStageId || sortedPublisher[0]?.id;
       const from = addFrom || availableFrom[0]?.id;
@@ -214,7 +214,7 @@ function RuleRow({
           <div className="mb-1 text-xs font-semibold text-gray-500">Return start</div>
           <Select
             value={rule.buyer_stage_id}
-            onChange={(e) => onUpdate(rule.id, Number(e.target.value), rule.return_stage_id)}
+            onChange={(e) => onUpdate(rule.id, Number(e.target.value), rule.return_stage_id ?? undefined)}
           >
             {fromOptions.map((s) => (
               <option key={s.id} value={s.id}>
@@ -236,7 +236,7 @@ function RuleRow({
         <div className="mb-1 text-xs font-semibold text-gray-500">Return start</div>
         <Select
           value={rule.buyer_stage_id}
-          onChange={(e) => onUpdate(rule.id, Number(e.target.value), rule.return_stage_id)}
+          onChange={(e) => onUpdate(rule.id, Number(e.target.value), rule.return_stage_id ?? undefined)}
         >
           {fromOptions.map((s) => (
             <option key={s.id} value={s.id}>
@@ -248,7 +248,7 @@ function RuleRow({
       <div className="min-w-[120px] flex-1">
         <div className="mb-1 text-xs font-semibold text-gray-500">Return destination</div>
         <Select
-          value={rule.return_stage_id}
+          value={rule.return_stage_id ?? 0}
           onChange={(e) => onUpdate(rule.id, rule.buyer_stage_id, Number(e.target.value))}
         >
           {publisherStages.map((s) => (

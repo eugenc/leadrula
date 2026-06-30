@@ -1,9 +1,10 @@
 import { format } from "date-fns";
 import { EmptyState, Spinner } from "@/components/ui/misc";
+import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { useUIStore } from "@/store/uiStore";
 import type { AppointmentBooking } from "@/types";
 
-function formatAppointmentTime(iso: string | null | undefined, timeZone: string): string {
+export function formatAppointmentTime(iso: string | null | undefined, timeZone: string): string {
   if (!iso) return "—";
   try {
     return new Intl.DateTimeFormat("en-US", {
@@ -33,41 +34,41 @@ export function BookedAppointmentsTable({
 }) {
   const openDetail = useUIStore((s) => s.openDetail);
 
-  if (isLoading) return <Spinner className="h-6 w-6" />;
+  if (isLoading) {
+    return (
+      <div className="flex justify-center py-16">
+        <Spinner className="h-6 w-6" />
+      </div>
+    );
+  }
   if (!items.length) return <EmptyState title={emptyTitle} />;
 
   return (
-    <div className="overflow-x-auto rounded-md border border-gray-100">
-      <table className="w-full text-sm">
-        <thead className="bg-gray-50 text-left text-xs font-semibold uppercase text-gray-400">
-          <tr>
-            <th className="px-3 py-2">Booked</th>
-            <th className="px-3 py-2">Appointment</th>
-            <th className="px-3 py-2">Lead</th>
-            <th className="px-3 py-2">Phone</th>
-            {showBuyer ? <th className="px-3 py-2">Buyer</th> : <th className="px-3 py-2">Publisher</th>}
-            <th className="px-3 py-2">Contract</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((row) => (
-            <tr
-              key={row.id}
-              className="cursor-pointer border-t border-gray-50 hover:bg-jade-50/50"
-              onClick={() => openDetail(row.lead_id)}
-            >
-              <td className="px-3 py-2 text-gray-500">{formatAppointmentTime(row.booked_at, timeZone)}</td>
-              <td className="px-3 py-2 font-medium">
-                {formatAppointmentTime(row.appointment_at, timeZone)}
-              </td>
-              <td className="px-3 py-2">{row.lead_name || "—"}</td>
-              <td className="px-3 py-2">{row.phone || row.email || "—"}</td>
-              <td className="px-3 py-2">{showBuyer ? row.buyer_name : row.publisher_name}</td>
-              <td className="px-3 py-2">{row.contract_name}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table>
+      <THead>
+        <tr>
+          <TH>Booked</TH>
+          <TH>Appointment</TH>
+          <TH>Lead</TH>
+          <TH>Phone</TH>
+          <TH>{showBuyer ? "Buyer" : "Publisher"}</TH>
+          <TH>Contract</TH>
+        </tr>
+      </THead>
+      <TBody>
+        {items.map((row) => (
+          <TR key={row.id} onClick={() => openDetail(row.lead_id)}>
+            <TD className="text-gray-500">{formatAppointmentTime(row.booked_at, timeZone)}</TD>
+            <TD className="font-medium text-gray-800">
+              {formatAppointmentTime(row.appointment_at, timeZone)}
+            </TD>
+            <TD>{row.lead_name || "—"}</TD>
+            <TD>{row.phone || row.email || "—"}</TD>
+            <TD>{showBuyer ? row.buyer_name : row.publisher_name}</TD>
+            <TD>{row.contract_name}</TD>
+          </TR>
+        ))}
+      </TBody>
+    </Table>
   );
 }

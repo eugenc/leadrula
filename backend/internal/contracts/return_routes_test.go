@@ -154,19 +154,20 @@ func TestDeleteReturnRule_blocksLastContractRule(t *testing.T) {
 	}
 }
 
-func TestAddBuyerContractReturnRule_resolvesPublisherReturnStage(t *testing.T) {
+func TestAddBuyerContractReturnRule_createsPendingRoute(t *testing.T) {
 	pool := connectContractsTestDB(t)
 	ctx := context.Background()
 	svc := NewService(pool)
 
-	var buyerID, contractID, buyerPipelineID, buyerStageID, returnStageID int64
+	var buyerID, contractID, buyerPipelineID, buyerStageID int64
 	err := pool.QueryRow(ctx,
-		`SELECT c.buyer_id, c.id, c.buyer_pipeline_id, c.return_stage_id,
+		`SELECT c.buyer_id, c.id, c.buyer_pipeline_id,
 		        (SELECT ps.id FROM pipeline_stages ps WHERE ps.pipeline_id = c.buyer_pipeline_id ORDER BY ps.position, ps.id LIMIT 1)
 		 FROM contracts c
-		 WHERE c.buyer_id IS NOT NULL AND c.buyer_pipeline_id IS NOT NULL AND c.return_stage_id IS NOT NULL
+		 WHERE c.buyer_id IS NOT NULL AND c.buyer_pipeline_id IS NOT NULL
+		   AND c.source_pipeline_id IS NOT NULL
 		   AND c.deleted_at IS NULL AND c.contract_type = 'sell'
-		 LIMIT 1`).Scan(&buyerID, &contractID, &buyerPipelineID, &returnStageID, &buyerStageID)
+		 LIMIT 1`).Scan(&buyerID, &contractID, &buyerPipelineID, &buyerStageID)
 	if err != nil {
 		t.Skip("no direct buyer contract in database")
 	}
@@ -193,8 +194,8 @@ func TestAddBuyerContractReturnRule_resolvesPublisherReturnStage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddBuyerContractReturnRule: %v", err)
 	}
-	if rr.ReturnStageID != returnStageID {
-		t.Fatalf("return_stage_id = %d, want %d", rr.ReturnStageID, returnStageID)
+	if rr.ReturnStageID != nil {
+		t.Fatalf("return_stage_id = %v, want pending (nil)", rr.ReturnStageID)
 	}
 	if rr.ParticipationID != nil {
 		t.Fatalf("expected contract-level rule, got participation_id %v", rr.ParticipationID)
@@ -307,8 +308,8 @@ func TestListContractParticipationReturnRules_andUpdateDestination(t *testing.T)
 	if err != nil {
 		t.Fatalf("UpdateParticipationReturnRuleDestination: %v", err)
 	}
-	if updated.ReturnStageID != altReturnStageID {
-		t.Fatalf("return_stage_id = %d, want %d", updated.ReturnStageID, altReturnStageID)
+	if updated.ReturnStageID == nil || *updated.ReturnStageID != altReturnStageID {
+		t.Fatalf("return_stage_id = %v, want %d", updated.ReturnStageID, altReturnStageID)
 	}
 	if updated.BuyerStageID != buyerStageID {
 		t.Fatalf("buyer_stage_id changed from %d to %d", buyerStageID, updated.BuyerStageID)
@@ -371,13 +372,60 @@ func TestListReturnRulesForPublisher_andUpdateContractDestination(t *testing.T) 
 	if err != nil {
 		t.Fatalf("UpdateContractReturnRuleDestination: %v", err)
 	}
-	if updated.ReturnStageID != altReturnStageID {
-		t.Fatalf("return_stage_id = %d, want %d", updated.ReturnStageID, altReturnStageID)
+	if updated.ReturnStageID == nil || *updated.ReturnStageID != altReturnStageID {
+		t.Fatalf("return_stage_id = %v, want %d", updated.ReturnStageID, altReturnStageID)
 	}
 
 	_, err = svc.UpdateContractReturnRuleDestination(ctx, publisherID, ruleID, defaultReturnStageID)
 	if err != nil {
 		t.Fatalf("restore return_stage_id: %v", err)
+	}
+}
+
+func TestFindReturnRule_pendingRouteDoesNotMatch(t *testing.T) {
+	pool := connectContractsTestDB(t)
+	ctx := context.Background()
+
+	var buyerID, contractID, buyerStageID int64
+	err := pool.QueryRow(ctx,
+		`SELECT c.buyer_id, c.id,
+		        (SELECT ps.id FROM pipeline_stages ps WHERE ps.pipeline_id = c.buyer_pipeline_id ORDER BY ps.position, ps.id LIMIT 1)
+		 FROM contracts c
+		 WHERE c.buyer_id IS NOT NULL AND c.buyer_pipeline_id IS NOT NULL
+		   AND c.source_pipeline_id IS NOT NULL
+		   AND c.deleted_at IS NULL AND c.contract_type = 'sell'
+		 LIMIT 1`).Scan(&buyerID, &contractID, &buyerStageID)
+	if err != nil {
+		t.Skip("no direct buyer contract in database")
+	}
+	if buyerStageID == 0 {
+		t.Skip("contract buyer pipeline has no stages")
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM contract_return_rules WHERE contract_id = $1 AND participation_id IS NULL AND buyer_stage_id = $2`,
+		contractID, buyerStageID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO contract_return_rules(contract_id, buyer_stage_id, return_stage_id)
+		 VALUES ($1, $2, NULL)`,
+		contractID, buyerStageID); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := FindReturnRule(ctx, tx, contractID, buyerID, buyerStageID)
+	if err != nil {
+		t.Fatalf("FindReturnRule: %v", err)
+	}
+	if info != nil {
+		t.Fatalf("expected no return for pending route, got %+v", info)
 	}
 }
 
@@ -431,5 +479,37 @@ func TestFindReturnRule_prefersRuleDestinationOverParticipationDefault(t *testin
 	if info.ReturnStageID != ruleReturnStageID {
 		t.Fatalf("ReturnStageID = %d, want rule destination %d (not participation default %d)",
 			info.ReturnStageID, ruleReturnStageID, altParticipationDefault)
+	}
+}
+
+func TestUpdateDelivery_preservesBuyerPipeline(t *testing.T) {
+	pool := connectContractsTestDB(t)
+	ctx := context.Background()
+	svc := NewService(pool)
+
+	var publisherID, contractID, buyerPipelineID int64
+	var sourcePipelineID, sourceStageID int64
+	err := pool.QueryRow(ctx,
+		`SELECT c.publisher_id, c.id, c.buyer_pipeline_id, c.source_pipeline_id, c.source_stage_id
+		 FROM contracts c
+		 WHERE c.buyer_id IS NOT NULL AND c.buyer_pipeline_id IS NOT NULL
+		   AND c.source_pipeline_id IS NOT NULL AND c.source_stage_id IS NOT NULL
+		   AND c.deleted_at IS NULL
+		 LIMIT 1`).Scan(&publisherID, &contractID, &buyerPipelineID, &sourcePipelineID, &sourceStageID)
+	if err != nil {
+		t.Skip("no direct pipeline contract with buyer pipeline in database")
+	}
+
+	updated, err := svc.UpdateDelivery(ctx, publisherID, contractID, DeliveryUpdateParams{
+		Delivery:         "leads_pipeline",
+		SourcePipelineID: sourcePipelineID,
+		SourceStageID:    sourceStageID,
+		BuyerPipelineID:  0,
+	})
+	if err != nil {
+		t.Fatalf("UpdateDelivery: %v", err)
+	}
+	if updated.BuyerPipelineID == nil || *updated.BuyerPipelineID != buyerPipelineID {
+		t.Fatalf("buyer_pipeline_id = %v, want %d preserved", updated.BuyerPipelineID, buyerPipelineID)
 	}
 }

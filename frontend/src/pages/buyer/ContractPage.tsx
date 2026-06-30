@@ -7,6 +7,7 @@ import { errorMessage } from "@/lib/api";
 import { formatMoney } from "@/lib/utils";
 import { formatContractLeadType } from "@/features/admin/contractLeadType";
 import { formatParticipationStatus, PUBLISHER_DELIVERY_MODES } from "@/features/admin/contractOffer";
+import { formatContractStatus } from "@/features/admin/contractStatus";
 import { BuyerParticipationAcceptDrawer } from "@/features/admin/BuyerParticipationAcceptDrawer";
 import { BuyerParticipationDetailDrawer } from "@/features/admin/BuyerParticipationDetailDrawer";
 import { BuyerContractDetailDrawer } from "@/features/admin/BuyerContractDetailDrawer";
@@ -147,7 +148,7 @@ export function ContractPage() {
                         <TD className="font-semibold">{c.publisher_name}</TD>
                         <TD>{c.name}</TD>
                         <TD>{formatContractLeadType(c.lead_type) || "—"}</TD>
-                        <TD>{c.status}</TD>
+                        <TD>{formatContractStatus(c.status)}</TD>
                       </TR>
                     ))}
                   </TBody>

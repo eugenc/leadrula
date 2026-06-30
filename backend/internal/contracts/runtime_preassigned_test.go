@@ -76,3 +76,41 @@ func TestGetTargetForPreassignedBuyer_openOffer(t *testing.T) {
 		t.Fatal("expected buyer pipeline on open-offer target")
 	}
 }
+
+func TestGetTargetForPreassignedBuyer_directContract(t *testing.T) {
+	cfg := config.Load()
+	ctx := context.Background()
+	pool, err := database.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer pool.Close()
+
+	var contractID, buyerID int64
+	err = pool.QueryRow(ctx,
+		`SELECT c.id, c.buyer_id FROM contracts c
+		 WHERE c.deleted_at IS NULL AND c.status = 'active'
+		   AND c.buyer_id IS NOT NULL AND c.buyer_pipeline_id > 0
+		   AND NOT EXISTS (
+		     SELECT 1 FROM contract_participations p
+		     WHERE p.contract_id = c.id AND p.buyer_id = c.buyer_id AND p.status = 'active'
+		   )
+		 LIMIT 1`).Scan(&contractID, &buyerID)
+	if err != nil {
+		t.Skip("no active direct contract without participation fixture")
+	}
+
+	target, err := GetTargetForPreassignedBuyer(ctx, pool, contractID, buyerID)
+	if err != nil {
+		t.Fatalf("GetTargetForPreassignedBuyer: %v", err)
+	}
+	if target.BuyerID != buyerID {
+		t.Fatalf("buyer id = %d want %d", target.BuyerID, buyerID)
+	}
+	if target.ParticipationID != 0 {
+		t.Fatalf("participation id = %d want 0 for direct contract", target.ParticipationID)
+	}
+	if target.BuyerPipelineID == 0 {
+		t.Fatal("expected buyer pipeline on direct contract target")
+	}
+}

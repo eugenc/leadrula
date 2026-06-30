@@ -18,6 +18,7 @@ type BookingCalendar struct {
 	Schedule   json.RawMessage `json:"schedule"`
 	Timezone   string          `json:"timezone"`
 	BufferMin  int             `json:"buffer_min"`
+	Location   string          `json:"location,omitempty"`
 	Configured bool            `json:"configured"`
 	SlotCount  int             `json:"slot_count"`
 	UpdatedAt  time.Time       `json:"updated_at"`
@@ -28,6 +29,7 @@ type PutCalendarParams struct {
 	Schedule  json.RawMessage
 	Timezone  string
 	BufferMin int
+	Location  string
 }
 
 type CreateCalendarParams struct {
@@ -37,7 +39,7 @@ type CreateCalendarParams struct {
 
 func (s *Service) ListBookingCalendars(ctx context.Context, buyerID int64) ([]BookingCalendar, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT c.id, c.account_id, c.name, c.schedule, c.timezone, c.buffer_min, c.updated_at,
+		`SELECT c.id, c.account_id, c.name, c.schedule, c.timezone, c.buffer_min, COALESCE(c.location, ''), c.updated_at,
 		        (SELECT COUNT(*)::int FROM buyer_appointment_slots sl
 		         WHERE sl.calendar_id = c.id AND sl.disabled_at IS NULL) AS slot_count
 		 FROM buyer_booking_calendars c
@@ -127,9 +129,10 @@ func (s *Service) PutBookingCalendar(ctx context.Context, buyerID, calendarID in
 		   schedule = $4,
 		   timezone = COALESCE(NULLIF($5, ''), timezone),
 		   buffer_min = $6,
+		   location = NULLIF(TRIM($7), ''),
 		   updated_at = now()
 		 WHERE id = $1 AND account_id = $2`,
-		calendarID, buyerID, name, sched, tz, p.BufferMin)
+		calendarID, buyerID, name, sched, tz, p.BufferMin, p.Location)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +141,7 @@ func (s *Service) PutBookingCalendar(ctx context.Context, buyerID, calendarID in
 
 func (s *Service) loadCalendar(ctx context.Context, buyerID, calendarID int64) (*BookingCalendar, error) {
 	row := s.pool.QueryRow(ctx,
-		`SELECT c.id, c.account_id, c.name, c.schedule, c.timezone, c.buffer_min, c.updated_at,
+		`SELECT c.id, c.account_id, c.name, c.schedule, c.timezone, c.buffer_min, COALESCE(c.location, ''), c.updated_at,
 		        (SELECT COUNT(*)::int FROM buyer_appointment_slots sl
 		         WHERE sl.calendar_id = c.id AND sl.disabled_at IS NULL)
 		 FROM buyer_booking_calendars c
@@ -155,7 +158,7 @@ func (s *Service) loadCalendar(ctx context.Context, buyerID, calendarID int64) (
 
 func (s *Service) loadCalendarByID(ctx context.Context, calendarID int64) (*BookingCalendar, error) {
 	row := s.pool.QueryRow(ctx,
-		`SELECT c.id, c.account_id, c.name, c.schedule, c.timezone, c.buffer_min, c.updated_at,
+		`SELECT c.id, c.account_id, c.name, c.schedule, c.timezone, c.buffer_min, COALESCE(c.location, ''), c.updated_at,
 		        (SELECT COUNT(*)::int FROM buyer_appointment_slots sl
 		         WHERE sl.calendar_id = c.id AND sl.disabled_at IS NULL)
 		 FROM buyer_booking_calendars c WHERE c.id = $1`, calendarID)
@@ -175,7 +178,7 @@ type calendarRowScanner interface {
 
 func scanBookingCalendarRow(row calendarRowScanner) (BookingCalendar, error) {
 	var cal BookingCalendar
-	err := row.Scan(&cal.ID, &cal.AccountID, &cal.Name, &cal.Schedule, &cal.Timezone, &cal.BufferMin, &cal.UpdatedAt, &cal.SlotCount)
+	err := row.Scan(&cal.ID, &cal.AccountID, &cal.Name, &cal.Schedule, &cal.Timezone, &cal.BufferMin, &cal.Location, &cal.UpdatedAt, &cal.SlotCount)
 	return cal, err
 }
 

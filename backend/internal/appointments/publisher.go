@@ -13,6 +13,7 @@ func (s *Service) ListPublisherContracts(ctx context.Context, publisherID int64)
 	rows, err := s.pool.Query(ctx,
 		`SELECT c.id, c.name, c.buyer_id, COALESCE(b.name, ''),
 		        COALESCE(bc.timezone, b.timezone, 'UTC'),
+		        COALESCE(bc.location, ''),
 		        (bc.id IS NOT NULL AND bc.schedule::text NOT IN ('{}', 'null')
 		         AND EXISTS(SELECT 1 FROM buyer_appointment_slots sl
 		                    WHERE sl.calendar_id = bc.id AND sl.disabled_at IS NULL))
@@ -35,7 +36,7 @@ func (s *Service) ListPublisherContracts(ctx context.Context, publisherID int64)
 	var out []AppointmentContract
 	for rows.Next() {
 		var c AppointmentContract
-		if err := rows.Scan(&c.ContractID, &c.ContractName, &c.BuyerID, &c.BuyerName, &c.Timezone, &c.Configured); err != nil {
+		if err := rows.Scan(&c.ContractID, &c.ContractName, &c.BuyerID, &c.BuyerName, &c.Timezone, &c.Location, &c.Configured); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -86,8 +87,8 @@ func (s *Service) ListContractSlots(ctx context.Context, publisherID, contractID
 		        sl.disabled_at IS NOT NULL
 		 FROM buyer_appointment_slots sl
 		 LEFT JOIN contract_appointment_slots cs ON cs.buyer_slot_id = sl.id AND cs.contract_id = $1
-		 WHERE sl.calendar_id = $3
-		 ORDER BY sl.weekday, sl.start_time`, contractID, buyerID, *calendarID)
+		 WHERE sl.calendar_id = $2
+		 ORDER BY sl.weekday, sl.start_time`, contractID, *calendarID)
 	if err != nil {
 		return nil, err
 	}
@@ -173,8 +174,15 @@ func (s *Service) contractBuyerID(ctx context.Context, publisherID, contractID i
 }
 
 func (s *Service) ListFreeSlots(ctx context.Context, publisherID, contractID int64, dateStr string) ([]FreeSlot, error) {
-	buyerID, err := s.contractBuyerID(ctx, publisherID, contractID)
-	if err != nil {
+	return s.listFreeSlots(ctx, publisherID, contractID, dateStr, false)
+}
+
+func (s *Service) listFreeSlots(ctx context.Context, accountID, contractID int64, dateStr string, asBuyer bool) ([]FreeSlot, error) {
+	if asBuyer {
+		if err := s.contractOwnedByBuyer(ctx, accountID, contractID); err != nil {
+			return nil, err
+		}
+	} else if _, err := s.contractBuyerID(ctx, accountID, contractID); err != nil {
 		return nil, err
 	}
 	ok, err := s.contractCalendarConfigured(ctx, contractID)
@@ -192,13 +200,17 @@ func (s *Service) ListFreeSlots(ctx context.Context, publisherID, contractID int
 	if err != nil {
 		return nil, err
 	}
-	_ = buyerID
 	loc := loadLocation(cal.Timezone)
 	date, err := parseDateParam(dateStr, loc)
 	if err != nil {
 		return nil, httpx.Validation(err.Error())
 	}
-	contractSlots, err := s.ListContractSlots(ctx, publisherID, contractID)
+	var contractSlots []ContractSlot
+	if asBuyer {
+		contractSlots, err = s.ListContractSlotsForBuyer(ctx, accountID, contractID)
+	} else {
+		contractSlots, err = s.ListContractSlots(ctx, accountID, contractID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +234,7 @@ func (s *Service) ListFreeSlots(ctx context.Context, publisherID, contractID int
 		if !bookingWindowOK(slotStart, now) {
 			continue
 		}
-		booked, err := s.countBookings(ctx, contractID, slotStart)
+		booked, err := s.countSlotOccupancy(ctx, cs.BuyerSlotID, slotStart)
 		if err != nil {
 			return nil, err
 		}
@@ -241,16 +253,40 @@ func (s *Service) ListFreeSlots(ctx context.Context, publisherID, contractID int
 	return out, nil
 }
 
-func (s *Service) countBookings(ctx context.Context, contractID int64, slotStart time.Time) (int, error) {
+func (s *Service) countSlotOccupancy(ctx context.Context, buyerSlotID int64, slotStart time.Time) (int, error) {
 	var n int
-	err := s.pool.QueryRow(ctx,
-		`SELECT COUNT(*)::int FROM lead_appointment_bookings
-		 WHERE contract_id=$1 AND slot_start=$2`, contractID, slotStart).Scan(&n)
+	err := s.pool.QueryRow(ctx, slotOccupancySQL, buyerSlotID, slotStart).Scan(&n)
 	return n, err
 }
 
+const slotOccupancySQL = `
+SELECT COUNT(*)::int FROM (
+  SELECT b.lead_id
+  FROM lead_appointment_bookings b
+  WHERE b.buyer_slot_id = $1 AND b.slot_start = $2
+  UNION
+  SELECT l.id
+  FROM leads l
+  JOIN contracts c ON c.id = l.contract_id
+  JOIN buyer_appointment_slots sl ON sl.id = $1
+  WHERE c.appointment_calendar_id = sl.calendar_id
+    AND l.action_at = $2
+    AND l.deleted_at IS NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM lead_appointment_bookings b2 WHERE b2.lead_id = l.id
+    )
+) occupied`
+
 func (s *Service) ListCalendarMarkers(ctx context.Context, publisherID, contractID int64, fromStr, toStr string) ([]CalendarDayMarker, error) {
-	if _, err := s.contractBuyerID(ctx, publisherID, contractID); err != nil {
+	return s.listCalendarMarkers(ctx, publisherID, contractID, fromStr, toStr, false)
+}
+
+func (s *Service) listCalendarMarkers(ctx context.Context, accountID, contractID int64, fromStr, toStr string, asBuyer bool) ([]CalendarDayMarker, error) {
+	if asBuyer {
+		if err := s.contractOwnedByBuyer(ctx, accountID, contractID); err != nil {
+			return nil, err
+		}
+	} else if _, err := s.contractBuyerID(ctx, accountID, contractID); err != nil {
 		return nil, err
 	}
 	calID, err := s.contractCalendarID(ctx, contractID)
@@ -276,7 +312,12 @@ func (s *Service) ListCalendarMarkers(ctx context.Context, publisherID, contract
 	var out []CalendarDayMarker
 	for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
 		dateS := d.Format("2006-01-02")
-		free, err := s.ListFreeSlots(ctx, publisherID, contractID, dateS)
+		var free []FreeSlot
+		if asBuyer {
+			free, err = s.ListFreeSlotsForBuyer(ctx, accountID, contractID, dateS)
+		} else {
+			free, err = s.ListFreeSlots(ctx, accountID, contractID, dateS)
+		}
 		if err != nil {
 			return nil, err
 		}

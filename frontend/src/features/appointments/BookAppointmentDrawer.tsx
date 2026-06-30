@@ -6,22 +6,29 @@ import { FormDrawer } from "@/components/ui/dialog";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import { useLeads, usePipelines, useStages } from "@/features/leads/hooks";
-import { useBookAppointment } from "@/features/appointments/hooks";
+import { useBookAppointment, useBuyerBookAppointment } from "@/features/appointments/hooks";
 import type { AppointmentFreeSlot } from "@/types";
 
 export function BookAppointmentDrawer({
   open,
   onClose,
+  onBooked,
   contractId,
   slot,
+  mode = "publisher",
 }: {
   open: boolean;
   onClose: () => void;
+  onBooked?: () => void;
   contractId: number;
   slot: AppointmentFreeSlot | null;
+  mode?: "publisher" | "buyer";
 }) {
-  const book = useBookAppointment();
-  const [mode, setMode] = useState<"existing" | "new">("existing");
+  const isBuyer = mode === "buyer";
+  const publisherBook = useBookAppointment();
+  const buyerBook = useBuyerBookAppointment();
+  const book = isBuyer ? buyerBook : publisherBook;
+  const [modeLead, setModeLead] = useState<"existing" | "new">("existing");
   const [deliveryMode, setDeliveryMode] = useState<"" | "contract" | "publisher_pipeline">("");
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -46,15 +53,18 @@ export function BookAppointmentDrawer({
 
   useEffect(() => {
     if (!open) {
-      setDeliveryMode("");
+      setDeliveryMode(isBuyer ? "contract" : "");
       setLeadId(null);
-      setMode("existing");
+      setModeLead("existing");
+    } else if (isBuyer) {
+      setDeliveryMode("contract");
     }
-  }, [open]);
+  }, [open, isBuyer]);
 
   function submit() {
     if (!slot) return;
-    if (!deliveryMode) {
+    const effectiveDelivery = isBuyer ? "contract" : deliveryMode;
+    if (!effectiveDelivery) {
       toast.error("Choose a delivery mode");
       return;
     }
@@ -62,9 +72,9 @@ export function BookAppointmentDrawer({
       contract_id: contractId,
       buyer_slot_id: slot.buyer_slot_id,
       slot_start: slot.slot_start,
-      delivery_mode: deliveryMode,
+      delivery_mode: effectiveDelivery,
     };
-    if (mode === "existing") {
+    if (modeLead === "existing") {
       if (!leadId) {
         toast.error("Select a lead");
         return;
@@ -77,7 +87,7 @@ export function BookAppointmentDrawer({
       body.email = email;
       body.source = source;
     }
-    if (deliveryMode === "publisher_pipeline") {
+    if (!isBuyer && effectiveDelivery === "publisher_pipeline") {
       if (!pipelineId || !stageId) {
         toast.error("Select publisher pipeline and stage");
         return;
@@ -89,6 +99,7 @@ export function BookAppointmentDrawer({
       onSuccess: () => {
         toast.success("Appointment booked");
         onClose();
+        onBooked?.();
       },
       onError: (e) => toast.error(errorMessage(e)),
     });
@@ -106,21 +117,21 @@ export function BookAppointmentDrawer({
       <div className="mb-4 flex gap-2">
         <button
           type="button"
-          className={`rounded px-3 py-1 text-sm font-semibold ${mode === "existing" ? "bg-jade-500 text-white" : "bg-gray-100"}`}
-          onClick={() => setMode("existing")}
+          className={`rounded px-3 py-1 text-sm font-semibold ${modeLead === "existing" ? "bg-jade-500 text-white" : "bg-gray-100"}`}
+          onClick={() => setModeLead("existing")}
         >
           Existing lead
         </button>
         <button
           type="button"
-          className={`rounded px-3 py-1 text-sm font-semibold ${mode === "new" ? "bg-jade-500 text-white" : "bg-gray-100"}`}
-          onClick={() => setMode("new")}
+          className={`rounded px-3 py-1 text-sm font-semibold ${modeLead === "new" ? "bg-jade-500 text-white" : "bg-gray-100"}`}
+          onClick={() => setModeLead("new")}
         >
           New lead
         </button>
       </div>
 
-      {mode === "existing" ? (
+      {modeLead === "existing" ? (
         <div className="space-y-2">
           <Label>Search leads</Label>
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, phone, email…" />
@@ -164,53 +175,57 @@ export function BookAppointmentDrawer({
         </div>
       )}
 
-      <div className="mt-4 space-y-2">
-        <Label>Delivery</Label>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="radio"
-            name="delivery"
-            checked={deliveryMode === "contract"}
-            onChange={() => setDeliveryMode("contract")}
-          />
-          Deliver via contract
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="radio"
-            name="delivery"
-            checked={deliveryMode === "publisher_pipeline"}
-            onChange={() => setDeliveryMode("publisher_pipeline")}
-          />
-          Place on publisher pipeline
-        </label>
-      </div>
+      {!isBuyer && (
+        <>
+          <div className="mt-4 space-y-2">
+            <Label>Delivery</Label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="delivery"
+                checked={deliveryMode === "contract"}
+                onChange={() => setDeliveryMode("contract")}
+              />
+              Deliver via contract
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="delivery"
+                checked={deliveryMode === "publisher_pipeline"}
+                onChange={() => setDeliveryMode("publisher_pipeline")}
+              />
+              Place on publisher pipeline
+            </label>
+          </div>
 
-      {deliveryMode === "publisher_pipeline" && (
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <div>
-            <Label>Pipeline</Label>
-            <Select value={pipelineId} onChange={(e) => setPipelineId(Number(e.target.value))}>
-              <option value={0}>Select…</option>
-              {(pipelines ?? []).map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label>Stage</Label>
-            <Select value={stageId} onChange={(e) => setStageId(Number(e.target.value))}>
-              <option value={0}>Select…</option>
-              {(stages ?? []).map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-        </div>
+          {deliveryMode === "publisher_pipeline" && (
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <div>
+                <Label>Pipeline</Label>
+                <Select value={pipelineId} onChange={(e) => setPipelineId(Number(e.target.value))}>
+                  <option value={0}>Select…</option>
+                  {(pipelines ?? []).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div>
+                <Label>Stage</Label>
+                <Select value={stageId} onChange={(e) => setStageId(Number(e.target.value))}>
+                  <option value={0}>Select…</option>
+                  {(stages ?? []).map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <div className="mt-6 flex justify-end gap-2">

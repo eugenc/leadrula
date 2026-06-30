@@ -401,13 +401,13 @@ export function LeadsListPage() {
         ) : (
           <>
             {(showSelectAllBanner || showAllSelectedBanner) && (
-              <div className="mb-2 hidden rounded-lg border border-blue-100 bg-blue-50 px-4 py-2 text-sm text-gray-700 sm:block">
+              <div className="mb-2 hidden rounded-lg border border-info-border bg-info-bg px-4 py-2 text-sm text-gray-800 sm:block">
                 {showSelectAllBanner ? (
                   <>
                     All {leads.length} leads on this page are selected.{" "}
                     <button
                       type="button"
-                      className="font-medium text-blue-600 hover:underline"
+                      className="font-medium text-info-fg hover:underline"
                       onClick={() => setSelectAllMatching(true)}
                     >
                       Select all {total} leads in {activeView.name}
@@ -418,7 +418,7 @@ export function LeadsListPage() {
                     All {total} leads selected.{" "}
                     <button
                       type="button"
-                      className="font-medium text-blue-600 hover:underline"
+                      className="font-medium text-info-fg hover:underline"
                       onClick={clearSelection}
                     >
                       Clear selection

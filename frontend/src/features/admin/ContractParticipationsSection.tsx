@@ -73,15 +73,11 @@ export function ContractParticipationsSection({ contract }: { contract: Contract
       <SectionLabel>Buyers</SectionLabel>
       <p className="text-xs text-gray-400">Add buyers to this open contract. Each buyer accepts with their own delivery and compensation.</p>
 
-      {(contract.source_pipeline_id || contract.return_stage_id) && (
+      {(contract.source_pipeline_id ?? 0) > 0 && (
         <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-xs text-gray-600">
           <p>
             <span className="font-semibold">Distribute from:</span>{" "}
             {pubPipelineName ?? "—"} / {stageName(pubStages, contract.source_stage_id)}
-          </p>
-          <p>
-            <span className="font-semibold">Return destination:</span>{" "}
-            {stageName(pubStages, contract.return_stage_id)}
           </p>
         </div>
       )}

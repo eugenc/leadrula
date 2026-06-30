@@ -494,14 +494,6 @@ func (s *Service) validateParticipationDelivery(ctx context.Context, buyerID, co
 		if err := validateBuyerTargetStage(ctx, s.pool, buyerStageID, buyerPipelineID); err != nil {
 			return nil, err
 		}
-		var returnStageID *int64
-		if err := s.pool.QueryRow(ctx,
-			`SELECT return_stage_id FROM contracts WHERE id = $1`, contractID).Scan(&returnStageID); err != nil {
-			return nil, err
-		}
-		if returnStageID == nil || *returnStageID == 0 {
-			return nil, httpx.Validation("publisher return destination is not configured on contract")
-		}
 		if requireReturnRoutes {
 			n, err := s.CountParticipationReturnRules(ctx, participationID)
 			if err != nil {

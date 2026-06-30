@@ -82,9 +82,7 @@ function DrawerContent({
 
   const deliveryValid = participationDeliveryValid(delivery, pipelineId, stageId, webhookId);
   const returnRoutesValid = !pipelineDelivery || (returnRoutes?.length ?? 0) > 0;
-  const publisherReturnStageId = participation.return_stage_id ?? 0;
-  const publisherPipelineConfigured =
-    (participation.source_pipeline_id ?? 0) > 0 && publisherReturnStageId > 0;
+  const publisherPipelineConfigured = (participation.source_pipeline_id ?? 0) > 0;
   const buyerPipelineSelected = pipelineId > 0;
 
   function stepComplete(i: number): boolean {
@@ -257,9 +255,6 @@ function DrawerContent({
         {step === 2 && pipelineDelivery && (
           <div className="space-y-3">
             <SectionLabel>Return routes</SectionLabel>
-            <p className="text-xs text-gray-400">
-              Pick which stages on your pipeline send leads back to the publisher.
-            </p>
             {!returnRoutesLoading && !buyerPipelineSelected && (
               <p className="text-sm text-gray-500">
                 Go back to Delivery and select your destination pipeline and stage.
@@ -276,7 +271,6 @@ function DrawerContent({
                 buyerStages={stages ?? []}
                 publisherStages={[]}
                 rules={returnRoutes ?? []}
-                defaultReturnStageId={publisherReturnStageId}
                 loading={returnRoutesLoading}
                 onAdd={(buyerStageId) =>
                   addRoute.mutate(

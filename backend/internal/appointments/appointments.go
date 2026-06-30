@@ -98,6 +98,7 @@ type AppointmentContract struct {
 	BuyerID      int64  `json:"buyer_id"`
 	BuyerName    string `json:"buyer_name"`
 	Timezone     string `json:"timezone"`
+	Location     string `json:"location,omitempty"`
 	Configured   bool   `json:"configured"`
 }
 

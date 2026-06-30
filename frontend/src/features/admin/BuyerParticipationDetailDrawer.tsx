@@ -21,6 +21,7 @@ import { emptyContractDelivery } from "@/features/admin/contractCompensation";
 import { formatCapPeriod, formatContractCap } from "@/features/admin/contractCap";
 import { formatContractLeadType } from "@/features/admin/contractLeadType";
 import { formatParticipationStatus } from "@/features/admin/contractOffer";
+import { formatContractStatus } from "@/features/admin/contractStatus";
 import { COMPENSATION_KINDS, formatCompTrigger } from "@/features/admin/contractCompensation";
 import { ContractReturnRulesEditor } from "@/features/admin/ContractReturnRulesEditor";
 import { BuyerContractFieldMapSection } from "@/features/admin/BuyerContractFieldMapSection";
@@ -79,9 +80,7 @@ function DrawerContent({
   const updateRoute = useUpdateParticipationReturnRoute();
   const removeRoute = useDeleteParticipationReturnRoute();
 
-  const publisherReturnStageId = participation.return_stage_id ?? 0;
-  const publisherPipelineConfigured =
-    (participation.source_pipeline_id ?? 0) > 0 && publisherReturnStageId > 0;
+  const publisherPipelineConfigured = (participation.source_pipeline_id ?? 0) > 0;
   const buyerPipelineSelected = pipelineId > 0;
   const deliveryValid = participationDeliveryValid(delivery, pipelineId, stageId, webhookId);
   const returnRoutesValid = !pipelineDelivery || (returnRoutes?.length ?? 0) > 0;
@@ -173,7 +172,7 @@ function DrawerContent({
 
         {participation.contract_status && participation.contract_status !== "active" && (
           <p className="mb-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            Publisher contract is {participation.contract_status}. Delivery changes are disabled until the publisher
+            Publisher contract is {formatContractStatus(participation.contract_status)}. Delivery changes are disabled until the publisher
             resumes the offer.
           </p>
         )}
@@ -282,9 +281,6 @@ function DrawerContent({
             returns: pipelineDelivery ? (
               <div className="space-y-3">
                 <SectionLabel>Return routes</SectionLabel>
-                <p className="text-xs text-gray-400">
-                  Pick which stages on your pipeline send leads back to the publisher.
-                </p>
                 {!returnRoutesLoading && !buyerPipelineSelected && (
                   <p className="text-sm text-gray-500">Select your destination pipeline under Delivery first.</p>
                 )}
@@ -299,7 +295,6 @@ function DrawerContent({
                     buyerStages={buyerStages ?? []}
                     publisherStages={[]}
                     rules={returnRoutes ?? []}
-                    defaultReturnStageId={publisherReturnStageId}
                     loading={returnRoutesLoading}
                     onAdd={(buyerStageId) =>
                       addRoute.mutate(

@@ -445,7 +445,7 @@ export interface ReturnRule {
   contract_id: number;
   participation_id?: number;
   buyer_stage_id: number;
-  return_stage_id: number;
+  return_stage_id?: number | null;
   buyer_stage_name?: string;
 }
 
@@ -501,6 +501,7 @@ export interface BuyerBookingCalendar {
   schedule: Record<string, { start: string; end: string }>;
   timezone: string;
   buffer_min: number;
+  location?: string;
   configured: boolean;
   slot_count: number;
   updated_at: string;
@@ -560,6 +561,16 @@ export interface AppointmentContractOption {
   contract_name: string;
   buyer_id: number;
   buyer_name: string;
+  timezone: string;
+  location?: string;
+  configured: boolean;
+}
+
+export interface BuyerAppointmentContractOption {
+  contract_id: number;
+  contract_name: string;
+  publisher_id: number;
+  publisher_name: string;
   timezone: string;
   configured: boolean;
 }

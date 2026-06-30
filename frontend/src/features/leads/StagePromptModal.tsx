@@ -46,7 +46,7 @@ export function StagePromptModal({
       onClose={onCancel}
       title={`Move to "${stage.name}"`}
       subtitle="Complete the required fields to move this lead."
-      className="max-w-[420px]"
+      className="w-fit max-w-[min(100vw-2rem,320px)]"
       footer={
         <>
           <Button variant="secondary" onClick={onCancel}>

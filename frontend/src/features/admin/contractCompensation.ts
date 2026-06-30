@@ -61,7 +61,6 @@ export type PipelineDraftFields = {
   source_stage_id: number;
   counterparty_pipeline_id: number;
   counterparty_stage_id: number;
-  return_stage_id: number;
 };
 
 export type ContractDeliveryDraft = PipelineDraftFields & { delivery: string };
@@ -73,7 +72,6 @@ export function emptyContractDelivery(): ContractDeliveryDraft {
     source_stage_id: 0,
     counterparty_pipeline_id: 0,
     counterparty_stage_id: 0,
-    return_stage_id: 0,
   };
 }
 
@@ -88,17 +86,15 @@ export function deliveryDraftFromContract(
 ): ContractDeliveryDraft {
   const sourcePipeline = contract.source_pipeline_id ?? 0;
   const buyerPipeline = contract.buyer_pipeline_id ?? 0;
-  const returnStage = contract.return_stage_id ?? 0;
   const inferred =
     delivery ??
-    (sourcePipeline === 0 && buyerPipeline === 0 && returnStage === 0 ? "leads" : "leads_pipeline");
+    (sourcePipeline === 0 && buyerPipeline === 0 ? "leads" : "leads_pipeline");
   return {
     delivery: inferred,
     source_pipeline_id: sourcePipeline,
     source_stage_id: contract.source_stage_id ?? 0,
     counterparty_pipeline_id: buyerPipeline,
     counterparty_stage_id: 0,
-    return_stage_id: returnStage,
   };
 }
 
@@ -108,18 +104,16 @@ export function deliveryDraftToBody(d: ContractDeliveryDraft): Record<string, un
     delivery: d.delivery,
     source_pipeline_id: leadsInbox ? 0 : d.source_pipeline_id,
     source_stage_id: leadsInbox ? 0 : d.source_stage_id,
-    buyer_pipeline_id: leadsInbox ? 0 : d.counterparty_pipeline_id,
-    return_stage_id: leadsInbox ? 0 : d.return_stage_id,
   };
 }
 
 export function deliveryDraftValid(d: ContractDeliveryDraft): boolean {
   if (d.delivery === "leads") return true;
-  return !!d.source_stage_id && !!d.counterparty_pipeline_id && !!d.return_stage_id;
+  return !!d.source_stage_id;
 }
 
 export function publisherPipelineDraftValid(d: ContractDeliveryDraft): boolean {
-  return !!d.source_pipeline_id && !!d.source_stage_id && !!d.return_stage_id;
+  return !!d.source_pipeline_id && !!d.source_stage_id;
 }
 
 export function openOfferPipelineRequired(allowedModes: string[]): boolean {
@@ -134,7 +128,6 @@ export function pipelineDraftWithoutLeads<T extends PipelineDraftFields & { deli
     source_stage_id: 0,
     counterparty_pipeline_id: 0,
     counterparty_stage_id: 0,
-    return_stage_id: 0,
   };
 }
 
@@ -148,7 +141,6 @@ export function pipelineFieldsToBody(
       source_stage_id: null,
       counterparty_pipeline_id: null,
       counterparty_stage_id: null,
-      return_stage_id: null,
     };
   }
   return {
@@ -156,7 +148,6 @@ export function pipelineFieldsToBody(
     source_stage_id: d.source_stage_id || null,
     counterparty_pipeline_id: d.counterparty_pipeline_id || null,
     counterparty_stage_id: d.counterparty_stage_id || null,
-    return_stage_id: d.return_stage_id || null,
   };
 }
 

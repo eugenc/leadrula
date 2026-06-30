@@ -64,8 +64,8 @@ func validateActivationParams(p CreateParams) error {
 		delivery = "leads_pipeline"
 	}
 	if delivery == "leads_pipeline" {
-		if p.SourceStageID == 0 || p.BuyerPipelineID == 0 || p.ReturnStageID == 0 {
-			return httpx.Validation("source_stage_id, buyer_pipeline_id, and return_stage_id are required for pipeline delivery")
+		if p.SourceStageID == 0 {
+			return httpx.Validation("source_stage_id is required for pipeline delivery")
 		}
 	}
 	if err := validateLeadCriteriaForActivation(p.LeadCriteria); err != nil {

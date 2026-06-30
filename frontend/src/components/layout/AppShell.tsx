@@ -32,6 +32,7 @@ const titles: Record<string, string> = {
   api: "API Keys",
   "api-docs": "API Documentation",
   calendar: "Calendar",
+  appointments: "Appointments",
   settings: "Settings",
   collaboration: "Collaboration",
   activity: "Activity Log",

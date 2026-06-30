@@ -718,7 +718,7 @@ export function useAddReturnRule(buyer = false) {
     }: {
       contractId: number;
       buyerStageId: number;
-      returnStageId: number;
+      returnStageId?: number;
       buyerPipelineId?: number;
     }) =>
       post(
@@ -748,7 +748,7 @@ export function useUpdateReturnRule(buyer = false) {
       contractId: number;
       ruleId: number;
       buyerStageId: number;
-      returnStageId: number;
+      returnStageId?: number;
       buyerPipelineId?: number;
     }) =>
       patch(

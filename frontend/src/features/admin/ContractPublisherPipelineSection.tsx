@@ -21,8 +21,8 @@ export function ContractPublisherPipelineSection({
     <div className="flex flex-col gap-2.5">
       <SectionLabel>Publisher pipeline</SectionLabel>
       <p className="text-xs text-gray-400">
-        Required when pipeline delivery is allowed. Leads distribute from the source stage; returns land on the return
-        destination stage.
+        Required when pipeline delivery is allowed. Leads distribute from the source stage; return destinations are
+        mapped per route below.
       </p>
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -35,7 +35,6 @@ export function ContractPublisherPipelineSection({
                 ...value,
                 source_pipeline_id: pipelineId,
                 source_stage_id: 0,
-                return_stage_id: 0,
               });
             }}
           >
@@ -50,17 +49,6 @@ export function ContractPublisherPipelineSection({
         <div>
           <Label>Distribute from stage</Label>
           <Select value={value.source_stage_id} onChange={(e) => set("source_stage_id", Number(e.target.value))}>
-            <option value={0}>Select…</option>
-            {(sourceStages ?? []).map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div className="col-span-2">
-          <Label>Return destination stage</Label>
-          <Select value={value.return_stage_id} onChange={(e) => set("return_stage_id", Number(e.target.value))}>
             <option value={0}>Select…</option>
             {(sourceStages ?? []).map((s) => (
               <option key={s.id} value={s.id}>

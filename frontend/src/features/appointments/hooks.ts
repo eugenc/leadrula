@@ -6,6 +6,7 @@ import type {
   AppointmentBooking,
   AppointmentCalendarMarker,
   AppointmentContractOption,
+  BuyerAppointmentContractOption,
   AppointmentFreeSlot,
   BuyerAppointmentSlot,
   BuyerBookingCalendar,
@@ -269,6 +270,54 @@ export function useBookAppointment() {
       qc.invalidateQueries({ queryKey: ["appointment-free-slots"] });
       qc.invalidateQueries({ queryKey: ["appointment-calendar-markers"] });
       qc.invalidateQueries({ queryKey: ["publisher-appointments"] });
+      qc.invalidateQueries({ queryKey: ["buyer-appointments"] });
+    },
+  });
+}
+
+export function useBuyerAppointmentContracts() {
+  return useQuery({
+    queryKey: ["buyer-appointment-contracts"],
+    queryFn: async () => {
+      const res = await get<{ items: BuyerAppointmentContractOption[] }>("/buyer/appointments/contracts");
+      return res.items ?? [];
+    },
+  });
+}
+
+export function useBuyerFreeSlots(contractId: number | null, date: string) {
+  return useQuery({
+    queryKey: ["buyer-appointment-free-slots", contractId, date],
+    queryFn: async () => {
+      const res = await get<{ items: AppointmentFreeSlot[] }>(
+        `/buyer/appointments/slots?contract_id=${contractId}&date=${date}`
+      );
+      return res.items ?? [];
+    },
+    enabled: !!contractId && !!date,
+  });
+}
+
+export function useBuyerAppointmentCalendarMarkers(contractId: number | null, from: string, to: string) {
+  return useQuery({
+    queryKey: ["buyer-appointment-calendar-markers", contractId, from, to],
+    queryFn: async () => {
+      const res = await get<{ items: AppointmentCalendarMarker[] }>(
+        `/buyer/appointments/calendar-markers?contract_id=${contractId}&from=${from}&to=${to}`
+      );
+      return res.items ?? [];
+    },
+    enabled: !!contractId && !!from && !!to,
+  });
+}
+
+export function useBuyerBookAppointment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) => post<AppointmentBooking>("/buyer/appointments/book", body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["buyer-appointment-free-slots"] });
+      qc.invalidateQueries({ queryKey: ["buyer-appointment-calendar-markers"] });
       qc.invalidateQueries({ queryKey: ["buyer-appointments"] });
     },
   });

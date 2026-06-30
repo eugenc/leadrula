@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Plus } from "lucide-react";
 import { PageBody } from "@/components/layout/PageBody";
-import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
 import { FilterSelect } from "@/components/ui/input";
+import { Spinner, EmptyState } from "@/components/ui/misc";
+import { AppointmentListCard } from "@/features/appointments/AppointmentListCard";
 import { BookedAppointmentsTable } from "@/features/appointments/BookedAppointmentsTable";
+import { BuyerBookAppointmentSheet } from "@/features/appointments/BuyerBookAppointmentSheet";
 import {
   APPOINTMENT_PRESET_LABELS,
   defaultAppointmentsUi,
@@ -16,15 +18,17 @@ import {
   type AppointmentSort,
   type SortDir,
 } from "@/features/appointments/appointmentsUiStorage";
-import { useBuyerBookings } from "@/features/appointments/hooks";
+import { useBuyerAppointmentContracts, useBuyerBookings } from "@/features/appointments/hooks";
 import { useBuyerContracts } from "@/features/admin/hooks";
 import { LeadSearchInput } from "@/features/leads/LeadSearchInput";
 import { get } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
+import { useUIStore } from "@/store/uiStore";
 import type { Me } from "@/types";
 
 export function BuyerAppointmentsPage() {
   const user = useAuthStore((s) => s.user);
+  const openDetail = useUIStore((s) => s.openDetail);
   const uiHydrated = useRef(false);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -35,6 +39,7 @@ export function BuyerAppointmentsPage() {
   const [contractId, setContractId] = useState(0);
   const [publisherId, setPublisherId] = useState(0);
   const [limit, setLimit] = useState(25);
+  const [bookOpen, setBookOpen] = useState(false);
 
   const { data: me } = useQuery({
     queryKey: ["me"],
@@ -43,6 +48,7 @@ export function BuyerAppointmentsPage() {
   const timeZone = me?.account?.timezone || "UTC";
 
   const { data: contracts = [] } = useBuyerContracts();
+  const { data: bookableContracts = [] } = useBuyerAppointmentContracts();
   const appointmentContracts = useMemo(
     () => contracts.filter((c) => c.lead_type === "Appointment"),
     [contracts]
@@ -123,9 +129,10 @@ export function BuyerAppointmentsPage() {
     persistUi(d);
   }
 
+  const canBook = bookableContracts.some((c) => c.configured);
+
   return (
     <>
-      <PageHeader title="Appointments" />
       <PageBody>
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <FilterSelect
@@ -182,7 +189,7 @@ export function BuyerAppointmentsPage() {
             value={search}
             onChange={setSearch}
             className="w-full min-w-0 sm:w-72"
-            inputClassName="h-8 text-sm"
+            inputClassName="h-7 text-sm"
             placeholder="Search name, phone, or email…"
             suggestionsEnabled={false}
           />
@@ -221,54 +228,87 @@ export function BuyerAppointmentsPage() {
               Clear filters
             </Button>
           )}
+
+          <div className="flex w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto">
+            <Button
+              type="button"
+              size="sm"
+              disabled={!canBook}
+              title={
+                canBook ? undefined : "Configure a calendar and attach it to an appointment contract first"
+              }
+              onClick={() => setBookOpen(true)}
+            >
+              <Plus className="h-4 w-4" />
+              Add appointment
+            </Button>
+          </div>
         </div>
 
-        <BookedAppointmentsTable
-          items={items}
-          isLoading={isLoading}
-          timeZone={timeZone}
-          emptyTitle={emptyTitle}
-        />
-
-        {total > 0 && (
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-sm text-gray-500">
-            <span>
-              {total} appointment{total === 1 ? "" : "s"}
-            </span>
-            <div className="flex items-center gap-2">
-              <FilterSelect
-                value={limit}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  setLimit(v);
-                  persistUi({ limit: v });
-                }}
-                className="w-28"
-              >
-                {PAGE_SIZES.map((n) => (
-                  <option key={n} value={n}>
-                    {n} / page
-                  </option>
-                ))}
-              </FilterSelect>
-              <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-                Previous
-              </Button>
-              <span>
-                Page {page} of {totalPages}
-              </span>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => p + 1)}
-              >
-                Next
-              </Button>
-            </div>
+        {isLoading ? (
+          <div className="flex justify-center py-16">
+            <Spinner className="h-6 w-6" />
           </div>
+        ) : items.length === 0 ? (
+          <EmptyState title={emptyTitle} />
+        ) : (
+          <>
+            <div className="space-y-2 sm:hidden">
+              {items.map((row) => (
+                <AppointmentListCard
+                  key={row.id}
+                  row={row}
+                  timeZone={timeZone}
+                  onOpen={() => openDetail(row.lead_id)}
+                />
+              ))}
+            </div>
+
+            <div className="hidden sm:block">
+              <BookedAppointmentsTable items={items} isLoading={false} timeZone={timeZone} />
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-500">
+              <span>
+                {(page - 1) * limit + 1}–{Math.min(page * limit, total)} of {total}
+              </span>
+              <div className="flex items-center gap-3">
+                <FilterSelect
+                  value={limit}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setLimit(v);
+                    persistUi({ limit: v });
+                  }}
+                  className="w-24"
+                >
+                  {PAGE_SIZES.map((n) => (
+                    <option key={n} value={n}>
+                      {n} / page
+                    </option>
+                  ))}
+                </FilterSelect>
+                <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+                  Previous
+                </Button>
+                <span>
+                  Page {page} of {totalPages}
+                </span>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          </>
         )}
       </PageBody>
+
+      <BuyerBookAppointmentSheet open={bookOpen} onClose={() => setBookOpen(false)} />
     </>
   );
 }

@@ -425,12 +425,7 @@ function CreateContractDrawer({
               )}
             </div>
           ) : (
-            <ContractDeliverySection
-              buyerId={form.buyer_id}
-              contractType={form.contract_type}
-              value={deliveryDraft}
-              onChange={setDeliveryDraft}
-            />
+            <ContractDeliverySection value={deliveryDraft} onChange={setDeliveryDraft} />
           ),
           criteria: (
             <ContractLeadCriteriaSection

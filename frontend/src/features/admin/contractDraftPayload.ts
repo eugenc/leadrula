@@ -41,7 +41,6 @@ export function buildContractPayload(args: {
     if (openOfferPipelineRequired(offer.allowed_delivery_modes)) {
       body.source_pipeline_id = args.delivery.source_pipeline_id;
       body.source_stage_id = args.delivery.source_stage_id;
-      body.return_stage_id = args.delivery.return_stage_id;
     }
   }
   if (first) {

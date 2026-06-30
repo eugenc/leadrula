@@ -28,6 +28,10 @@ func (h *Handler) RegisterBuyer(r chi.Router) {
 	r.Get("/booking-calendars/{calendarId}/appointments", h.listBuyerCalendarAppointments)
 
 	r.Get("/appointments", h.listBuyerAppointments)
+	r.Get("/appointments/contracts", h.listBuyerAppointmentContracts)
+	r.Get("/appointments/slots", h.listBuyerFreeSlots)
+	r.Get("/appointments/calendar-markers", h.listBuyerAppointmentCalendarMarkers)
+	r.With(auth.RequireRole("admin", "user")).Post("/appointments/book", h.bookAsBuyer)
 	r.With(auth.RequireRole("admin")).Patch("/contracts/{id}/appointment-calendar", h.setContractAppointmentCalendar)
 }
 
@@ -87,12 +91,13 @@ func (h *Handler) putBookingCalendar(w http.ResponseWriter, r *http.Request) {
 		Schedule  json.RawMessage `json:"schedule"`
 		Timezone  string          `json:"timezone"`
 		BufferMin int             `json:"buffer_min"`
+		Location  string          `json:"location"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
 	cal, err := h.svc.PutBookingCalendar(r.Context(), p.AccountID, int64(pathInt(r, "calendarId")), PutCalendarParams{
-		Name: body.Name, Schedule: body.Schedule, Timezone: body.Timezone, BufferMin: body.BufferMin,
+		Name: body.Name, Schedule: body.Schedule, Timezone: body.Timezone, BufferMin: body.BufferMin, Location: body.Location,
 	})
 	if err != nil {
 		httpx.WriteError(w, err)
@@ -221,6 +226,92 @@ func (h *Handler) listBuyerAppointments(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	httpx.JSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) listBuyerAppointmentContracts(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	items, err := h.svc.ListBuyerAppointmentContracts(r.Context(), p.AccountID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if items == nil {
+		items = []BuyerAppointmentContract{}
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *Handler) listBuyerFreeSlots(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	contractID, _ := strconv.ParseInt(r.URL.Query().Get("contract_id"), 10, 64)
+	date := r.URL.Query().Get("date")
+	if contractID == 0 {
+		httpx.WriteError(w, httpx.Validation("contract_id required"))
+		return
+	}
+	items, err := h.svc.ListFreeSlotsForBuyer(r.Context(), p.AccountID, contractID, date)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if items == nil {
+		items = []FreeSlot{}
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *Handler) listBuyerAppointmentCalendarMarkers(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	contractID, _ := strconv.ParseInt(r.URL.Query().Get("contract_id"), 10, 64)
+	from := r.URL.Query().Get("from")
+	to := r.URL.Query().Get("to")
+	if contractID == 0 {
+		httpx.WriteError(w, httpx.Validation("contract_id required"))
+		return
+	}
+	items, err := h.svc.ListCalendarMarkersForBuyer(r.Context(), p.AccountID, contractID, from, to)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if items == nil {
+		items = []CalendarDayMarker{}
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *Handler) bookAsBuyer(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body struct {
+		ContractID   int64  `json:"contract_id"`
+		BuyerSlotID  int64  `json:"buyer_slot_id"`
+		SlotStart    string `json:"slot_start"`
+		DeliveryMode string `json:"delivery_mode"`
+		LeadID       int64  `json:"lead_id"`
+		FirstName    string `json:"first_name"`
+		LastName     string `json:"last_name"`
+		Phone        string `json:"phone"`
+		Email        string `json:"email"`
+		Source       string `json:"source"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	slotStart, err := time.Parse(time.RFC3339, body.SlotStart)
+	if err != nil {
+		httpx.WriteError(w, httpx.Validation("invalid slot_start"))
+		return
+	}
+	row, err := h.svc.BookAsBuyer(r.Context(), p, BookParams{
+		ContractID: body.ContractID, BuyerSlotID: body.BuyerSlotID, SlotStart: slotStart,
+		DeliveryMode: body.DeliveryMode, LeadID: body.LeadID,
+		FirstName: body.FirstName, LastName: body.LastName, Phone: body.Phone, Email: body.Email, Source: body.Source,
+	})
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusCreated, row)
 }
 
 func (h *Handler) listPublisherContracts(w http.ResponseWriter, r *http.Request) {
