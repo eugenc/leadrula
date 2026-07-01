@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Sheet,
   DrawerBody,
@@ -174,13 +175,20 @@ function LeadEconomics({ lead, accountType }: { lead: Lead; accountType?: string
 export function LeadDetailDrawer() {
   const leadId = useUIStore((s) => s.detailLeadId);
   const close = useUIStore((s) => s.closeDetail);
-  const { data: lead, isLoading, isError } = useLead(leadId);
+  const qc = useQueryClient();
+  const { data: lead, isLoading, isError, error } = useLead(leadId);
+
+  useEffect(() => {
+    if (isError) {
+      qc.invalidateQueries({ queryKey: ["leads"] });
+    }
+  }, [isError, qc]);
 
   return (
     <Sheet open={!!leadId} onClose={close} width={560}>
       {isError ? (
         <div className="px-6 py-20 text-center text-sm text-gray-400">
-          This lead is no longer available.
+          {leadDrawerErrorMessage(error)}
         </div>
       ) : isLoading || !lead ? (
         <div className="flex justify-center py-20">
@@ -191,6 +199,17 @@ export function LeadDetailDrawer() {
       )}
     </Sheet>
   );
+}
+
+function leadDrawerErrorMessage(err: unknown): string {
+  const e = apiError(err);
+  if (e.code === "forbidden") {
+    return "You don't have permission to view this lead.";
+  }
+  if (e.code === "not_found") {
+    return "This lead is no longer available.";
+  }
+  return errorMessage(err);
 }
 
 function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {

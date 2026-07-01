@@ -107,8 +107,9 @@ export async function fetchAllLeadIds(filters: LeadFilters): Promise<number[]> {
 }
 
 export function useLead(id: number | null) {
+  const accountType = useAuthStore((s) => s.user?.account_type);
   return useQuery({
-    queryKey: ["lead", id],
+    queryKey: ["lead", accountType, id],
     queryFn: () => get<Lead>(`${ns()}/leads/${id}`),
     enabled: !!id,
   });

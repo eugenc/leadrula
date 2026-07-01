@@ -2,7 +2,9 @@ package collaboration
 
 import (
 	"context"
+	"errors"
 
+	"github.com/echayko/leadrula/backend/internal/accounts"
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/internal/permissions"
 )
@@ -131,20 +133,12 @@ func (s *Service) resolveImpersonation(ctx context.Context, real *auth.Principal
 }
 
 func (s *Service) loadUserPrincipal(ctx context.Context, userPublicID string) (*auth.Principal, error) {
-	const q = `
-		SELECT u.id, u.public_id, u.account_id, a.public_id, a.type, u.role, u.is_active
-		FROM users u JOIN accounts a ON a.id = u.account_id
-		WHERE u.public_id = $1`
-	p := &auth.Principal{}
-	var active bool
-	err := s.repo.pool.QueryRow(ctx, q, userPublicID).Scan(
-		&p.UserID, &p.UserPublicID, &p.AccountID, &p.AccountPublicID,
-		&p.AccountType, &p.Role, &active)
+	p, err := accounts.NewRepository(s.repo.pool).LoadPrincipal(ctx, userPublicID)
 	if err != nil {
-		return nil, ErrNotFound
-	}
-	if !active {
-		return nil, ErrNotFound
+		if errors.Is(err, accounts.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
 	}
 	return p, nil
 }

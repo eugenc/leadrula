@@ -51,7 +51,10 @@ func (p *Principal) LeadScope() string {
 	if p.FullAccess {
 		return permissions.LeadScopeAll
 	}
-	return p.Perms.LeadScope
+	if p.Perms.LeadScope != "" {
+		return p.Perms.LeadScope
+	}
+	return permissions.PresetForRole(p.Role, p.AccountType).LeadScope
 }
 
 // CollaborationPublisherID returns the impersonating publisher account id when the

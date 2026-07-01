@@ -2,12 +2,15 @@ package leads
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"testing"
 
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/internal/config"
 	"github.com/echayko/leadrula/backend/internal/database"
+	"github.com/echayko/leadrula/backend/internal/permissions"
+	"github.com/echayko/leadrula/backend/pkg/httpx"
 )
 
 func connectOversightTestDB(t *testing.T) *Repository {
@@ -185,5 +188,117 @@ func TestList_oversightScope_switchedFromPublisher(t *testing.T) {
 		if item.PublisherID != pubID {
 			t.Fatalf("lead %d has publisher_id=%d, want %d", item.ID, item.PublisherID, pubID)
 		}
+	}
+}
+
+func TestPublisherUser_listAndGet_respectAssignedScope(t *testing.T) {
+	repo := connectOversightTestDB(t)
+	ctx := context.Background()
+
+	var leadID, accountID, userID int64
+	err := repo.pool.QueryRow(ctx,
+		`SELECT l.id, l.owner_account_id, u.id
+		 FROM leads l
+		 JOIN users u ON u.id = l.assigned_user_id
+		 JOIN accounts a ON a.id = u.account_id
+		 WHERE l.deleted_at IS NULL
+		   AND a.type = 'publisher'
+		   AND u.role = 'user'
+		   AND l.owner_account_id = u.account_id
+		 LIMIT 1`).Scan(&leadID, &accountID, &userID)
+	if err != nil {
+		t.Skip("no publisher-owned lead assigned to publisher user fixture")
+	}
+
+	p := &auth.Principal{
+		UserID:      userID,
+		AccountID:   accountID,
+		AccountType: "publisher",
+		Role:        "user",
+		Perms:       permissions.Resolve("user", "publisher", nil),
+	}
+
+	if _, err := repo.GetByRef(ctx, p, strconv.FormatInt(leadID, 10)); err != nil {
+		t.Fatalf("expected assigned lead to be viewable, got %v", err)
+	}
+
+	res, err := repo.List(ctx, p, ListOptions{All: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, item := range res.Items {
+		if item.ID == leadID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected assigned lead in list results")
+	}
+
+	var otherLeadID int64
+	err = repo.pool.QueryRow(ctx,
+		`SELECT l.id
+		 FROM leads l
+		 WHERE l.deleted_at IS NULL
+		   AND l.owner_account_id = $1
+		   AND (l.assigned_user_id IS NULL OR l.assigned_user_id <> $2)
+		 LIMIT 1`, accountID, userID).Scan(&otherLeadID)
+	if err != nil {
+		t.Skip("no unassigned/other-assigned publisher lead for negative case")
+	}
+
+	_, err = repo.GetByRef(ctx, p, strconv.FormatInt(otherLeadID, 10))
+	var appErr *httpx.AppError
+	if !errors.As(err, &appErr) || appErr.Code != httpx.CodeForbidden {
+		t.Fatalf("expected forbidden for unassigned lead, got %v", err)
+	}
+}
+
+func TestPublisherAdmin_listAndGet_allScope(t *testing.T) {
+	repo := connectOversightTestDB(t)
+	ctx := context.Background()
+
+	var leadID, accountID, userID int64
+	err := repo.pool.QueryRow(ctx,
+		`SELECT l.id, l.owner_account_id, u.id
+		 FROM leads l
+		 JOIN users u ON u.account_id = l.owner_account_id
+		 JOIN accounts a ON a.id = u.account_id
+		 WHERE l.deleted_at IS NULL
+		   AND a.type = 'publisher'
+		   AND u.role = 'admin'
+		   AND l.owner_account_id = u.account_id
+		 LIMIT 1`).Scan(&leadID, &accountID, &userID)
+	if err != nil {
+		t.Skip("no publisher-owned lead for admin fixture")
+	}
+
+	p := &auth.Principal{
+		UserID:      userID,
+		AccountID:   accountID,
+		AccountType: "publisher",
+		Role:        "admin",
+		Perms:       permissions.Resolve("admin", "publisher", nil),
+	}
+
+	if _, err := repo.GetByRef(ctx, p, strconv.FormatInt(leadID, 10)); err != nil {
+		t.Fatalf("expected admin to view lead, got %v", err)
+	}
+
+	res, err := repo.List(ctx, p, ListOptions{All: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, item := range res.Items {
+		if item.ID == leadID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected lead in admin list results")
 	}
 }
