@@ -202,7 +202,7 @@ function RuleRow({
   buyerStages: Stage[];
   publisherStages: Stage[];
   usedFrom: Set<number>;
-  onUpdate: (ruleId: number, buyerStageId: number, returnStageId: number) => void;
+  onUpdate: (ruleId: number, buyerStageId: number, returnStageId?: number) => void;
   onDelete: (ruleId: number) => void;
 }) {
   const fromOptions = buyerStages.filter((s) => s.id === rule.buyer_stage_id || !usedFrom.has(s.id));

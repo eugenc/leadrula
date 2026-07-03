@@ -75,25 +75,6 @@ function leadCriteriaEqual(a: ContractLeadCriteria, b: ContractLeadCriteria) {
   return JSON.stringify(leadCriteriaForCompare(a)) === JSON.stringify(leadCriteriaForCompare(b));
 }
 
-function BuyerPipelinePendingBanner({
-  contract,
-  delivery,
-  openOffer,
-}: {
-  contract: Contract;
-  delivery: ContractDeliveryDraft;
-  openOffer: boolean;
-}) {
-  if (openOffer || delivery.delivery !== "leads_pipeline" || contract.buyer_pipeline_id) {
-    return null;
-  }
-  return (
-    <p className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-      Buyer has not configured their destination pipeline yet.
-    </p>
-  );
-}
-
 export function ContractDetailDrawer({
   contract,
   onClose,
@@ -467,18 +448,10 @@ function DraftDrawerContent({
                     )}
                   </div>
                 ) : (
-                  <>
-                    <BuyerPipelinePendingBanner
-                      contract={contract}
-                      delivery={deliveryDraft}
-                      openOffer={openOffer}
-                    />
-                    <ContractDeliverySection
-                      value={deliveryDraft}
-                      onChange={setDeliveryDraft}
-                      directContract={!openOffer && form.buyer_id > 0}
-                    />
-                  </>
+                  <ContractDeliverySection
+                    value={deliveryDraft}
+                    onChange={setDeliveryDraft}
+                  />
                 )}
                 {form.lead_type === "Call" && <CallSettingsSection contractId={contract.id} />}
                 {form.lead_type === "Appointment" && (
@@ -806,15 +779,9 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
                   </>
                 ) : (
                   <>
-                    <BuyerPipelinePendingBanner
-                      contract={contract}
-                      delivery={deliveryDraft}
-                      openOffer={isOpenOffer}
-                    />
                     <ContractDeliverySection
                       value={deliveryDraft}
                       onChange={setDeliveryDraft}
-                      directContract={!isOpenOffer && !!contract.buyer_id}
                     />
                     <Button
                       className="mt-3"

@@ -139,11 +139,15 @@ export function pipelineFieldsToBody(
     return {
       source_pipeline_id: null,
       source_stage_id: null,
+      counterparty_pipeline_id: null,
+      counterparty_stage_id: null,
     };
   }
   return {
     source_pipeline_id: d.source_pipeline_id || null,
     source_stage_id: d.source_stage_id || null,
+    counterparty_pipeline_id: d.counterparty_pipeline_id || null,
+    counterparty_stage_id: d.counterparty_stage_id || null,
   };
 }
 

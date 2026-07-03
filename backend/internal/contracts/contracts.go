@@ -297,7 +297,6 @@ type CreateParams struct {
 }
 
 func (s *Service) Create(ctx context.Context, publisherID int64, p CreateParams) (*Contract, error) {
-	p = sanitizePublisherDirectContractParams(p, nil)
 	if p.ContractType == "" {
 		p.ContractType = "sell"
 	}
