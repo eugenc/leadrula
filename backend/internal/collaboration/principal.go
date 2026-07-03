@@ -104,21 +104,33 @@ func (s *Service) resolveSwitch(ctx context.Context, real *auth.Principal, claim
 }
 
 func (s *Service) resolveImpersonation(ctx context.Context, real *auth.Principal, claims *auth.Claims) (*auth.Principal, error) {
-	if real.AccountType != "publisher" || !real.IsAdmin() {
+	if claims.ImpersonatorAcct == "" {
 		return nil, ErrNotFound
 	}
 	buyerAccountID, buyerType, err := s.repo.GetAccountByPublicID(ctx, claims.AccountID)
 	if err != nil || buyerType != "buyer" {
 		return nil, ErrNotFound
 	}
-	pubID, err := s.repo.PublisherAccountIDForUser(ctx, real.UserID)
-	if err != nil {
-		return nil, err
+	pubID, pubType, err := s.repo.GetAccountByPublicID(ctx, claims.ImpersonatorAcct)
+	if err != nil || pubType != "publisher" {
+		return nil, ErrNotFound
+	}
+	if !canImpersonateFromPublisher(real, pubID) {
+		return nil, ErrNotFound
 	}
 	if err := s.repo.ValidateActive(ctx, pubID, buyerAccountID, claims.CollabVersion); err != nil {
 		return nil, err
 	}
-	impersonator := *real
+	impersonator := auth.Principal{
+		UserID:          real.UserID,
+		UserPublicID:    real.UserPublicID,
+		AccountID:       pubID,
+		AccountPublicID: claims.ImpersonatorAcct,
+		AccountType:     "publisher",
+		Role:            "admin",
+		FullAccess:      true,
+		Perms:           permissions.FullAccess("publisher"),
+	}
 	return &auth.Principal{
 		UserID:          real.UserID,
 		UserPublicID:    real.UserPublicID,
@@ -130,6 +142,16 @@ func (s *Service) resolveImpersonation(ctx context.Context, real *auth.Principal
 		FullAccess:      true,
 		Perms:           permissions.FullAccess("buyer"),
 	}, nil
+}
+
+func canImpersonateFromPublisher(real *auth.Principal, pubID int64) bool {
+	if real == nil || !real.IsAdmin() {
+		return false
+	}
+	if real.AccountType == "platform" {
+		return true
+	}
+	return real.AccountType == "publisher" && real.AccountID == pubID
 }
 
 func (s *Service) loadUserPrincipal(ctx context.Context, userPublicID string) (*auth.Principal, error) {
