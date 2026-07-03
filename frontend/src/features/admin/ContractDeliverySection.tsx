@@ -10,9 +10,11 @@ import { usePipelines, useStages } from "@/features/leads/hooks";
 export function ContractDeliverySection({
   value,
   onChange,
+  directContract = false,
 }: {
   value: ContractDeliveryDraft;
   onChange: (v: ContractDeliveryDraft) => void;
+  directContract?: boolean;
 }) {
   const { data: pubPipelines } = usePipelines();
   const { data: sourceStages } = useStages(value.source_pipeline_id || undefined);
@@ -38,6 +40,11 @@ export function ContractDeliverySection({
           ))}
         </Select>
       </div>
+      {value.delivery === "leads_pipeline" && directContract && (
+        <p className="text-xs text-gray-500">
+          The buyer chooses their destination pipeline on the contract after it is active.
+        </p>
+      )}
       {value.delivery === "leads_pipeline" && (
         <div className="grid grid-cols-2 gap-3">
           <div>

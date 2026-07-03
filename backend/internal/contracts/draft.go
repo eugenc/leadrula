@@ -75,6 +75,7 @@ func validateActivationParams(p CreateParams) error {
 }
 
 func (s *Service) CreateDraft(ctx context.Context, publisherID int64, p CreateParams) (*Contract, error) {
+	p = sanitizePublisherDirectContractParams(p, nil)
 	name := strings.TrimSpace(p.Name)
 	if name == "" {
 		return nil, httpx.Validation("name is required")
@@ -138,6 +139,7 @@ func (s *Service) UpdateDraft(ctx context.Context, publisherID, contractID int64
 	if err != nil {
 		return nil, err
 	}
+	p = sanitizePublisherDirectContractParams(p, existing)
 	if existing.Status != "draft" {
 		return nil, httpx.Validation("only draft contracts can be updated this way")
 	}
@@ -211,6 +213,7 @@ func (s *Service) ActivateDraft(ctx context.Context, publisherID, contractID int
 	if err != nil {
 		return nil, err
 	}
+	p = sanitizePublisherDirectContractParams(p, existing)
 	if existing.Status != "draft" {
 		return nil, httpx.Validation("only draft contracts can be activated")
 	}
@@ -371,6 +374,25 @@ func derefInt64(v *int64) int64 {
 		return 0
 	}
 	return *v
+}
+
+// sanitizePublisherDirectContractParams strips buyer-side pipeline fields from publisher
+// create/update payloads. The buyer sets destination pipeline via their contract delivery API.
+func sanitizePublisherDirectContractParams(p CreateParams, existing *Contract) CreateParams {
+	if p.BuyerID == 0 {
+		return p
+	}
+	if existing != nil {
+		p.BuyerPipelineID = derefInt64(existing.BuyerPipelineID)
+	} else {
+		p.BuyerPipelineID = 0
+	}
+	p.ReturnStageID = 0
+	for i := range p.Compensations {
+		p.Compensations[i].CounterpartyPipelineID = nil
+		p.Compensations[i].CounterpartyStageID = nil
+	}
+	return p
 }
 
 func (s *Service) insertDraftContract(ctx context.Context, tx pgx.Tx, publisherID int64, p draftInsertParams) (*Contract, error) {

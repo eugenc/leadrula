@@ -425,7 +425,11 @@ function CreateContractDrawer({
               )}
             </div>
           ) : (
-            <ContractDeliverySection value={deliveryDraft} onChange={setDeliveryDraft} />
+            <ContractDeliverySection
+              value={deliveryDraft}
+              onChange={setDeliveryDraft}
+              directContract={!openOffer && form.buyer_id > 0}
+            />
           ),
           criteria: (
             <ContractLeadCriteriaSection
