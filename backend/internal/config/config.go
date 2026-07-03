@@ -28,6 +28,8 @@ type Config struct {
 	MailgunFrom    string
 	MailgunAPIBase string
 
+	MarketingQuoteTo string
+
 	S3Endpoint  string
 	S3Bucket    string
 	S3AccessKey string
@@ -72,6 +74,7 @@ func Load() *Config {
 		MailgunDomain:  os.Getenv("MAILGUN_DOMAIN"),
 		MailgunFrom:    getenv("MAILGUN_FROM", "no-reply@leadrula.local"),
 		MailgunAPIBase: getenv("MAILGUN_API_BASE", "https://api.mailgun.net"),
+		MarketingQuoteTo: os.Getenv("MARKETING_QUOTE_TO"),
 		S3Endpoint:     os.Getenv("S3_ENDPOINT"),
 		S3Bucket:       os.Getenv("S3_BUCKET"),
 		S3AccessKey:    os.Getenv("S3_ACCESS_KEY"),

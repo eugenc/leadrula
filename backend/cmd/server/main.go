@@ -30,6 +30,7 @@ import (
 	"github.com/echayko/leadrula/backend/internal/integrations"
 	"github.com/echayko/leadrula/backend/internal/intake"
 	"github.com/echayko/leadrula/backend/internal/leads"
+	"github.com/echayko/leadrula/backend/internal/marketing"
 	"github.com/echayko/leadrula/backend/internal/notifications"
 	"github.com/echayko/leadrula/backend/internal/oversight"
 	"github.com/echayko/leadrula/backend/internal/partnerships"
@@ -204,6 +205,9 @@ func main() {
 
 	// public auth
 	accountsH.RegisterAuthRoutes(r)
+
+	marketingH := marketing.NewHandler(email, cfg.MarketingQuoteTo, cfg.MailgunAPIKey != "")
+	marketingH.RegisterPublicRoutes(r)
 
 	if cfg.StripeWebhookSecret != "" {
 		r.Post("/webhooks/stripe", billingH.StripeWebhook)

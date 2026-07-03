@@ -94,3 +94,55 @@ func (e *EmailSender) SendPasswordReset(to, fullName, token string) error {
 	body := passwordResetEmail(e.baseURL, fullName, link)
 	return e.send(to, "Reset your LeadRula password", body)
 }
+
+// QuoteSubmission is a marketing site quote request.
+type QuoteSubmission struct {
+	FullName      string
+	Email         string
+	Phone         string
+	Role          string
+	MonthlyVolume string
+	Verticals     string
+	Message       string
+}
+
+func (e *EmailSender) SendQuoteRequest(to string, sub QuoteSubmission) error {
+	body := quoteRequestEmail(sub)
+	return e.send(to, "New Leadrula quote request from "+sub.FullName, body)
+}
+
+func (e *EmailSender) SendQuoteConfirmation(to, fullName string) error {
+	name := fullName
+	if name == "" {
+		name = "there"
+	}
+	body := fmt.Sprintf(`<p>Hi %s,</p><p>Thanks for reaching out to Leadrula. We received your quote request and will be in touch within one business day.</p><p>— The Leadrula team</p>`, escapeHTML(name))
+	return e.send(to, "We received your Leadrula quote request", body)
+}
+
+func quoteRequestEmail(sub QuoteSubmission) string {
+	rows := []struct{ label, val string }{
+		{"Name", sub.FullName},
+		{"Email", sub.Email},
+		{"Phone", sub.Phone},
+		{"Role", sub.Role},
+		{"Monthly volume", sub.MonthlyVolume},
+		{"Verticals", sub.Verticals},
+		{"Message", sub.Message},
+	}
+	var b strings.Builder
+	b.WriteString("<h2>New quote request</h2><table>")
+	for _, row := range rows {
+		if row.val == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "<tr><td><strong>%s</strong></td><td>%s</td></tr>", row.label, escapeHTML(row.val))
+	}
+	b.WriteString("</table>")
+	return b.String()
+}
+
+func escapeHTML(s string) string {
+	replacer := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
+	return replacer.Replace(s)
+}
