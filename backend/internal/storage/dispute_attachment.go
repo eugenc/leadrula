@@ -66,6 +66,18 @@ func (s *DisputeAttachmentStore) Put(ctx context.Context, key, contentType strin
 	return err
 }
 
+// Delete removes an object (used by messaging retention purge).
+func (s *DisputeAttachmentStore) Delete(ctx context.Context, key string) error {
+	if !s.Enabled() {
+		return nil
+	}
+	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	return err
+}
+
 // Get streams the object back for an access-controlled download.
 func (s *DisputeAttachmentStore) Get(ctx context.Context, key string) (io.ReadCloser, string, error) {
 	if !s.Enabled() {

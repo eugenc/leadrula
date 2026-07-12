@@ -3,6 +3,7 @@ import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { ImpersonationBanner } from "./ImpersonationBanner";
+import { ChatWidget } from "@/features/messaging/ChatWidget";
 import { useUIStore } from "@/store/uiStore";
 
 const titles: Record<string, string> = {
@@ -42,6 +43,7 @@ export function PlatformShell() {
           <Outlet />
         </main>
       </div>
+      <ChatWidget />
     </div>
   );
 }

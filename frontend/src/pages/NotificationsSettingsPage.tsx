@@ -12,6 +12,7 @@ import {
 import {
   accountNotificationEvents,
   LEAD_NOTIFICATION_EVENTS,
+  MESSAGE_NOTIFICATION_EVENTS,
   withDefaults,
 } from "@/features/notifications/settings";
 import type { NotificationPrefs } from "@/types";
@@ -22,12 +23,14 @@ function PrefsTable({
   events,
   prefs,
   onChange,
+  inAppLocked = false,
 }: {
   title: string;
   description: string;
   events: { id: string; label: string }[];
   prefs: NotificationPrefs;
   onChange: (eventId: string, channel: "in_app" | "email", value: boolean) => void;
+  inAppLocked?: boolean;
 }) {
   return (
     <Card className="p-5">
@@ -49,7 +52,8 @@ function PrefsTable({
               <span className="text-sm font-medium text-gray-800">{e.label}</span>
               <div className="flex justify-center">
                 <Switch
-                  checked={row?.in_app ?? true}
+                  checked={inAppLocked ? true : (row?.in_app ?? true)}
+                  disabled={inAppLocked}
                   onChange={(v) => onChange(e.id, "in_app", v)}
                 />
               </div>
@@ -79,6 +83,9 @@ export function NotificationsSettingsPage() {
 
   const accountEvents =
     accountType && showAccount ? accountNotificationEvents(accountType) : [];
+  const personalEvents = showPersonal
+    ? [...LEAD_NOTIFICATION_EVENTS, ...MESSAGE_NOTIFICATION_EVENTS]
+    : MESSAGE_NOTIFICATION_EVENTS;
   const [accountPrefs, setAccountPrefs] = useState<NotificationPrefs>({});
   const [personalPrefs, setPersonalPrefs] = useState<NotificationPrefs>({});
 
@@ -87,8 +94,8 @@ export function NotificationsSettingsPage() {
     if (data.account) {
       setAccountPrefs(withDefaults(data.account, accountEvents));
     }
-    setPersonalPrefs(withDefaults(data.personal, LEAD_NOTIFICATION_EVENTS));
-  }, [data, accountEvents.length]);
+    setPersonalPrefs(withDefaults(data.personal, personalEvents));
+  }, [data, accountEvents.length, showPersonal]);
 
   if (isLoading || !data) {
     return <p className="text-sm text-gray-400">Loading notification settings…</p>;
@@ -112,18 +119,12 @@ export function NotificationsSettingsPage() {
   const save = () => {
     const body: { account?: NotificationPrefs; personal?: NotificationPrefs } = {};
     if (showAccount) body.account = accountPrefs;
-    if (showPersonal) body.personal = personalPrefs;
+    body.personal = personalPrefs;
     update.mutate(body, {
       onSuccess: () => toast.success("Notification settings saved"),
       onError: (err) => toast.error(errorMessage(err)),
     });
   };
-
-  if (!showAccount && !showPersonal) {
-    return (
-      <p className="text-sm text-gray-500">Notification settings are not available for this account.</p>
-    );
-  }
 
   return (
     <div className="max-w-2xl space-y-4">
@@ -145,6 +146,14 @@ export function NotificationsSettingsPage() {
           onChange={(id, ch, v) => patchChannel(setPersonalPrefs, id, ch, v)}
         />
       ) : null}
+      <PrefsTable
+        title="Messaging"
+        description="In-app alerts are always on. Turn on email to also get message notifications by email."
+        events={MESSAGE_NOTIFICATION_EVENTS}
+        prefs={personalPrefs}
+        onChange={(id, ch, v) => patchChannel(setPersonalPrefs, id, ch, v)}
+        inAppLocked
+      />
       <Button onClick={save} disabled={update.isPending}>
         Save
       </Button>

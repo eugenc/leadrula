@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Sheet, DrawerHeader, DrawerBody, DrawerFooter } from "@/components/ui/dialog";
+import { ContractMessageButton } from "@/features/messaging/MessageButton";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { toast } from "@/store/toastStore";
@@ -659,6 +660,11 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
       />
 
       <DrawerBody>
+        {contract.buyer_id != null && (
+          <div className="mb-4">
+            <ContractMessageButton contractId={contract.public_id} />
+          </div>
+        )}
         <div className="mb-4 flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">
           <span className="text-sm text-gray-400">Contract ID</span>
           <div className="flex items-center gap-2">

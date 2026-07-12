@@ -38,6 +38,7 @@ const (
 	NavSettings      = "settings"
 	NavBilling       = "billing"
 	NavIntegrations  = "integrations"
+	NavMessages      = "messages"
 )
 
 var allActionKeys = []string{
@@ -195,7 +196,7 @@ func defaultNavForAccount(accountType string) map[string]bool {
 	keys := []string{
 		NavDashboard, NavLeads, NavFields, NavAppointments, NavCalendars, NavCalls,
 		NavBoard, NavPipelines, NavContracts, NavCollaboration, NavWebhooks,
-		NavSettings, NavBilling, NavIntegrations,
+		NavSettings, NavBilling, NavIntegrations, NavMessages,
 	}
 	switch accountType {
 	case "publisher":

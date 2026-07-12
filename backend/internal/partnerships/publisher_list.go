@@ -9,13 +9,14 @@ import (
 // PartnerPublisher is a publisher linked via publisher_partnerships.
 type PartnerPublisher struct {
 	ID        int64  `json:"id"`
+	PublicID  string `json:"public_id"`
 	Name      string `json:"name"`
 	HandlerID string `json:"handler_id"`
 }
 
 func ListPartnerPublishers(ctx context.Context, pool *pgxpool.Pool, publisherID int64) ([]PartnerPublisher, error) {
 	rows, err := pool.Query(ctx,
-		`SELECT a.id, a.name, a.handler_id
+		`SELECT a.id, a.public_id::text, a.name, a.handler_id
 		 FROM publisher_partnerships pp
 		 JOIN accounts a ON (
 		   (pp.publisher_a_id = $1 AND a.id = pp.publisher_b_id)
@@ -30,7 +31,7 @@ func ListPartnerPublishers(ctx context.Context, pool *pgxpool.Pool, publisherID 
 	var out []PartnerPublisher
 	for rows.Next() {
 		var p PartnerPublisher
-		if err := rows.Scan(&p.ID, &p.Name, &p.HandlerID); err != nil {
+		if err := rows.Scan(&p.ID, &p.PublicID, &p.Name, &p.HandlerID); err != nil {
 			return nil, err
 		}
 		out = append(out, p)

@@ -66,12 +66,20 @@ func (s *Service) Deliver(ctx context.Context, q database.Querier, p DeliverPara
 			userPrefs, err := s.loadUserPrefs(ctx, q, uid)
 			if err != nil {
 				if errors.Is(err, pgx.ErrNoRows) {
-					log.Printf("notification skip missing user prefs id=%d event=%s", uid, p.EventType)
-					continue
+					// message alerts always reach the user even without a prefs row
+					if p.EventType != "message_received" {
+						log.Printf("notification skip missing user prefs id=%d event=%s", uid, p.EventType)
+						continue
+					}
+					userPrefs = nil
+				} else {
+					return nil, err
 				}
-				return nil, err
 			}
 			ch = userPrefs.forEvent(p.EventType)
+		}
+		if p.EventType == "message_received" {
+			ch.InApp = true // in-app message alerts are always on; email stays opt-in
 		}
 		if ch.InApp {
 			if _, err := q.Exec(ctx,
@@ -169,6 +177,11 @@ func eventLabel(eventType string, payload map[string]any) string {
 		return "New dispute message"
 	case "dispute_deadline":
 		return "A dispute was auto-resolved"
+	case "message_received":
+		if name, ok := payload["sender_name"].(string); ok && name != "" {
+			return "New message from " + name
+		}
+		return "New message"
 	case "dispute_update":
 		if payload["outcome"] == "accepted" {
 			return "Dispute accepted"
@@ -224,6 +237,8 @@ func eventLink(baseURL, accountType, eventType string) string {
 		return baseURL + prefix + "/appointments"
 	case "dispute_update", "new_invoice", "lead_disputed", "dispute_message", "dispute_deadline":
 		return baseURL + prefix + "/billing"
+	case "message_received":
+		return baseURL + prefix + "/dashboard"
 	case "collaboration_request":
 		return baseURL + prefix + "/collaboration"
 	case "partnership_request", "partnership_accepted":

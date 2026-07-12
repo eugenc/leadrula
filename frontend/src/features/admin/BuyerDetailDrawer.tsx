@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Sheet, DrawerHeader, DrawerBody, DrawerFooter } from "@/components/ui/dialog";
+import { MessageButton } from "@/features/messaging/MessageButton";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/misc";
@@ -164,6 +165,9 @@ function DrawerContent({
       />
 
       <DrawerBody>
+        <div className="mb-4">
+          <MessageButton accountId={buyer.public_id} />
+        </div>
         <div className="mb-5 rounded-lg border border-gray-100 bg-gray-50 p-3">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-sm font-semibold text-gray-800">Collaboration</span>

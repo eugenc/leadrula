@@ -1,6 +1,7 @@
 import axios, { AxiosError } from "axios";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
+import type { AccountType } from "@/types";
 
 function normalizeBaseURL(raw: string): string {
   const trimmed = raw.replace(/\/$/, "");
@@ -182,9 +183,51 @@ export function ns(): string {
   return "/buyer";
 }
 
+function accountPrefix(type: AccountType): string {
+  if (type === "publisher") return "/publisher";
+  if (type === "platform") return "/platform";
+  return "/buyer";
+}
+
+// messagingNs routes chat API calls to the home account namespace while switched/impersonating.
+export function messagingNs(): string {
+  const { user, impersonation, switchSession } = useAuthStore.getState();
+  if (impersonation?.publisherUser) return accountPrefix(impersonation.publisherUser.account_type);
+  if (switchSession?.originUser) return accountPrefix(switchSession.originUser.account_type);
+  return ns();
+}
+
+export function homeAccountType(): AccountType | undefined {
+  const { user, impersonation, switchSession } = useAuthStore.getState();
+  if (impersonation?.publisherUser) return impersonation.publisherUser.account_type;
+  if (switchSession?.originUser) return switchSession.originUser.account_type;
+  return user?.account_type;
+}
+
+export function homeAccessToken(): string | null {
+  const { accessToken, impersonation, switchSession } = useAuthStore.getState();
+  if (impersonation?.publisherAccessToken) return impersonation.publisherAccessToken;
+  if (switchSession?.originAccessToken) return switchSession.originAccessToken;
+  return accessToken;
+}
+
+function isHomeNamespacePath(path: string): boolean {
+  const home = homeAccountType();
+  if (!home) return false;
+  return path.startsWith(`${accountPrefix(home)}/messages`);
+}
+
+function authConfig(path: string): { headers?: { Authorization: string } } {
+  const nested = useAuthStore.getState().impersonation || useAuthStore.getState().switchSession;
+  if (!nested || !isHomeNamespacePath(path)) return {};
+  const token = homeAccessToken();
+  if (!token) return {};
+  return { headers: { Authorization: `Bearer ${token}` } };
+}
+
 export async function get<T>(path: string): Promise<T> {
   try {
-    const res = await api.get(path);
+    const res = await api.get(path, authConfig(path));
     return res.data.data as T;
   } catch (e) {
     throw apiError(e);
@@ -193,7 +236,7 @@ export async function get<T>(path: string): Promise<T> {
 
 export async function post<T>(path: string, body?: unknown): Promise<T> {
   try {
-    const res = await api.post(path, body);
+    const res = await api.post(path, body, authConfig(path));
     return res.data.data as T;
   } catch (e) {
     throw apiError(e);
@@ -202,7 +245,7 @@ export async function post<T>(path: string, body?: unknown): Promise<T> {
 
 export async function postForm<T>(path: string, form: FormData): Promise<T> {
   try {
-    const res = await api.post(path, form);
+    const res = await api.post(path, form, authConfig(path));
     return res.data.data as T;
   } catch (e) {
     throw apiError(e);
@@ -211,7 +254,7 @@ export async function postForm<T>(path: string, form: FormData): Promise<T> {
 
 export async function getBlob(path: string): Promise<Blob> {
   try {
-    const res = await api.get(path, { responseType: "blob" });
+    const res = await api.get(path, { ...authConfig(path), responseType: "blob" });
     return res.data as Blob;
   } catch (e) {
     throw apiError(e);
@@ -220,7 +263,7 @@ export async function getBlob(path: string): Promise<Blob> {
 
 export async function patch<T>(path: string, body?: unknown): Promise<T> {
   try {
-    const res = await api.patch(path, body);
+    const res = await api.patch(path, body, authConfig(path));
     return res.data.data as T;
   } catch (e) {
     throw apiError(e);
@@ -238,7 +281,7 @@ export async function put<T>(path: string, body?: unknown): Promise<T> {
 
 export async function del<T>(path: string): Promise<T> {
   try {
-    const res = await api.delete(path);
+    const res = await api.delete(path, authConfig(path));
     return res.data.data as T;
   } catch (e) {
     throw apiError(e);

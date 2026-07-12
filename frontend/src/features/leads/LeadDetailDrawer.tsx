@@ -14,6 +14,7 @@ import { Input, InputWithOverflowTooltip, Label, Textarea, Select } from "@/comp
 import { Badge, Spinner } from "@/components/ui/misc";
 import { LinkifiedText } from "@/components/ui/linkified-text";
 import { SectionLabel } from "@/components/layout/SectionLabel";
+import { LeadMessageButton } from "@/features/messaging/MessageButton";
 import { ActionDot } from "./ActionDot";
 import { format, isPast } from "date-fns";
 import { CircleHelp, Copy, MapPin, ChevronDown, ChevronRight, X, Zap } from "lucide-react";
@@ -466,6 +467,9 @@ function LeadHeader({ lead, onClose }: { lead: Lead; onClose: () => void }) {
         >
           <Copy className="h-3 w-3" />
         </IconButton>
+        {(user?.account_type === "buyer" || lead.buyer_name) && (
+          <LeadMessageButton leadId={lead.public_id} size="sm" className="ml-2 h-6 px-2 text-xs" />
+        )}
       </div>
 
       {showActionAtForStage(currentStageType) && (

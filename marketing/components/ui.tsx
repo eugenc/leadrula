@@ -242,3 +242,79 @@ export function Pill({ children }: { children: ReactNode }) {
     </div>
   );
 }
+
+export function LeadTypeCard({
+  icon,
+  title,
+  tag,
+  desc,
+  items,
+}: {
+  icon: ReactNode;
+  title: string;
+  tag: string;
+  desc: string;
+  items: string[];
+}) {
+  return (
+    <div className="rounded-xl border border-gray-100 bg-white p-6 transition-all hover:border-jade-300 hover:shadow-lg hover:shadow-jade-500/10">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex h-[38px] w-[38px] items-center justify-center rounded-[9px] border border-jade-100 bg-jade-50 text-jade-500">
+          {icon}
+        </div>
+        <span className="rounded-full border border-jade-200 bg-jade-50 px-2 py-0.5 text-[10px] font-semibold text-jade-700">
+          {tag}
+        </span>
+      </div>
+      <div className="mb-1.5 text-[15px] font-bold text-gray-800">{title}</div>
+      <div className="mb-4 text-xs leading-relaxed text-gray-400">{desc}</div>
+      <ul className="flex flex-col gap-2">
+        {items.map((t) => (
+          <CheckItem key={t} text={t} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export const LEAD_TYPES = [
+  {
+    title: "Data",
+    tag: "Web leads",
+    icon: (
+      <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+        <ellipse cx="12" cy="5" rx="9" ry="3" />
+        <path d="M3 5v14a9 3 0 0 0 18 0V5" />
+        <path d="M3 12a9 3 0 0 0 18 0" />
+      </svg>
+    ),
+    desc: "Web leads from any source, validated and enriched before they reach a buyer.",
+    items: ["API, web forms, or CSV import", "Custom fields per vertical", "Dedupe and validation on entry"],
+  },
+  {
+    title: "Appointments",
+    tag: "Booked",
+    icon: (
+      <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="4" width="18" height="18" rx="2" />
+        <line x1="16" y1="2" x2="16" y2="6" />
+        <line x1="8" y1="2" x2="8" y2="6" />
+        <line x1="3" y1="10" x2="21" y2="10" />
+        <path d="M9 16l2 2 4-4" />
+      </svg>
+    ),
+    desc: "Booked appointments distributed with the time slot, synced to the buyer's calendar.",
+    items: ["Booked from the pipeline", "Synced to buyer calendars", "Reminders and no-show handling"],
+  },
+  {
+    title: "Calls",
+    tag: "Pay-per-call",
+    icon: (
+      <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+      </svg>
+    ),
+    desc: "Inbound calls routed live to buyers by real-time bid or static rules, billed by duration.",
+    items: ["RTB and static call routing", "Per-second / per-minute billing", "Connect threshold before charge"],
+  },
+];

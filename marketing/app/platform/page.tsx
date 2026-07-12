@@ -6,16 +6,19 @@ import {
   Eyebrow,
   FeatCard,
   H2,
+  LeadTypeCard,
+  LEAD_TYPES,
   Mock,
   MockCard,
   Pill,
   QuoteButton,
+  Sub,
 } from "@/components/ui";
 
 export const metadata: Metadata = pageMeta({
   title: "Platform — Intake, Routing, Contracts & Rev Share",
   description:
-    "Everything between the lead form and the closed deal: intake, routing, contracts, collaboration, and settlement on one platform.",
+    "Intake, routing, call routing, contracts, collaboration, and settlement for data leads, appointments, and pay-per-call on one platform.",
   path: "/platform",
 });
 
@@ -25,13 +28,13 @@ const features = [
   ["Kanban CRM", "Multi-pipeline lead boards"],
   ["Calendar", "Appointments from pipeline"],
   ["Smart routing", "Targets, branches, field maps"],
+  ["Call routing", "Inbound RTB + static, duration billing"],
   ["Contracts", "Caps, criteria, return rules"],
   ["Collaboration", "Shared pipelines + comments"],
   ["Rev share", "Auto settlement on close"],
   ["Wallet billing", "Balance top-up, per-lead charge"],
   ["Returns", "Disputes + re-distribution"],
   ["Teams + roles", "Admin controls, invites, audit"],
-  ["Activity log", "Every action, fully traceable"],
 ];
 
 const integrations = [
@@ -63,6 +66,21 @@ export default function PlatformPage() {
             settlement.
           </p>
           <QuoteButton xl />
+        </div>
+      </div>
+
+      <div className="border-b border-gray-100 py-12 sm:py-[72px]">
+        <div className={containerClass}>
+          <div className="mb-10 text-center">
+            <Eyebrow>Every lead type</Eyebrow>
+            <H2>Data, appointments, and calls.</H2>
+            <Sub center>One distribution engine, one set of contracts and billing, across all three lead types.</Sub>
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            {LEAD_TYPES.map((t) => (
+              <LeadTypeCard key={t.title} {...t} />
+            ))}
+          </div>
         </div>
       </div>
 
@@ -137,6 +155,38 @@ export default function PlatformPage() {
                   badge="Paused"
                   badgeVariant="neutral"
                   sub="Destination: buyer CRM via field-mapped webhook"
+                />
+              </Mock>
+            }
+          />
+
+          <Dive
+            id="calls"
+            eyebrow="Calls"
+            title="Inbound calls, routed live."
+            desc="Pay-per-call built in. Route inbound calls to buyers by real-time bid or static rules, and bill by connected duration."
+            items={[
+              { label: "RTB + static routing", text: "buyers bid in real time, or route by fixed caps and priority" },
+              { label: "Duration billing", text: "per-second or per-minute, charged only after a connect threshold" },
+              { label: "Caps and schedules", text: "concurrency caps, hours of operation, and geo routing" },
+            ]}
+            mock={
+              <Mock>
+                <MockCard
+                  title="Solar - Live inbound"
+                  badge="RTB"
+                  sub="3 buyers bidding · High bid $18.50 · Connect 90s"
+                  bar={64}
+                />
+                <MockCard
+                  title="Insurance - Static route"
+                  badge="Active"
+                  sub="Priority: PolicyBridge, then Fallback · Cap 40 concurrent"
+                />
+                <MockCard
+                  title="Call #2291 - 4m 12s"
+                  badge="+$16.80 billed"
+                  sub="Per-minute after 60s connect threshold"
                 />
               </Mock>
             }

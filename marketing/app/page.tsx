@@ -6,6 +6,8 @@ import {
   containerClass,
   Eyebrow,
   H2,
+  LeadTypeCard,
+  LEAD_TYPES,
   QuoteButton,
   StatBar,
   Sub,
@@ -86,8 +88,8 @@ export default function HomePage() {
             <span className="text-jade-500">One pipeline.</span>
           </h1>
           <p className="mx-auto mb-9 mt-[18px] max-w-[480px] text-base leading-relaxed text-gray-400">
-            Leadrula is the lead distribution platform where publishers source, qualify, and route leads to buyers,
-            and stay in the deal until it closes.
+            One platform to source, qualify, and distribute every lead type, data, appointments, and calls, then stay
+            in the deal until it closes.
           </p>
           <div className="mb-[18px] flex flex-col items-center justify-center gap-2.5 sm:flex-row">
             <QuoteButton xl />
@@ -168,6 +170,24 @@ export default function HomePage() {
                 "Automatic rev share settlement",
               ]}
             />
+          </div>
+        </div>
+      </div>
+
+      <div className="border-b border-gray-100 py-12 sm:py-[72px]">
+        <div className={containerClass}>
+          <div className="mb-10 text-center">
+            <Eyebrow>Every lead type</Eyebrow>
+            <H2>Data, appointments, and calls. One platform.</H2>
+            <Sub center>
+              Most platforms pick a lane. Leadrula distributes all three, with the same contracts, billing, and
+              pipeline.
+            </Sub>
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            {LEAD_TYPES.map((t) => (
+              <LeadTypeCard key={t.title} {...t} />
+            ))}
           </div>
         </div>
       </div>

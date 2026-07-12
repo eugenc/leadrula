@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Sheet, DrawerHeader, DrawerBody } from "@/components/ui/dialog";
+import { ContractMessageButton } from "@/features/messaging/MessageButton";
 import { Button } from "@/components/ui/button";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { toast } from "@/store/toastStore";
@@ -114,6 +115,9 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
       />
 
       <DrawerBody>
+        <div className="mb-4">
+          <ContractMessageButton contractId={contract.public_id} />
+        </div>
         <div className="mb-4 flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">
           <span className="text-sm text-gray-400">Contract ID</span>
           <div className="flex items-center gap-2">

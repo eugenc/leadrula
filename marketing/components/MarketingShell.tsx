@@ -153,6 +153,7 @@ function Footer() {
       links: [
         ["Intake & Qualification", "/platform#intake"],
         ["Routing & Distribution", "/platform#routing"],
+        ["Call Routing", "/platform#calls"],
         ["Contracts & Rev Share", "/platform#contracts"],
         ["Collaboration", "/platform#collab"],
       ],

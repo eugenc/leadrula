@@ -10,6 +10,10 @@ export const LEAD_NOTIFICATION_EVENTS: NotificationEventDef[] = [
   { id: "lead_returned", label: "A lead was returned" },
 ];
 
+export const MESSAGE_NOTIFICATION_EVENTS: NotificationEventDef[] = [
+  { id: "message_received", label: "New messages" },
+];
+
 export const BUYER_ACCOUNT_NOTIFICATION_EVENTS: NotificationEventDef[] = [
   { id: "dispute_update", label: "Dispute updates" },
   { id: "new_invoice", label: "New invoices" },

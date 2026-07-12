@@ -31,6 +31,7 @@ import (
 	"github.com/echayko/leadrula/backend/internal/intake"
 	"github.com/echayko/leadrula/backend/internal/leads"
 	"github.com/echayko/leadrula/backend/internal/marketing"
+	"github.com/echayko/leadrula/backend/internal/messaging"
 	"github.com/echayko/leadrula/backend/internal/notifications"
 	"github.com/echayko/leadrula/backend/internal/oversight"
 	"github.com/echayko/leadrula/backend/internal/partnerships"
@@ -180,11 +181,21 @@ func main() {
 	callsH := calls.NewHandler(callsSvc)
 	go callsSvc.RunCapResetWorker(ctx)
 
+	// In-app messaging: threads, connect gate, broadcasts, audit, retention.
+	msgHub := messaging.NewHub()
+	msgStore := storage.NewDisputeAttachmentStore(cfg.S3Endpoint, cfg.S3Bucket, cfg.S3AccessKey, cfg.S3SecretKey)
+	msgSvc := messaging.NewService(pool, msgHub, msgStore, notifSvc, accountsRepo)
+	msgH := messaging.NewHandler(msgSvc, msgHub, tokens, collabSvc.ResolvePrincipal, cfg.CORSOrigins)
+	go msgSvc.RunRetentionLoop(ctx)
+
 	// ── router ───────────────────────────────────────────────────
 	r := chi.NewRouter()
 	r.Use(mw.RequestID, mw.RealIP, mw.Recoverer, mw.Logger, mw.CORS(cfg.CORSOrigins))
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
+
+	// Messaging WebSocket (validates JWT from ?token= before upgrade).
+	r.Get("/ws/messages", msgH.WebSocket)
 
 	// public intake API (API-key auth)
 	r.Group(func(pub chi.Router) {
@@ -229,6 +240,8 @@ func main() {
 		pl.Use(requireAuth, auth.RequireAccountType("platform"))
 		accountsH.RegisterPlatformRoutes(pl)
 		notifH.RegisterRoutes(pl)
+		msgH.RegisterRoutes(pl)
+		msgH.RegisterPlatformAudit(pl)
 	})
 
 	// publisher namespace
@@ -254,6 +267,7 @@ func main() {
 		dashboardH.RegisterRoutes(p)
 		callsH.RegisterPublisher(p)
 		apptH.RegisterPublisher(p)
+		msgH.RegisterRoutes(p)
 	})
 
 	// buyer namespace
@@ -281,6 +295,7 @@ func main() {
 		dashboardH.RegisterRoutes(b)
 		callsH.RegisterBuyer(b)
 		apptH.RegisterBuyer(b)
+		msgH.RegisterRoutes(b)
 	})
 
 	srv := &http.Server{

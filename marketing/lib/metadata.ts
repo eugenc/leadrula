@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { siteUrl } from "./env";
 
 const defaultDescription =
-  "Leadrula is the lead distribution platform where publishers source, qualify, and route leads to buyers — and stay in the deal until it closes.";
+  "One platform to source, qualify, and distribute data leads, appointments, and calls — then stay in the deal until it closes.";
 
 export function pageMeta(opts: {
   title: string;

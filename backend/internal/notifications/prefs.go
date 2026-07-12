@@ -47,12 +47,12 @@ func accountEvents(accountType string) []string {
 }
 
 func personalEvents() []string {
-	return []string{"new_lead", "lead_returned"}
+	return []string{"new_lead", "lead_returned", "message_received"}
 }
 
 func isPersonalEvent(event string) bool {
 	switch event {
-	case "new_lead", "lead_returned":
+	case "new_lead", "lead_returned", "message_received":
 		return true
 	default:
 		return false

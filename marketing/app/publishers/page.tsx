@@ -14,7 +14,7 @@ const toolkit = [
   ["Intake review", "Approve borderline leads manually"],
   ["Buyer directory", "Manage your whole buyer network"],
   ["Contracts", "Caps, criteria, delivery, returns"],
-  ["Routing engine", "Targets, branches, field mapping"],
+  ["Routing engine", "Data, appointments, and call routing"],
   ["Own pipelines", "Qualify before you distribute"],
   ["Collaboration", "Help buyers close your leads"],
   ["Billing", "Automatic charges + settlements"],
@@ -32,7 +32,7 @@ export default function PublishersPage() {
             <span className="text-jade-500">Get paid on it.</span>
           </h1>
           <p className="mx-auto mb-7 mt-[18px] max-w-[480px] text-base leading-relaxed text-gray-400">
-            Stop selling leads into a black hole. Route them on your rules, watch them move through the buyer&apos;s
+            Distribute data, appointments, and calls on your own rules, watch them move through the buyer&apos;s
             pipeline, and settle rev share automatically.
           </p>
           <QuoteButton xl />
@@ -52,12 +52,12 @@ export default function PublishersPage() {
       <div className="border-b border-gray-100">
         <div className={containerClass}>
           <Dive
-            title="Your entire supply, one intake."
-            desc="Bring leads in from any channel: API, forms, or CSV upload. Everything lands in one log, tagged by source, with your custom fields intact."
+            title="Every lead type, one intake."
+            desc="Bring in data, appointments, and calls from any channel. Everything lands in one log, tagged by source and type, with your custom fields intact."
             items={[
-              { label: "Inbound API", text: "one endpoint, unlimited sources and API keys" },
-              { label: "Bulk import", text: "map any CSV to your fields in seconds" },
-              { label: "Provenance tracking", text: "know exactly which source sent every lead" },
+              { label: "Data", text: "API, web forms, or CSV, with custom fields" },
+              { label: "Appointments", text: "booked slots that sync to buyer calendars" },
+              { label: "Calls", text: "inbound numbers routed live by RTB or static rules" },
             ]}
             mock={
               <Mock>

@@ -5,6 +5,7 @@ import { Topbar } from "./Topbar";
 import { BottomTabBar } from "./BottomTabBar";
 import { ImpersonationBanner } from "./ImpersonationBanner";
 import { LeadDetailDrawer } from "@/features/leads/LeadDetailDrawer";
+import { ChatWidget } from "@/features/messaging/ChatWidget";
 import { useMe } from "@/features/leads/hooks";
 import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
@@ -93,6 +94,7 @@ export function AppShell() {
       </div>
       <BottomTabBar />
       <LeadDetailDrawer />
+      <ChatWidget />
     </div>
   );
 }

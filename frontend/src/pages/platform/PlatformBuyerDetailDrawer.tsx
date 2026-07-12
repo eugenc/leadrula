@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { format } from "date-fns";
 import { ArrowRightLeft } from "lucide-react";
 import { Sheet, DrawerHeader, DrawerBody, DrawerFooter } from "@/components/ui/dialog";
+import { MessageButton } from "@/features/messaging/MessageButton";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { toast } from "@/store/toastStore";
@@ -83,6 +84,9 @@ function DrawerContent({ buyer, onClose }: { buyer: PlatformAccount; onClose: ()
       <DrawerHeader title={buyer.name} subtitle={buyer.handler_id} onClose={onClose} />
 
       <DrawerBody>
+        <div className="mb-4">
+          <MessageButton accountId={buyer.id} />
+        </div>
         <div className="flex flex-col gap-2.5">
           <div>
             <Label>Company name</Label>

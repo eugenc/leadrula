@@ -16,7 +16,7 @@ const toolkit = [
   ["Routes + API keys", "Push leads to your own stack"],
   ["Returns + disputes", "Fair process, clean records"],
   ["Wallet billing", "Top-up, statements, no surprises"],
-  ["Team + roles", "Invite closers, control access"],
+  ["Call handling", "Inbound routing, duration billing"],
   ["Delivery logs", "Every lead, fully traceable"],
 ];
 
@@ -32,8 +32,8 @@ export default function BuyersPage() {
             <span className="text-jade-500">Publisher in your corner.</span>
           </h1>
           <p className="mx-auto mb-7 mt-[18px] max-w-[480px] text-base leading-relaxed text-gray-400">
-            Leads arrive pre-qualified, pre-booked, and in your CRM, with a publisher who can see where deals get stuck
-            and help move them.
+            Data, appointments, and inbound calls arrive pre-qualified and in your CRM, with a publisher who can see
+            where deals get stuck and help move them.
           </p>
           <QuoteButton xl />
           <div className="mx-auto max-w-[720px]">
@@ -52,12 +52,12 @@ export default function BuyersPage() {
       <div className="border-b border-gray-100">
         <div className={containerClass}>
           <Dive
-            title="A CRM built for bought leads."
-            desc="Every distributed lead lands as a card on your Kanban board, or gets pushed straight to the CRM you already run."
+            title="Data, appointments, and calls in one CRM."
+            desc="Every lead type lands where you work: a card on your Kanban board, a slot on your calendar, or a live call to your team, or pushed to the CRM you already run."
             items={[
-              { label: "Native board", text: "multi-pipeline Kanban with custom stages" },
-              { label: "Or your CRM", text: "GHL, HubSpot, Salesforce, Pipedrive via routes" },
-              { label: "Calendar built in", text: "appointments from publishers sync automatically" },
+              { label: "Data leads", text: "as cards on a multi-pipeline Kanban board" },
+              { label: "Appointments", text: "booked slots synced to your calendar" },
+              { label: "Calls", text: "live inbound routed to your team, billed by duration" },
             ]}
             mock={
               <Mock>
