@@ -57,7 +57,7 @@ export function formatCustomDate(date: Date, formatToken: string): string {
 }
 
 const DISPLAY_DATE = "MMM d, yyyy";
-const DISPLAY_DATETIME = "EEE. d, h:mm a";
+const DISPLAY_DATETIME = "EEE. MMM d, h:mm a";
 
 export function formatDatetimeForDisplay(value: string | Date | null | undefined): string {
   if (!value) return "—";
