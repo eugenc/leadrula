@@ -411,6 +411,12 @@ export function UnifiedInboundLogTable({
                               {r.branch_position}
                             </div>
                           )}
+                          {r.route_name && (
+                            <div>
+                              <span className="font-medium text-gray-500">Route Name: </span>
+                              {r.route_name}
+                            </div>
+                          )}
                           {r.route_id != null && (
                             <div>
                               <span className="font-medium text-gray-500">Route ID: </span>
