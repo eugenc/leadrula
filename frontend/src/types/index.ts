@@ -1326,6 +1326,7 @@ export interface GhlConnectionDetail {
     inbound: number;
     inbound_webhook_slug?: string;
   };
+  has_private_integration_token?: boolean;
 }
 
 export interface TwilioPhoneNumber {

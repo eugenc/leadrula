@@ -31,6 +31,32 @@ func TestParseGHLConfig_opportunityRequiresStageMap(t *testing.T) {
 	}
 }
 
+func TestParseGHLConfigForTest_allowsOpportunityWithoutStageMap(t *testing.T) {
+	cfg, err := ParseGHLConfigForTest(map[string]any{
+		"location_id":        "loc1",
+		"create_opportunity": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LocationID != "loc1" {
+		t.Fatalf("location_id: got %q", cfg.LocationID)
+	}
+}
+
+func TestParseGHLConfigForTest_webhookMode(t *testing.T) {
+	cfg, err := ParseGHLConfigForTest(map[string]any{
+		"delivery_mode": "webhook",
+		"webhook_url":   "https://hooks.gohighlevel.com/workflow/abc",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DeliveryMode != "webhook" || cfg.WebhookURL == "" {
+		t.Fatalf("unexpected config: %+v", cfg)
+	}
+}
+
 func TestResolveGHLStage(t *testing.T) {
 	entries := []GHLPipelineStageMapEntry{
 		{LeadrulaPipelineID: 1, LeadrulaStageID: 5, GHLPipelineID: "p1", GHLPipelineStageID: "s1"},

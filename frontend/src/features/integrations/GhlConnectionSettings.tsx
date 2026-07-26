@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Label, Select, Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/misc";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { useCustomFields } from "@/features/leads/hooks";
@@ -59,10 +58,6 @@ export function GhlConnectionSettings({
   ghlPipelinesLoading = false,
   ghlCalendarsLoading = false,
   apiAuth,
-  onTestConnection,
-  testConnectionDisabled = false,
-  testConnectionPending = false,
-  testConnectionLoadingLabel,
 }: {
   config: GHLConfig;
   onChange: (config: GHLConfig) => void;
@@ -76,11 +71,8 @@ export function GhlConnectionSettings({
     locationId: string;
     onLocationIdChange: (v: string) => void;
     pitPlaceholder?: string;
+    hasPrivateIntegrationToken?: boolean;
   };
-  onTestConnection?: () => void;
-  testConnectionDisabled?: boolean;
-  testConnectionPending?: boolean;
-  testConnectionLoadingLabel?: string;
 }) {
   const { data: customFields } = useCustomFields();
   const createField = useCreateField();
@@ -163,6 +155,16 @@ export function GhlConnectionSettings({
               onChange={(e) => apiAuth.onPitTokenChange(e.target.value)}
               placeholder={apiAuth.pitPlaceholder}
             />
+            {apiAuth.hasPrivateIntegrationToken === true && (
+              <p className="mt-1 text-xs text-green-700">
+                Token saved on server. Enter a new value only to replace it.
+              </p>
+            )}
+            {apiAuth.hasPrivateIntegrationToken === false && (
+              <p className="mt-1 text-xs text-amber-700">
+                No token saved. Enter your Private Integration Token to enable push.
+              </p>
+            )}
           </div>
           <div>
             <Label>Location ID</Label>
@@ -172,24 +174,6 @@ export function GhlConnectionSettings({
             />
           </div>
         </>
-      )}
-
-      {onTestConnection && (
-        <Button
-          variant="secondary"
-          size="sm"
-          disabled={testConnectionDisabled}
-          onClick={onTestConnection}
-        >
-          {testConnectionPending ? (
-            <span className="inline-flex items-center gap-2">
-              <Spinner className="h-3.5 w-3.5" />
-              {testConnectionLoadingLabel ?? "Testing…"}
-            </span>
-          ) : (
-            "Test connection"
-          )}
-        </Button>
       )}
 
       {!webhookMode && (

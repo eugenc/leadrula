@@ -84,7 +84,7 @@ func (p *GHLProvider) ValidateCredentials(ctx context.Context, credentials []byt
 }
 
 func (p *GHLProvider) TestConnection(ctx context.Context, credentials []byte, config map[string]any) error {
-	cfg, err := ParseGHLConfig(config)
+	cfg, err := ParseGHLConfigForTest(config)
 	if err != nil {
 		return err
 	}
