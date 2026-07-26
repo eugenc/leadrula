@@ -11,9 +11,10 @@ import (
 )
 
 type GHLConnectionDetail struct {
-	Connection     Connection          `json:"connection"`
-	InboundWebhook *InboundWebhookInfo `json:"inbound_webhook,omitempty"`
-	WebhookIDs     webhooks.GHLWebhookIDs `json:"webhook_ids,omitempty"`
+	Connection                 Connection             `json:"connection"`
+	InboundWebhook             *InboundWebhookInfo    `json:"inbound_webhook,omitempty"`
+	WebhookIDs                 webhooks.GHLWebhookIDs `json:"webhook_ids,omitempty"`
+	HasPrivateIntegrationToken bool                   `json:"has_private_integration_token"`
 }
 
 type GHLConnectionResponse struct {
@@ -179,16 +180,78 @@ func BuildGHLInboundWebhookInfo(apiBaseURL string, webhookID int64, slug string)
 	return info
 }
 
-func GHLDetailFromConnection(conn *Connection, apiBaseURL string) *GHLConnectionDetail {
+func GHLDetailFromConnection(conn *Connection, apiBaseURL string, hasPIT bool) *GHLConnectionDetail {
 	ids := webhooks.ParseGHLWebhookIDs(conn.Config)
 	detail := &GHLConnectionDetail{
-		Connection: *conn,
-		WebhookIDs: ids,
+		Connection:                 *conn,
+		WebhookIDs:                 ids,
+		HasPrivateIntegrationToken: hasPIT,
 	}
 	if conn.Status == "active" && ids.InboundSlug != "" {
 		detail.InboundWebhook = BuildGHLInboundWebhookInfo(apiBaseURL, ids.Inbound, ids.InboundSlug)
 	}
 	return detail
+}
+
+func ghlCredentialsHavePIT(encKey, encCreds []byte) bool {
+	if len(encCreds) == 0 {
+		return false
+	}
+	plain, err := decrypt(encKey, encCreds)
+	if err != nil {
+		return false
+	}
+	_, err = providers.ParseGHLCredentials(plain)
+	return err == nil
+}
+
+func (s *Service) GHLHasPrivateIntegrationToken(ctx context.Context, connectionID int64) bool {
+	var encCreds []byte
+	if err := s.pool.QueryRow(ctx,
+		`SELECT credentials FROM integration_connections WHERE id=$1`, connectionID,
+	).Scan(&encCreds); err != nil {
+		return false
+	}
+	return ghlCredentialsHavePIT(s.encKey, encCreds)
+}
+
+func (s *Service) GHLConnectionDetail(ctx context.Context, accountID, connectionID int64, apiBaseURL string) (*GHLConnectionDetail, error) {
+	conn, err := s.GetConnection(ctx, accountID, connectionID)
+	if err != nil {
+		return nil, err
+	}
+	if conn.ProviderSlug != "ghl" {
+		return nil, httpx.Validation("not a ghl connection")
+	}
+	hasPIT := s.GHLHasPrivateIntegrationToken(ctx, connectionID)
+	return GHLDetailFromConnection(conn, apiBaseURL, hasPIT), nil
+}
+
+func (s *Service) TestStoredConnection(ctx context.Context, accountID, connectionID int64) error {
+	conn, err := s.GetConnection(ctx, accountID, connectionID)
+	if err != nil {
+		return err
+	}
+	var encCreds []byte
+	if err := s.pool.QueryRow(ctx,
+		`SELECT credentials FROM integration_connections WHERE id=$1`, connectionID,
+	).Scan(&encCreds); err != nil {
+		return err
+	}
+	credentials, err := decrypt(s.encKey, encCreds)
+	if err != nil {
+		return err
+	}
+	config := configMap(conn.Config)
+	switch conn.ProviderSlug {
+	case "sunbase":
+		return (&providers.SunbaseProvider{}).TestConnection(ctx, credentials, config)
+	case "ghl":
+		config = providers.MergeGHLConfigDefaults(config)
+		return (&providers.GHLProvider{}).TestConnection(ctx, credentials, config)
+	default:
+		return httpx.Validation("test connection not supported for " + conn.ProviderSlug)
+	}
 }
 
 func wrapGHLProvisionErr(step string, err error) error {

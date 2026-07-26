@@ -2,6 +2,7 @@
 .env
 .env.local
 *.local
+backend/ghl/pit_nc
 
 # Go
 backend/server

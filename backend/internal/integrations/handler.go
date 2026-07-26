@@ -64,6 +64,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Use(auth.RequirePermission(permissions.ActionSettingsAdmin))
 		r.Post("/integrations/connections", h.createConnection)
 		r.Post("/integrations/connections/test", h.testConnection)
+		r.Post("/integrations/connections/{id}/test", h.testStoredConnection)
 		r.Post("/integrations/ghl/metadata", h.postGHLMetadata)
 		r.Patch("/integrations/connections/{id}", h.patchConnection)
 		r.Get("/integrations/connections/{id}/sunbase", h.getSunbaseDetail)
@@ -311,17 +312,22 @@ func (h *Handler) createGHLConnection(w http.ResponseWriter, r *http.Request, ac
 func (h *Handler) getGHLDetail(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	conn, err := h.svc.GetConnection(r.Context(), p.AccountID, id)
+	detail, err := h.svc.GHLConnectionDetail(r.Context(), p.AccountID, id, h.apiBaseURL)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
-	if conn.ProviderSlug != "ghl" {
-		httpx.WriteError(w, httpx.Validation("not a ghl connection"))
+	httpx.JSON(w, http.StatusOK, detail)
+}
+
+func (h *Handler) testStoredConnection(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err := h.svc.TestStoredConnection(r.Context(), p.AccountID, id); err != nil {
+		httpx.JSON(w, http.StatusOK, map[string]any{"ok": false, "message": err.Error()})
 		return
 	}
-	detail := GHLDetailFromConnection(conn, h.apiBaseURL)
-	httpx.JSON(w, http.StatusOK, detail)
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) getGHLPipelines(w http.ResponseWriter, r *http.Request) {

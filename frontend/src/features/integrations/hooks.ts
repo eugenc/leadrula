@@ -72,6 +72,16 @@ export function useTestIntegrationConnection() {
   });
 }
 
+export function useTestStoredIntegrationConnection() {
+  return useMutation({
+    mutationFn: (connectionId: number) =>
+      post<{ ok: boolean; message?: string }>(
+        `${ns()}/integrations/connections/${connectionId}/test`,
+        {}
+      ),
+  });
+}
+
 export function useUpdateIntegrationConnection() {
   const qc = useQueryClient();
   return useMutation({
@@ -84,7 +94,10 @@ export function useUpdateIntegrationConnection() {
       credentials?: Record<string, unknown>;
       config?: Record<string, unknown>;
     }) => patch<IntegrationConnection>(`${ns()}/integrations/connections/${id}`, { credentials, config }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["integration-connections"] }),
+    onSuccess: (_conn, vars) => {
+      qc.invalidateQueries({ queryKey: ["integration-connections"] });
+      qc.invalidateQueries({ queryKey: ["ghl-connection", vars.id] });
+    },
   });
 }
 

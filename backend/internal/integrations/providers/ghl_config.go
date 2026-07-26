@@ -141,6 +141,37 @@ func ParseGHLConfig(config map[string]any) (GHLConfig, error) {
 	return out, nil
 }
 
+// ParseGHLConfigForTest validates only what credential testing needs (location or webhook URL).
+// It does not require pipeline_stage_map, calendar_id, or appointment fields.
+func ParseGHLConfigForTest(config map[string]any) (GHLConfig, error) {
+	out := GHLConfig{CreateContact: true}
+	if config == nil {
+		config = map[string]any{}
+	}
+	out.DeliveryMode = parseGHLDeliveryMode(config)
+	if s, ok := config["webhook_url"].(string); ok {
+		out.WebhookURL = strings.TrimSpace(s)
+	}
+	if loc, ok := config["location_id"].(string); ok {
+		out.LocationID = strings.TrimSpace(loc)
+	}
+
+	if out.DeliveryMode == "webhook" {
+		if out.WebhookURL == "" {
+			return out, fmt.Errorf("webhook_url is required in webhook delivery mode")
+		}
+		if !ghlWebhookURLValid(out.WebhookURL) {
+			return out, fmt.Errorf("webhook_url must be a valid http or https URL")
+		}
+		return out, nil
+	}
+
+	if out.LocationID == "" {
+		return out, fmt.Errorf("location_id is required in config")
+	}
+	return out, nil
+}
+
 func parseGHLTitleTemplate(config map[string]any, templateKey, legacyKey, defaultTemplate string) string {
 	if raw, ok := config[templateKey]; ok {
 		if s, ok := raw.(string); ok {

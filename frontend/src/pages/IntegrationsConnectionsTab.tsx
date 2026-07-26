@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { FormDrawer } from "@/components/ui/dialog";
+import { Spinner } from "@/components/ui/misc";
 import { IntegrationsCatalog } from "@/features/integrations/IntegrationsCatalog";
 import {
   integrationLogoClassName,
@@ -39,6 +40,7 @@ import {
   useDeleteIntegrationConnection,
   useOAuthConnect,
   useTestIntegrationConnection,
+  useTestStoredIntegrationConnection,
   useUpdateIntegrationConnection,
   useSunbaseConnectionDetail,
   useGhlConnectionDetail,
@@ -49,7 +51,6 @@ import {
 } from "@/features/integrations/hooks";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
-import { Spinner } from "@/components/ui/misc";
 import type { IntegrationConnection, IntegrationProvider, OutboundFieldMapEntry, SunbaseInboundWebhook } from "@/types";
 
 export function IntegrationsConnectionsTab() {
@@ -164,6 +165,7 @@ function AddConnectionDrawer({
   const create = useCreateIntegrationConnection();
   const update = useUpdateIntegrationConnection();
   const testConn = useTestIntegrationConnection();
+  const testStoredConn = useTestStoredIntegrationConnection();
   const fetchGhlMetadata = useFetchGhlMetadata();
   const oauth = useOAuthConnect();
   const remove = useDeleteIntegrationConnection();
@@ -303,6 +305,7 @@ function AddConnectionDrawer({
     setSunbaseActive(false);
     setTwilioActive(false);
     setName(conn.name);
+    setPitToken("");
     const cfg = (conn.config ?? {}) as GHLConfig;
     setLocationId(cfg.location_id ?? "");
     setGhlConfig(normalizeGhlConfig({
@@ -322,6 +325,39 @@ function AddConnectionDrawer({
   }
 
   const ghlWebhookMode = isGhlWebhookMode(ghlConfig);
+  const hasStoredPit = ghlDetail?.has_private_integration_token === true;
+  const canTestWithStoredPit = showGhlActive && hasStoredPit && !pitToken.trim();
+
+  const ghlTestConnectionDisabled = ghlWebhookMode
+    ? !ghlConfig.webhook_url?.trim() || testConn.isPending || testStoredConn.isPending
+    : (!pitToken.trim() && !canTestWithStoredPit) ||
+      !locationId.trim() ||
+      testConn.isPending ||
+      testStoredConn.isPending ||
+      fetchGhlMetadata.isPending;
+  const ghlTestConnectionPending =
+    testConn.isPending || testStoredConn.isPending || (!ghlWebhookMode && fetchGhlMetadata.isPending);
+  const ghlTestConnectionLoadingLabel =
+    !ghlWebhookMode && fetchGhlMetadata.isPending ? "Loading GHL data…" : "Testing…";
+
+  function ghlTestConnectionButton() {
+    return (
+      <Button
+        variant="secondary"
+        disabled={ghlTestConnectionDisabled}
+        onClick={runTestGhlConnection}
+      >
+        {ghlTestConnectionPending ? (
+          <span className="inline-flex items-center gap-2">
+            <Spinner className="h-3.5 w-3.5" />
+            {ghlTestConnectionLoadingLabel}
+          </span>
+        ) : (
+          "Test connection"
+        )}
+      </Button>
+    );
+  }
 
   function runTestGhlConnection() {
     if (ghlWebhookMode) {
@@ -333,7 +369,10 @@ function AddConnectionDrawer({
         {
           provider_slug: "ghl",
           credentials: {},
-          config: normalizeGhlConfig({ ...ghlConfig, create_contact: true }),
+          config: {
+            delivery_mode: "webhook",
+            webhook_url: ghlConfig.webhook_url?.trim(),
+          },
         },
         {
           onSuccess: (res) => {
@@ -346,6 +385,19 @@ function AddConnectionDrawer({
       return;
     }
     if (!pitToken.trim()) {
+      if (canTestWithStoredPit && activeConnection) {
+        testStoredConn.mutate(activeConnection.id, {
+          onSuccess: (res) => {
+            if (!res.ok) {
+              toast.error(res.message ?? "Connection failed");
+              return;
+            }
+            toast.success("Connection successful");
+          },
+          onError: (e) => toast.error(errorMessage(e)),
+        });
+        return;
+      }
       toast.error("Enter a Private Integration Token to test");
       return;
     }
@@ -357,7 +409,7 @@ function AddConnectionDrawer({
       {
         provider_slug: "ghl",
         credentials: { private_integration_token: pitToken.trim() },
-        config: { ...ghlConfig, location_id: locationId.trim() },
+        config: { delivery_mode: "api", location_id: locationId.trim() },
       },
       {
         onSuccess: (res) => {
@@ -525,6 +577,15 @@ function AddConnectionDrawer({
 
   function saveGhlChanges() {
     if (!activeConnection) return;
+    if (
+      !ghlWebhookMode &&
+      !pitToken.trim() &&
+      ghlDetail !== undefined &&
+      !hasStoredPit
+    ) {
+      toast.error("Private Integration Token is required");
+      return;
+    }
     const config = normalizeGhlConfig({
       ...ghlConfig,
       ...(ghlWebhookMode ? {} : { location_id: locationId.trim() }),
@@ -543,6 +604,7 @@ function AddConnectionDrawer({
         onSuccess: (conn) => {
           setActiveConnection(conn);
           if (conn.inbound_webhook) setInboundWebhook(conn.inbound_webhook);
+          if (pitToken.trim()) setPitToken("");
           toast.success("Saved");
         },
         onError: (e) => toast.error(errorMessage(e)),
@@ -625,6 +687,7 @@ function AddConnectionDrawer({
                 Disconnect
               </Button>
             )}
+            {ghlTestConnectionButton()}
             <Button variant="secondary" onClick={onClose}>
               Done
             </Button>
@@ -652,6 +715,7 @@ function AddConnectionDrawer({
             <Button variant="secondary" onClick={onClose}>
               Cancel
             </Button>
+            {isGhl && ghlTestConnectionButton()}
             <Button
               disabled={
                 !slug ||
@@ -845,23 +909,16 @@ function AddConnectionDrawer({
                           onPitTokenChange: setPitToken,
                           locationId,
                           onLocationIdChange: setLocationId,
-                          pitPlaceholder: showGhlActive ? "Leave blank to keep current token" : undefined,
+                          pitPlaceholder:
+                            showGhlActive && hasStoredPit
+                              ? "Leave blank to keep current token"
+                              : showGhlActive
+                                ? "Enter your Private Integration Token"
+                                : undefined,
+                          hasPrivateIntegrationToken: showGhlActive
+                            ? ghlDetail?.has_private_integration_token
+                            : undefined,
                         }
-                  }
-                  onTestConnection={runTestGhlConnection}
-                  testConnectionDisabled={
-                    ghlWebhookMode
-                      ? !ghlConfig.webhook_url?.trim() || testConn.isPending
-                      : !pitToken.trim() ||
-                        !locationId.trim() ||
-                        testConn.isPending ||
-                        fetchGhlMetadata.isPending
-                  }
-                  testConnectionPending={
-                    testConn.isPending || (!ghlWebhookMode && fetchGhlMetadata.isPending)
-                  }
-                  testConnectionLoadingLabel={
-                    !ghlWebhookMode && fetchGhlMetadata.isPending ? "Loading GHL data…" : "Testing…"
                   }
                 />
               </div>

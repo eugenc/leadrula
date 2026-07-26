@@ -6,6 +6,37 @@ import (
 	"github.com/echayko/leadrula/backend/internal/integrations/providers"
 )
 
+func testEncKey(t *testing.T) []byte {
+	t.Helper()
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	return key
+}
+
+func TestGhlCredentialsHavePIT(t *testing.T) {
+	key := testEncKey(t)
+	plain := []byte(`{"private_integration_token":"pit-abc"}`)
+	enc, err := encrypt(key, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ghlCredentialsHavePIT(key, enc) {
+		t.Fatal("expected true for valid encrypted PIT")
+	}
+	if ghlCredentialsHavePIT(key, nil) {
+		t.Fatal("expected false for empty credentials")
+	}
+	emptyEnc, err := encrypt(key, []byte(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ghlCredentialsHavePIT(key, emptyEnc) {
+		t.Fatal("expected false for empty JSON credentials")
+	}
+}
+
 func TestValidateGHLConfigJSON_appointmentRequiresFields(t *testing.T) {
 	err := providers.ValidateGHLConfigJSON(map[string]any{
 		"location_id":        "loc1",
