@@ -8,6 +8,7 @@ Local-only helpers for GoHighLevel API setup. **Do not commit real tokens** — 
 |------|--------|
 | Pipelines | `opportunities.write`, `opportunities.readonly` |
 | Calendars | `calendars.write`, `calendars.readonly` |
+| Custom fields (field mapping dropdown) | `locations/customFields.read` |
 
 In GHL: **Settings → Private Integrations → [your token] → Scopes**. Add missing scopes and save. If GHL regenerates the token, update `pit_nc`.
 

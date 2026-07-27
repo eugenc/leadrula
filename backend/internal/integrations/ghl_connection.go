@@ -147,9 +147,14 @@ func (s *Service) GHLMetadataFromCredentials(ctx context.Context, credentialsRaw
 	if err != nil {
 		return nil, httpx.Validation(err.Error())
 	}
+	customFields, err := providers.FetchGHLCustomFields(ctx, token, locationID)
+	if err != nil {
+		return nil, httpx.Validation(err.Error())
+	}
 	return map[string]any{
-		"pipelines": pipelines,
-		"calendars": calendars,
+		"pipelines":     pipelines,
+		"calendars":     calendars,
+		"custom_fields": providers.GHLCustomFieldsToResponse(customFields),
 	}, nil
 }
 
@@ -167,6 +172,12 @@ func (s *Service) ghlMetadataByKind(ctx context.Context, token, locationID, kind
 			return nil, httpx.Validation(err.Error())
 		}
 		return map[string]any{"calendars": calendars}, nil
+	case "custom_fields":
+		customFields, err := providers.FetchGHLCustomFields(ctx, token, locationID)
+		if err != nil {
+			return nil, httpx.Validation(err.Error())
+		}
+		return map[string]any{"custom_fields": providers.GHLCustomFieldsToResponse(customFields)}, nil
 	default:
 		return nil, httpx.Validation("unknown metadata kind")
 	}

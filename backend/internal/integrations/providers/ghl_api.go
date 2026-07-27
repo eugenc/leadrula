@@ -125,6 +125,9 @@ func ghlCreateOpportunity(ctx context.Context, token string, cfg GHLConfig, cont
 		"status":            "open",
 		"source":            payload.Source,
 	}
+	if fields := ghlCustomFieldsPayload(cfg.OutboundFieldMap, payload, "opportunity"); len(fields) > 0 {
+		opp["customFields"] = fields
+	}
 	res, err := ghlDo(ctx, http.MethodPost, "/opportunities/", token, cfg.LocationID, opp)
 	mapped := AnyMapToMapped(opp)
 	result := &DeliveryResult{
@@ -251,4 +254,56 @@ func FetchGHLPipelines(ctx context.Context, token, locationID string) ([]GHLPipe
 
 func FetchGHLCalendars(ctx context.Context, token, locationID string) ([]GHLCalendar, error) {
 	return ghlListCalendars(ctx, token, locationID)
+}
+
+type GHLCustomField struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	FieldKey string `json:"fieldKey"`
+	Model    string `json:"model"`
+	DataType string `json:"dataType"`
+}
+
+type GHLCustomFieldResponse struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	FieldKey string `json:"field_key"`
+	Model    string `json:"model"`
+	DataType string `json:"data_type"`
+}
+
+func GHLCustomFieldsToResponse(fields []GHLCustomField) []GHLCustomFieldResponse {
+	out := make([]GHLCustomFieldResponse, 0, len(fields))
+	for _, f := range fields {
+		out = append(out, GHLCustomFieldResponse{
+			ID:       f.ID,
+			Name:     f.Name,
+			FieldKey: f.FieldKey,
+			Model:    f.Model,
+			DataType: f.DataType,
+		})
+	}
+	return out
+}
+
+func ghlListCustomFields(ctx context.Context, token, locationID string) ([]GHLCustomField, error) {
+	path := "/locations/" + url.PathEscape(locationID) + "/customFields?model=all"
+	res, err := ghlDo(ctx, http.MethodGet, path, token, locationID, nil)
+	if err != nil {
+		return nil, err
+	}
+	if res.Status < 200 || res.Status >= 300 {
+		return nil, fmt.Errorf("%s", ghlErrorMessage(res))
+	}
+	var parsed struct {
+		CustomFields []GHLCustomField `json:"customFields"`
+	}
+	if err := json.Unmarshal(res.Body, &parsed); err != nil {
+		return nil, err
+	}
+	return parsed.CustomFields, nil
+}
+
+func FetchGHLCustomFields(ctx context.Context, token, locationID string) ([]GHLCustomField, error) {
+	return ghlListCustomFields(ctx, token, locationID)
 }

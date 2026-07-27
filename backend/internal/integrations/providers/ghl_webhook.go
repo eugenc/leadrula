@@ -34,7 +34,16 @@ func ghlWebhookURLValid(raw string) bool {
 }
 
 func buildGHLWebhookPayload(cfg GHLConfig, payload DeliveryPayload) map[string]any {
-	body := buildGHLContactBody(cfg, payload)
+	body := ghlStandardContactFields(cfg, payload)
+	for _, e := range cfg.OutboundFieldMap {
+		if e.DestKey == "" {
+			continue
+		}
+		v := resolveGHLFieldValue(e, payload)
+		if v != "" {
+			body[e.DestKey] = v
+		}
+	}
 	delete(body, "locationId")
 	delete(body, "tags")
 	if payload.PipelineID != 0 {

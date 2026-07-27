@@ -23,6 +23,7 @@ import {
 import { GhlCustomFieldMapSection } from "@/features/integrations/GhlCustomFieldMapSection";
 import { GhlPipelineStageMapSection } from "@/features/integrations/GhlPipelineStageMapSection";
 import { GhlTitleTemplateEditor } from "@/features/integrations/GhlTitleTemplateEditor";
+import type { GhlCustomField } from "@/features/integrations/hooks";
 import type { OutboundFieldMapEntry } from "@/types";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
@@ -55,16 +56,20 @@ export function GhlConnectionSettings({
   onChange,
   ghlPipelines,
   ghlCalendars,
+  ghlCustomFields,
   ghlPipelinesLoading = false,
   ghlCalendarsLoading = false,
+  ghlCustomFieldsLoading = false,
   apiAuth,
 }: {
   config: GHLConfig;
   onChange: (config: GHLConfig) => void;
   ghlPipelines: GhlPipeline[];
   ghlCalendars: GhlCalendar[];
+  ghlCustomFields: GhlCustomField[];
   ghlPipelinesLoading?: boolean;
   ghlCalendarsLoading?: boolean;
+  ghlCustomFieldsLoading?: boolean;
   apiAuth?: {
     pitToken: string;
     onPitTokenChange: (v: string) => void;
@@ -245,6 +250,9 @@ export function GhlConnectionSettings({
       <GhlCustomFieldMapSection
         entries={outboundMap}
         onChange={(entries) => patch({ outbound_field_map: entries })}
+        ghlCustomFields={ghlCustomFields}
+        ghlCustomFieldsLoading={ghlCustomFieldsLoading}
+        webhookMode={webhookMode}
       />
 
       {webhookMode && (
