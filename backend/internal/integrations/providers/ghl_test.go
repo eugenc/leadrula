@@ -293,6 +293,94 @@ func TestParseGHLConfig_appointmentDefaultsDatetime(t *testing.T) {
 	}
 }
 
+func TestBuildGHLContactBody_customFields(t *testing.T) {
+	fieldID := "cf-abc"
+	fieldKey := "contact.roof_type"
+	model := "contact"
+	cfg := GHLConfig{
+		LocationID:    "loc1",
+		CreateContact: true,
+		OutboundFieldMap: []SunbaseFieldMapEntry{
+			{
+				DestKey:          fieldKey,
+				SourceType:       "static",
+				StaticValue:      strPtr("Solar"),
+				GHLCustomFieldID: &fieldID,
+				GHLFieldModel:    &model,
+			},
+		},
+	}
+	body := buildGHLContactBody(cfg, DeliveryPayload{})
+	raw, ok := body["customFields"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected customFields array, got %T: %v", body["customFields"], body["customFields"])
+	}
+	if len(raw) != 1 {
+		t.Fatalf("expected 1 custom field, got %d", len(raw))
+	}
+	if raw[0]["id"] != fieldID || raw[0]["key"] != fieldKey || raw[0]["field_value"] != "Solar" {
+		t.Fatalf("unexpected custom field: %v", raw[0])
+	}
+	if _, ok := body[fieldKey]; ok {
+		t.Fatalf("custom field should not be top-level key")
+	}
+}
+
+func TestBuildGHLContactBody_legacyKeyOnly(t *testing.T) {
+	cfg := GHLConfig{
+		LocationID:    "loc1",
+		CreateContact: true,
+		OutboundFieldMap: []SunbaseFieldMapEntry{
+			{
+				DestKey:     "contact.legacy_field",
+				SourceType:  "static",
+				StaticValue: strPtr("value"),
+			},
+		},
+	}
+	body := buildGHLContactBody(cfg, DeliveryPayload{})
+	raw, ok := body["customFields"].([]map[string]any)
+	if !ok || len(raw) != 1 {
+		t.Fatalf("expected legacy key-only custom field, got %v", body["customFields"])
+	}
+	if raw[0]["key"] != "contact.legacy_field" {
+		t.Fatalf("unexpected key: %v", raw[0]["key"])
+	}
+	if _, hasID := raw[0]["id"]; hasID {
+		t.Fatal("legacy mapping should not include id")
+	}
+}
+
+func TestGhlCustomFieldsPayload_opportunityOnly(t *testing.T) {
+	fieldID := "opp-cf"
+	fieldKey := "opportunity.disposition"
+	model := "opportunity"
+	contactModel := "contact"
+	entries := []SunbaseFieldMapEntry{
+		{
+			DestKey:          fieldKey,
+			SourceType:       "static",
+			StaticValue:      strPtr("Showed"),
+			GHLCustomFieldID: &fieldID,
+			GHLFieldModel:    &model,
+		},
+		{
+			DestKey:       "contact.notes",
+			SourceType:    "static",
+			StaticValue:   strPtr("note"),
+			GHLFieldModel: &contactModel,
+		},
+	}
+	oppFields := ghlCustomFieldsPayload(entries, DeliveryPayload{}, "opportunity")
+	if len(oppFields) != 1 || oppFields[0]["key"] != fieldKey {
+		t.Fatalf("unexpected opportunity fields: %v", oppFields)
+	}
+	contactFields := ghlCustomFieldsPayload(entries, DeliveryPayload{}, "contact")
+	if len(contactFields) != 1 || contactFields[0]["key"] != "contact.notes" {
+		t.Fatalf("unexpected contact fields: %v", contactFields)
+	}
+}
+
 func TestParseAppointmentTimes(t *testing.T) {
 	start, end, err := parseAppointmentTimes("2024-06-15T10:00:00", "America/New_York")
 	if err != nil {

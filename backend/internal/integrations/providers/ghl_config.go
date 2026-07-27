@@ -304,7 +304,15 @@ func resolveGHLStage(mapEntries []GHLPipelineStageMapEntry, pipelineID, stageID 
 }
 
 func buildGHLContactBody(cfg GHLConfig, payload DeliveryPayload) map[string]any {
-	contact := map[string]any{
+	contact := ghlStandardContactFields(cfg, payload)
+	if fields := ghlCustomFieldsPayload(cfg.OutboundFieldMap, payload, "contact"); len(fields) > 0 {
+		contact["customFields"] = fields
+	}
+	return contact
+}
+
+func ghlStandardContactFields(cfg GHLConfig, payload DeliveryPayload) map[string]any {
+	return map[string]any{
 		"firstName":  payload.FirstName,
 		"lastName":   payload.LastName,
 		"phone":      payload.Phone,
@@ -317,16 +325,37 @@ func buildGHLContactBody(cfg GHLConfig, payload DeliveryPayload) map[string]any 
 		"locationId": cfg.LocationID,
 		"tags":       []string{"leadrula"},
 	}
-	for _, e := range cfg.OutboundFieldMap {
-		if e.DestKey == "" {
+}
+
+func ghlFieldModel(e SunbaseFieldMapEntry) string {
+	if e.GHLFieldModel != nil {
+		if m := strings.TrimSpace(*e.GHLFieldModel); m != "" {
+			return m
+		}
+	}
+	return "contact"
+}
+
+func ghlCustomFieldsPayload(entries []SunbaseFieldMapEntry, payload DeliveryPayload, model string) []map[string]any {
+	var out []map[string]any
+	for _, e := range entries {
+		if e.DestKey == "" || ghlFieldModel(e) != model {
 			continue
 		}
 		v := resolveGHLFieldValue(e, payload)
-		if v != "" {
-			contact[e.DestKey] = v
+		if v == "" {
+			continue
 		}
+		item := map[string]any{
+			"key":          e.DestKey,
+			"field_value":  v,
+		}
+		if e.GHLCustomFieldID != nil && strings.TrimSpace(*e.GHLCustomFieldID) != "" {
+			item["id"] = strings.TrimSpace(*e.GHLCustomFieldID)
+		}
+		out = append(out, item)
 	}
-	return contact
+	return out
 }
 
 func resolveGHLFieldValue(e SunbaseFieldMapEntry, payload DeliveryPayload) string {

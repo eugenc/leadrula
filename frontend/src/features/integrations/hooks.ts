@@ -139,6 +139,25 @@ export function useGhlCalendars(connectionId: number | null) {
   });
 }
 
+export type GhlCustomField = {
+  id: string;
+  name: string;
+  field_key: string;
+  model: "contact" | "opportunity";
+  data_type: string;
+};
+
+export function useGhlCustomFields(connectionId: number | null) {
+  return useQuery({
+    queryKey: ["ghl-custom-fields", connectionId],
+    queryFn: () =>
+      get<{ custom_fields: GhlCustomField[] }>(
+        `${ns()}/integrations/connections/${connectionId}/ghl/custom-fields`
+      ),
+    enabled: connectionId != null,
+  });
+}
+
 export function useTwilioPhoneNumbers(connectionId: number | null) {
   return useQuery({
     queryKey: ["twilio-phone-numbers", connectionId],
@@ -217,6 +236,7 @@ export function useReleaseTwilioPhoneNumber() {
 export type GhlMetadataPreview = {
   pipelines: { id: string; name: string; stages?: { id: string; name: string }[] }[];
   calendars: { id: string; name: string }[];
+  custom_fields: GhlCustomField[];
 };
 
 export function useFetchGhlMetadata() {

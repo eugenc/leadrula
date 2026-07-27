@@ -46,6 +46,7 @@ import {
   useGhlConnectionDetail,
   useGhlPipelines,
   useGhlCalendars,
+  useGhlCustomFields,
   useFetchGhlMetadata,
   type GhlMetadataPreview,
 } from "@/features/integrations/hooks";
@@ -188,13 +189,17 @@ function AddConnectionDrawer({
   const { data: ghlDetail } = useGhlConnectionDetail(ghlDetailId);
   const { data: ghlPipelinesData, isLoading: ghlPipelinesLoading } = useGhlPipelines(ghlDetailId);
   const { data: ghlCalendarsData, isLoading: ghlCalendarsLoading } = useGhlCalendars(ghlDetailId);
+  const { data: ghlCustomFieldsData, isLoading: ghlCustomFieldsLoading } = useGhlCustomFields(ghlDetailId);
 
   const ghlPipelines =
     ghlPipelinesData?.pipelines ?? ghlMetadataPreview?.pipelines ?? [];
   const ghlCalendars =
     ghlCalendarsData?.calendars ?? ghlMetadataPreview?.calendars ?? [];
+  const ghlCustomFields =
+    ghlCustomFieldsData?.custom_fields ?? ghlMetadataPreview?.custom_fields ?? [];
   const ghlPipelinesBusy = showGhlActive ? ghlPipelinesLoading : fetchGhlMetadata.isPending;
   const ghlCalendarsBusy = showGhlActive ? ghlCalendarsLoading : fetchGhlMetadata.isPending;
+  const ghlCustomFieldsBusy = showGhlActive ? ghlCustomFieldsLoading : fetchGhlMetadata.isPending;
 
   const drawerTitle = showSunbaseActive
     ? "SunBase connected"
@@ -899,8 +904,10 @@ function AddConnectionDrawer({
                   onChange={setGhlConfig}
                   ghlPipelines={ghlPipelines}
                   ghlCalendars={ghlCalendars}
+                  ghlCustomFields={ghlCustomFields}
                   ghlPipelinesLoading={ghlPipelinesBusy}
                   ghlCalendarsLoading={ghlCalendarsBusy}
+                  ghlCustomFieldsLoading={ghlCustomFieldsBusy}
                   apiAuth={
                     ghlWebhookMode
                       ? undefined

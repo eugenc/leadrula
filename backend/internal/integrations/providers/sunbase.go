@@ -25,11 +25,13 @@ var (
 )
 
 type SunbaseFieldMapEntry struct {
-	DestKey       string  `json:"dest_key"`
-	SourceType    string  `json:"source_type"`
-	BuiltinField  *string `json:"builtin_field,omitempty"`
-	CustomFieldID *int64  `json:"custom_field_id,omitempty"`
-	StaticValue   *string `json:"static_value,omitempty"`
+	DestKey          string  `json:"dest_key"`
+	SourceType       string  `json:"source_type"`
+	BuiltinField     *string `json:"builtin_field,omitempty"`
+	CustomFieldID    *int64  `json:"custom_field_id,omitempty"`
+	StaticValue      *string `json:"static_value,omitempty"`
+	GHLCustomFieldID *string `json:"ghl_custom_field_id,omitempty"`
+	GHLFieldModel    *string `json:"ghl_field_model,omitempty"`
 }
 
 type SunbaseProvider struct{}
