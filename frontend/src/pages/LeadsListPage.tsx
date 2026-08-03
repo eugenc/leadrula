@@ -69,6 +69,8 @@ import {
   formatStatus,
   buyerStatusBadgeVariant,
   formatBuyerStatus,
+  leadsNeedsEconomics,
+  leadsNeedsStageHistory,
 } from "@/features/leads/leadsListColumns";
 
 const PAGE_SIZES = [25, 50, 100] as const;
@@ -133,8 +135,8 @@ export function LeadsListPage() {
 
   const filtersChanged = filtersViewChanged(activeView, conditions);
 
-  const filters = useMemo(
-    () => ({
+  const filters = useMemo(() => {
+    const base = {
       view_id: filtersChanged ? undefined : activeId,
       filters: filtersChanged ? JSON.stringify(conditions) : undefined,
       q: debouncedSearch || undefined,
@@ -142,22 +144,30 @@ export function LeadsListPage() {
       limit,
       sort,
       sort_dir: sortDir,
-    }),
-    [filtersChanged, activeId, conditions, debouncedSearch, page, limit, sort, sortDir]
-  );
+    };
+    return {
+      ...base,
+      ...(!leadsNeedsEconomics(visibleCols) ? { include_economics: false as const } : {}),
+      ...(!leadsNeedsStageHistory(visibleCols, sort) ? { include_stage_history: false as const } : {}),
+    };
+  }, [filtersChanged, activeId, conditions, debouncedSearch, page, limit, sort, sortDir, visibleCols]);
 
-  const bulkListFilters = useMemo(
-    () => ({
+  const bulkListFilters = useMemo(() => {
+    const base = {
       view_id: filtersChanged ? undefined : activeId,
       filters: filtersChanged ? JSON.stringify(conditions) : undefined,
       q: debouncedSearch || undefined,
       sort,
       sort_dir: sortDir,
-    }),
-    [filtersChanged, activeId, conditions, debouncedSearch, sort, sortDir]
-  );
+    };
+    return {
+      ...base,
+      ...(!leadsNeedsEconomics(visibleCols) ? { include_economics: false as const } : {}),
+      ...(!leadsNeedsStageHistory(visibleCols, sort) ? { include_stage_history: false as const } : {}),
+    };
+  }, [filtersChanged, activeId, conditions, debouncedSearch, sort, sortDir, visibleCols]);
 
-  const { data, isLoading, isError, error } = useLeads(filters);
+  const { data, isLoading, isError, error } = useLeads(filters, { enabled: !activeLoading });
   const bulk = useBulkLeads();
   const openDetail = useUIStore((s) => s.openDetail);
 
@@ -401,7 +411,7 @@ export function LeadsListPage() {
           </div>
         )}
 
-        {isLoading || viewsLoading || activeLoading ? (
+        {isLoading && !data ? (
           <div className="flex justify-center py-16">
             <Spinner className="h-6 w-6" />
           </div>

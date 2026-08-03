@@ -2,6 +2,8 @@ import { useRef } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { LeadCard } from "./LeadCard";
+import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/misc";
 import { cn } from "@/lib/utils";
 import { stageColorDot, stageColorLine } from "@/features/pipelines/stageColors";
 import { isBoardDraggable } from "./boardStage";
@@ -64,6 +66,10 @@ export function BoardColumn({
   accountType,
   droppable = true,
   headerHint,
+  loading = false,
+  hasMore = false,
+  onLoadMore,
+  loadingMore = false,
 }: {
   stage: Stage;
   items: Lead[];
@@ -75,6 +81,10 @@ export function BoardColumn({
   accountType?: AccountType;
   droppable?: boolean;
   headerHint?: string;
+  loading?: boolean;
+  hasMore?: boolean;
+  onLoadMore?: () => void;
+  loadingMore?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const { setNodeRef, isOver } = useDroppable({
@@ -89,6 +99,8 @@ export function BoardColumn({
     estimateSize: () => rowHeight,
     overscan: 5,
   });
+
+  const totalLabel = hasMore ? `${items.length}+` : String(items.length);
 
   return (
     <div
@@ -105,7 +117,7 @@ export function BoardColumn({
         >
           {stage.name}
         </span>
-        <span className="text-xs text-gray-400">{items.length}</span>
+        <span className="text-xs text-gray-400">{totalLabel}</span>
       </div>
       <div
         ref={(node) => {
@@ -121,44 +133,65 @@ export function BoardColumn({
             stageColorLine(stage.color)
           )}
         />
-        <div
-          style={{
-            height: virtualizer.getTotalSize(),
-            width: "100%",
-            position: "relative",
-          }}
-        >
-          {virtualizer.getVirtualItems().map((vi) => {
-            const lead = items[vi.index];
-            if (!lead) return null;
-            return (
-              <div
-                key={lead.id}
-                data-index={vi.index}
-                ref={virtualizer.measureElement}
-                className="pb-2"
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  transform: `translateY(${vi.start}px)`,
-                }}
-              >
-                <VirtualLeadRow
-                  lead={lead}
-                  stageId={stage.id}
-                  stageType={stage.stage_type}
-                  customFields={customFields}
-                  cardFields={cardFields}
-                  onClick={() => onCardClick(lead.id)}
-                  isDragOverlaySource={activeDragId === String(lead.id)}
-                  draggable={isBoardDraggable(lead, accountType)}
-                />
-              </div>
-            );
-          })}
-        </div>
+        {loading ? (
+          <div className="flex justify-center py-8">
+            <Spinner className="h-5 w-5" />
+          </div>
+        ) : items.length === 0 ? (
+          <p className="py-4 text-center text-xs text-gray-400">No leads</p>
+        ) : (
+          <div
+            style={{
+              height: virtualizer.getTotalSize(),
+              width: "100%",
+              position: "relative",
+            }}
+          >
+            {virtualizer.getVirtualItems().map((vi) => {
+              const lead = items[vi.index];
+              if (!lead) return null;
+              return (
+                <div
+                  key={lead.id}
+                  data-index={vi.index}
+                  ref={virtualizer.measureElement}
+                  className="pb-2"
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${vi.start}px)`,
+                  }}
+                >
+                  <VirtualLeadRow
+                    lead={lead}
+                    stageId={stage.id}
+                    stageType={stage.stage_type}
+                    customFields={customFields}
+                    cardFields={cardFields}
+                    onClick={() => onCardClick(lead.id)}
+                    isDragOverlaySource={activeDragId === String(lead.id)}
+                    draggable={isBoardDraggable(lead, accountType)}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {hasMore && onLoadMore && (
+          <div className="pb-2 pt-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full text-xs"
+              onClick={onLoadMore}
+              disabled={loadingMore}
+            >
+              {loadingMore ? "Loading…" : "Load more"}
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

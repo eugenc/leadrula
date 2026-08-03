@@ -74,12 +74,14 @@ func (h *Handler) publicList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	opts := ListOptions{
-		ListFilters: f,
-		Page:        int(parseInt(q.Get("page"))),
-		Limit:       int(parseInt(q.Get("limit"))),
-		Sort:        q.Get("sort"),
-		SortDir:     q.Get("sort_dir"),
-		All:         q.Get("all") == "1",
+		ListFilters:         f,
+		Page:                int(parseInt(q.Get("page"))),
+		Limit:               int(parseInt(q.Get("limit"))),
+		Sort:                q.Get("sort"),
+		SortDir:             q.Get("sort_dir"),
+		All:                 q.Get("all") == "1",
+		IncludeEconomics:    parseIncludeFlag(q.Get("include_economics"), true),
+		IncludeStageHistory: parseIncludeFlag(q.Get("include_stage_history"), true),
 	}
 
 	result, err := h.svc.repo.List(r.Context(), p, opts)

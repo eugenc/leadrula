@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueries, keepPreviousData } from "@tanstack/react-query";
 import { get } from "@/lib/api";
 import type { Me } from "@/types";
 import {
@@ -18,6 +18,9 @@ import {
   useLeads,
   useChangeStage,
   useCustomFields,
+  BOARD_STAGE_LIMIT,
+  fetchLeads,
+  type LeadFilters,
 } from "./hooks";
 import { BoardSortPicker } from "./BoardSortPicker";
 import { BoardColumn } from "./BoardColumn";
@@ -55,6 +58,8 @@ import {
   parseBoardCardFields,
   BOARD_CARD_FIELDS_PREF_KEY,
   PIPELINE_COLUMNS,
+  leadsNeedsEconomics,
+  leadsNeedsStageHistory,
 } from "./leadsListColumns";
 import { useAuthStore } from "@/store/authStore";
 import { groupLeadsForBoard, isPublisherTrackedLead, UNPLACED_BOARD_STAGE_ID } from "./boardStage";
@@ -80,6 +85,29 @@ function resolveDropStage(over: DragEndEvent["over"]): number | null {
   if (stageId != null) return Number(stageId);
   const n = Number(over.id);
   return Number.isFinite(n) ? n : null;
+}
+
+function buildBoardLeadFilters(
+  pipelineId: number | undefined,
+  filtersChanged: boolean,
+  activeId: string,
+  conditions: FilterCondition[],
+  debouncedSearch: string,
+  sort: string,
+  sortDir: "asc" | "desc",
+  cardFields: string[]
+): LeadFilters {
+  const filters: LeadFilters = {
+    pipeline_id: pipelineId,
+    view_id: filtersChanged ? undefined : activeId,
+    filters: filtersChanged ? JSON.stringify(conditions) : undefined,
+    q: debouncedSearch || undefined,
+    sort,
+    sort_dir: sortDir,
+  };
+  if (!leadsNeedsEconomics(cardFields)) filters.include_economics = false;
+  if (!leadsNeedsStageHistory(cardFields, sort)) filters.include_stage_history = false;
+  return filters;
 }
 
 function estimateRowHeight(cardFieldCount: number): number {
@@ -176,23 +204,20 @@ export function Board() {
   }, [activeId, viewsLoading, activeLoading, views, applyViewFilters]);
 
   useEffect(() => {
-    if (viewsLoading || activeLoading || customFieldsLoading || uiHydrated.current || !user?.id) return;
+    if (!user?.id || uiHydrated.current) return;
+    setUiReady(true);
+    uiHydrated.current = true;
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id || customFieldsLoading) return;
     const legacyCardFields = parseBoardCardFields(me?.user.prefs?.[BOARD_CARD_FIELDS_PREF_KEY]);
     const stored =
       loadBoardUi(user.id, allColumnIds, legacyCardFields) ?? defaultBoardUi(allColumnIds);
     setSort(stored.sort);
     setSortDir(stored.sort_dir);
     setCardFields(stored.card_fields);
-    uiHydrated.current = true;
-    setUiReady(true);
-  }, [
-    viewsLoading,
-    activeLoading,
-    customFieldsLoading,
-    user?.id,
-    allColumnIds,
-    me?.user.prefs,
-  ]);
+  }, [customFieldsLoading, user?.id, allColumnIds, me?.user.prefs]);
 
   const filtersChanged = filtersViewChanged(activeView, conditions);
 
@@ -201,39 +226,58 @@ export function Board() {
     return () => clearTimeout(t);
   }, [searchTerm]);
 
-  const leadFilters = useMemo(
-    () => ({
-      pipeline_id: pipelineId,
-      all: true as const,
-      view_id: filtersChanged ? undefined : activeId,
-      filters: filtersChanged ? JSON.stringify(conditions) : undefined,
-      q: debouncedSearch || undefined,
-      sort,
-      sort_dir: sortDir,
-    }),
-    [pipelineId, filtersChanged, activeId, conditions, debouncedSearch, sort, sortDir]
+  const activeCardFields = cardFields.filter((id) => allColumnIds.includes(id));
+
+  const baseLeadFilters = useMemo(
+    () =>
+      buildBoardLeadFilters(
+        pipelineId,
+        filtersChanged,
+        activeId,
+        conditions,
+        debouncedSearch,
+        sort,
+        sortDir,
+        activeCardFields
+      ),
+    [pipelineId, filtersChanged, activeId, conditions, debouncedSearch, sort, sortDir, activeCardFields]
   );
 
   const suggestionFilters = useMemo(
-    () => ({
-      pipeline_id: pipelineId,
-      all: true as const,
-      view_id: filtersChanged ? undefined : activeId,
-      filters: filtersChanged ? JSON.stringify(conditions) : undefined,
-      sort,
-      sort_dir: sortDir,
-    }),
-    [pipelineId, filtersChanged, activeId, conditions, sort, sortDir]
+    () => ({ ...baseLeadFilters, page: 1, limit: 8 }),
+    [baseLeadFilters]
   );
 
   const { data: stages } = useStages(pipelineId);
-  const { data: leads, isLoading, isFetching, isError, error } = useLeads(leadFilters, {
-    keepPreviousData: true,
+  const stageList = useMemo(
+    () => [...(stages ?? [])].sort((a, b) => a.position - b.position),
+    [stages]
+  );
+
+  const [stageLimits, setStageLimits] = useState<Record<number, number>>({});
+  const leadsReady = !!pipelineId && !activeLoading;
+
+  const stageQueries = useQueries({
+    queries: stageList.map((stage) => {
+      const limit = stageLimits[stage.id] ?? BOARD_STAGE_LIMIT;
+      const filters: LeadFilters = { ...baseLeadFilters, stage_id: stage.id, limit, page: 1 };
+      return {
+        queryKey: ["leads", filters],
+        queryFn: () => fetchLeads(filters),
+        enabled: leadsReady,
+        placeholderData: keepPreviousData,
+      };
+    }),
   });
+
+  const { data: pipelineLeads } = useLeads(
+    { ...baseLeadFilters, limit: 100, page: 1 },
+    { enabled: leadsReady && stageList.length > 0 }
+  );
+
   const changeStage = useChangeStage();
   const openDetail = useUIStore((s) => s.openDetail);
 
-  const activeCardFields = cardFields.filter((id) => allColumnIds.includes(id));
   const rowHeight = estimateRowHeight(activeCardFields.filter((id) => id !== "name").length);
 
   const [board, setBoard] = useState<Record<number, Lead[]>>({});
@@ -246,27 +290,55 @@ export function Board() {
   const [activeDrag, setActiveDrag] = useState<Lead | null>(null);
   const [activeDragStageType, setActiveDragStageType] = useState<StageType | undefined>();
 
-  const stageList = useMemo(
-    () => [...(stages ?? [])].sort((a, b) => a.position - b.position),
-    [stages]
-  );
-
   const pipelineStageIds = useMemo(() => new Set(stageList.map((s) => s.id)), [stageList]);
 
+  const stageTotals = useMemo(() => {
+    const totals: Record<number, number> = {};
+    stageList.forEach((stage, i) => {
+      totals[stage.id] = stageQueries[i]?.data?.total ?? 0;
+    });
+    return totals;
+  }, [stageList, stageQueries]);
+
+  const serverBoard = useMemo(() => {
+    const grouped: Record<number, Lead[]> = {};
+    stageList.forEach((stage, i) => {
+      grouped[stage.id] = stageQueries[i]?.data?.items ?? [];
+    });
+    const { unplaced } = groupLeadsForBoard(
+      pipelineLeads?.items ?? [],
+      pipelineStageIds,
+      accountType
+    );
+    return { grouped, unplaced };
+  }, [stageList, stageQueries, pipelineLeads?.items, pipelineStageIds, accountType]);
+
   useEffect(() => {
-    const { grouped, unplaced } = groupLeadsForBoard(leads?.items ?? [], pipelineStageIds, accountType);
-    setBoard(grouped);
-    setUnplacedLeads(unplaced);
-  }, [leads?.items, accountType, pipelineStageIds]);
+    setStageLimits({});
+  }, [pipelineId, activeId, conditions, debouncedSearch, sort, sortDir]);
+
+  useEffect(() => {
+    setBoard(serverBoard.grouped);
+    setUnplacedLeads(serverBoard.unplaced);
+  }, [serverBoard]);
+
+  const isLoading = stageQueries.some((q) => q.isLoading && !q.data);
+  const isFetching = stageQueries.some((q) => q.isFetching);
+  const isError = stageQueries.some((q) => q.isError);
+  const error = stageQueries.find((q) => q.error)?.error;
+
+  const allLeads = useMemo(
+    () => [...Object.values(serverBoard.grouped).flat(), ...serverBoard.unplaced],
+    [serverBoard]
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
 
   function revert() {
-    const { grouped, unplaced } = groupLeadsForBoard(leads?.items ?? [], pipelineStageIds, accountType);
-    setBoard(grouped);
-    setUnplacedLeads(unplaced);
+    setBoard(serverBoard.grouped);
+    setUnplacedLeads(serverBoard.unplaced);
   }
 
   function moveLocal(leadId: number, fromStage: number, toStage: number) {
@@ -304,7 +376,7 @@ export function Board() {
         onError: (err) => {
           const e = apiError(err);
           if (stagePromptMissingError(e.code, e.message, stage.stage_type)) {
-            const lead = leads?.items.find((l) => l.id === leadId);
+            const lead = allLeads.find((l) => l.id === leadId);
             const fromStage = stageList.find((s) => s.id === lead?.stage_id);
             setPrompt({
               leadId,
@@ -374,14 +446,7 @@ export function Board() {
 
   const customFieldsList = customFields ?? [];
 
-  if (
-    plLoading ||
-    viewsLoading ||
-    activeLoading ||
-    customFieldsLoading ||
-    !uiReady ||
-    (isLoading && !leads)
-  ) {
+  if (plLoading || !uiReady) {
     return (
       <div className="flex justify-center py-16">
         <Spinner className="h-6 w-6" />
@@ -474,7 +539,11 @@ export function Board() {
               Updating…
             </span>
           )}
-          {stageList.map((stage) => (
+          {stageList.map((stage, i) => {
+            const limit = stageLimits[stage.id] ?? BOARD_STAGE_LIMIT;
+            const total = stageTotals[stage.id] ?? 0;
+            const columnLoading = stageQueries[i]?.isLoading && !stageQueries[i]?.data;
+            return (
             <BoardColumn
               key={stage.id}
               stage={stage}
@@ -485,8 +554,18 @@ export function Board() {
               onCardClick={openDetail}
               activeDragId={activeDrag ? String(activeDrag.id) : null}
               accountType={accountType}
+              loading={columnLoading}
+              hasMore={total > limit}
+              onLoadMore={() =>
+                setStageLimits((prev) => ({
+                  ...prev,
+                  [stage.id]: (prev[stage.id] ?? BOARD_STAGE_LIMIT) + BOARD_STAGE_LIMIT,
+                }))
+              }
+              loadingMore={stageQueries[i]?.isFetching && !columnLoading}
             />
-          ))}
+            );
+          })}
           {unplacedLeads.length > 0 && (
             <BoardColumn
               key={unplacedStage.id}

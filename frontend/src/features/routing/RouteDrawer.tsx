@@ -22,12 +22,8 @@ import {
   ORIGIN_LABELS,
   PUBLISHER_ORIGINS,
 } from "./routeFormatters";
-import {
-  RouteBranchesEditor,
-  blankBranch,
-  branchDestinationValid,
-  reindexBranches,
-} from "./RouteBranchesEditor";
+import { RouteBranchesEditor } from "./RouteBranchesEditor";
+import { blankBranch, branchDestinationValid, reindexBranches } from "./routeBranchUtils";
 
 type Origin = Route["origin"];
 

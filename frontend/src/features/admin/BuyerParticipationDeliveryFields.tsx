@@ -131,3 +131,18 @@ export function participationDeliveryValid(
   if (delivery === "webhook") return webhookId > 0;
   return true;
 }
+
+export function deliverySaveBlockReason(
+  delivery: string,
+  pipelineId: number,
+  stageId: number,
+  webhookId: number
+): string | null {
+  if (delivery === "leads_pipeline" && (pipelineId <= 0 || stageId <= 0)) {
+    return "Select destination pipeline and stage.";
+  }
+  if (delivery === "webhook" && webhookId <= 0) {
+    return "Select an outbound webhook.";
+  }
+  return null;
+}

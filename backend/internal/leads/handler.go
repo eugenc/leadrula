@@ -94,12 +94,14 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	}
 
 	opts := ListOptions{
-		ListFilters: f,
-		Page:        int(parseInt(q.Get("page"))),
-		Limit:       int(parseInt(q.Get("limit"))),
-		Sort:        q.Get("sort"),
-		SortDir:     q.Get("sort_dir"),
-		All:         q.Get("all") == "1",
+		ListFilters:         f,
+		Page:                int(parseInt(q.Get("page"))),
+		Limit:               int(parseInt(q.Get("limit"))),
+		Sort:                q.Get("sort"),
+		SortDir:             q.Get("sort_dir"),
+		All:                 q.Get("all") == "1",
+		IncludeEconomics:    parseIncludeFlag(q.Get("include_economics"), true),
+		IncludeStageHistory: parseIncludeFlag(q.Get("include_stage_history"), true),
 	}
 
 	if viewID := q.Get("view_id"); viewID != "" {
@@ -594,6 +596,18 @@ func id(r *http.Request) int64 {
 func parseInt(s string) int64 {
 	v, _ := strconv.ParseInt(s, 10, 64)
 	return v
+}
+
+func parseIncludeFlag(raw string, defaultVal bool) bool {
+	if raw == "" {
+		return defaultVal
+	}
+	switch raw {
+	case "0", "false", "no":
+		return false
+	default:
+		return true
+	}
 }
 
 func todayInTZ(tz string) string {

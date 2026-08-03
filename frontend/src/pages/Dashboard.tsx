@@ -6,11 +6,8 @@ import { StatCard, Spinner } from "@/components/ui/misc";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { PageBody } from "@/components/layout/PageBody";
 import { formatMoney } from "@/lib/utils";
-import {
-  DashboardStatCards,
-  DashboardWideWidgets,
-  useDashboardStats,
-} from "@/features/dashboard/DashboardWidgets";
+import { DashboardStatCards, DashboardWideWidgets } from "@/features/dashboard/DashboardWidgets";
+import { useDashboardStats } from "@/features/dashboard/useDashboardStats";
 import {
   DashboardViewPicker,
   useResolvedDashboardView,

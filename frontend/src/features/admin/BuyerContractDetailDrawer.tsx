@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Sheet, DrawerHeader, DrawerBody } from "@/components/ui/dialog";
 import { ContractMessageButton } from "@/features/messaging/MessageButton";
 import { Button } from "@/components/ui/button";
@@ -29,8 +29,13 @@ import { BuyerTriggerStageFields } from "@/features/admin/BuyerTriggerStageField
 import {
   BuyerParticipationDeliveryFields,
   participationDeliveryValid,
+  deliverySaveBlockReason,
 } from "@/features/admin/BuyerParticipationDeliveryFields";
 import type { Contract } from "@/types";
+
+function initialDeliveryFrom(contract: Contract, allowed: string[]) {
+  return contract.delivery || (contract.buyer_pipeline_id ? "leads_pipeline" : allowed[0] || "leads");
+}
 
 export function BuyerContractDetailDrawer({
   contract,
@@ -47,15 +52,31 @@ export function BuyerContractDetailDrawer({
 }
 
 function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () => void }) {
-  const allowed = contract.allowed_delivery_modes ?? ["leads", "leads_pipeline"];
-  const initialDelivery =
-    contract.delivery ||
-    (contract.buyer_pipeline_id ? "leads_pipeline" : allowed[0] || "leads");
-  const [delivery, setDelivery] = useState(initialDelivery);
+  const allowed = useMemo(
+    () => contract.allowed_delivery_modes ?? ["leads", "leads_pipeline"],
+    [contract.allowed_delivery_modes]
+  );
+  const [delivery, setDelivery] = useState(() => initialDeliveryFrom(contract, allowed));
   const [pipelineId, setPipelineId] = useState(contract.buyer_pipeline_id ?? 0);
   const [stageId, setStageId] = useState(contract.buyer_target_stage_id ?? 0);
   const [webhookId, setWebhookId] = useState(contract.outbound_webhook_id ?? 0);
   const [integrationId, setIntegrationId] = useState(contract.integration_connection_id ?? 0);
+
+  useEffect(() => {
+    setDelivery(initialDeliveryFrom(contract, allowed));
+    setPipelineId(contract.buyer_pipeline_id ?? 0);
+    setStageId(contract.buyer_target_stage_id ?? 0);
+    setWebhookId(contract.outbound_webhook_id ?? 0);
+    setIntegrationId(contract.integration_connection_id ?? 0);
+  }, [
+    contract.id,
+    contract.delivery,
+    contract.buyer_pipeline_id,
+    contract.buyer_target_stage_id,
+    contract.outbound_webhook_id,
+    contract.integration_connection_id,
+    allowed,
+  ]);
 
   const pipelineDelivery = delivery === "leads_pipeline";
   const contractActive = contract.status === "active";
@@ -78,6 +99,7 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
   const buyerPipelineSelected = pipelineId > 0;
   const deliveryValid = participationDeliveryValid(delivery, pipelineId, stageId, webhookId);
   const returnRoutesValid = !pipelineDelivery || (returnRoutes?.length ?? 0) > 0;
+  const deliverySaveBlock = deliverySaveBlockReason(delivery, pipelineId, stageId, webhookId);
 
   const hasTriggerComps = (compensations ?? []).some(
     (c) => (c.kind === "rev_share" || c.kind === "profit_share") && c.trigger === "buyer_stage"
@@ -228,19 +250,23 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
                   <Button
                     className="mt-3"
                     variant="secondary"
-                    disabled={
-                      !deliveryValid ||
-                      (pipelineDelivery && !returnRoutesValid) ||
+                    disabled={!deliveryValid || saveDelivery.isPending}
+                    title={
                       saveDelivery.isPending
+                        ? "Saving…"
+                        : deliverySaveBlock ?? undefined
                     }
                     onClick={saveDeliverySettings}
                   >
-                    Save delivery
+                    {saveDelivery.isPending ? "Saving…" : "Save delivery"}
                   </Button>
                 )}
-                {pipelineDelivery && !returnRoutesValid && (
-                  <p className="mt-2 text-xs text-gray-500">
-                    Add at least one return route before saving pipeline delivery.
+                {canEditDelivery && deliverySaveBlock && (
+                  <p className="mt-2 text-xs text-gray-500">{deliverySaveBlock}</p>
+                )}
+                {canEditDelivery && deliveryValid && pipelineDelivery && !returnRoutesValid && (
+                  <p className="mt-2 text-xs text-amber-700">
+                    Add return routes on the Return routes tab so leads can be returned to the publisher.
                   </p>
                 )}
               </>

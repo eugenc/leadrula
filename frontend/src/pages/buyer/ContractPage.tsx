@@ -22,8 +22,18 @@ export function ContractPage() {
   const { data: participations, isLoading: partsLoading, isError, error } = useBuyerParticipations();
   const { data: contracts, isLoading: contractsLoading } = useBuyerContracts();
   const [selectedInvite, setSelectedInvite] = useState<ContractParticipation | null>(null);
-  const [selectedActive, setSelectedActive] = useState<ContractParticipation | null>(null);
-  const [selectedContract, setSelectedContract] = useState<Contract | null>(null);
+  const [selectedActiveId, setSelectedActiveId] = useState<number | null>(null);
+  const [selectedContractId, setSelectedContractId] = useState<number | null>(null);
+
+  const selectedActive = useMemo(
+    () => participations?.find((p) => p.id === selectedActiveId) ?? null,
+    [participations, selectedActiveId]
+  );
+
+  const selectedContract = useMemo(
+    () => contracts?.find((c) => c.id === selectedContractId) ?? null,
+    [contracts, selectedContractId]
+  );
 
   const loading = partsLoading || contractsLoading;
 
@@ -52,10 +62,10 @@ export function ContractPage() {
       (p) => p.contract_id === contract.id && (p.status === "active" || p.status === "paused")
     );
     if (part) {
-      setSelectedActive(part);
+      setSelectedActiveId(part.id);
       return;
     }
-    setSelectedContract(contract);
+    setSelectedContractId(contract.id);
   }
 
   const hasContent =
@@ -115,7 +125,7 @@ export function ContractPage() {
                   </THead>
                   <TBody>
                     {activeParticipations.map((p) => (
-                      <TR key={p.id} onClick={() => setSelectedActive(p)}>
+                      <TR key={p.id} onClick={() => setSelectedActiveId(p.id)}>
                         <TD className="font-semibold">{p.publisher_name}</TD>
                         <TD>{p.contract_name}</TD>
                         <TD>{formatContractLeadType(p.lead_type) || "—"}</TD>
@@ -159,8 +169,8 @@ export function ContractPage() {
         )}
 
         <BuyerParticipationAcceptDrawer participation={selectedInvite} onClose={() => setSelectedInvite(null)} />
-        <BuyerParticipationDetailDrawer participation={selectedActive} onClose={() => setSelectedActive(null)} />
-        <BuyerContractDetailDrawer contract={selectedContract} onClose={() => setSelectedContract(null)} />
+        <BuyerParticipationDetailDrawer participation={selectedActive} onClose={() => setSelectedActiveId(null)} />
+        <BuyerContractDetailDrawer contract={selectedContract} onClose={() => setSelectedContractId(null)} />
       </PageBody>
     </>
   );
