@@ -47,6 +47,8 @@ export interface LeadFilters {
   sort?: string;
   sort_dir?: "asc" | "desc";
   all?: boolean;
+  include_economics?: boolean;
+  include_stage_history?: boolean;
   namespace?: "publisher" | "buyer";
 }
 
@@ -66,6 +68,10 @@ function leadsQueryString(filters: LeadFilters): string {
     }
     if (k === "action_overdue") {
       if (v) qs.set("action_overdue", "1");
+      return;
+    }
+    if (k === "include_economics" || k === "include_stage_history") {
+      if (v === false) qs.set(k, "0");
       return;
     }
     if (k === "view_id" || k === "filters") {
@@ -99,6 +105,16 @@ export function useLeads(
     placeholderData: options?.keepPreviousData ? keepPreviousData : undefined,
   });
 }
+
+export async function fetchLeads(filters: LeadFilters): Promise<LeadListResponse> {
+  const q = leadsQueryString(filters);
+  const base = leadsBasePath(filters.namespace);
+  return normalizeLeadsResponse(
+    await get<LeadListResponse | Lead[]>(`${base}/leads${q ? `?${q}` : ""}`)
+  );
+}
+
+export const BOARD_STAGE_LIMIT = 50;
 
 export async function fetchAllLeadIds(filters: LeadFilters): Promise<number[]> {
   const q = leadsQueryString({ ...filters, all: true });

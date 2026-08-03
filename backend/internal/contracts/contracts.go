@@ -1180,7 +1180,7 @@ func (s *Service) validateBuyerContractDelivery(ctx context.Context, buyerID, co
 }
 
 func (s *Service) UpdateBuyerContractDelivery(ctx context.Context, buyerID, contractID int64, p AcceptParticipationParams) (*Contract, error) {
-	validated, err := s.validateBuyerContractDelivery(ctx, buyerID, contractID, p, true)
+	validated, err := s.validateBuyerContractDelivery(ctx, buyerID, contractID, p, false)
 	if err != nil {
 		return nil, err
 	}

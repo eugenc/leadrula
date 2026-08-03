@@ -66,10 +66,103 @@ func (r *Repository) EnrichLeadEconomics(ctx context.Context, accountType string
 }
 
 func (r *Repository) EnrichLeadEconomicsBatch(ctx context.Context, accountType string, items []Lead) error {
+	if len(items) == 0 {
+		return nil
+	}
+	if accountType == "buyer" {
+		return r.enrichBuyerEconomicsBatch(ctx, items)
+	}
+	return r.enrichPublisherEconomicsBatch(ctx, items)
+}
+
+func (r *Repository) enrichBuyerEconomicsBatch(ctx context.Context, items []Lead) error {
+	ids := make([]int64, len(items))
 	for i := range items {
-		if err := r.EnrichLeadEconomics(ctx, accountType, &items[i]); err != nil {
+		items[i].Cost = nil
+		items[i].Revenue = nil
+		items[i].GrossProfit = nil
+		items[i].NetProfit = nil
+		ids[i] = items[i].ID
+	}
+	rows, err := r.pool.Query(ctx,
+		`SELECT DISTINCT ON (lead_id) lead_id, ABS(amount::float8)
+		 FROM transactions
+		 WHERE lead_id = ANY($1) AND type = 'debit'
+		 ORDER BY lead_id, created_at DESC`, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	prices := map[int64]float64{}
+	for rows.Next() {
+		var leadID int64
+		var amount float64
+		if err := rows.Scan(&leadID, &amount); err != nil {
 			return err
 		}
+		prices[leadID] = amount
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range items {
+		if amount, ok := prices[items[i].ID]; ok {
+			items[i].PurchasePrice = &amount
+		}
+	}
+	return nil
+}
+
+func (r *Repository) enrichPublisherEconomicsBatch(ctx context.Context, items []Lead) error {
+	var ids []int64
+	for i := range items {
+		items[i].PurchasePrice = nil
+		items[i].NetProfit = netProfitValue(items[i].Cost, items[i].Revenue)
+		if items[i].Status == "distributed" || items[i].Status == "closed" {
+			ids = append(ids, items[i].ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := r.pool.Query(ctx,
+		`SELECT DISTINCT ON (ce.lead_id) ce.lead_id, ce.amount::float8, ce.cost_basis::float8
+		 FROM compensation_earnings ce
+		 JOIN contract_compensations cc ON cc.id = ce.compensation_id
+		 WHERE ce.lead_id = ANY($1) AND ce.kind = 'distribute' AND ce.amount > 0
+		 ORDER BY ce.lead_id, ce.created_at DESC`, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type earning struct {
+		saleAmount float64
+		costBasis  float64
+	}
+	earnings := map[int64]earning{}
+	for rows.Next() {
+		var leadID int64
+		var saleAmount float64
+		var costBasis *float64
+		if err := rows.Scan(&leadID, &saleAmount, &costBasis); err != nil {
+			return err
+		}
+		basis := 0.0
+		if costBasis != nil {
+			basis = *costBasis
+		}
+		earnings[leadID] = earning{saleAmount: saleAmount, costBasis: basis}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range items {
+		e, ok := earnings[items[i].ID]
+		if !ok {
+			continue
+		}
+		gp := e.saleAmount - e.costBasis
+		items[i].GrossProfit = &gp
 	}
 	return nil
 }

@@ -601,7 +601,7 @@ func (s *Service) UpdateParticipationDelivery(ctx context.Context, buyerID, part
 	if contractStatus != "active" {
 		return nil, httpx.BusinessRule("publisher contract is not active")
 	}
-	validated, err := s.validateParticipationDelivery(ctx, buyerID, part.ContractID, participationID, p, true)
+	validated, err := s.validateParticipationDelivery(ctx, buyerID, part.ContractID, participationID, p, false)
 	if err != nil {
 		return nil, err
 	}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Sheet, DrawerHeader, DrawerBody, DrawerFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { SectionLabel } from "@/components/layout/SectionLabel";
@@ -30,6 +30,7 @@ import { BuyerTriggerStageFields } from "@/features/admin/BuyerTriggerStageField
 import {
   BuyerParticipationDeliveryFields,
   participationDeliveryValid,
+  deliverySaveBlockReason,
 } from "@/features/admin/BuyerParticipationDeliveryFields";
 import type { ContractParticipation } from "@/types";
 
@@ -54,13 +55,34 @@ function DrawerContent({
   participation: ContractParticipation;
   onClose: () => void;
 }) {
-  const allowed = participation.allowed_delivery_modes ?? ["leads", "leads_pipeline"];
+  const allowed = useMemo(
+    () => participation.allowed_delivery_modes ?? ["leads", "leads_pipeline"],
+    [participation.allowed_delivery_modes]
+  );
   const [delivery, setDelivery] = useState(participation.delivery || allowed[0] || "leads");
   const [pipelineId, setPipelineId] = useState(participation.buyer_pipeline_id ?? 0);
   const [stageId, setStageId] = useState(participation.buyer_target_stage_id ?? 0);
   const [webhookId, setWebhookId] = useState(participation.outbound_webhook_id ?? 0);
   const [integrationId, setIntegrationId] = useState(participation.integration_connection_id ?? 0);
   const [status, setStatus] = useState(participation.status);
+
+  useEffect(() => {
+    setDelivery(participation.delivery || allowed[0] || "leads");
+    setPipelineId(participation.buyer_pipeline_id ?? 0);
+    setStageId(participation.buyer_target_stage_id ?? 0);
+    setWebhookId(participation.outbound_webhook_id ?? 0);
+    setIntegrationId(participation.integration_connection_id ?? 0);
+    setStatus(participation.status);
+  }, [
+    participation.id,
+    participation.delivery,
+    participation.buyer_pipeline_id,
+    participation.buyer_target_stage_id,
+    participation.outbound_webhook_id,
+    participation.integration_connection_id,
+    participation.status,
+    allowed,
+  ]);
 
   const pipelineDelivery = delivery === "leads_pipeline";
   const editable = status === "active" || status === "paused";
@@ -84,6 +106,7 @@ function DrawerContent({
   const buyerPipelineSelected = pipelineId > 0;
   const deliveryValid = participationDeliveryValid(delivery, pipelineId, stageId, webhookId);
   const returnRoutesValid = !pipelineDelivery || (returnRoutes?.length ?? 0) > 0;
+  const deliverySaveBlock = deliverySaveBlockReason(delivery, pipelineId, stageId, webhookId);
 
   const primaryRate =
     participation.rate_per_lead ??
@@ -261,19 +284,23 @@ function DrawerContent({
                   <Button
                     className="mt-3"
                     variant="secondary"
-                    disabled={
-                      !deliveryValid ||
-                      (pipelineDelivery && !returnRoutesValid) ||
+                    disabled={!deliveryValid || saveDelivery.isPending}
+                    title={
                       saveDelivery.isPending
+                        ? "Saving…"
+                        : deliverySaveBlock ?? undefined
                     }
                     onClick={saveDeliverySettings}
                   >
-                    Save delivery
+                    {saveDelivery.isPending ? "Saving…" : "Save delivery"}
                   </Button>
                 )}
-                {pipelineDelivery && !returnRoutesValid && (
-                  <p className="mt-2 text-xs text-gray-500">
-                    Add at least one return route before saving pipeline delivery.
+                {canEditDelivery && deliverySaveBlock && (
+                  <p className="mt-2 text-xs text-gray-500">{deliverySaveBlock}</p>
+                )}
+                {canEditDelivery && deliveryValid && pipelineDelivery && !returnRoutesValid && (
+                  <p className="mt-2 text-xs text-amber-700">
+                    Add return routes on the Return routes tab so leads can be returned to the publisher.
                   </p>
                 )}
               </>

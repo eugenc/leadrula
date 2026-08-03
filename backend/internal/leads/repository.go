@@ -47,7 +47,13 @@ func boardStageSQL(accountType string) string {
 	return `l.stage_id`
 }
 
-func listSelect(accountType string) string {
+func listSelect(accountType string, includeStageHistory bool) string {
+	stageEnteredExpr := `l.created_at AS stage_entered_at`
+	moveCountExpr := `0 AS stage_move_count`
+	if includeStageHistory {
+		stageEnteredExpr = `COALESCE(stage_entry.created_at, l.created_at) AS stage_entered_at`
+		moveCountExpr = `COALESCE(move_counts.move_count, 0) AS stage_move_count`
+	}
 	return `l.id, l.public_id, l.owner_account_id, l.publisher_id, l.contract_id,
 	l.first_name, l.last_name, l.phone, l.email, l.address, l.city, l.state, l.zip, l.country, l.address_place_id, l.source, l.external_id,
 	l.cost, l.revenue,
@@ -62,14 +68,19 @@ func listSelect(accountType string) string {
 	st.name AS stage_name,
 	st.stage_type AS stage_type,
 	` + boardStageSQL(accountType) + ` AS board_stage_id,
-	COALESCE(
-		(SELECT h.created_at FROM lead_stage_history h
-		 WHERE h.lead_id = l.id AND h.to_stage_id = l.stage_id
-		 ORDER BY h.created_at DESC, h.id DESC LIMIT 1),
-		l.created_at
-	) AS stage_entered_at,
-	` + stageMoveCountSQL + ` AS stage_move_count`
+	` + stageEnteredExpr + `,
+	` + moveCountExpr
 }
+
+const listStageHistoryJoins = `
+	LEFT JOIN LATERAL (
+		SELECT h.created_at FROM lead_stage_history h
+		WHERE h.lead_id = l.id AND h.to_stage_id = l.stage_id
+		ORDER BY h.created_at DESC, h.id DESC LIMIT 1
+	) stage_entry ON true
+	LEFT JOIN LATERAL (
+		SELECT COUNT(*)::int AS move_count FROM lead_stage_history h WHERE h.lead_id = l.id
+	) move_counts ON true`
 
 const stageMoveCountSQL = `(SELECT COUNT(*)::int FROM lead_stage_history h WHERE h.lead_id = l.id)`
 
@@ -319,11 +330,13 @@ type ListFilters struct {
 
 type ListOptions struct {
 	ListFilters
-	Page    int
-	Limit   int
-	Sort    string
-	SortDir string
-	All     bool
+	Page                 int
+	Limit                int
+	Sort                 string
+	SortDir              string
+	All                  bool
+	IncludeEconomics     bool
+	IncludeStageHistory  bool
 }
 
 var listSortCols = map[string]string{
@@ -596,7 +609,11 @@ func (r *Repository) List(ctx context.Context, p *auth.Principal, o ListOptions)
 	orderBy, extraJoin, sortArgs := r.resolveListSort(ctx, p.AccountID, p.AccountType, o.Sort, o.SortDir, len(args))
 	qArgs := append([]any{}, args...)
 	qArgs = append(qArgs, sortArgs...)
-	q := `SELECT ` + listSelect(p.AccountType) + listFrom + extraJoin + ` WHERE ` + where + ` ORDER BY ` + orderBy
+	stageJoins := ""
+	if o.IncludeStageHistory {
+		stageJoins = listStageHistoryJoins
+	}
+	q := `SELECT ` + listSelect(p.AccountType, o.IncludeStageHistory) + listFrom + stageJoins + extraJoin + ` WHERE ` + where + ` ORDER BY ` + orderBy
 	if !o.All && o.Limit > 0 {
 		q += fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(qArgs)+1, len(qArgs)+2)
 		qArgs = append(qArgs, limit, offset)
@@ -625,8 +642,10 @@ func (r *Repository) List(ctx context.Context, p *auth.Principal, o ListOptions)
 	if items == nil {
 		items = []Lead{}
 	}
-	if err := r.EnrichLeadEconomicsBatch(ctx, p.AccountType, items); err != nil {
-		return nil, err
+	if o.IncludeEconomics {
+		if err := r.EnrichLeadEconomicsBatch(ctx, p.AccountType, items); err != nil {
+			return nil, err
+		}
 	}
 	return &ListResult{Items: items, Total: total, Page: page, Limit: limit}, nil
 }

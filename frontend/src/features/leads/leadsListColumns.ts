@@ -173,6 +173,17 @@ export function normalizeBoardCardFields(cols: string[], validIds: string[]): st
   return filtered.length ? filtered : [...DEFAULT_BOARD_CARD_FIELDS];
 }
 
+const ECONOMICS_COLUMNS = new Set(["net_profit", "purchase_price", "gross_profit"]);
+
+export function leadsNeedsEconomics(columns: string[]): boolean {
+  return columns.some((c) => ECONOMICS_COLUMNS.has(c));
+}
+
+export function leadsNeedsStageHistory(columns: string[], sort?: string): boolean {
+  if (sort === "stage_entered_at") return true;
+  return columns.some((c) => c === "stage_entered_at" || c === "status");
+}
+
 export function formatTimeInStage(enteredAt: string): string {
   const ms = Date.now() - new Date(enteredAt).getTime();
   if (ms < 0) return "—";

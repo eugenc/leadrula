@@ -576,22 +576,37 @@ export function useCounterParticipation() {
 
 export function useUpdateParticipationDelivery() {
   const qc = useQueryClient();
+  const accountId = useAuthStore((s) => s.user?.account_id);
   return useMutation({
     mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
       patch<ContractParticipation>(`/buyer/participations/${id}`, body),
-    onSuccess: () => {
+    onSuccess: (data, { id }) => {
+      if (accountId) {
+        qc.setQueryData<ContractParticipation[]>(
+          ["buyer-participations", accountId],
+          (old) => old?.map((p) => (p.id === data.id ? { ...p, ...data } : p))
+        );
+      }
       qc.invalidateQueries({ queryKey: ["buyer-participations"] });
+      qc.invalidateQueries({ queryKey: ["participation-return-routes", id] });
     },
   });
 }
 
 export function useUpdateBuyerContractDelivery() {
   const qc = useQueryClient();
+  const accountId = useAuthStore((s) => s.user?.account_id);
   return useMutation({
     mutationFn: ({ contractId, body }: { contractId: number; body: Record<string, unknown> }) =>
-      patch<import("@/types").Contract>(`/buyer/contracts/${contractId}/delivery`, body),
-    onSuccess: () => {
+      patch<Contract>(`/buyer/contracts/${contractId}/delivery`, body),
+    onSuccess: (data, { contractId }) => {
+      if (accountId) {
+        qc.setQueryData<Contract[]>(["buyer-contracts", accountId], (old) =>
+          old?.map((c) => (c.id === data.id ? { ...c, ...data } : c))
+        );
+      }
       qc.invalidateQueries({ queryKey: ["buyer-contracts"] });
+      qc.invalidateQueries({ queryKey: ["return-rules", contractId, true] });
     },
   });
 }
