@@ -217,7 +217,7 @@ func scanBuyerContract(row pgx.Row, withPublisher bool) (*Contract, error) {
 		&c.SourcePipelineID, &c.SourceStageID, &c.BuyerPipelineID, &c.ReturnStageID,
 		&c.RatePerLead, &c.Status, &c.CapPeriod, &c.CapTotal, &c.CapMaxDaily,
 		&c.CreatedAt, &c.ContractType, &c.MirrorContractID, &c.AllowedDeliveryModes,
-		&delivery, &c.BuyerTargetStageID, &c.AppointmentCalendarID,
+		&delivery, &c.BuyerTargetStageID, &c.AppointmentCalendarID, &c.IntegrationConnectionID,
 	}
 	if withPublisher {
 		scan = append(scan, &c.PublisherName, &c.LeadCount)
@@ -240,7 +240,7 @@ func (s *Service) ListForBuyer(ctx context.Context, buyerID int64) ([]Contract, 
 		        c.rate_per_lead::float8, c.status, c.cap_period, c.cap_total, c.cap_max_daily,
 		        c.created_at, c.contract_type, c.mirror_contract_id, c.allowed_delivery_modes,
 		        COALESCE(cc.delivery, ''), cc.counterparty_stage_id, c.appointment_calendar_id,
-		        a.name, `+contractLeadCountSubquery+`
+		        c.integration_connection_id, a.name, `+contractLeadCountSubquery+`
 		 FROM contracts c
 		 JOIN accounts a ON a.id = c.publisher_id
 		 `+buyerContractCompLateral+`
@@ -268,7 +268,8 @@ func (s *Service) GetForBuyerContract(ctx context.Context, buyerID, contractID i
 		        c.source_pipeline_id, c.source_stage_id, c.buyer_pipeline_id, c.return_stage_id,
 		        c.rate_per_lead::float8, c.status, c.cap_period, c.cap_total, c.cap_max_daily,
 		        c.created_at, c.contract_type, c.mirror_contract_id, c.allowed_delivery_modes,
-		        COALESCE(cc.delivery, ''), cc.counterparty_stage_id, c.appointment_calendar_id
+		        COALESCE(cc.delivery, ''), cc.counterparty_stage_id, c.appointment_calendar_id,
+		        c.integration_connection_id
 		 FROM contracts c
 		 `+buyerContractCompLateral+`
 		 WHERE c.id = $1 AND c.buyer_id = $2 AND c.deleted_at IS NULL AND c.contract_type = 'sell'`,
@@ -1143,7 +1144,9 @@ func (s *Service) validateBuyerContractDelivery(ctx context.Context, buyerID, co
 		return nil, httpx.Validation("webhook delivery is not available on direct contracts")
 	}
 	if p.IntegrationConnectionID != 0 {
-		return nil, httpx.Validation("crm integration is not available on direct contracts")
+		if err := validateBuyerCRMConnection(ctx, s.pool, buyerID, p.IntegrationConnectionID); err != nil {
+			return nil, err
+		}
 	}
 	buyerPipelineID := p.BuyerPipelineID
 	buyerStageID := p.BuyerTargetStageID
@@ -1195,8 +1198,10 @@ func (s *Service) UpdateBuyerContractDelivery(ctx context.Context, buyerID, cont
 	}
 	defer tx.Rollback(ctx)
 	if _, err := tx.Exec(ctx,
-		`UPDATE contracts SET buyer_pipeline_id = NULLIF($2,0) WHERE id = $1`,
-		contractID, validated.buyerPipelineID); err != nil {
+		`UPDATE contracts SET buyer_pipeline_id = NULLIF($2,0),
+		                      integration_connection_id = NULLIF($3,0)
+		 WHERE id = $1`,
+		contractID, validated.buyerPipelineID, p.IntegrationConnectionID); err != nil {
 		return nil, err
 	}
 	res, err := tx.Exec(ctx,

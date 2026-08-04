@@ -244,7 +244,7 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
                   onWebhookIdChange={setWebhookId}
                   integrationId={integrationId}
                   onIntegrationIdChange={setIntegrationId}
-                  showIntegration={false}
+                  showIntegration
                 />
                 {canEditDelivery && (
                   <Button
