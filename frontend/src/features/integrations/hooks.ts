@@ -7,6 +7,7 @@ import type {
   RouteIntegration,
   SunbaseConnectionDetail,
   GhlConnectionDetail,
+  CrmConnectionDetail,
   TwilioPhoneNumber,
   TwilioAvailablePhoneNumber,
 } from "@/types";
@@ -97,6 +98,7 @@ export function useUpdateIntegrationConnection() {
     onSuccess: (_conn, vars) => {
       qc.invalidateQueries({ queryKey: ["integration-connections"] });
       qc.invalidateQueries({ queryKey: ["ghl-connection", vars.id] });
+      qc.invalidateQueries({ queryKey: ["crm-connection", vars.id] });
     },
   });
 }
@@ -117,12 +119,44 @@ export function useGhlConnectionDetail(id: number | null) {
   });
 }
 
+export function useCrmConnectionDetail(id: number | null) {
+  return useQuery({
+    queryKey: ["crm-connection", id],
+    queryFn: () => get<CrmConnectionDetail>(`${ns()}/integrations/connections/${id}/crm`),
+    enabled: id != null,
+  });
+}
+
 export function useGhlPipelines(connectionId: number | null) {
   return useQuery({
     queryKey: ["ghl-pipelines", connectionId],
     queryFn: () =>
       get<{ pipelines: { id: string; name: string; stages?: { id: string; name: string }[] }[] }>(
         `${ns()}/integrations/connections/${connectionId}/ghl/pipelines`
+      ),
+    enabled: connectionId != null,
+  });
+}
+
+export type CrmPipeline = {
+  external_id: string;
+  name: string;
+  stages: {
+    external_id: string;
+    name: string;
+    position: number;
+    is_won?: boolean;
+    is_closed_lost?: boolean;
+    is_closed?: boolean;
+  }[];
+};
+
+export function useCrmPipelines(connectionId: number | null) {
+  return useQuery({
+    queryKey: ["crm-pipelines", connectionId],
+    queryFn: () =>
+      get<{ pipelines: CrmPipeline[]; provider_slug: string }>(
+        `${ns()}/integrations/connections/${connectionId}/crm/pipelines`
       ),
     enabled: connectionId != null,
   });

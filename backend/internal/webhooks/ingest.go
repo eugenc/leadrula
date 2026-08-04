@@ -27,6 +27,11 @@ func flattenPayload(raw map[string]any) map[string]any {
 			continue
 		}
 		out[k] = v
+		if nested, ok := v.(map[string]any); ok {
+			for nk, nv := range nested {
+				out[k+"."+nk] = nv
+			}
+		}
 	}
 	if custom, ok := raw["custom"].(map[string]any); ok {
 		for k, v := range custom {
@@ -203,6 +208,9 @@ func (s *Service) ingestPayload(ctx context.Context, wa *WebhookAuth, slug strin
 	}
 	seenLeadIDs := leadIDsForOriginRoutes(results)
 	for _, leadID := range seenLeadIDs {
+		if providerSlug != nil && providers.CRMPipelineImportSupported(*providerSlug) {
+			tryApplyCRMInboundStageSync(ctx, s, webhook, leadID, flat, *providerSlug)
+		}
 		applyInboundOriginRoutes(ctx, s.leadSvc, webhook, leadID, flat)
 	}
 	return &IngestResult{Status: "processed", Results: results}, nil

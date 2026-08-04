@@ -1332,6 +1332,15 @@ export interface GhlConnectionDetail {
   has_private_integration_token?: boolean;
 }
 
+export interface CrmConnectionDetail {
+  connection: IntegrationConnection;
+  inbound_webhook?: SunbaseInboundWebhook;
+  webhook_ids?: {
+    inbound: number;
+    inbound_webhook_slug?: string;
+  };
+}
+
 export interface TwilioPhoneNumber {
   sid: string;
   phone_number: string;

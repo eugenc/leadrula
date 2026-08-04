@@ -138,6 +138,7 @@ func main() {
 		}
 		integrationsSvc = integrations.NewService(pool, encKey, oauthCfg)
 		integrationsEnq = integrationsSvc
+		pipelinesH.SetCRMImportHelper(integrationsSvc)
 		routingSvc.SetCallWebhooks(integrationsSvc, cfg.WebhookBaseURL)
 		go integrationsSvc.RunWorker(ctx)
 	} else if cfg.IntegrationEncKey != "" {

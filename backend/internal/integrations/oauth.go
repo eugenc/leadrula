@@ -145,23 +145,23 @@ func (s *Service) OAuthStartURL(ctx context.Context, accountID int64, providerSl
 	return authURL + "?" + q.Encode(), connID, nil
 }
 
-func (s *Service) OAuthCallback(ctx context.Context, namespace, providerSlug, code, state string) error {
+func (s *Service) OAuthCallback(ctx context.Context, namespace, providerSlug, code, state string) (int64, error) {
 	connID, verifier, ns, err := s.loadPKCE(state)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if ns != "" {
 		namespace = ns
 	}
 	meta, ok := oauthProviders[providerSlug]
 	if !ok {
-		return httpx.Validation("unknown oauth provider")
+		return 0, httpx.Validation("unknown oauth provider")
 	}
 	var configJSON []byte
 	if err := s.pool.QueryRow(ctx,
 		`SELECT config FROM integration_connections WHERE id = $1 AND oauth_state = $2`,
 		connID, state).Scan(&configJSON); err != nil {
-		return httpx.NotFound("connection not found")
+		return 0, httpx.NotFound("connection not found")
 	}
 	var connConfig map[string]any
 	_ = json.Unmarshal(configJSON, &connConfig)
@@ -182,25 +182,25 @@ func (s *Service) OAuthCallback(ctx context.Context, namespace, providerSlug, co
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(body.Encode()))
 	if err != nil {
-		return err
+		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("token exchange failed: %s", string(raw))
+		return 0, fmt.Errorf("token exchange failed: %s", string(raw))
 	}
 	var tok map[string]any
 	if err := json.Unmarshal(raw, &tok); err != nil {
-		return err
+		return 0, err
 	}
 	access, _ := tok["access_token"].(string)
 	if access == "" {
-		return fmt.Errorf("no access_token in response")
+		return 0, fmt.Errorf("no access_token in response")
 	}
 	refresh, _ := tok["refresh_token"].(string)
 	expiresIn, _ := tok["expires_in"].(float64)
@@ -217,26 +217,26 @@ func (s *Service) OAuthCallback(ctx context.Context, namespace, providerSlug, co
 	}
 	encAccess, err := encrypt(s.encKey, []byte(access))
 	if err != nil {
-		return err
+		return 0, err
 	}
 	var encRefresh []byte
 	if refresh != "" {
 		encRefresh, err = encrypt(s.encKey, []byte(refresh))
 		if err != nil {
-			return err
+			return 0, err
 		}
 	}
 	encRaw, _ := encrypt(s.encKey, raw)
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer tx.Rollback(ctx)
 	_, err = tx.Exec(ctx,
 		`UPDATE integration_connections SET status = 'active', oauth_state = NULL, config = $2, updated_at = now() WHERE id = $1`,
 		connID, configJSON)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	_, err = tx.Exec(ctx,
 		`INSERT INTO integration_oauth_tokens (connection_id, access_token, refresh_token, expires_at, raw)
@@ -246,9 +246,12 @@ func (s *Service) OAuthCallback(ctx context.Context, namespace, providerSlug, co
 		       expires_at = EXCLUDED.expires_at, raw = EXCLUDED.raw, updated_at = now()`,
 		connID, encAccess, encRefresh, expiresAt, encRaw)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return connID, nil
 }
 
 func (s *Service) refreshOAuthToken(ctx context.Context, connectionID int64, providerSlug string, connConfig map[string]any) ([]byte, error) {

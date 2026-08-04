@@ -55,6 +55,47 @@ export function useCreatePipeline() {
   const inv = useInvalidate(["pipelines"]);
   return useMutation({ mutationFn: (name: string) => post(`${ns()}/pipelines`, { name }), onSuccess: inv });
 }
+
+export type ImportPipelinesFromCrmResult = {
+  created: { id: number; name: string; stage_count: number }[];
+  synced: {
+    id: number;
+    name: string;
+    stages_added: number;
+    stages_renamed: number;
+    stages_reordered: boolean;
+  }[];
+  renamed: { original_name: string; final_name: string; id: number; stage_count: number }[];
+  skipped: { name: string; reason: string }[];
+};
+
+export type ImportPipelinesFromCrmPayload = {
+  connection_id: number;
+  provider_slug: string;
+  setup_crm_mapping?: boolean;
+  setup_ghl_mapping?: boolean;
+  pipelines: {
+    external_id: string;
+    name: string;
+    stages: {
+      external_id: string;
+      name: string;
+      position: number;
+      is_won?: boolean;
+      is_closed_lost?: boolean;
+      is_closed?: boolean;
+    }[];
+  }[];
+};
+
+export function useImportPipelinesFromCrm() {
+  const inv = useInvalidate(["pipelines"]);
+  return useMutation({
+    mutationFn: (body: ImportPipelinesFromCrmPayload) =>
+      post<ImportPipelinesFromCrmResult>(`${ns()}/pipelines/import-from-crm`, body),
+    onSuccess: inv,
+  });
+}
 export function useDeletePipeline() {
   const inv = useInvalidate(["pipelines"]);
   return useMutation({ mutationFn: (id: number) => del(`${ns()}/pipelines/${id}`), onSuccess: inv });

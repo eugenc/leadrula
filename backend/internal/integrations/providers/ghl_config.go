@@ -25,8 +25,10 @@ type GHLFieldSource struct {
 type GHLPipelineStageMapEntry struct {
 	LeadrulaPipelineID int64  `json:"leadrula_pipeline_id"`
 	LeadrulaStageID    int64  `json:"leadrula_stage_id"`
-	GHLPipelineID      string `json:"ghl_pipeline_id"`
-	GHLPipelineStageID string `json:"ghl_pipeline_stage_id"`
+	CRMPipelineID      string `json:"crm_pipeline_id,omitempty"`
+	CRMStageID         string `json:"crm_stage_id,omitempty"`
+	GHLPipelineID      string `json:"ghl_pipeline_id,omitempty"`
+	GHLPipelineStageID string `json:"ghl_pipeline_stage_id,omitempty"`
 }
 
 type GHLOpportunityStandardFields struct {
@@ -60,6 +62,9 @@ type GHLConfig struct {
 	OutboundFieldMap            []SunbaseFieldMapEntry
 	OpportunityStandardFields   GHLOpportunityStandardFields
 	AppointmentStandardFields   GHLAppointmentStandardFields
+	InboundStageSyncEnabled     bool
+	InboundSyncLeadrulaPipelineID int64
+	InboundSyncGHLPipelineID    string
 }
 
 func ParseGHLCredentials(credentials []byte) (token string, err error) {
@@ -120,6 +125,16 @@ func ParseGHLConfig(config map[string]any) (GHLConfig, error) {
 	out.OutboundFieldMap = ghlOutboundFieldMapFromConfig(config)
 	out.OpportunityStandardFields = parseGHLOpportunityStandardFields(config["opportunity_standard_fields"])
 	out.AppointmentStandardFields = parseGHLAppointmentStandardFields(config["appointment_standard_fields"])
+	if v, ok := config["inbound_stage_sync_enabled"].(bool); ok {
+		out.InboundStageSyncEnabled = v
+	}
+	out.InboundSyncLeadrulaPipelineID = ghlInt64FromAny(config["inbound_sync_leadrula_pipeline_id"])
+	if s, ok := config["inbound_sync_ghl_pipeline_id"].(string); ok {
+		out.InboundSyncGHLPipelineID = strings.TrimSpace(s)
+	}
+	if err := validateInboundStageSync(out); err != nil {
+		return out, err
+	}
 
 	if out.DeliveryMode == "webhook" {
 		if out.WebhookURL == "" {
@@ -262,6 +277,43 @@ func ghlFieldSourceSet(fs GHLFieldSource) bool {
 	}
 }
 
+// PipelineStageMapFromConfig reads pipeline_stage_map from a GHL connection config map.
+func PipelineStageMapFromConfig(config map[string]any) []GHLPipelineStageMapEntry {
+	if config == nil {
+		return nil
+	}
+	return parsePipelineStageMap(config["pipeline_stage_map"], ParseGHLDeliveryModeFromConfig(config))
+}
+
+// MergePipelineStageMapEntries appends entries without clobbering existing leadrula pipeline/stage pairs.
+func MergePipelineStageMapEntries(existing, add []GHLPipelineStageMapEntry) []GHLPipelineStageMapEntry {
+	seen := map[string]bool{}
+	out := make([]GHLPipelineStageMapEntry, 0, len(existing)+len(add))
+	for _, e := range existing {
+		key := fmt.Sprintf("%d:%d", e.LeadrulaPipelineID, e.LeadrulaStageID)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, e)
+	}
+	for _, e := range add {
+		if e.LeadrulaPipelineID == 0 || e.LeadrulaStageID == 0 {
+			continue
+		}
+		if entryCRMPipelineID(mapEntry(e)) == "" || entryCRMStageID(mapEntry(e)) == "" {
+			continue
+		}
+		key := fmt.Sprintf("%d:%d", e.LeadrulaPipelineID, e.LeadrulaStageID)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, e)
+	}
+	return out
+}
+
 func parsePipelineStageMap(raw any, deliveryMode string) []GHLPipelineStageMapEntry {
 	if raw == nil {
 		return nil
@@ -282,7 +334,7 @@ func parsePipelineStageMap(raw any, deliveryMode string) []GHLPipelineStageMapEn
 			continue
 		}
 		if !webhookMode {
-			if strings.TrimSpace(e.GHLPipelineID) == "" || strings.TrimSpace(e.GHLPipelineStageID) == "" {
+			if entryCRMPipelineID(mapEntry(e)) == "" || entryCRMStageID(mapEntry(e)) == "" {
 				continue
 			}
 		}
@@ -437,6 +489,122 @@ func resolveGHLStage(mapEntries []GHLPipelineStageMapEntry, pipelineID, stageID 
 		}
 	}
 	return "", "", fmt.Errorf("no GHL stage mapped for Leadrula pipeline %d stage %d", pipelineID, stageID)
+}
+
+func validateInboundStageSync(cfg GHLConfig) error {
+	if !cfg.InboundStageSyncEnabled {
+		return nil
+	}
+	if cfg.InboundSyncLeadrulaPipelineID <= 0 {
+		return fmt.Errorf("inbound_sync_leadrula_pipeline_id required when inbound stage sync is enabled")
+	}
+	if strings.TrimSpace(cfg.InboundSyncGHLPipelineID) == "" {
+		return fmt.Errorf("inbound_sync_ghl_pipeline_id required when inbound stage sync is enabled")
+	}
+	if !hasCompleteInboundStageMap(cfg.PipelineStageMap, cfg.InboundSyncLeadrulaPipelineID) {
+		return fmt.Errorf("configure stage mappings for the selected pipeline")
+	}
+	return nil
+}
+
+func hasCompleteInboundStageMap(entries []GHLPipelineStageMapEntry, lrPipelineID int64) bool {
+	return hasCompleteCRMInboundStageMap(mapEntries(entries), lrPipelineID)
+}
+
+// InboundStageSyncReady reports whether inbound GHL stage auto-sync should run.
+func InboundStageSyncReady(cfg GHLConfig) bool {
+	return CRMInboundStageSyncReady(ParseInboundStageSyncFromGHL(cfg))
+}
+
+func ParseInboundStageSyncFromGHL(cfg GHLConfig) InboundStageSyncConfig {
+	entries := make([]CRMPipelineStageMapEntry, 0, len(cfg.PipelineStageMap))
+	for _, e := range cfg.PipelineStageMap {
+		entries = append(entries, mapEntry(e))
+	}
+	crmPipelineID := cfg.InboundSyncGHLPipelineID
+	return InboundStageSyncConfig{
+		Enabled:            cfg.InboundStageSyncEnabled,
+		LeadrulaPipelineID: cfg.InboundSyncLeadrulaPipelineID,
+		CRMPipelineID:      crmPipelineID,
+		PipelineStageMap:   entries,
+	}
+}
+
+func ResolveLeadrulaStage(entries []GHLPipelineStageMapEntry, lrPipelineID int64, ghlPipelineID, ghlStageID string) (stageID int64, ok bool) {
+	return ResolveCRMLeadrulaStage(mapEntries(entries), lrPipelineID, ghlPipelineID, ghlStageID)
+}
+
+func mapEntry(e GHLPipelineStageMapEntry) CRMPipelineStageMapEntry {
+	return CRMPipelineStageMapEntry{
+		LeadrulaPipelineID: e.LeadrulaPipelineID,
+		LeadrulaStageID:    e.LeadrulaStageID,
+		CRMPipelineID:      e.CRMPipelineID,
+		CRMStageID:         e.CRMStageID,
+		GHLPipelineID:      e.GHLPipelineID,
+		GHLPipelineStageID: e.GHLPipelineStageID,
+	}
+}
+
+func mapEntries(entries []GHLPipelineStageMapEntry) []CRMPipelineStageMapEntry {
+	out := make([]CRMPipelineStageMapEntry, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, mapEntry(e))
+	}
+	return out
+}
+
+// GHLInboundPipelineStage reads GHL pipeline and stage IDs from a flattened webhook payload.
+func GHLInboundPipelineStage(flat map[string]any) (pipelineID, stageID string) {
+	for _, key := range []string{"pipelineId", "pipeline_id"} {
+		if v, ok := flat[key]; ok {
+			pipelineID = strings.TrimSpace(toGHLText(v))
+			if pipelineID != "" {
+				break
+			}
+		}
+	}
+	for _, key := range []string{"pipelineStageId", "pipeline_stage_id", "stageId"} {
+		if v, ok := flat[key]; ok {
+			stageID = strings.TrimSpace(toGHLText(v))
+			if stageID != "" {
+				break
+			}
+		}
+	}
+	return pipelineID, stageID
+}
+
+func toGHLText(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case float64:
+		if x == float64(int64(x)) {
+			return strconv.FormatInt(int64(x), 10)
+		}
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+func ghlInt64FromAny(v any) int64 {
+	switch x := v.(type) {
+	case float64:
+		return int64(x)
+	case int64:
+		return x
+	case int:
+		return int64(x)
+	case json.Number:
+		n, _ := x.Int64()
+		return n
+	case string:
+		n, _ := strconv.ParseInt(strings.TrimSpace(x), 10, 64)
+		return n
+	default:
+		return 0
+	}
 }
 
 func buildGHLContactBody(cfg GHLConfig, payload DeliveryPayload) map[string]any {
@@ -682,5 +850,6 @@ func DefaultGHLConnectionConfig(locationID string) map[string]any {
 		"opportunity_title_template": "{{first_name}} {{last_name}}",
 		"pipeline_stage_map":  []any{},
 		"outbound_field_map":  []any{},
+		"inbound_stage_sync_enabled": false,
 	}
 }

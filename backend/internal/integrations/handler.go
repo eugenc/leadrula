@@ -29,10 +29,15 @@ type WebhookGHLService interface {
 	DeleteGHLWebhooks(ctx context.Context, accountID int64, ids webhooks.GHLWebhookIDs)
 }
 
+type WebhookCRMService interface {
+	ProvisionCRMInboundWebhook(ctx context.Context, accountID, connectionID int64, connectionPublicID, connectionName, providerSlug string) (*webhooks.CRMWebhookIDs, error)
+}
+
 type Handler struct {
 	svc        *Service
 	webhooks   WebhookSunbaseService
 	ghlHooks   WebhookGHLService
+	crmHooks   WebhookCRMService
 	namespace  string
 	appBaseURL string
 	apiBaseURL string
@@ -48,6 +53,9 @@ func NewHandler(svc *Service, webhooksSvc WebhookSunbaseService, namespace, appB
 	}
 	if ghl, ok := webhooksSvc.(WebhookGHLService); ok {
 		h.ghlHooks = ghl
+	}
+	if crm, ok := webhooksSvc.(WebhookCRMService); ok {
+		h.crmHooks = crm
 	}
 	return h
 }
@@ -70,6 +78,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Patch("/integrations/connections/{id}", h.patchConnection)
 		r.Get("/integrations/connections/{id}/sunbase", h.getSunbaseDetail)
 		r.Get("/integrations/connections/{id}/ghl", h.getGHLDetail)
+		r.Get("/integrations/connections/{id}/crm", h.getCRMDetail)
+		r.Get("/integrations/connections/{id}/crm/pipelines", h.getCRMPipelines)
 		r.Get("/integrations/connections/{id}/ghl/pipelines", h.getGHLPipelines)
 		r.Get("/integrations/connections/{id}/ghl/calendars", h.getGHLCalendars)
 		r.Get("/integrations/connections/{id}/ghl/custom-fields", h.getGHLCustomFields)
@@ -271,7 +281,16 @@ func (h *Handler) patchConnection(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusOK, h.ghlResponse(conn))
 		return
 	}
-	httpx.WriteError(w, httpx.Validation("patch only supported for sunbase and ghl connections"))
+	if CRMConnectionConfigurable(existing.ProviderSlug) {
+		conn, err := h.svc.UpdateCRMConnection(r.Context(), p.AccountID, id, body.Config)
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		httpx.JSON(w, http.StatusOK, crmResponse(conn, h.apiBaseURL))
+		return
+	}
+	httpx.WriteError(w, httpx.Validation("patch only supported for sunbase, ghl, and configurable crm connections"))
 }
 
 func (h *Handler) createGHLConnection(w http.ResponseWriter, r *http.Request, accountID int64, name string, credentials json.RawMessage, config map[string]any) {
@@ -339,6 +358,31 @@ func (h *Handler) testStoredConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) getCRMDetail(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	detail, err := h.svc.CRMConnectionDetail(r.Context(), p.AccountID, id, h.apiBaseURL)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, detail)
+}
+
+func (h *Handler) getCRMPipelines(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	pipelines, slug, err := h.svc.FetchCRMPipelines(r.Context(), p.AccountID, id)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"pipelines":     pipelines,
+		"provider_slug": slug,
+	})
 }
 
 func (h *Handler) getGHLPipelines(w http.ResponseWriter, r *http.Request) {
@@ -593,9 +637,19 @@ func (h *Handler) oauthCallback(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, httpx.Validation("missing code or state"))
 		return
 	}
-	if err := h.svc.OAuthCallback(r.Context(), h.namespace, provider, code, state); err != nil {
+	connID, err := h.svc.OAuthCallback(r.Context(), h.namespace, provider, code, state)
+	if err != nil {
 		httpx.WriteError(w, err)
 		return
+	}
+	if h.crmHooks != nil && providers.CRMPipelineImportSupported(provider) && provider != "salesforce" {
+		accountID, publicID, name, slug, cfg, loadErr := h.svc.GetConnectionAccount(r.Context(), connID)
+		if loadErr == nil {
+			if ids, provErr := h.crmHooks.ProvisionCRMInboundWebhook(r.Context(), accountID, connID, publicID, name, slug); provErr == nil {
+				merged := webhooks.MergeCRMConfig(cfg, ids)
+				_ = h.svc.FinalizeCRMConnection(r.Context(), connID, merged)
+			}
+		}
 	}
 	redirect := strings.TrimRight(h.appBaseURL, "/")
 	if redirect == "" {
