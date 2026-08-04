@@ -81,3 +81,19 @@ func (r *Repository) LogPipelinePlacement(ctx context.Context, q database.Querie
 func (r *Repository) LogLeadCreated(ctx context.Context, q database.Querier, leadID, ownerAccountID int64, actor HistoryActor, source string) error {
 	return r.InsertChangeLog(ctx, q, leadID, ownerAccountID, actor, "lead_created", "Created", "", source)
 }
+
+func (r *Repository) LogCRMSyncSkipped(ctx context.Context, q database.Querier, leadID, ownerAccountID int64, actor HistoryActor) error {
+	return r.InsertChangeLog(ctx, q, leadID, ownerAccountID, actor, "crm_sync_skipped", "CRM sync", "", "Skipped — no integration linked")
+}
+
+func (r *Repository) BuyerHasActiveCRMConnection(ctx context.Context, q database.Querier, buyerID int64) (bool, error) {
+	var exists bool
+	err := q.QueryRow(ctx,
+		`SELECT EXISTS (
+		   SELECT 1 FROM integration_connections ic
+		   JOIN integration_providers p ON p.id = ic.provider_id
+		   WHERE ic.account_id = $1 AND ic.status = 'active'
+		     AND p.slug IN ('pipedrive', 'ghl', 'hubspot', 'zoho_crm', 'salesforce', 'sunbase')
+		 )`, buyerID).Scan(&exists)
+	return exists, err
+}

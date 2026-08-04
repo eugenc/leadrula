@@ -3,7 +3,33 @@ import { SectionLabel } from "@/components/layout/SectionLabel";
 import { useIntegrationConnections } from "@/features/integrations/hooks";
 import { usePipelines, useStages } from "@/features/leads/hooks";
 import { PUBLISHER_DELIVERY_MODES } from "@/features/admin/contractOffer";
-import { formatIntegrationConnectionLabel } from "@/features/integrations/constants";
+import { formatIntegrationConnectionLabel, INTEGRATION_CATEGORY } from "@/features/integrations/constants";
+import type { IntegrationConnection } from "@/types";
+
+export function activeCrmConnections(connections: IntegrationConnection[] | undefined) {
+  return (connections ?? []).filter(
+    (c) => c.status === "active" && INTEGRATION_CATEGORY[c.provider_slug] === "crm"
+  );
+}
+
+export function CrmForwardWarning({
+  integrationId,
+  connections,
+}: {
+  integrationId: number;
+  connections: IntegrationConnection[] | undefined;
+}) {
+  const crmConnections = activeCrmConnections(connections);
+  if (integrationId > 0 || crmConnections.length === 0) return null;
+  const names = crmConnections.map((c) => c.name).join(", ");
+  return (
+    <p className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+      You have CRM integration{crmConnections.length > 1 ? "s" : ""} configured ({names}) but none selected
+      for CRM forward. Leads will land in inbox or pipeline but will <span className="font-medium">not</span> sync
+      to your CRM, and nothing will appear under Logs → Integrations until you link one here.
+    </p>
+  );
+}
 
 export function BuyerParticipationDeliveryFields({
   allowedModes,
@@ -116,6 +142,7 @@ export function BuyerParticipationDeliveryFields({
                 ))}
             </Select>
           </div>
+          <CrmForwardWarning integrationId={integrationId} connections={connections} />
         </div>
       )}
     </div>

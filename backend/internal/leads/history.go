@@ -655,6 +655,8 @@ func changeLogKind(changeKind string) string {
 		return "imported"
 	case "lead_created":
 		return "lead_created"
+	case "crm_sync_skipped":
+		return "integration"
 	case "preassigned_buyer":
 		return "field_change"
 	default:
@@ -697,6 +699,11 @@ func changeLogSummary(changeKind string, fieldName, fromVal, toVal *string) stri
 			return fmt.Sprintf("Created · %s", *toVal)
 		}
 		return "Created"
+	case "crm_sync_skipped":
+		if toVal != nil && *toVal != "" {
+			return fmt.Sprintf("CRM sync · %s", *toVal)
+		}
+		return "CRM sync skipped"
 	default:
 		return fmt.Sprintf("%s · %s → %s", field, from, to)
 	}

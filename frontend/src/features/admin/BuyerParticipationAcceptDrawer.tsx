@@ -26,6 +26,7 @@ import { BuyerTriggerStageFields } from "@/features/admin/BuyerTriggerStageField
 import { ContractReturnRulesEditor } from "@/features/admin/ContractReturnRulesEditor";
 import {
   BuyerParticipationDeliveryFields,
+  CrmForwardWarning,
   participationDeliveryValid,
 } from "@/features/admin/BuyerParticipationDeliveryFields";
 import type { ContractParticipation } from "@/types";
@@ -250,6 +251,7 @@ function DrawerContent({
               buyerPipelineId={pipelineId || participation.buyer_pipeline_id}
               persistChanges={false}
             />
+            <CrmForwardWarning integrationId={integrationId} connections={connections} />
           </div>
         )}
 
@@ -329,6 +331,7 @@ function DrawerContent({
                   ))}
               </Select>
             </div>
+            <CrmForwardWarning integrationId={integrationId} connections={connections} />
           </div>
         )}
       </DrawerBody>

@@ -71,19 +71,24 @@ func loadLegacyTarget(ctx context.Context, q database.Querier, contractID int64)
 
 func loadPerLeadTargetByComp(ctx context.Context, q database.Querier, compID int64) (*Target, error) {
 	t := &Target{}
+	var delivery string
 	err := q.QueryRow(ctx,
 		`SELECT cc.contract_id, c.buyer_id, COALESCE(cc.counterparty_pipeline_id, c.buyer_pipeline_id),
-		        COALESCE(cc.flat_amount, cc.bid_max, 0)::float8, cc.id
+		        COALESCE(cc.flat_amount, cc.bid_max, 0)::float8, cc.id,
+		        COALESCE(cc.delivery, 'leads'), COALESCE(cc.counterparty_stage_id, 0),
+		        COALESCE(c.integration_connection_id, 0)
 		 FROM contract_compensations cc
 		 JOIN contracts c ON c.id = cc.contract_id
 		 WHERE cc.id = $1 AND cc.trigger = 'per_lead' AND c.deleted_at IS NULL AND c.status = 'active'`,
-		compID).Scan(&t.ID, &t.BuyerID, &t.BuyerPipelineID, &t.RatePerLead, &t.CompensationID)
+		compID).Scan(&t.ID, &t.BuyerID, &t.BuyerPipelineID, &t.RatePerLead, &t.CompensationID,
+		&delivery, &t.BuyerStageID, &t.IntegrationID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, httpx.NotFound("compensation not found")
 		}
 		return nil, err
 	}
+	t.Delivery = delivery
 	return t, nil
 }
 
