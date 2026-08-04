@@ -70,6 +70,40 @@ func (s *Service) processJobs(ctx context.Context) error {
 	return rows.Err()
 }
 
+// ProcessJobByID runs a single queue row synchronously (used by ops scripts and retries).
+func (s *Service) ProcessJobByID(ctx context.Context, jobID int64) error {
+	var connID, leadID int64
+	var routeID, triggerID *int64
+	var payload json.RawMessage
+	var attempts int
+	err := s.pool.QueryRow(ctx,
+		`UPDATE integration_delivery_queue
+		 SET status = 'processing', attempts = attempts + 1, updated_at = now()
+		 WHERE id = $1 AND status IN ('pending', 'dead')
+		 RETURNING connection_id, route_id, lead_id, payload, attempts, webhook_trigger_id`,
+		jobID).Scan(&connID, &routeID, &leadID, &payload, &attempts, &triggerID)
+	if err != nil {
+		return fmt.Errorf("queue job %d: %w", jobID, err)
+	}
+	s.executeJob(ctx, jobID, connID, leadID, payload, attempts, triggerID)
+
+	var status string
+	var lastErr *string
+	if err := s.pool.QueryRow(ctx,
+		`SELECT status::text, last_error FROM integration_delivery_queue WHERE id = $1`, jobID).
+		Scan(&status, &lastErr); err != nil {
+		return err
+	}
+	if status != "success" {
+		msg := "delivery failed"
+		if lastErr != nil && *lastErr != "" {
+			msg = *lastErr
+		}
+		return fmt.Errorf("%s", msg)
+	}
+	return nil
+}
+
 func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, payload json.RawMessage, attempts int, triggerID *int64) {
 	defer func() {
 		if r := recover(); r != nil {

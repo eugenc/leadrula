@@ -139,9 +139,25 @@ func ghlCreateOpportunity(ctx context.Context, token string, cfg GHLConfig, cont
 		return result, err
 	}
 	if res.Status < 200 || res.Status >= 300 {
+		if ghlIsDuplicateOpportunity(res) {
+			return result, nil
+		}
 		return result, fmt.Errorf("%s", ghlErrorMessage(res))
 	}
 	return result, nil
+}
+
+func ghlIsDuplicateOpportunity(res ghlHTTPResult) bool {
+	if res.Status != 400 {
+		return false
+	}
+	var parsed struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	_ = json.Unmarshal(res.Body, &parsed)
+	return parsed.Code == "OPPORTUNITY_NO_DUPLICATE" ||
+		strings.Contains(strings.ToLower(parsed.Message), "duplicate opportunity")
 }
 
 func ghlCreateAppointment(ctx context.Context, token string, cfg GHLConfig, contactID string, payload DeliveryPayload) (*DeliveryResult, error) {
@@ -158,19 +174,25 @@ func ghlCreateAppointment(ctx context.Context, token string, cfg GHLConfig, cont
 	if cfg.AppointmentNotes != nil {
 		notes = resolveGHLFieldSourceValue(*cfg.AppointmentNotes, payload)
 	}
+	assignedUserID, err := ghlCalendarAssignedUserID(ctx, token, cfg)
+	if err != nil {
+		return nil, err
+	}
 	event := map[string]any{
-		"calendarId":        cfg.CalendarID,
-		"locationId":        cfg.LocationID,
-		"contactId":         contactID,
-		"title":             title,
-		"appointmentStatus": "confirmed",
-		"startTime":         startISO,
-		"endTime":           endISO,
+		"calendarId":               cfg.CalendarID,
+		"locationId":               cfg.LocationID,
+		"contactId":                contactID,
+		"title":                    title,
+		"appointmentStatus":        "confirmed",
+		"startTime":                startISO,
+		"endTime":                  endISO,
+		"ignoreFreeSlotValidation": true,
+		"assignedUserId":           assignedUserID,
 	}
 	if notes != "" {
 		event["notes"] = notes
 	}
-	res, err := ghlDo(ctx, http.MethodPost, "/calendars/events", token, cfg.LocationID, event)
+	res, err := ghlDo(ctx, http.MethodPost, "/calendars/events/appointments", token, cfg.LocationID, event)
 	mapped := AnyMapToMapped(event)
 	result := &DeliveryResult{
 		HTTPStatus: res.Status,
@@ -223,6 +245,42 @@ func ghlListPipelines(ctx context.Context, token, locationID string) ([]GHLPipel
 		return nil, err
 	}
 	return parsed.Pipelines, nil
+}
+
+func ghlCalendarAssignedUserID(ctx context.Context, token string, cfg GHLConfig) (string, error) {
+	if cfg.CalendarID == "" {
+		return "", fmt.Errorf("calendar_id required")
+	}
+	path := "/calendars/" + url.PathEscape(cfg.CalendarID)
+	res, err := ghlDo(ctx, http.MethodGet, path, token, cfg.LocationID, nil)
+	if err != nil {
+		return "", err
+	}
+	if res.Status < 200 || res.Status >= 300 {
+		return "", fmt.Errorf("%s", ghlErrorMessage(res))
+	}
+	var parsed struct {
+		Calendar struct {
+			TeamMembers []struct {
+				UserID    string `json:"userId"`
+				IsPrimary bool   `json:"isPrimary"`
+			} `json:"teamMembers"`
+		} `json:"calendar"`
+	}
+	if err := json.Unmarshal(res.Body, &parsed); err != nil {
+		return "", err
+	}
+	for _, m := range parsed.Calendar.TeamMembers {
+		if m.IsPrimary && m.UserID != "" {
+			return m.UserID, nil
+		}
+	}
+	for _, m := range parsed.Calendar.TeamMembers {
+		if m.UserID != "" {
+			return m.UserID, nil
+		}
+	}
+	return "", fmt.Errorf("no team member on GHL calendar %s", cfg.CalendarID)
 }
 
 func ghlListCalendars(ctx context.Context, token, locationID string) ([]GHLCalendar, error) {

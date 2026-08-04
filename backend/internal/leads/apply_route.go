@@ -420,6 +420,10 @@ func enqueueParticipationIntegration(ctx context.Context, deps RouteApplyDeps, t
 		if err := deps.Integrations.EnqueueConnectionDelivery(ctx, target.IntegrationID, lead.ID, payloadJSON, deps.EnqueuedConnectionIDs); err != nil {
 			return err
 		}
+	} else if target.BuyerID != 0 {
+		if hasCRM, err := deps.Repo.BuyerHasActiveCRMConnection(ctx, deps.Repo.Pool(), target.BuyerID); err == nil && hasCRM {
+			_ = deps.Repo.LogCRMSyncSkipped(ctx, deps.Repo.Pool(), lead.ID, target.BuyerID, ActorSystem("Route"))
+		}
 	}
 	if target.Delivery == "webhook" && target.WebhookID != 0 {
 		return deps.Integrations.EnqueueParticipationWebhook(ctx, target.WebhookID, lead.ID, payloadJSON)
