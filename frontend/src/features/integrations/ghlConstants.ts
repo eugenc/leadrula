@@ -22,6 +22,8 @@ export type GHLFieldSource = {
 export type GHLPipelineStageMapEntry = {
   leadrula_pipeline_id: number;
   leadrula_stage_id: number;
+  crm_pipeline_id?: string;
+  crm_stage_id?: string;
   ghl_pipeline_id: string;
   ghl_pipeline_stage_id: string;
 };
@@ -65,6 +67,7 @@ export type GHLConfig = {
   appointment_standard_fields?: GHLAppointmentStandardFields;
   inbound_stage_sync_enabled?: boolean;
   inbound_sync_leadrula_pipeline_id?: number;
+  inbound_sync_crm_pipeline_id?: string;
   inbound_sync_ghl_pipeline_id?: string;
 };
 

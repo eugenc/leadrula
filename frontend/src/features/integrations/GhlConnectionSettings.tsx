@@ -22,14 +22,16 @@ import {
   mergeGhlMapSection,
   type GHLConfig,
   type GHLFieldSource,
+  type GHLPipelineStageMapEntry,
 } from "@/features/integrations/ghlConstants";
 import { GhlEntityFieldMapSection } from "@/features/integrations/GhlEntityFieldMapSection";
 import {
   GhlAppointmentStandardFieldsSection,
   GhlOpportunityStandardFieldsSection,
 } from "@/features/integrations/GhlStandardFieldGroup";
-import { GhlPipelineStageMapSection } from "@/features/integrations/GhlPipelineStageMapSection";
-import { GhlInboundStageSyncSection } from "@/features/integrations/GhlInboundStageSyncSection";
+import { CrmInboundStageSyncSection } from "@/features/integrations/CrmInboundStageSyncSection";
+import { CrmPipelineStageMapSection } from "@/features/integrations/CrmPipelineStageMapSection";
+import { crmPipelinesToOptions } from "@/features/integrations/crmConstants";
 import { GhlTitleTemplateEditor } from "@/features/integrations/GhlTitleTemplateEditor";
 import type { GhlCustomField } from "@/features/integrations/hooks";
 import type { OutboundFieldMapEntry } from "@/types";
@@ -119,13 +121,37 @@ export function GhlConnectionSettings({
       ? (config.pipeline_stage_map ?? []).filter((e) => e.leadrula_pipeline_id === inboundSyncPipelineID)
       : (config.pipeline_stage_map ?? []);
 
-  function patchStageMap(entries: import("@/features/integrations/ghlConstants").GHLPipelineStageMapEntry[]) {
+  const ghlPipelineOptions = crmPipelinesToOptions(
+    ghlPipelines.map((p) => ({
+      external_id: p.id,
+      name: p.name,
+      stages: (p.stages ?? []).map((s) => ({ external_id: s.id, name: s.name })),
+    }))
+  );
+
+  function patchInboundConfig(next: import("@/features/integrations/crmConstants").CRMInboundConfig) {
+    patch({
+      inbound_stage_sync_enabled: next.inbound_stage_sync_enabled,
+      inbound_sync_leadrula_pipeline_id: next.inbound_sync_leadrula_pipeline_id,
+      inbound_sync_crm_pipeline_id: next.inbound_sync_crm_pipeline_id,
+      inbound_sync_ghl_pipeline_id:
+        next.inbound_sync_crm_pipeline_id ?? next.inbound_sync_ghl_pipeline_id ?? config.inbound_sync_ghl_pipeline_id,
+      pipeline_stage_map: next.pipeline_stage_map as GHLPipelineStageMapEntry[] | undefined,
+    });
+  }
+
+  function patchStageMapEntries(entries: import("@/features/integrations/crmConstants").CRMPipelineStageMapEntry[]) {
+    const mapped = entries.map((e) => ({
+      ...e,
+      ghl_pipeline_id: e.crm_pipeline_id ?? e.ghl_pipeline_id ?? "",
+      ghl_pipeline_stage_id: e.crm_stage_id ?? e.ghl_pipeline_stage_id ?? "",
+    })) as GHLPipelineStageMapEntry[];
     if (!inboundSyncEnabled || inboundSyncPipelineID <= 0) {
-      patch({ pipeline_stage_map: entries });
+      patch({ pipeline_stage_map: mapped });
       return;
     }
     const other = (config.pipeline_stage_map ?? []).filter((e) => e.leadrula_pipeline_id !== inboundSyncPipelineID);
-    patch({ pipeline_stage_map: [...other, ...entries] });
+    patch({ pipeline_stage_map: [...other, ...mapped] });
   }
 
   function patchMapSection(section: "contact" | "opportunity" | "appointment", entries: OutboundFieldMapEntry[]) {
@@ -290,20 +316,21 @@ export function GhlConnectionSettings({
         />
       </div>
 
-      <GhlInboundStageSyncSection
+      <CrmInboundStageSyncSection
         config={config}
-        onChange={onChange}
-        ghlPipelines={ghlPipelines}
-        ghlPipelinesLoading={ghlPipelinesLoading}
-        webhookMode={webhookMode}
+        onChange={patchInboundConfig}
+        providerLabel="GoHighLevel"
+        crmPipelines={ghlPipelineOptions}
+        crmPipelinesLoading={ghlPipelinesLoading}
       />
 
       {webhookMode && (
-        <GhlPipelineStageMapSection
+        <CrmPipelineStageMapSection
           entries={inboundSyncEnabled ? filteredStageMap : (config.pipeline_stage_map ?? [])}
-          onChange={inboundSyncEnabled ? patchStageMap : (entries) => patch({ pipeline_stage_map: entries })}
-          ghlPipelines={ghlPipelines}
-          ghlPipelinesLoading={ghlPipelinesLoading}
+          onChange={patchStageMapEntries}
+          providerLabel="GHL"
+          crmPipelines={ghlPipelineOptions}
+          crmPipelinesLoading={ghlPipelinesLoading}
           triggerOnly={!inboundSyncEnabled}
           syncEnabled={inboundSyncEnabled}
           defaultLeadrulaPipelineId={inboundSyncEnabled ? inboundSyncPipelineID : undefined}
@@ -318,11 +345,12 @@ export function GhlConnectionSettings({
             value={opportunityTitleTemplateFromConfig(config)}
             onChange={(v) => patch({ opportunity_title_template: v })}
           />
-          <GhlPipelineStageMapSection
+          <CrmPipelineStageMapSection
             entries={inboundSyncEnabled ? filteredStageMap : (config.pipeline_stage_map ?? [])}
-            onChange={inboundSyncEnabled ? patchStageMap : (entries) => patch({ pipeline_stage_map: entries })}
-            ghlPipelines={ghlPipelines}
-            ghlPipelinesLoading={ghlPipelinesLoading}
+            onChange={patchStageMapEntries}
+            providerLabel="GHL"
+            crmPipelines={ghlPipelineOptions}
+            crmPipelinesLoading={ghlPipelinesLoading}
             syncEnabled={inboundSyncEnabled}
             defaultLeadrulaPipelineId={inboundSyncEnabled ? inboundSyncPipelineID : undefined}
           />
