@@ -25,7 +25,9 @@ type Target struct {
 
 const perLeadCompSQL = `
 SELECT cc.id, c.buyer_id, COALESCE(cc.counterparty_pipeline_id, c.buyer_pipeline_id),
-       COALESCE(cc.flat_amount, cc.bid_max, 0)::float8
+       COALESCE(cc.flat_amount, cc.bid_max, 0)::float8,
+       COALESCE(cc.delivery, 'leads'), COALESCE(cc.counterparty_stage_id, 0),
+       COALESCE(c.integration_connection_id, 0)
 FROM contract_compensations cc
 JOIN contracts c ON c.id = cc.contract_id
 WHERE cc.contract_id = $1 AND cc.trigger = 'per_lead'
@@ -36,8 +38,10 @@ LIMIT 1`
 
 func loadPerLeadTarget(ctx context.Context, q database.Querier, contractID int64) (*Target, error) {
 	t := &Target{}
+	var delivery string
 	err := q.QueryRow(ctx, perLeadCompSQL, contractID).Scan(
-		&t.CompensationID, &t.BuyerID, &t.BuyerPipelineID, &t.RatePerLead)
+		&t.CompensationID, &t.BuyerID, &t.BuyerPipelineID, &t.RatePerLead,
+		&delivery, &t.BuyerStageID, &t.IntegrationID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return loadLegacyTarget(ctx, q, contractID)
@@ -45,15 +49,17 @@ func loadPerLeadTarget(ctx context.Context, q database.Querier, contractID int64
 		return nil, err
 	}
 	t.ID = contractID
+	t.Delivery = delivery
 	return t, nil
 }
 
 func loadLegacyTarget(ctx context.Context, q database.Querier, contractID int64) (*Target, error) {
 	t := &Target{}
 	err := q.QueryRow(ctx,
-		`SELECT id, buyer_id, buyer_pipeline_id, rate_per_lead::float8
+		`SELECT id, buyer_id, buyer_pipeline_id, rate_per_lead::float8,
+		        COALESCE(integration_connection_id, 0)
 		 FROM contracts WHERE id = $1 AND deleted_at IS NULL AND status = 'active'`, contractID).Scan(
-		&t.ID, &t.BuyerID, &t.BuyerPipelineID, &t.RatePerLead)
+		&t.ID, &t.BuyerID, &t.BuyerPipelineID, &t.RatePerLead, &t.IntegrationID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, httpx.NotFound("contract not found")
