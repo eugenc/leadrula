@@ -17,6 +17,7 @@ export function CrmPipelineStageMapSection({
   providerLabel,
   crmPipelines,
   crmPipelinesLoading = false,
+  triggerOnly = false,
   syncEnabled = false,
   defaultLeadrulaPipelineId,
 }: {
@@ -25,10 +26,12 @@ export function CrmPipelineStageMapSection({
   providerLabel: string;
   crmPipelines: CrmPipelineOption[];
   crmPipelinesLoading?: boolean;
+  triggerOnly?: boolean;
   syncEnabled?: boolean;
   defaultLeadrulaPipelineId?: number;
 }) {
   const { data: pipelines } = usePipelines();
+  const showCrmFields = !triggerOnly;
 
   function addRow() {
     onChange([
@@ -55,17 +58,19 @@ export function CrmPipelineStageMapSection({
   return (
     <div className="space-y-3 rounded-lg border border-gray-100 p-3">
       <div className="flex items-center justify-between">
-        <Label>Pipeline / stage mapping</Label>
+        <Label>{triggerOnly ? "Outbound trigger stages" : "Pipeline / stage mapping"}</Label>
         <Button size="sm" variant="secondary" onClick={addRow}>
           <Plus className="h-3.5 w-3.5" /> Add row
         </Button>
       </div>
       <p className="text-xs text-gray-400">
-        {syncEnabled
-          ? `Map each Leadrula stage to its ${providerLabel} counterpart for inbound stage sync.`
-          : `Map Leadrula stages to ${providerLabel} pipeline stages.`}
+        {triggerOnly
+          ? "Push to CRM when a lead enters these Leadrula pipeline stages. At least one trigger stage is required."
+          : syncEnabled
+            ? `Map each Leadrula stage to its ${providerLabel} counterpart for inbound stage sync.`
+            : `Map Leadrula stages to ${providerLabel} pipeline stages.`}
       </p>
-      {!crmPipelinesLoading && crmPipelines.length === 0 && (
+      {showCrmFields && !crmPipelinesLoading && crmPipelines.length === 0 && (
         <p className="text-xs text-gray-400">
           {providerLabel} pipeline and stage IDs can be entered manually if pipelines are not loaded yet.
         </p>
@@ -78,8 +83,12 @@ export function CrmPipelineStageMapSection({
             <tr>
               <TH>Leadrula pipeline</TH>
               <TH>Leadrula stage</TH>
-              <TH>{providerLabel} pipeline</TH>
-              <TH>{providerLabel} stage</TH>
+              {showCrmFields && (
+                <>
+                  <TH>{providerLabel} pipeline</TH>
+                  <TH>{providerLabel} stage</TH>
+                </>
+              )}
               <TH className="w-12" />
             </tr>
           </THead>
@@ -91,6 +100,8 @@ export function CrmPipelineStageMapSection({
                 pipelines={pipelines ?? []}
                 crmPipelines={crmPipelines}
                 providerLabel={providerLabel}
+                triggerOnly={triggerOnly}
+                showCrmFields={showCrmFields}
                 lockLeadrulaPipeline={defaultLeadrulaPipelineId}
                 onChange={(patch) => updateRow(idx, patch)}
                 onRemove={() => removeRow(idx)}
@@ -108,6 +119,8 @@ function PipelineStageRow({
   pipelines,
   crmPipelines,
   providerLabel,
+  triggerOnly,
+  showCrmFields,
   lockLeadrulaPipeline,
   onChange,
   onRemove,
@@ -116,6 +129,8 @@ function PipelineStageRow({
   pipelines: { id: number; name: string }[];
   crmPipelines: CrmPipelineOption[];
   providerLabel: string;
+  triggerOnly?: boolean;
+  showCrmFields?: boolean;
   lockLeadrulaPipeline?: number;
   onChange: (patch: Partial<CRMPipelineStageMapEntry>) => void;
   onRemove: () => void;
@@ -165,54 +180,74 @@ function PipelineStageRow({
           ))}
         </Select>
       </TD>
-      <TD>
-        {crmPipelines.length > 0 ? (
-          <Select
-            className="!h-8 !text-sm"
-            value={crmPipelineId}
-            onChange={(ev) => {
-              onChange({ crm_pipeline_id: ev.target.value, crm_stage_id: "" });
-            }}
-          >
-            <option value="">Select…</option>
-            {crmPipelines.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </Select>
-        ) : (
-          <Input
-            className="!h-8 !text-sm font-mono"
-            value={entry.crm_pipeline_id ?? ""}
-            onChange={(ev) => onChange({ crm_pipeline_id: ev.target.value, crm_stage_id: "" })}
-            placeholder={`${providerLabel} pipeline ID`}
-          />
-        )}
-      </TD>
-      <TD>
-        {crmStages.length > 0 ? (
-          <Select
-            className="!h-8 !text-sm"
-            value={entryCrmStageId(entry)}
-            onChange={(ev) => onChange({ crm_stage_id: ev.target.value })}
-          >
-            <option value="">Select…</option>
-            {crmStages.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </Select>
-        ) : (
-          <Input
-            className="!h-8 !text-sm font-mono"
-            value={entry.crm_stage_id ?? ""}
-            onChange={(ev) => onChange({ crm_stage_id: ev.target.value })}
-            placeholder={`${providerLabel} stage ID`}
-          />
-        )}
-      </TD>
+      {showCrmFields && (
+        <>
+          <TD>
+            {crmPipelines.length > 0 ? (
+              <Select
+                className="!h-8 !text-sm"
+                value={crmPipelineId}
+                onChange={(ev) => {
+                  onChange({
+                    crm_pipeline_id: ev.target.value,
+                    crm_stage_id: "",
+                    ghl_pipeline_id: ev.target.value,
+                    ghl_pipeline_stage_id: "",
+                  });
+                }}
+              >
+                <option value="">Select…</option>
+                {crmPipelines.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <Input
+                className="!h-8 !text-sm font-mono"
+                value={entry.crm_pipeline_id ?? entry.ghl_pipeline_id ?? ""}
+                onChange={(ev) =>
+                  onChange({
+                    crm_pipeline_id: ev.target.value,
+                    ghl_pipeline_id: ev.target.value,
+                    crm_stage_id: "",
+                    ghl_pipeline_stage_id: "",
+                  })
+                }
+                placeholder={`${providerLabel} pipeline ID`}
+              />
+            )}
+          </TD>
+          <TD>
+            {crmStages.length > 0 ? (
+              <Select
+                className="!h-8 !text-sm"
+                value={entryCrmStageId(entry)}
+                onChange={(ev) =>
+                  onChange({ crm_stage_id: ev.target.value, ghl_pipeline_stage_id: ev.target.value })
+                }
+              >
+                <option value="">Select…</option>
+                {crmStages.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <Input
+                className="!h-8 !text-sm font-mono"
+                value={entry.crm_stage_id ?? entry.ghl_pipeline_stage_id ?? ""}
+                onChange={(ev) =>
+                  onChange({ crm_stage_id: ev.target.value, ghl_pipeline_stage_id: ev.target.value })
+                }
+                placeholder={`${providerLabel} stage ID`}
+              />
+            )}
+          </TD>
+        </>
+      )}
       <TD>
         <IconButton variant="danger" aria-label="Remove" onClick={onRemove}>
           <Trash2 className="h-4 w-4" />
