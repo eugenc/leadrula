@@ -43,7 +43,7 @@ func (s *Service) LeadHistory(ctx context.Context, p *auth.Principal, leadID int
 
 // ChangeStage moves a lead to a new stage, enforcing destination prompts and
 // applying any matching return rule. Atomic per DB spec §4.2.
-func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, newStageID int64, actionAt *time.Time, disqReasonID *int64) (*Lead, []auth.ImpersonationChange, error) {
+func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, newStageID int64, actionAt *time.Time, disqReasonID *int64, extraSkipIntegrationConnIDs ...int64) (*Lead, []auth.ImpersonationChange, error) {
 	var pendingEmails []notifications.EmailJob
 	tx, err := s.repo.pool.Begin(ctx)
 	if err != nil {
@@ -266,7 +266,9 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 	}
 	if !frozen && s.integrations != nil && updated.PipelineID != nil && updated.StageID != nil {
 		if payloadJSON, err := BuildDeliveryPayload(updated); err == nil {
-			_ = s.integrations.TryEnqueueGHLWebhookOnStageMove(ctx, updated.OwnerAccountID, *updated.PipelineID, *updated.StageID, leadID, payloadJSON, enqueuedConnIDs)
+			skipConnIDs := append([]int64{}, enqueuedConnIDs...)
+			skipConnIDs = append(skipConnIDs, extraSkipIntegrationConnIDs...)
+			_ = s.integrations.TryEnqueueGHLWebhookOnStageMove(ctx, updated.OwnerAccountID, *updated.PipelineID, *updated.StageID, leadID, payloadJSON, skipConnIDs)
 		}
 	}
 	var auditChanges []auth.ImpersonationChange
@@ -343,21 +345,21 @@ func (s *Service) ClearFromPipeline(ctx context.Context, p *auth.Principal, lead
 }
 
 // ChangeStageByWebhook moves a lead without user permission checks (inbound webhook).
-func (s *Service) ChangeStageByWebhook(ctx context.Context, accountID, leadID, newStageID int64, actionAt *time.Time, disqReasonID *int64, webhookName string) (*Lead, error) {
-	p := &auth.Principal{AccountID: accountID, Role: "admin", UserID: 0}
-	lead, err := s.changeStageWithActor(ctx, p, leadID, newStageID, actionAt, disqReasonID, ActorWebhook(webhookName))
+func (s *Service) ChangeStageByWebhook(ctx context.Context, accountID, leadID, newStageID int64, actionAt *time.Time, disqReasonID *int64, webhookName string, skipIntegrationConnIDs ...int64) (*Lead, error) {
+	p := &auth.Principal{AccountID: accountID, Role: "admin", UserID: 0, FullAccess: true}
+	lead, err := s.changeStageWithActor(ctx, p, leadID, newStageID, actionAt, disqReasonID, ActorWebhook(webhookName), skipIntegrationConnIDs...)
 	return lead, err
 }
 
-func (s *Service) changeStageWithActor(ctx context.Context, p *auth.Principal, leadID, newStageID int64, actionAt *time.Time, disqReasonID *int64, actor HistoryActor) (*Lead, error) {
-	lead, _, err := s.ChangeStage(ctx, p, leadID, newStageID, actionAt, disqReasonID)
+func (s *Service) changeStageWithActor(ctx context.Context, p *auth.Principal, leadID, newStageID int64, actionAt *time.Time, disqReasonID *int64, actor HistoryActor, skipIntegrationConnIDs ...int64) (*Lead, error) {
+	lead, _, err := s.ChangeStage(ctx, p, leadID, newStageID, actionAt, disqReasonID, skipIntegrationConnIDs...)
 	if err != nil {
 		return nil, err
 	}
 	// Re-label the latest stage history row when webhook moved (ChangeStage used user actor).
 	if actor.Type == "webhook" && actor.Label != "" {
 		_, _ = s.repo.pool.Exec(ctx,
-			`UPDATE lead_stage_history SET actor_type=$2, actor_label=$3, moved_by_user_id=0
+			`UPDATE lead_stage_history SET actor_type=$2, actor_label=$3, moved_by_user_id=NULL
 			 WHERE id = (SELECT id FROM lead_stage_history WHERE lead_id=$1 ORDER BY created_at DESC, id DESC LIMIT 1)`,
 			leadID, actor.Type, actor.Label)
 	}

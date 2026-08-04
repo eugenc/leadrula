@@ -17,6 +17,7 @@ import {
 } from "@/features/admin/hooks";
 import { StageSettingsDrawer } from "@/features/pipelines/StageSettingsDrawer";
 import { DeletePipelineResourceConfirmDialog } from "@/features/pipelines/DeletePipelineResourceConfirmDialog";
+import { ImportPipelinesFromCrmModal } from "@/features/pipelines/ImportPipelinesFromCrmModal";
 import { stageColorDot } from "@/features/pipelines/stageColors";
 import { PageBody } from "@/components/layout/PageBody";
 import { SectionLabel } from "@/components/layout/SectionLabel";
@@ -26,7 +27,7 @@ import { Input, Select } from "@/components/ui/input";
 import { STAGE_TYPES } from "@/features/pipelines/stageTypes";
 import { Card, Spinner, EmptyState } from "@/components/ui/misc";
 import { cn } from "@/lib/utils";
-import { Plus, Settings2, Trash2, GripVertical } from "lucide-react";
+import { Plus, Settings2, Trash2, GripVertical, Download } from "lucide-react";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import type { Stage, StageType } from "@/types";
@@ -45,6 +46,7 @@ export function PipelinesPage() {
   const [pipelineToDelete, setPipelineToDelete] = useState<{ id: number; name: string } | null>(
     null
   );
+  const [importOpen, setImportOpen] = useState(false);
 
   return (
     <>
@@ -54,6 +56,11 @@ export function PipelinesPage() {
         ) : (
           <div className="flex gap-6">
             <Card className="w-64 shrink-0 p-2">
+              <div className="mb-2 px-1">
+                <Button variant="outline" size="sm" className="w-full" onClick={() => setImportOpen(true)}>
+                  <Download className="h-3.5 w-3.5" /> Import from CRM
+                </Button>
+              </div>
               {(pipelines ?? []).map((p) => (
                 <div
                   key={p.id}
@@ -143,6 +150,8 @@ export function PipelinesPage() {
           });
         }}
       />
+
+      <ImportPipelinesFromCrmModal open={importOpen} onClose={() => setImportOpen(false)} />
     </>
   );
 }

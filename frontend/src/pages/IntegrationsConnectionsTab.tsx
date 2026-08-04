@@ -15,6 +15,15 @@ import { SunbaseFieldMapSection } from "@/features/integrations/SunbaseFieldMapS
 import { SunbaseInboundEndpointSection } from "@/features/integrations/SunbaseInboundEndpointSection";
 import { GhlInboundEndpointSection } from "@/features/integrations/GhlInboundEndpointSection";
 import { GhlConnectionSettings } from "@/features/integrations/GhlConnectionSettings";
+import { CrmConnectionSettings } from "@/features/integrations/CrmConnectionSettings";
+import { CrmInboundEndpointSection } from "@/features/integrations/CrmInboundEndpointSection";
+import {
+  crmPipelinesToOptions,
+  crmProviderLabel,
+  isConfigurableCrm,
+  normalizeCrmConfig,
+  type CRMInboundConfig,
+} from "@/features/integrations/crmConstants";
 import { TwilioPhoneNumbersSection } from "@/features/integrations/TwilioPhoneNumbersSection";
 import {
   DEFAULT_GHL_CONFIG,
@@ -22,6 +31,7 @@ import {
   isGhlWebhookMode,
   type GHLConfig,
 } from "@/features/integrations/ghlConstants";
+import { usePipelines } from "@/features/leads/hooks";
 import {
   SUNBASE_URL,
   sunbaseFieldMap,
@@ -44,6 +54,8 @@ import {
   useUpdateIntegrationConnection,
   useSunbaseConnectionDetail,
   useGhlConnectionDetail,
+  useCrmConnectionDetail,
+  useCrmPipelines,
   useGhlPipelines,
   useGhlCalendars,
   useGhlCustomFields,
@@ -156,8 +168,10 @@ function AddConnectionDrawer({
   const [fieldMap, setFieldMap] = useState<OutboundFieldMapEntry[]>(sunbaseFieldMap(""));
   const [sunbaseActive, setSunbaseActive] = useState(false);
   const [ghlActive, setGhlActive] = useState(false);
+  const [crmActive, setCrmActive] = useState(false);
   const [twilioActive, setTwilioActive] = useState(false);
   const [ghlConfig, setGhlConfig] = useState<GHLConfig>(DEFAULT_GHL_CONFIG(""));
+  const [crmConfig, setCrmConfig] = useState<CRMInboundConfig>({});
   const [activeConnection, setActiveConnection] = useState<IntegrationConnection | null>(null);
   const [inboundWebhook, setInboundWebhook] = useState<SunbaseInboundWebhook | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -181,15 +195,31 @@ function AddConnectionDrawer({
   const isManage = existingForSlug.length > 0;
   const showSunbaseActive = isSunbase && sunbaseActive && activeConnection != null;
   const showGhlActive = isGhl && ghlActive && activeConnection != null;
+  const showCrmActive =
+    isConfigurableCrm(effectiveSlug) && crmActive && activeConnection != null;
   const showTwilioActive = isTwilio && twilioActive && activeConnection != null;
 
   const detailId = showSunbaseActive ? activeConnection.id : null;
   const ghlDetailId = showGhlActive ? activeConnection.id : null;
+  const crmDetailId = showCrmActive ? activeConnection.id : null;
   const { data: sunbaseDetail } = useSunbaseConnectionDetail(detailId);
   const { data: ghlDetail } = useGhlConnectionDetail(ghlDetailId);
+  const { data: crmDetail } = useCrmConnectionDetail(crmDetailId);
   const { data: ghlPipelinesData, isLoading: ghlPipelinesLoading } = useGhlPipelines(ghlDetailId);
+  const { data: crmPipelinesData, isLoading: crmPipelinesLoading } = useCrmPipelines(crmDetailId);
   const { data: ghlCalendarsData, isLoading: ghlCalendarsLoading } = useGhlCalendars(ghlDetailId);
   const { data: ghlCustomFieldsData, isLoading: ghlCustomFieldsLoading } = useGhlCustomFields(ghlDetailId);
+  const { data: lrPipelines } = usePipelines();
+
+  const ghlInboundSyncPipelineName =
+    ghlConfig.inbound_stage_sync_enabled && ghlConfig.inbound_sync_leadrula_pipeline_id
+      ? lrPipelines?.find((p) => p.id === ghlConfig.inbound_sync_leadrula_pipeline_id)?.name
+      : undefined;
+
+  const crmInboundSyncPipelineName =
+    crmConfig.inbound_stage_sync_enabled && crmConfig.inbound_sync_leadrula_pipeline_id
+      ? lrPipelines?.find((p) => p.id === crmConfig.inbound_sync_leadrula_pipeline_id)?.name
+      : undefined;
 
   const ghlPipelines =
     ghlPipelinesData?.pipelines ?? ghlMetadataPreview?.pipelines ?? [];
@@ -201,10 +231,14 @@ function AddConnectionDrawer({
   const ghlCalendarsBusy = showGhlActive ? ghlCalendarsLoading : fetchGhlMetadata.isPending;
   const ghlCustomFieldsBusy = showGhlActive ? ghlCustomFieldsLoading : fetchGhlMetadata.isPending;
 
+  const crmPipelines = crmPipelinesToOptions(crmPipelinesData?.pipelines ?? []);
+
   const drawerTitle = showSunbaseActive
     ? "SunBase connected"
     : showGhlActive
       ? "GoHighLevel connected"
+      : showCrmActive && selected
+        ? `${crmProviderLabel(effectiveSlug)} connected`
       : showTwilioActive
         ? "Twilio connected"
       : isManage && selected
@@ -226,8 +260,10 @@ function AddConnectionDrawer({
       setFieldMap(sunbaseFieldMap(""));
       setSunbaseActive(false);
       setGhlActive(false);
+      setCrmActive(false);
       setTwilioActive(false);
       setGhlConfig(DEFAULT_GHL_CONFIG(""));
+      setCrmConfig({});
       setActiveConnection(null);
       setInboundWebhook(null);
       setShowAdvanced(false);
@@ -248,6 +284,12 @@ function AddConnectionDrawer({
         const existing = connections.find((c) => c.provider_slug === "ghl");
         if (existing) {
           loadGhlConnection(existing);
+        }
+      }
+      if (isConfigurableCrm(initialSlug)) {
+        const existing = connections.find((c) => c.provider_slug === initialSlug);
+        if (existing) {
+          loadCrmConnection(existing);
         }
       }
       if (initialSlug === "twilio") {
@@ -285,10 +327,17 @@ function AddConnectionDrawer({
     }
   }, [ghlDetail]);
 
+  useEffect(() => {
+    if (crmDetail?.inbound_webhook) {
+      setInboundWebhook(crmDetail.inbound_webhook);
+    }
+  }, [crmDetail]);
+
   function loadSunbaseConnection(conn: IntegrationConnection) {
     setActiveConnection(conn);
     setSunbaseActive(true);
     setGhlActive(false);
+    setCrmActive(false);
     setTwilioActive(false);
     setName(conn.name);
     const cfg = conn.config ?? {};
@@ -307,6 +356,7 @@ function AddConnectionDrawer({
   function loadGhlConnection(conn: IntegrationConnection) {
     setActiveConnection(conn);
     setGhlActive(true);
+    setCrmActive(false);
     setSunbaseActive(false);
     setTwilioActive(false);
     setName(conn.name);
@@ -321,11 +371,24 @@ function AddConnectionDrawer({
     if (conn.inbound_webhook) setInboundWebhook(conn.inbound_webhook);
   }
 
+  function loadCrmConnection(conn: IntegrationConnection) {
+    setActiveConnection(conn);
+    setCrmActive(true);
+    setGhlActive(false);
+    setSunbaseActive(false);
+    setTwilioActive(false);
+    setName(conn.name);
+    setSlug(conn.provider_slug);
+    setCrmConfig(normalizeCrmConfig(conn.config ?? {}));
+    if (conn.inbound_webhook) setInboundWebhook(conn.inbound_webhook);
+  }
+
   function loadTwilioConnection(conn: IntegrationConnection) {
     setActiveConnection(conn);
     setTwilioActive(true);
     setSunbaseActive(false);
     setGhlActive(false);
+    setCrmActive(false);
     setName(conn.name);
   }
 
@@ -636,6 +699,25 @@ function AddConnectionDrawer({
     );
   }
 
+  function saveCrmChanges() {
+    if (!activeConnection) return;
+    update.mutate(
+      {
+        id: activeConnection.id,
+        config: crmConfig as Record<string, unknown>,
+      },
+      {
+        onSuccess: (conn) => {
+          setActiveConnection(conn);
+          setCrmConfig(normalizeCrmConfig(conn.config ?? {}));
+          if (conn.inbound_webhook) setInboundWebhook(conn.inbound_webhook);
+          toast.success("Saved");
+        },
+        onError: (e) => toast.error(errorMessage(e)),
+      }
+    );
+  }
+
   function disconnect(id: number, closeOnSuccess = false) {
     remove.mutate(id, {
       onSuccess: () => {
@@ -643,6 +725,7 @@ function AddConnectionDrawer({
         if (activeConnection?.id === id) {
           setSunbaseActive(false);
           setGhlActive(false);
+          setCrmActive(false);
           setTwilioActive(false);
           setActiveConnection(null);
           setInboundWebhook(null);
@@ -697,6 +780,24 @@ function AddConnectionDrawer({
               Done
             </Button>
             <Button disabled={update.isPending} onClick={saveGhlChanges}>
+              Save changes
+            </Button>
+          </>
+        ) : showCrmActive ? (
+          <>
+            {activeConnection && (
+              <Button
+                variant="secondary"
+                disabled={remove.isPending}
+                onClick={() => disconnect(activeConnection.id, true)}
+              >
+                Disconnect
+              </Button>
+            )}
+            <Button variant="secondary" onClick={onClose}>
+              Done
+            </Button>
+            <Button disabled={update.isPending} onClick={saveCrmChanges}>
               Save changes
             </Button>
           </>
@@ -767,13 +868,38 @@ function AddConnectionDrawer({
           <SunbaseInboundEndpointSection inbound={inboundWebhook} />
         )}
 
-        {showGhlActive && inboundWebhook && <GhlInboundEndpointSection inbound={inboundWebhook} />}
+        {showGhlActive && inboundWebhook && (
+          <GhlInboundEndpointSection
+            inbound={inboundWebhook}
+            inboundStageSyncEnabled={!!ghlConfig.inbound_stage_sync_enabled}
+            syncPipelineName={ghlInboundSyncPipelineName}
+          />
+        )}
+
+        {showCrmActive && inboundWebhook && activeConnection && (
+          <CrmInboundEndpointSection
+            inbound={inboundWebhook}
+            providerLabel={crmProviderLabel(activeConnection.provider_slug)}
+            inboundStageSyncEnabled={!!crmConfig.inbound_stage_sync_enabled}
+            syncPipelineName={crmInboundSyncPipelineName}
+          />
+        )}
+
+        {showCrmActive && activeConnection && (
+          <CrmConnectionSettings
+            providerSlug={activeConnection.provider_slug}
+            config={crmConfig}
+            onChange={setCrmConfig}
+            crmPipelines={crmPipelines}
+            crmPipelinesLoading={crmPipelinesLoading}
+          />
+        )}
 
         {showTwilioActive && activeConnection && (
           <TwilioPhoneNumbersSection connectionId={activeConnection.id} />
         )}
 
-        {isManage && !showSunbaseActive && !showGhlActive && !showTwilioActive && (
+        {isManage && !showSunbaseActive && !showGhlActive && !showCrmActive && !showTwilioActive && (
           <div className="space-y-2 border-b border-gray-100 pb-4">
             <p className="text-sm font-semibold text-gray-800">Connected</p>
             {existingForSlug.map((c) => (
@@ -784,6 +910,7 @@ function AddConnectionDrawer({
                   onClick={() => {
                     if (c.provider_slug === "sunbase") loadSunbaseConnection(c);
                     if (c.provider_slug === "ghl") loadGhlConnection(c);
+                    if (isConfigurableCrm(c.provider_slug)) loadCrmConnection(c);
                     if (c.provider_slug === "twilio") loadTwilioConnection(c);
                   }}
                 >
@@ -803,7 +930,7 @@ function AddConnectionDrawer({
         )}
 
         <>
-            {!showSunbaseActive && !showGhlActive && !showTwilioActive && !(isGoogleMaps && isManage) && (
+            {!showSunbaseActive && !showGhlActive && !showCrmActive && !showTwilioActive && !(isGoogleMaps && isManage) && (
               <>
                 <div>
                   <Label>Provider</Label>

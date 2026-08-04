@@ -11,9 +11,14 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-type Handler struct{ svc *Service }
+type Handler struct {
+	svc        *Service
+	crmImport  CRMImportHelper
+}
 
 func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
+
+func (h *Handler) SetCRMImportHelper(u CRMImportHelper) { h.crmImport = u }
 
 // RegisterRoutes mounts pipeline + stage routes. Mutations require admin.
 func (h *Handler) RegisterRoutes(r chi.Router) {
@@ -26,6 +31,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequirePermission(permissions.ActionPipelinesRouting))
 		r.Post("/pipelines", h.create)
+		r.Post("/pipelines/import-from-crm", h.importFromCRM)
 		r.Patch("/pipelines/{id}", h.update)
 		r.Delete("/pipelines/{id}", h.delete)
 		r.Post("/pipelines/{id}/stages", h.createStage)
@@ -66,6 +72,20 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, pl)
+}
+
+func (h *Handler) importFromCRM(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	var body ImportFromCRMInput
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	result, err := h.svc.ImportFromCRM(r.Context(), p, body, h.crmImport)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) update(w http.ResponseWriter, r *http.Request) {

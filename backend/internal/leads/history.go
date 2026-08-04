@@ -44,10 +44,14 @@ func (r *Repository) InsertStageHistory(ctx context.Context, q database.Querier,
 			actorType = "system"
 		}
 	}
+	var movedByUserID any
+	if p.UserID > 0 {
+		movedByUserID = p.UserID
+	}
 	_, err := q.Exec(ctx,
 		`INSERT INTO lead_stage_history(lead_id, from_stage_id, to_stage_id, owner_account_id, moved_by_user_id, action_at_captured, disqualification_reason_id, actor_type, actor_label)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-		leadID, p.FromStage, p.ToStage, p.OwnerAccountID, p.UserID, p.ActionAt, p.DisqReason, actorType, nullIfEmpty(p.Actor.Label))
+		leadID, p.FromStage, p.ToStage, p.OwnerAccountID, movedByUserID, p.ActionAt, p.DisqReason, actorType, nullIfEmpty(p.Actor.Label))
 	return err
 }
 

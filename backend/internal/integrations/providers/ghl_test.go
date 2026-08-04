@@ -72,6 +72,76 @@ func TestResolveGHLStage(t *testing.T) {
 	}
 }
 
+func TestResolveLeadrulaStage(t *testing.T) {
+	entries := []GHLPipelineStageMapEntry{
+		{LeadrulaPipelineID: 1, LeadrulaStageID: 5, GHLPipelineID: "p1", GHLPipelineStageID: "s1"},
+		{LeadrulaPipelineID: 2, LeadrulaStageID: 9, GHLPipelineID: "p1", GHLPipelineStageID: "s2"},
+	}
+	stageID, ok := ResolveLeadrulaStage(entries, 1, "p1", "s1")
+	if !ok || stageID != 5 {
+		t.Fatalf("got stageID=%d ok=%v", stageID, ok)
+	}
+	_, ok = ResolveLeadrulaStage(entries, 1, "p1", "s2")
+	if ok {
+		t.Fatal("expected no match for wrong stage on pipeline 1")
+	}
+	stageID, ok = ResolveLeadrulaStage(entries, 2, "p1", "s2")
+	if !ok || stageID != 9 {
+		t.Fatalf("pipeline 2: got stageID=%d ok=%v", stageID, ok)
+	}
+}
+
+func TestGHLInboundPipelineStage(t *testing.T) {
+	p, s := GHLInboundPipelineStage(map[string]any{
+		"pipelineId":      "gp1",
+		"pipelineStageId": "gs1",
+	})
+	if p != "gp1" || s != "gs1" {
+		t.Fatalf("got pipeline=%q stage=%q", p, s)
+	}
+	p, s = GHLInboundPipelineStage(map[string]any{"pipeline_id": "gp2", "stageId": "gs2"})
+	if p != "gp2" || s != "gs2" {
+		t.Fatalf("snake_case: got pipeline=%q stage=%q", p, s)
+	}
+	if p, s := GHLInboundPipelineStage(map[string]any{"pipelineId": "gp1"}); p != "gp1" || s != "" {
+		t.Fatalf("missing stage: pipeline=%q stage=%q", p, s)
+	}
+}
+
+func TestValidateInboundStageSync(t *testing.T) {
+	cfg := GHLConfig{
+		InboundStageSyncEnabled:       true,
+		InboundSyncLeadrulaPipelineID: 1,
+		InboundSyncGHLPipelineID:      "p1",
+		PipelineStageMap: []GHLPipelineStageMapEntry{
+			{LeadrulaPipelineID: 1, LeadrulaStageID: 5, GHLPipelineID: "p1", GHLPipelineStageID: "s1"},
+		},
+	}
+	if err := validateInboundStageSync(cfg); err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !InboundStageSyncReady(cfg) {
+		t.Fatal("expected ready")
+	}
+	cfg.InboundSyncGHLPipelineID = ""
+	if err := validateInboundStageSync(cfg); err == nil {
+		t.Fatal("expected ghl pipeline required")
+	}
+}
+
+func TestValidateGHLConfigJSON_inboundStageSyncRequiresMap(t *testing.T) {
+	_, err := ParseGHLConfig(map[string]any{
+		"location_id":                     "loc1",
+		"inbound_stage_sync_enabled":      true,
+		"inbound_sync_leadrula_pipeline_id": 1,
+		"inbound_sync_ghl_pipeline_id":      "p1",
+		"pipeline_stage_map":              []any{},
+	})
+	if err == nil {
+		t.Fatal("expected validation error for missing stage map")
+	}
+}
+
 func TestResolveGHLFieldSourceValue_builtin(t *testing.T) {
 	bf := "first_name"
 	fs := GHLFieldSource{SourceType: "builtin", BuiltinField: &bf}

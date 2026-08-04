@@ -1,6 +1,6 @@
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Label, Select } from "@/components/ui/input";
+import { Label, Select, Input } from "@/components/ui/input";
 import { IconButton } from "@/components/layout/IconButton";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { usePipelines, useStages } from "@/features/leads/hooks";
@@ -14,19 +14,29 @@ export function GhlPipelineStageMapSection({
   ghlPipelines,
   ghlPipelinesLoading = false,
   triggerOnly = false,
+  syncEnabled = false,
+  defaultLeadrulaPipelineId,
 }: {
   entries: GHLPipelineStageMapEntry[];
   onChange: (entries: GHLPipelineStageMapEntry[]) => void;
   ghlPipelines: GhlPipeline[];
   ghlPipelinesLoading?: boolean;
   triggerOnly?: boolean;
+  syncEnabled?: boolean;
+  defaultLeadrulaPipelineId?: number;
 }) {
   const { data: pipelines } = usePipelines();
+  const showGHLFields = !triggerOnly;
 
   function addRow() {
     onChange([
       ...entries,
-      { leadrula_pipeline_id: 0, leadrula_stage_id: 0, ghl_pipeline_id: "", ghl_pipeline_stage_id: "" },
+      {
+        leadrula_pipeline_id: defaultLeadrulaPipelineId ?? 0,
+        leadrula_stage_id: 0,
+        ghl_pipeline_id: "",
+        ghl_pipeline_stage_id: "",
+      },
     ]);
   }
 
@@ -51,9 +61,16 @@ export function GhlPipelineStageMapSection({
       <p className="text-xs text-gray-400">
         {triggerOnly
           ? "Push to GHL when a lead enters these Leadrula pipeline stages. At least one trigger stage is required."
-          : "Map each Leadrula stage to a GHL pipeline stage when pushing opportunities."}
+          : syncEnabled
+            ? "Map each Leadrula stage to its GHL counterpart for bidirectional sync."
+            : "Map each Leadrula stage to a GHL pipeline stage when pushing opportunities."}
       </p>
-      {!triggerOnly && !ghlPipelinesLoading && ghlPipelines.length === 0 && (
+      {showGHLFields && !ghlPipelinesLoading && ghlPipelines.length === 0 && (
+        <p className="text-xs text-gray-400">
+          GHL pipeline and stage IDs can be entered manually, or click Test connection to load pipelines from GHL.
+        </p>
+      )}
+      {!triggerOnly && !ghlPipelinesLoading && ghlPipelines.length === 0 && !syncEnabled && (
         <p className="text-xs text-gray-400">Click Test connection to load pipelines from GHL.</p>
       )}
       {entries.length === 0 ? (
@@ -81,6 +98,8 @@ export function GhlPipelineStageMapSection({
                 pipelines={pipelines ?? []}
                 ghlPipelines={ghlPipelines}
                 triggerOnly={triggerOnly}
+                showGHLFields={showGHLFields}
+                lockLeadrulaPipeline={defaultLeadrulaPipelineId}
                 onChange={(patch) => updateRow(idx, patch)}
                 onRemove={() => removeRow(idx)}
               />
@@ -97,6 +116,8 @@ function PipelineStageRow({
   pipelines,
   ghlPipelines,
   triggerOnly,
+  showGHLFields,
+  lockLeadrulaPipeline,
   onChange,
   onRemove,
 }: {
@@ -104,30 +125,40 @@ function PipelineStageRow({
   pipelines: { id: number; name: string }[];
   ghlPipelines: GhlPipeline[];
   triggerOnly?: boolean;
+  showGHLFields?: boolean;
+  lockLeadrulaPipeline?: number;
   onChange: (patch: Partial<GHLPipelineStageMapEntry>) => void;
   onRemove: () => void;
 }) {
-  const { data: stages } = useStages(entry.leadrula_pipeline_id || undefined);
+  const lrPipelineLocked = lockLeadrulaPipeline != null && lockLeadrulaPipeline > 0;
+  const lrPipelineID = lrPipelineLocked ? lockLeadrulaPipeline! : entry.leadrula_pipeline_id;
+  const { data: stages } = useStages(lrPipelineID || undefined);
   const ghlPipeline = ghlPipelines.find((p) => p.id === entry.ghl_pipeline_id);
   const ghlStages = ghlPipeline?.stages ?? [];
 
   return (
     <TR>
       <TD>
-        <Select
-          className="!h-8 !text-sm"
-          value={entry.leadrula_pipeline_id}
-          onChange={(ev) => {
-            onChange({ leadrula_pipeline_id: Number(ev.target.value), leadrula_stage_id: 0 });
-          }}
-        >
-          <option value={0}>Select…</option>
-          {pipelines.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </Select>
+        {lrPipelineLocked ? (
+          <span className="text-sm text-gray-700">
+            {pipelines.find((p) => p.id === lockLeadrulaPipeline)?.name ?? `Pipeline ${lockLeadrulaPipeline}`}
+          </span>
+        ) : (
+          <Select
+            className="!h-8 !text-sm"
+            value={entry.leadrula_pipeline_id}
+            onChange={(ev) => {
+              onChange({ leadrula_pipeline_id: Number(ev.target.value), leadrula_stage_id: 0 });
+            }}
+          >
+            <option value={0}>Select…</option>
+            {pipelines.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </Select>
+        )}
       </TD>
       <TD>
         <Select
@@ -143,37 +174,55 @@ function PipelineStageRow({
           ))}
         </Select>
       </TD>
-      {!triggerOnly && (
+      {!triggerOnly && showGHLFields && (
         <>
           <TD>
-            <Select
-              className="!h-8 !text-sm"
-              value={entry.ghl_pipeline_id}
-              onChange={(ev) => {
-                onChange({ ghl_pipeline_id: ev.target.value, ghl_pipeline_stage_id: "" });
-              }}
-            >
-              <option value="">Select…</option>
-              {ghlPipelines.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </Select>
+            {ghlPipelines.length > 0 ? (
+              <Select
+                className="!h-8 !text-sm"
+                value={entry.ghl_pipeline_id}
+                onChange={(ev) => {
+                  onChange({ ghl_pipeline_id: ev.target.value, ghl_pipeline_stage_id: "" });
+                }}
+              >
+                <option value="">Select…</option>
+                {ghlPipelines.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <Input
+                className="!h-8 !text-sm font-mono"
+                value={entry.ghl_pipeline_id}
+                onChange={(ev) => onChange({ ghl_pipeline_id: ev.target.value, ghl_pipeline_stage_id: "" })}
+                placeholder="GHL pipeline ID"
+              />
+            )}
           </TD>
           <TD>
-            <Select
-              className="!h-8 !text-sm"
-              value={entry.ghl_pipeline_stage_id}
-              onChange={(ev) => onChange({ ghl_pipeline_stage_id: ev.target.value })}
-            >
-              <option value="">Select…</option>
-              {ghlStages.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </Select>
+            {ghlStages.length > 0 ? (
+              <Select
+                className="!h-8 !text-sm"
+                value={entry.ghl_pipeline_stage_id}
+                onChange={(ev) => onChange({ ghl_pipeline_stage_id: ev.target.value })}
+              >
+                <option value="">Select…</option>
+                {ghlStages.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <Input
+                className="!h-8 !text-sm font-mono"
+                value={entry.ghl_pipeline_stage_id}
+                onChange={(ev) => onChange({ ghl_pipeline_stage_id: ev.target.value })}
+                placeholder="GHL stage ID"
+              />
+            )}
           </TD>
         </>
       )}

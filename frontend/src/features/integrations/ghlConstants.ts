@@ -63,6 +63,9 @@ export type GHLConfig = {
   outbound_field_map?: OutboundFieldMapEntry[];
   opportunity_standard_fields?: GHLOpportunityStandardFields;
   appointment_standard_fields?: GHLAppointmentStandardFields;
+  inbound_stage_sync_enabled?: boolean;
+  inbound_sync_leadrula_pipeline_id?: number;
+  inbound_sync_ghl_pipeline_id?: string;
 };
 
 export function ghlEntryBelongsToSection(e: OutboundFieldMapEntry, section: GHLMapSection): boolean {
@@ -170,6 +173,7 @@ export const DEFAULT_GHL_CONFIG = (locationId: string): GHLConfig => ({
   opportunity_title_template: "{{first_name}} {{last_name}}",
   pipeline_stage_map: [],
   outbound_field_map: [],
+  inbound_stage_sync_enabled: false,
 });
 
 export const GHL_TIMEZONES = [
