@@ -74,3 +74,14 @@ export type HiddenIntegrationSlug = (typeof HIDDEN_INTEGRATION_SLUGS)[number];
 export function isHiddenIntegrationSlug(slug: string): slug is HiddenIntegrationSlug {
   return (HIDDEN_INTEGRATION_SLUGS as readonly string[]).includes(slug);
 }
+
+export function formatIntegrationConnectionLabel(c: {
+  name?: string | null;
+  provider_name?: string | null;
+  provider_slug?: string | null;
+}): string {
+  const name = c.name?.trim();
+  const type = c.provider_name?.trim() || c.provider_slug?.trim();
+  if (name && type) return `${name} (${type})`;
+  return name || type || "Integration";
+}
