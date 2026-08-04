@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/echayko/leadrula/backend/internal/integrations/providers"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/jackc/pgx/v5"
 )
@@ -133,10 +134,70 @@ func (s *Service) SyncGHLInboundEvent(ctx context.Context, inboundWebhookID int6
 	return s.ensureGHLInboundContactIDFieldMap(ctx, inboundWebhookID)
 }
 
+// SyncGHLInboundFieldMaps replaces inbound field maps derived from outbound GHL connection config.
+func (s *Service) SyncGHLInboundFieldMaps(ctx context.Context, inboundWebhookID int64, config map[string]any) error {
+	if inboundWebhookID <= 0 {
+		return nil
+	}
+	var eventID int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT id FROM webhook_events WHERE webhook_id=$1 AND action='create' ORDER BY id LIMIT 1`,
+		inboundWebhookID).Scan(&eventID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := s.pool.Exec(ctx, `DELETE FROM webhook_event_field_map WHERE event_id=$1`, eventID); err != nil {
+		return err
+	}
+
+	seen := map[string]bool{}
+	add := func(sourceKey, targetType string, builtinField *string, customFieldID *int64) error {
+		sourceKey = strings.TrimSpace(sourceKey)
+		if sourceKey == "" || seen[sourceKey] {
+			return nil
+		}
+		seen[sourceKey] = true
+		_, err := s.AddFieldMap(ctx, eventID, sourceKey, targetType, builtinField, customFieldID)
+		return err
+	}
+
+	for _, f := range defaultGHLInboundFields {
+		bf := f.BuiltinField
+		if err := add(f.SourceKey, "builtin", &bf, nil); err != nil {
+			return err
+		}
+	}
+
+	for _, m := range providers.GHLInboundMapsFromConfig(config) {
+		switch m.TargetType {
+		case "builtin":
+			if m.BuiltinField == nil {
+				continue
+			}
+			bf := *m.BuiltinField
+			if err := add(m.SourceKey, "builtin", &bf, nil); err != nil {
+				return err
+			}
+		case "custom":
+			if m.CustomFieldID == nil {
+				continue
+			}
+			id := *m.CustomFieldID
+			if err := add(m.SourceKey, "custom", nil, &id); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // SyncAllGHLInboundWebhooks repairs inbound field maps for every GHL connection.
 func (s *Service) SyncAllGHLInboundWebhooks(ctx context.Context) error {
 	rows, err := s.pool.Query(ctx,
-		`SELECT w.id FROM webhooks w
+		`SELECT w.id, ic.config FROM webhooks w
 		 JOIN integration_connections ic ON ic.id = w.integration_connection_id
 		 JOIN integration_providers ip ON ip.id = ic.provider_id
 		 WHERE ip.slug = 'ghl' AND w.inbound_enabled`)
@@ -146,10 +207,13 @@ func (s *Service) SyncAllGHLInboundWebhooks(ctx context.Context) error {
 	defer rows.Close()
 	for rows.Next() {
 		var webhookID int64
-		if err := rows.Scan(&webhookID); err != nil {
+		var configJSON []byte
+		if err := rows.Scan(&webhookID, &configJSON); err != nil {
 			return err
 		}
-		if err := s.SyncGHLInboundEvent(ctx, webhookID); err != nil {
+		cfg := map[string]any{}
+		_ = json.Unmarshal(configJSON, &cfg)
+		if err := s.SyncGHLInboundFieldMaps(ctx, webhookID, cfg); err != nil {
 			return err
 		}
 	}

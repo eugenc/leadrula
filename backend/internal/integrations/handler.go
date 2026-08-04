@@ -25,6 +25,7 @@ type WebhookSunbaseService interface {
 type WebhookGHLService interface {
 	ProvisionGHLWebhooks(ctx context.Context, accountID int64, connectionID int64, connectionPublicID, connectionName string) (*webhooks.GHLWebhookIDs, error)
 	SyncGHLInboundEvent(ctx context.Context, inboundWebhookID int64) error
+	SyncGHLInboundFieldMaps(ctx context.Context, inboundWebhookID int64, config map[string]any) error
 	DeleteGHLWebhooks(ctx context.Context, accountID int64, ids webhooks.GHLWebhookIDs)
 }
 
@@ -258,6 +259,15 @@ func (h *Handler) patchConnection(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, err)
 			return
 		}
+		if h.ghlHooks != nil {
+			ids := webhooks.ParseGHLWebhookIDs(conn.Config)
+			if ids.Inbound > 0 {
+				if syncErr := h.ghlHooks.SyncGHLInboundFieldMaps(r.Context(), ids.Inbound, configMap(conn.Config)); syncErr != nil {
+					httpx.WriteError(w, syncErr)
+					return
+				}
+			}
+		}
 		httpx.JSON(w, http.StatusOK, h.ghlResponse(conn))
 		return
 	}
@@ -293,13 +303,13 @@ func (h *Handler) createGHLConnection(w http.ResponseWriter, r *http.Request, ac
 		httpx.WriteError(w, wrapGHLProvisionErr("provision webhooks", err))
 		return
 	}
-	if err := h.ghlHooks.SyncGHLInboundEvent(r.Context(), ids.Inbound); err != nil {
+	merged := webhooks.MergeGHLConfig(config, ids)
+	if err := h.ghlHooks.SyncGHLInboundFieldMaps(r.Context(), ids.Inbound, merged); err != nil {
 		h.ghlHooks.DeleteGHLWebhooks(r.Context(), accountID, *ids)
 		_ = h.svc.DeleteConnection(r.Context(), accountID, conn.ID)
 		httpx.WriteError(w, wrapGHLProvisionErr("sync inbound webhook", err))
 		return
 	}
-	merged := webhooks.MergeGHLConfig(config, ids)
 	if err := h.svc.FinalizeGHLConnection(r.Context(), conn.ID, merged); err != nil {
 		h.ghlHooks.DeleteGHLWebhooks(r.Context(), accountID, *ids)
 		_ = h.svc.DeleteConnection(r.Context(), accountID, conn.ID)

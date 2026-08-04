@@ -740,6 +740,7 @@ export interface OutboundFieldMapEntry {
   meta_field?: string;
   ghl_custom_field_id?: string;
   ghl_field_model?: "contact" | "opportunity";
+  ghl_map_section?: "contact" | "opportunity" | "appointment";
 }
 
 export interface Webhook {

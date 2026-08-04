@@ -125,6 +125,7 @@ func ghlCreateOpportunity(ctx context.Context, token string, cfg GHLConfig, cont
 		"status":            "open",
 		"source":            payload.Source,
 	}
+	applyGHLOpportunityStandardFields(opp, cfg.OpportunityStandardFields, payload)
 	if fields := ghlCustomFieldsPayload(cfg.OutboundFieldMap, payload, "opportunity"); len(fields) > 0 {
 		opp["customFields"] = fields
 	}
@@ -162,7 +163,8 @@ func ghlIsDuplicateOpportunity(res ghlHTTPResult) bool {
 
 func ghlCreateAppointment(ctx context.Context, token string, cfg GHLConfig, contactID string, payload DeliveryPayload) (*DeliveryResult, error) {
 	datetimeStr := resolveGHLFieldSourceValue(cfg.AppointmentDatetime, payload)
-	startISO, endISO, err := parseAppointmentTimes(datetimeStr, cfg.AppointmentTimezone)
+	duration := appointmentDurationMinutes(cfg.AppointmentStandardFields)
+	startISO, endISO, err := parseAppointmentTimes(datetimeStr, cfg.AppointmentTimezone, duration)
 	if err != nil {
 		return nil, err
 	}
@@ -178,6 +180,9 @@ func ghlCreateAppointment(ctx context.Context, token string, cfg GHLConfig, cont
 	if err != nil {
 		return nil, err
 	}
+	if v := strings.TrimSpace(resolveGHLFieldSourceValue(cfg.AppointmentStandardFields.AssignedUserID, payload)); v != "" {
+		assignedUserID = v
+	}
 	event := map[string]any{
 		"calendarId":               cfg.CalendarID,
 		"locationId":               cfg.LocationID,
@@ -189,6 +194,7 @@ func ghlCreateAppointment(ctx context.Context, token string, cfg GHLConfig, cont
 		"ignoreFreeSlotValidation": true,
 		"assignedUserId":           assignedUserID,
 	}
+	applyGHLAppointmentStandardFields(event, cfg.AppointmentStandardFields, payload)
 	if notes != "" {
 		event["notes"] = notes
 	}

@@ -32,6 +32,7 @@ type SunbaseFieldMapEntry struct {
 	StaticValue      *string `json:"static_value,omitempty"`
 	GHLCustomFieldID *string `json:"ghl_custom_field_id,omitempty"`
 	GHLFieldModel    *string `json:"ghl_field_model,omitempty"`
+	GHLMapSection    *string `json:"ghl_map_section,omitempty"`
 }
 
 type SunbaseProvider struct{}
