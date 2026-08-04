@@ -11,6 +11,7 @@ import {
   useDetachRouteIntegration,
 } from "@/features/integrations/hooks";
 import { type RouteDestinationIntegrationSelection } from "@/features/integrations/RouteDestinationIntegrationsEditor";
+import { formatIntegrationConnectionLabel } from "@/features/integrations/constants";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { FormDrawer } from "@/components/ui/dialog";
@@ -329,7 +330,7 @@ export function RouteDrawer({
               <option value={0}>Select…</option>
               {(connections ?? []).filter((c) => c.status === "active").map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name} ({c.provider_slug})
+                  {formatIntegrationConnectionLabel(c)}
                 </option>
               ))}
             </Select>

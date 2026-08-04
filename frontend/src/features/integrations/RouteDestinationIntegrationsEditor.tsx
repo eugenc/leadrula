@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useIntegrationConnections } from "@/features/integrations/hooks";
+import { formatIntegrationConnectionLabel } from "@/features/integrations/constants";
 import { Button } from "@/components/ui/button";
 import { Label, Select } from "@/components/ui/input";
 import type { IntegrationConnection } from "@/types";
@@ -100,7 +101,7 @@ export function RouteDestinationIntegrationsEditor({
             <option value={0}>Select…</option>
             {available.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.name} ({c.provider_slug})
+                {formatIntegrationConnectionLabel(c)}
               </option>
             ))}
           </Select>

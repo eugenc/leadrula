@@ -3,6 +3,7 @@ import { SectionLabel } from "@/components/layout/SectionLabel";
 import { useIntegrationConnections } from "@/features/integrations/hooks";
 import { usePipelines, useStages } from "@/features/leads/hooks";
 import { PUBLISHER_DELIVERY_MODES } from "@/features/admin/contractOffer";
+import { formatIntegrationConnectionLabel } from "@/features/integrations/constants";
 
 export function BuyerParticipationDeliveryFields({
   allowedModes,
@@ -110,7 +111,7 @@ export function BuyerParticipationDeliveryFields({
                 .filter((c) => c.status === "active")
                 .map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.name || c.provider_name}
+                    {formatIntegrationConnectionLabel(c)}
                   </option>
                 ))}
             </Select>

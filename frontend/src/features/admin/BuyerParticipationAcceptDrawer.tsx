@@ -18,6 +18,7 @@ import {
 } from "@/features/admin/hooks";
 import { Input } from "@/components/ui/input";
 import { useIntegrationConnections } from "@/features/integrations/hooks";
+import { formatIntegrationConnectionLabel } from "@/features/integrations/constants";
 import { useStages } from "@/features/leads/hooks";
 import { PUBLISHER_DELIVERY_MODES, formatParticipationStatus } from "@/features/admin/contractOffer";
 import { BuyerContractFieldMapSection } from "@/features/admin/BuyerContractFieldMapSection";
@@ -323,7 +324,7 @@ function DrawerContent({
                   .filter((c) => c.status === "active")
                   .map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.name || c.provider_name}
+                      {formatIntegrationConnectionLabel(c)}
                     </option>
                   ))}
               </Select>
