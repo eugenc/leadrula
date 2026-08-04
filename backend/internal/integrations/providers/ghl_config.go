@@ -29,21 +29,37 @@ type GHLPipelineStageMapEntry struct {
 	GHLPipelineStageID string `json:"ghl_pipeline_stage_id"`
 }
 
+type GHLOpportunityStandardFields struct {
+	MonetaryValue  GHLFieldSource
+	AssignedUserID GHLFieldSource
+	Status         GHLFieldSource
+}
+
+type GHLAppointmentStandardFields struct {
+	Description         GHLFieldSource
+	Address             GHLFieldSource
+	DurationMinutes     int
+	AssignedUserID      GHLFieldSource
+	MeetingLocationType GHLFieldSource
+}
+
 type GHLConfig struct {
-	DeliveryMode             string
-	WebhookURL               string
-	LocationID               string
-	CreateContact            bool
-	CreateOpportunity        bool
-	CreateAppointment        bool
-	CalendarID               string
-	AppointmentTimezone      string
-	AppointmentDatetime      GHLFieldSource
-	AppointmentTitleTemplate string
-	OpportunityTitleTemplate string
-	AppointmentNotes         *GHLFieldSource
-	PipelineStageMap         []GHLPipelineStageMapEntry
-	OutboundFieldMap         []SunbaseFieldMapEntry
+	DeliveryMode                string
+	WebhookURL                  string
+	LocationID                  string
+	CreateContact               bool
+	CreateOpportunity           bool
+	CreateAppointment           bool
+	CalendarID                  string
+	AppointmentTimezone         string
+	AppointmentDatetime         GHLFieldSource
+	AppointmentTitleTemplate    string
+	OpportunityTitleTemplate    string
+	AppointmentNotes            *GHLFieldSource
+	PipelineStageMap            []GHLPipelineStageMapEntry
+	OutboundFieldMap            []SunbaseFieldMapEntry
+	OpportunityStandardFields   GHLOpportunityStandardFields
+	AppointmentStandardFields   GHLAppointmentStandardFields
 }
 
 func ParseGHLCredentials(credentials []byte) (token string, err error) {
@@ -101,7 +117,9 @@ func ParseGHLConfig(config map[string]any) (GHLConfig, error) {
 		out.AppointmentNotes = notes
 	}
 	out.PipelineStageMap = parsePipelineStageMap(config["pipeline_stage_map"], out.DeliveryMode)
-	out.OutboundFieldMap = outboundFieldMapFromConfig(config)
+	out.OutboundFieldMap = ghlOutboundFieldMapFromConfig(config)
+	out.OpportunityStandardFields = parseGHLOpportunityStandardFields(config["opportunity_standard_fields"])
+	out.AppointmentStandardFields = parseGHLAppointmentStandardFields(config["appointment_standard_fields"])
 
 	if out.DeliveryMode == "webhook" {
 		if out.WebhookURL == "" {
@@ -276,6 +294,124 @@ func parsePipelineStageMap(raw any, deliveryMode string) []GHLPipelineStageMapEn
 		out = append(out, e)
 	}
 	return out
+}
+
+func ghlOutboundFieldMapFromConfig(config map[string]any) []SunbaseFieldMapEntry {
+	if config == nil {
+		return nil
+	}
+	raw, ok := config["outbound_field_map"]
+	if !ok || raw == nil {
+		return nil
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var entries []SunbaseFieldMapEntry
+	if json.Unmarshal(b, &entries) != nil {
+		return nil
+	}
+	return entries
+}
+
+func parseGHLOpportunityStandardFields(raw any) GHLOpportunityStandardFields {
+	m := parseGHLStandardFieldsMap(raw)
+	out := GHLOpportunityStandardFields{}
+	if fs, ok := m["monetary_value"]; ok {
+		out.MonetaryValue = fs
+	}
+	if fs, ok := m["assigned_user_id"]; ok {
+		out.AssignedUserID = fs
+	}
+	if fs, ok := m["status"]; ok {
+		out.Status = fs
+	}
+	return out
+}
+
+func parseGHLAppointmentStandardFields(raw any) GHLAppointmentStandardFields {
+	out := GHLAppointmentStandardFields{DurationMinutes: 30}
+	if raw == nil {
+		return out
+	}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		b, err := json.Marshal(raw)
+		if err != nil {
+			return out
+		}
+		if json.Unmarshal(b, &m) != nil {
+			return out
+		}
+	}
+	if v := intFromAny(m["duration_minutes"]); v > 0 {
+		out.DurationMinutes = v
+	}
+	fields := parseGHLStandardFieldsMap(raw)
+	if fs, ok := fields["description"]; ok {
+		out.Description = fs
+	}
+	if fs, ok := fields["address"]; ok {
+		out.Address = fs
+	}
+	if fs, ok := fields["assigned_user_id"]; ok {
+		out.AssignedUserID = fs
+	}
+	if fs, ok := fields["meeting_location_type"]; ok {
+		out.MeetingLocationType = fs
+	}
+	return out
+}
+
+func intFromAny(v any) int {
+	switch x := v.(type) {
+	case float64:
+		return int(x)
+	case int:
+		return x
+	case int64:
+		return int(x)
+	case json.Number:
+		n, _ := x.Int64()
+		return int(n)
+	default:
+		return 0
+	}
+}
+
+func applyGHLOpportunityStandardFields(opp map[string]any, std GHLOpportunityStandardFields, payload DeliveryPayload) {
+	if v := strings.TrimSpace(resolveGHLFieldSourceValue(std.MonetaryValue, payload)); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil {
+			opp["monetaryValue"] = n
+		}
+	}
+	if v := strings.TrimSpace(resolveGHLFieldSourceValue(std.AssignedUserID, payload)); v != "" {
+		opp["assignedTo"] = v
+	}
+	if v := strings.TrimSpace(resolveGHLFieldSourceValue(std.Status, payload)); v != "" {
+		opp["status"] = v
+	}
+}
+
+func applyGHLAppointmentStandardFields(event map[string]any, std GHLAppointmentStandardFields, payload DeliveryPayload) {
+	if v := strings.TrimSpace(resolveGHLFieldSourceValue(std.Description, payload)); v != "" {
+		event["description"] = v
+	}
+	if v := strings.TrimSpace(resolveGHLFieldSourceValue(std.Address, payload)); v != "" {
+		event["address"] = v
+	}
+	if v := strings.TrimSpace(resolveGHLFieldSourceValue(std.MeetingLocationType, payload)); v != "" {
+		event["meetingLocationType"] = v
+	}
+}
+
+func appointmentDurationMinutes(std GHLAppointmentStandardFields) time.Duration {
+	mins := std.DurationMinutes
+	if mins <= 0 {
+		mins = 30
+	}
+	return time.Duration(mins) * time.Minute
 }
 
 // MatchesGHLWebhookTrigger reports whether the lead stage is configured as a webhook outbound trigger.
@@ -488,7 +624,7 @@ func defaultOpportunityTitle(payload DeliveryPayload) string {
 	return "Opportunity"
 }
 
-func parseAppointmentTimes(datetimeStr, timezone string) (startISO, endISO string, err error) {
+func parseAppointmentTimes(datetimeStr, timezone string, duration time.Duration) (startISO, endISO string, err error) {
 	datetimeStr = strings.TrimSpace(datetimeStr)
 	timezone = strings.TrimSpace(timezone)
 	if datetimeStr == "" {
@@ -496,6 +632,9 @@ func parseAppointmentTimes(datetimeStr, timezone string) (startISO, endISO strin
 	}
 	if timezone == "" {
 		timezone = "America/New_York"
+	}
+	if duration <= 0 {
+		duration = 30 * time.Minute
 	}
 	loc, err := time.LoadLocation(timezone)
 	if err != nil {
@@ -523,7 +662,7 @@ func parseAppointmentTimes(datetimeStr, timezone string) (startISO, endISO strin
 		return "", "", fmt.Errorf("could not parse appointment datetime %q", datetimeStr)
 	}
 	start := t.In(loc)
-	end := start.Add(30 * time.Minute)
+	end := start.Add(duration)
 	return start.Format(time.RFC3339), end.Format(time.RFC3339), nil
 }
 

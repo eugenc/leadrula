@@ -2,6 +2,7 @@ package providers
 
 import (
 	"testing"
+	"time"
 )
 
 func TestParseGHLConfig_requiresLocation(t *testing.T) {
@@ -382,11 +383,71 @@ func TestGhlCustomFieldsPayload_opportunityOnly(t *testing.T) {
 }
 
 func TestParseAppointmentTimes(t *testing.T) {
-	start, end, err := parseAppointmentTimes("2024-06-15T10:00:00", "America/New_York")
+	start, end, err := parseAppointmentTimes("2024-06-15T10:00:00", "America/New_York", 30*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if start == "" || end == "" {
 		t.Fatal("expected ISO times")
+	}
+}
+
+func TestApplyGHLOpportunityStandardFields(t *testing.T) {
+	v := "5000"
+	bf := "cost"
+	opp := map[string]any{"status": "open"}
+	applyGHLOpportunityStandardFields(opp, GHLOpportunityStandardFields{
+		MonetaryValue:  GHLFieldSource{SourceType: "static", StaticValue: &v},
+		AssignedUserID: GHLFieldSource{SourceType: "static", StaticValue: strPtr("user-1")},
+		Status:         GHLFieldSource{SourceType: "builtin", BuiltinField: &bf},
+	}, DeliveryPayload{})
+	if opp["monetaryValue"] != float64(5000) {
+		t.Fatalf("monetaryValue: %v", opp["monetaryValue"])
+	}
+	if opp["assignedTo"] != "user-1" {
+		t.Fatalf("assignedTo: %v", opp["assignedTo"])
+	}
+}
+
+func TestGHLInboundMapsFromConfig_invertsOutbound(t *testing.T) {
+	cfid := int64(42)
+	config := map[string]any{
+		"location_id": "loc1",
+		"outbound_field_map": []map[string]any{
+			{
+				"dest_key":        "contact.solar_type",
+				"source_type":     "custom",
+				"custom_field_id": cfid,
+				"ghl_field_model": "contact",
+			},
+			{
+				"dest_key":     "contact.static_only",
+				"source_type":  "static",
+				"static_value": "x",
+			},
+		},
+		"opportunity_standard_fields": map[string]any{
+			"monetary_value": map[string]any{
+				"source_type":     "custom",
+				"custom_field_id": cfid,
+			},
+		},
+	}
+	maps := GHLInboundMapsFromConfig(config)
+	if len(maps) < 2 {
+		t.Fatalf("expected at least 2 inbound maps, got %d", len(maps))
+	}
+	foundSolar := false
+	foundMonetary := false
+	for _, m := range maps {
+		if m.SourceKey == "contact.solar_type" && m.TargetType == "custom" && m.CustomFieldID != nil && *m.CustomFieldID == cfid {
+			foundSolar = true
+		}
+		if m.SourceKey == "monetaryValue" && m.TargetType == "custom" {
+			foundMonetary = true
+		}
+	}
+	if !foundSolar || !foundMonetary {
+		t.Fatalf("missing inverted maps: solar=%v monetary=%v maps=%+v", foundSolar, foundMonetary, maps)
 	}
 }

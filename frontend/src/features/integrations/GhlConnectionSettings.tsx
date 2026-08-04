@@ -11,16 +11,23 @@ import { BUILTIN_FIELD_LABELS } from "@/features/leads/csvMapping";
 import {
   GHL_STANDARD_CONTACT_FIELDS,
   GHL_APPOINTMENT_BUILTINS,
+  GHL_TITLE_BUILTINS,
   GHL_TIMEZONES,
   DEFAULT_APPOINTMENT_DATETIME,
   isGhlFieldSourceSet,
   isGhlWebhookMode,
   appointmentTitleTemplateFromConfig,
   opportunityTitleTemplateFromConfig,
+  ghlMapSectionEntries,
+  mergeGhlMapSection,
   type GHLConfig,
   type GHLFieldSource,
 } from "@/features/integrations/ghlConstants";
-import { GhlCustomFieldMapSection } from "@/features/integrations/GhlCustomFieldMapSection";
+import { GhlEntityFieldMapSection } from "@/features/integrations/GhlEntityFieldMapSection";
+import {
+  GhlAppointmentStandardFieldsSection,
+  GhlOpportunityStandardFieldsSection,
+} from "@/features/integrations/GhlStandardFieldGroup";
 import { GhlPipelineStageMapSection } from "@/features/integrations/GhlPipelineStageMapSection";
 import { GhlTitleTemplateEditor } from "@/features/integrations/GhlTitleTemplateEditor";
 import type { GhlCustomField } from "@/features/integrations/hooks";
@@ -104,6 +111,14 @@ export function GhlConnectionSettings({
 
   const outboundMap = (config.outbound_field_map ?? []) as OutboundFieldMapEntry[];
   const webhookMode = isGhlWebhookMode(config);
+
+  function patchMapSection(section: "contact" | "opportunity" | "appointment", entries: OutboundFieldMapEntry[]) {
+    patch({ outbound_field_map: mergeGhlMapSection(outboundMap, section, entries) });
+  }
+
+  const contactMap = ghlMapSectionEntries(outboundMap, "contact");
+  const opportunityMap = ghlMapSectionEntries(outboundMap, "opportunity");
+  const appointmentMap = ghlMapSectionEntries(outboundMap, "appointment");
 
   useEffect(() => {
     if (!webhookMode && config.create_appointment && !isGhlFieldSourceSet(config.appointment_datetime)) {
@@ -227,7 +242,8 @@ export function GhlConnectionSettings({
         </p>
       )}
 
-      <div className="rounded-lg border border-gray-100 p-3">
+      <div className="space-y-3 rounded-lg border border-gray-100 p-3">
+        <SectionLabel>Contact</SectionLabel>
         <Label>Standard contact fields (fixed)</Label>
         <Table className="mt-2">
           <THead>
@@ -245,15 +261,18 @@ export function GhlConnectionSettings({
             ))}
           </TBody>
         </Table>
+        <GhlEntityFieldMapSection
+          section="contact"
+          title="Contact custom fields"
+          description="Map Leadrula fields to GHL contact custom fields."
+          entries={contactMap}
+          onChange={(entries) => patchMapSection("contact", entries)}
+          ghlCustomFields={ghlCustomFields}
+          ghlCustomFieldsLoading={ghlCustomFieldsLoading}
+          webhookMode={webhookMode}
+          defaultModel="contact"
+        />
       </div>
-
-      <GhlCustomFieldMapSection
-        entries={outboundMap}
-        onChange={(entries) => patch({ outbound_field_map: entries })}
-        ghlCustomFields={ghlCustomFields}
-        ghlCustomFieldsLoading={ghlCustomFieldsLoading}
-        webhookMode={webhookMode}
-      />
 
       {webhookMode && (
         <GhlPipelineStageMapSection
@@ -266,6 +285,7 @@ export function GhlConnectionSettings({
 
       {!webhookMode && config.create_opportunity && (
         <div className="space-y-3 rounded-lg border border-gray-100 p-3">
+          <SectionLabel>Opportunity</SectionLabel>
           <GhlTitleTemplateEditor
             label="Opportunity title"
             value={opportunityTitleTemplateFromConfig(config)}
@@ -277,12 +297,29 @@ export function GhlConnectionSettings({
             ghlPipelines={ghlPipelines}
             ghlPipelinesLoading={ghlPipelinesLoading}
           />
+          <GhlOpportunityStandardFieldsSection
+            values={config.opportunity_standard_fields}
+            onChange={(v) => patch({ opportunity_standard_fields: v })}
+            builtins={GHL_TITLE_BUILTINS}
+            customFields={activeCustomFields}
+            FieldSourceSelect={FieldSourceSelect}
+          />
+          <GhlEntityFieldMapSection
+            section="opportunity"
+            title="Opportunity custom fields"
+            description="Map Leadrula fields to GHL opportunity custom fields."
+            entries={opportunityMap}
+            onChange={(entries) => patchMapSection("opportunity", entries)}
+            ghlCustomFields={ghlCustomFields}
+            ghlCustomFieldsLoading={ghlCustomFieldsLoading}
+            defaultModel="opportunity"
+          />
         </div>
       )}
 
       {!webhookMode && config.create_appointment && (
         <div className="space-y-3 rounded-lg border border-gray-100 p-3">
-          <SectionLabel>Appointment settings</SectionLabel>
+          <SectionLabel>Appointment</SectionLabel>
           <div>
             <Label>GHL calendar</Label>
             <Select
@@ -353,6 +390,23 @@ export function GhlConnectionSettings({
               ))}
             </Select>
           </div>
+          <GhlAppointmentStandardFieldsSection
+            values={config.appointment_standard_fields}
+            onChange={(v) => patch({ appointment_standard_fields: v })}
+            builtins={GHL_APPOINTMENT_BUILTINS}
+            customFields={activeCustomFields}
+            FieldSourceSelect={FieldSourceSelect}
+          />
+          <GhlEntityFieldMapSection
+            section="appointment"
+            title="Appointment custom data"
+            description="GHL has no appointment custom fields. Map to contact or opportunity custom fields on the linked records."
+            entries={appointmentMap}
+            onChange={(entries) => patchMapSection("appointment", entries)}
+            ghlCustomFields={ghlCustomFields}
+            ghlCustomFieldsLoading={ghlCustomFieldsLoading}
+            allowTargetPick
+          />
         </div>
       )}
 

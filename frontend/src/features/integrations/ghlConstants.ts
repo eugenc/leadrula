@@ -28,6 +28,22 @@ export type GHLPipelineStageMapEntry = {
 
 export type GHLDeliveryMode = "api" | "webhook";
 
+export type GHLMapSection = "contact" | "opportunity" | "appointment";
+
+export type GHLOpportunityStandardFields = {
+  monetary_value?: GHLFieldSource;
+  assigned_user_id?: GHLFieldSource;
+  status?: GHLFieldSource;
+};
+
+export type GHLAppointmentStandardFields = {
+  description?: GHLFieldSource;
+  address?: GHLFieldSource;
+  duration_minutes?: number;
+  assigned_user_id?: GHLFieldSource;
+  meeting_location_type?: GHLFieldSource;
+};
+
 export type GHLConfig = {
   delivery_mode?: GHLDeliveryMode;
   webhook_url?: string;
@@ -45,7 +61,39 @@ export type GHLConfig = {
   appointment_notes?: GHLFieldSource;
   pipeline_stage_map?: GHLPipelineStageMapEntry[];
   outbound_field_map?: OutboundFieldMapEntry[];
+  opportunity_standard_fields?: GHLOpportunityStandardFields;
+  appointment_standard_fields?: GHLAppointmentStandardFields;
 };
+
+export function ghlEntryBelongsToSection(e: OutboundFieldMapEntry, section: GHLMapSection): boolean {
+  if (e.ghl_map_section) return e.ghl_map_section === section;
+  if (section === "contact") return !e.ghl_field_model || e.ghl_field_model === "contact";
+  if (section === "opportunity") return e.ghl_field_model === "opportunity";
+  return false;
+}
+
+export function ghlMapSectionEntries(all: OutboundFieldMapEntry[], section: GHLMapSection): OutboundFieldMapEntry[] {
+  return all.filter((e) => ghlEntryBelongsToSection(e, section));
+}
+
+export function mergeGhlMapSection(
+  all: OutboundFieldMapEntry[],
+  section: GHLMapSection,
+  sectionEntries: OutboundFieldMapEntry[]
+): OutboundFieldMapEntry[] {
+  const kept = all.filter((e) => !ghlEntryBelongsToSection(e, section));
+  const tagged = sectionEntries.map((e) => ({
+    ...e,
+    ghl_map_section: section,
+    ...(section === "opportunity" ? { ghl_field_model: "opportunity" as const } : {}),
+    ...(section === "contact" && !e.ghl_field_model ? { ghl_field_model: "contact" as const } : {}),
+  }));
+  return [...kept, ...tagged];
+}
+
+export const GHL_MEETING_LOCATION_TYPES = ["custom", "zoom", "gmeet", "phone", "address", "ms_teams", "google"];
+
+export const GHL_OPPORTUNITY_STATUS_VALUES = ["open", "won", "lost", "abandoned"];
 
 export const GHL_TITLE_BUILTINS = [
   "first_name",
