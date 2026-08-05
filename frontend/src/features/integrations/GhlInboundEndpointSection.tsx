@@ -4,6 +4,12 @@ import { IconButton } from "@/components/layout/IconButton";
 import { toast } from "@/store/toastStore";
 import type { SunbaseInboundWebhook } from "@/types";
 
+const GHL_STAGE_SYNC_WEBHOOK_BODY = `{
+  "contact_id": "{{contact.id}}",
+  "pipeline_id": "{{opportunity.pipeline_id}}",
+  "pipelineStageId": "{{opportunity.pipeline_stage_id}}"
+}`;
+
 export function GhlInboundEndpointSection({
   inbound,
   inboundStageSyncEnabled,
@@ -16,6 +22,11 @@ export function GhlInboundEndpointSection({
   function copyEndpoint() {
     navigator.clipboard.writeText(inbound.endpoint);
     toast.success("Endpoint copied");
+  }
+
+  function copyWebhookBody() {
+    navigator.clipboard.writeText(GHL_STAGE_SYNC_WEBHOOK_BODY);
+    toast.success("Webhook body copied");
   }
 
   return (
@@ -36,6 +47,14 @@ export function GhlInboundEndpointSection({
               <li><code className="font-mono">pipelineStageId</code></li>
             </ul>
             <p>Use a GHL Workflow triggered on <strong>Opportunity Stage Changed</strong> and map those values into the webhook action.</p>
+            <p className="mt-1">Do not use display names like <code className="font-mono">pipeline_name</code> or <code className="font-mono">pipleline_stage</code> — send GHL IDs instead.</p>
+            <div className="mt-2 space-y-1">
+              <p className="font-medium">Example webhook body (copy into your GHL workflow):</p>
+              <pre className="overflow-x-auto rounded border border-amber-300 bg-white p-2 font-mono text-[11px]">{GHL_STAGE_SYNC_WEBHOOK_BODY}</pre>
+              <Button size="sm" variant="secondary" onClick={copyWebhookBody}>
+                <Copy className="h-3.5 w-3.5" /> Copy webhook body
+              </Button>
+            </div>
           </div>
         )}
         {inboundStageSyncEnabled && syncPipelineName && (

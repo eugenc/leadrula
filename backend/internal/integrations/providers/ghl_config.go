@@ -27,8 +27,10 @@ type GHLPipelineStageMapEntry struct {
 	LeadrulaStageID    int64  `json:"leadrula_stage_id"`
 	CRMPipelineID      string `json:"crm_pipeline_id,omitempty"`
 	CRMStageID         string `json:"crm_stage_id,omitempty"`
+	CRMStageName       string `json:"crm_stage_name,omitempty"`
 	GHLPipelineID      string `json:"ghl_pipeline_id,omitempty"`
 	GHLPipelineStageID string `json:"ghl_pipeline_stage_id,omitempty"`
+	GHLStageName       string `json:"ghl_stage_name,omitempty"`
 }
 
 type GHLOpportunityStandardFields struct {
@@ -540,8 +542,10 @@ func mapEntry(e GHLPipelineStageMapEntry) CRMPipelineStageMapEntry {
 		LeadrulaStageID:    e.LeadrulaStageID,
 		CRMPipelineID:      e.CRMPipelineID,
 		CRMStageID:         e.CRMStageID,
+		CRMStageName:       e.CRMStageName,
 		GHLPipelineID:      e.GHLPipelineID,
 		GHLPipelineStageID: e.GHLPipelineStageID,
+		GHLStageName:       e.GHLStageName,
 	}
 }
 
@@ -551,6 +555,19 @@ func mapEntries(entries []GHLPipelineStageMapEntry) []CRMPipelineStageMapEntry {
 		out = append(out, mapEntry(e))
 	}
 	return out
+}
+
+// GHLInboundPipelineStageName reads a human-readable stage name from common GHL workflow custom fields.
+// Used as a fallback when pipelineStageId is missing (e.g. typo keys like pipleline_stage).
+func GHLInboundPipelineStageName(flat map[string]any) string {
+	for _, key := range []string{"pipeline_stage", "pipleline_stage", "pippleine_stage", "stage_name"} {
+		if v, ok := flat[key]; ok {
+			if s := strings.TrimSpace(toGHLText(v)); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 // GHLInboundPipelineStage reads GHL pipeline and stage IDs from a flattened webhook payload.

@@ -182,7 +182,7 @@ function PipelineStageRow({
                 className="!h-8 !text-sm"
                 value={entry.ghl_pipeline_id}
                 onChange={(ev) => {
-                  onChange({ ghl_pipeline_id: ev.target.value, ghl_pipeline_stage_id: "" });
+                  onChange({ ghl_pipeline_id: ev.target.value, ghl_pipeline_stage_id: "", ghl_stage_name: "" });
                 }}
               >
                 <option value="">Select…</option>
@@ -196,30 +196,43 @@ function PipelineStageRow({
               <Input
                 className="!h-8 !text-sm font-mono"
                 value={entry.ghl_pipeline_id}
-                onChange={(ev) => onChange({ ghl_pipeline_id: ev.target.value, ghl_pipeline_stage_id: "" })}
+                onChange={(ev) => onChange({ ghl_pipeline_id: ev.target.value, ghl_pipeline_stage_id: "", ghl_stage_name: "" })}
                 placeholder="GHL pipeline ID"
               />
             )}
           </TD>
           <TD>
             {ghlStages.length > 0 ? (
-              <Select
-                className="!h-8 !text-sm"
-                value={entry.ghl_pipeline_stage_id}
-                onChange={(ev) => onChange({ ghl_pipeline_stage_id: ev.target.value })}
-              >
-                <option value="">Select…</option>
-                {ghlStages.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </Select>
+              <div className="space-y-0.5">
+                <Select
+                  className="!h-8 !text-sm"
+                  value={entry.ghl_pipeline_stage_id}
+                  onChange={(ev) => {
+                    const stage = ghlStages.find((s) => s.id === ev.target.value);
+                    onChange({
+                      ghl_pipeline_stage_id: ev.target.value,
+                      ghl_stage_name: stage?.name ?? "",
+                    });
+                  }}
+                >
+                  <option value="">Select…</option>
+                  {ghlStages.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </Select>
+                {entry.ghl_pipeline_stage_id && (
+                  <p className="truncate font-mono text-[10px] text-gray-400" title={entry.ghl_pipeline_stage_id}>
+                    {entry.ghl_pipeline_stage_id}
+                  </p>
+                )}
+              </div>
             ) : (
               <Input
                 className="!h-8 !text-sm font-mono"
                 value={entry.ghl_pipeline_stage_id}
-                onChange={(ev) => onChange({ ghl_pipeline_stage_id: ev.target.value })}
+                onChange={(ev) => onChange({ ghl_pipeline_stage_id: ev.target.value, ghl_stage_name: "" })}
                 placeholder="GHL stage ID"
               />
             )}

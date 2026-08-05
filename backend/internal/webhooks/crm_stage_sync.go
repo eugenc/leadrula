@@ -42,6 +42,11 @@ func tryApplyCRMInboundStageSync(ctx context.Context, s *Service, webhook Webhoo
 	}
 
 	diag := providers.DiagnoseCRMInboundStageSync(slug, flat, syncCfg, lead.StageID)
+	if !diag.CanSync && slug == "ghl" {
+		if byName, ok := tryGHLInboundStageSyncByName(flat, syncCfg, lead.StageID); ok {
+			diag = byName
+		}
+	}
 	actor := leads.ActorWebhook(webhook.Name)
 	if !diag.CanSync {
 		if diag.SkipReason != "" && diag.SkipReason != "lead already at target stage" {
@@ -68,4 +73,37 @@ func tryApplyCRMInboundStageSync(ctx context.Context, s *Service, webhook Webhoo
 
 func tryApplyGHLInboundStageSync(ctx context.Context, s *Service, webhook Webhook, leadID int64, flat map[string]any) {
 	tryApplyCRMInboundStageSync(ctx, s, webhook, leadID, flat, "ghl")
+}
+
+func tryGHLInboundStageSyncByName(flat map[string]any, syncCfg providers.InboundStageSyncConfig, currentStageID *int64) (providers.InboundStageSyncDiagnosis, bool) {
+	crmPipelineID, crmStageID := providers.GHLInboundPipelineStage(flat)
+	if crmPipelineID == "" || crmStageID != "" || crmPipelineID != syncCfg.CRMPipelineID {
+		return providers.InboundStageSyncDiagnosis{}, false
+	}
+	stageName := providers.GHLInboundPipelineStageName(flat)
+	if stageName == "" {
+		return providers.InboundStageSyncDiagnosis{}, false
+	}
+
+	targetStageID, ok := providers.ResolveCRMLeadrulaStageByGHLStageName(
+		syncCfg.PipelineStageMap, syncCfg.LeadrulaPipelineID, crmPipelineID, stageName,
+	)
+	if !ok {
+		return providers.InboundStageSyncDiagnosis{
+			SkipReason:    fmt.Sprintf("no stage map entry for GHL stage name %q", stageName),
+			CRMPipelineID: crmPipelineID,
+		}, false
+	}
+	if currentStageID != nil && *currentStageID == targetStageID {
+		return providers.InboundStageSyncDiagnosis{
+			SkipReason:    "lead already at target stage",
+			TargetStageID: targetStageID,
+			CRMPipelineID: crmPipelineID,
+		}, true
+	}
+	return providers.InboundStageSyncDiagnosis{
+		CanSync:       true,
+		TargetStageID: targetStageID,
+		CRMPipelineID: crmPipelineID,
+	}, true
 }

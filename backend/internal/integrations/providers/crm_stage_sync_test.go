@@ -139,3 +139,93 @@ func TestDiagnoseCRMInboundStageSync_ready(t *testing.T) {
 		t.Fatalf("diag = %+v", diag)
 	}
 }
+
+func TestHasCRMStageMapEntry(t *testing.T) {
+	entries := []CRMPipelineStageMapEntry{
+		{LeadrulaPipelineID: 15, LeadrulaStageID: 99, GHLPipelineID: "jjFgv4", GHLPipelineStageID: "a46d5671"},
+	}
+	if !HasCRMStageMapEntry(entries, 15, "jjFgv4", 99) {
+		t.Fatal("expected entry")
+	}
+	if HasCRMStageMapEntry(entries, 15, "jjFgv4", 98) {
+		t.Fatal("unexpected entry for unmapped stage")
+	}
+}
+
+func TestResolveCRMLeadrulaStageByGHLStageName(t *testing.T) {
+	entries := []CRMPipelineStageMapEntry{
+		{
+			LeadrulaPipelineID: 15,
+			LeadrulaStageID:    99,
+			GHLPipelineID:      "jjFgv4ewhw0aO9ziDEUO",
+			GHLPipelineStageID: "a46d5671-2046-43f6-b0fc-af716d9fd234",
+			GHLStageName:       "PTO",
+		},
+	}
+	id, ok := ResolveCRMLeadrulaStageByGHLStageName(entries, 15, "jjFgv4ewhw0aO9ziDEUO", "PTO")
+	if !ok || id != 99 {
+		t.Fatalf("got id=%d ok=%v", id, ok)
+	}
+	id, ok = ResolveCRMLeadrulaStageByGHLStageName(entries, 15, "jjFgv4ewhw0aO9ziDEUO", "  pto ")
+	if !ok || id != 99 {
+		t.Fatalf("case-insensitive: got id=%d ok=%v", id, ok)
+	}
+	_, ok = ResolveCRMLeadrulaStageByGHLStageName(entries, 15, "jjFgv4ewhw0aO9ziDEUO", "Installed")
+	if ok {
+		t.Fatal("expected no match for unmapped stage name")
+	}
+}
+
+func TestResolveCRMLeadrulaStageByGHLStageName_differsFromLeadrulaName(t *testing.T) {
+	entries := []CRMPipelineStageMapEntry{
+		{
+			LeadrulaPipelineID: 1,
+			LeadrulaStageID:    10,
+			GHLPipelineID:      "pipe-a",
+			GHLPipelineStageID: "stage-b",
+			GHLStageName:       "Installed Complete",
+		},
+	}
+	id, ok := ResolveCRMLeadrulaStageByGHLStageName(entries, 1, "pipe-a", "Installed Complete")
+	if !ok || id != 10 {
+		t.Fatalf("got id=%d ok=%v", id, ok)
+	}
+}
+
+func TestDiagnoseCRMInboundStageSync_novaStractaPayload(t *testing.T) {
+	cfg := InboundStageSyncConfig{
+		Enabled:            true,
+		LeadrulaPipelineID: 15,
+		CRMPipelineID:      "jjFgv4ewhw0aO9ziDEUO",
+		PipelineStageMap: []CRMPipelineStageMapEntry{
+			{
+				LeadrulaPipelineID: 15,
+				LeadrulaStageID:    99,
+				GHLPipelineID:      "jjFgv4ewhw0aO9ziDEUO",
+				GHLPipelineStageID: "a46d5671-2046-43f6-b0fc-af716d9fd234",
+				GHLStageName:       "PTO",
+			},
+		},
+	}
+	flat := map[string]any{
+		"contact_id":      "riy9z40Tg5TW9RGFEqRD",
+		"pipeline_id":     "jjFgv4ewhw0aO9ziDEUO",
+		"pipeline_name":   "Solar Dynamics Leads",
+		"pipleline_stage": "PTO",
+	}
+	diag := DiagnoseCRMInboundStageSync("ghl", flat, cfg, nil)
+	if diag.CanSync || diag.SkipReason != "payload missing pipelineId or pipelineStageId" {
+		t.Fatalf("expected missing stage id, got %+v", diag)
+	}
+	pipe, stage := GHLInboundPipelineStage(flat)
+	if pipe != "jjFgv4ewhw0aO9ziDEUO" || stage != "" {
+		t.Fatalf("pipeline=%q stage=%q", pipe, stage)
+	}
+	if GHLInboundPipelineStageName(flat) != "PTO" {
+		t.Fatal("expected PTO stage name")
+	}
+	id, ok := ResolveCRMLeadrulaStageByGHLStageName(cfg.PipelineStageMap, 15, "jjFgv4ewhw0aO9ziDEUO", "PTO")
+	if !ok || id != 99 {
+		t.Fatalf("name fallback map: id=%d ok=%v", id, ok)
+	}
+}

@@ -53,6 +53,10 @@ func (s *Service) mergePipelineStageMap(ctx context.Context, accountID, connecti
 		if e.GHLPipelineStageID != "" {
 			row["ghl_pipeline_stage_id"] = e.GHLPipelineStageID
 		}
+		if name := firstNonEmpty(e.CRMStageName, e.GHLStageName); name != "" {
+			row["crm_stage_name"] = name
+			row["ghl_stage_name"] = name
+		}
 		entries = append(entries, row)
 	}
 	cfg["pipeline_stage_map"] = entries
