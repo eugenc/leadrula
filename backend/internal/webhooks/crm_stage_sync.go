@@ -41,14 +41,19 @@ func tryApplyCRMInboundStageSync(ctx context.Context, s *Service, webhook Webhoo
 		return
 	}
 
-	diag := providers.DiagnoseCRMInboundStageSync(slug, flat, syncCfg, lead.StageID)
+	actor := leads.ActorWebhook(webhook.Name)
+	if lead.PipelineID != nil && *lead.PipelineID != syncCfg.LeadrulaPipelineID {
+		_ = s.leads.LogCRMSyncSkipped(ctx, s.leads.Pool(), leadID, lead.OwnerAccountID, actor, "lead not in inbound sync pipeline")
+		return
+	}
+
+	diag := providers.DiagnoseCRMInboundStageSync(slug, flat, syncCfg, lead.StageID, lead.PipelineID)
 	if !diag.CanSync && slug == "ghl" {
 		byName, tried := tryGHLInboundStageSyncByName(ctx, s, flat, syncCfg, lead.StageID)
 		if tried {
 			diag = byName
 		}
 	}
-	actor := leads.ActorWebhook(webhook.Name)
 	if !diag.CanSync {
 		if diag.SkipReason != "" && diag.SkipReason != "lead already at target stage" {
 			_ = s.leads.LogCRMSyncSkipped(ctx, s.leads.Pool(), leadID, lead.OwnerAccountID, actor, diag.SkipReason)
@@ -64,6 +69,20 @@ func tryApplyCRMInboundStageSync(ctx context.Context, s *Service, webhook Webhoo
 	if stage.StageType != pipelines.StageTypeStandard {
 		_ = s.leads.LogCRMSyncSkipped(ctx, s.leads.Pool(), leadID, lead.OwnerAccountID, actor,
 			fmt.Sprintf("target stage type %q is not a standard pipeline stage", stage.StageType))
+		return
+	}
+
+	var pendingOutbound bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(
+		   SELECT 1 FROM integration_delivery_queue
+		   WHERE lead_id = $1 AND connection_id = $2
+		     AND status IN ('pending', 'processing')
+		 )`, leadID, connID).Scan(&pendingOutbound); err != nil {
+		return
+	}
+	if pendingOutbound {
+		_ = s.leads.LogCRMSyncSkipped(ctx, s.leads.Pool(), leadID, lead.OwnerAccountID, actor, "outbound delivery pending for lead")
 		return
 	}
 

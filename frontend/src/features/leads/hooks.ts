@@ -139,13 +139,34 @@ export type StageChangePayload =
       disqualification_reason_id?: number | null;
     };
 
+function leadMatchesLeadFilters(lead: Lead, filters: LeadFilters): boolean {
+  if (filters.pipeline_id && lead.pipeline_id !== filters.pipeline_id) return false;
+  if (filters.stage_id && lead.stage_id !== filters.stage_id) return false;
+  return true;
+}
+
 export function useChangeStage() {
   const qc = useQueryClient();
+  const accountType = useAuthStore((s) => s.user?.account_type);
   return useMutation({
     mutationFn: ({ leadId, payload }: { leadId: number; payload: StageChangePayload }) =>
       patch<Lead>(`${ns()}/leads/${leadId}/stage`, payload),
     onSuccess: (updated, { leadId }) => {
-      qc.setQueryData(["lead", leadId], updated);
+      qc.setQueryData(["lead", accountType, leadId], updated);
+      const merged = { ...updated, board_stage_id: computeBoardStageId(updated, accountType) };
+      qc.setQueriesData<LeadListResponse>({ queryKey: ["leads"] }, (old, query) => {
+        if (!old?.items) return old;
+        const filters = (query.queryKey[1] ?? {}) as LeadFilters;
+        const hadLead = old.items.some((l) => l.id === leadId);
+        let items = old.items.filter((l) => l.id !== leadId);
+        let total = old.total ?? old.items.length;
+        if (hadLead) total = Math.max(0, total - 1);
+        if (leadMatchesLeadFilters(merged, filters)) {
+          items = [...items, merged];
+          total += 1;
+        }
+        return { ...old, items, total };
+      });
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["lead-history", leadId] });
     },

@@ -190,6 +190,14 @@ export function Board() {
     [user?.id]
   );
 
+  const updatePipelineId = useCallback(
+    (id: number) => {
+      setPipelineId(id);
+      if (user?.id) saveBoardUi(user.id, { pipeline_id: id });
+    },
+    [user?.id]
+  );
+
   const applyViewFilters = useCallback((view: SavedLeadView) => {
     setConditions([...view.filters]);
     setSearchTerm("");
@@ -217,6 +225,9 @@ export function Board() {
     setSort(stored.sort);
     setSortDir(stored.sort_dir);
     setCardFields(stored.card_fields);
+    if (typeof stored.pipeline_id === "number") {
+      setPipelineId(stored.pipeline_id);
+    }
   }, [customFieldsLoading, user?.id, allColumnIds, me?.user.prefs]);
 
   const filtersChanged = filtersViewChanged(activeView, conditions);
@@ -467,7 +478,7 @@ export function Board() {
       <div className="relative z-10 mb-4 flex shrink-0 flex-wrap items-center gap-2 px-4 pt-5 sm:px-6 lg:px-8">
         <FilterSelect
           value={pipelineId ?? ""}
-          onChange={(e) => setPipelineId(Number(e.target.value))}
+          onChange={(e) => updatePipelineId(Number(e.target.value))}
           className="w-full min-w-0 sm:w-56"
         >
           {pipelines.map((p) => (

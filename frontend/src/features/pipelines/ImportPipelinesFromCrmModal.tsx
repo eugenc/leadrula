@@ -34,8 +34,12 @@ type CrmStage = {
 type CrmPipeline = {
   external_id: string;
   name: string;
-  stages: CrmStage[];
+  stages?: CrmStage[] | null;
 };
+
+function pipelineStages(p: CrmPipeline): CrmStage[] {
+  return p.stages ?? [];
+}
 
 function inferStageType(stage: CrmStage, isLast: boolean): string {
   if (stage.is_won) return "won";
@@ -143,7 +147,7 @@ export function ImportPipelinesFromCrmModal({ open, onClose }: Props) {
   }
 
   const selectedPipelines = pipelines.filter((p) => selected.has(p.external_id));
-  const totalStages = selectedPipelines.reduce((n, p) => n + p.stages.length, 0);
+  const totalStages = selectedPipelines.reduce((n, p) => n + pipelineStages(p).length, 0);
 
   async function runImport() {
     if (!connectionId || !providerSlug || selectedPipelines.length === 0) return;
@@ -156,7 +160,7 @@ export function ImportPipelinesFromCrmModal({ open, onClose }: Props) {
         pipelines: selectedPipelines.map((p) => ({
           external_id: p.external_id,
           name: p.name,
-          stages: p.stages.map((s) => ({
+          stages: pipelineStages(p).map((s) => ({
             external_id: s.external_id,
             name: s.name,
             position: s.position,
@@ -314,13 +318,14 @@ export function ImportPipelinesFromCrmModal({ open, onClose }: Props) {
                             <ChevronRight className="h-3.5 w-3.5 shrink-0 text-gray-400" />
                           )}
                           {p.name}
-                          <span className="font-normal text-gray-400">({p.stages.length} stages)</span>
+                          <span className="font-normal text-gray-400">({pipelineStages(p).length} stages)</span>
                         </button>
                       </div>
                       {isExpanded && (
                         <ul className="mt-2 space-y-1 border-t border-gray-50 pt-2 pl-6">
-                          {p.stages.map((s, idx) => {
-                            const type = inferStageType(s, idx === p.stages.length - 1);
+                          {pipelineStages(p).map((s, idx) => {
+                            const stages = pipelineStages(p);
+                            const type = inferStageType(s, idx === stages.length - 1);
                             return (
                               <li key={s.external_id} className="flex items-center justify-between text-xs text-gray-600">
                                 <span>{s.name}</span>
@@ -364,7 +369,7 @@ export function ImportPipelinesFromCrmModal({ open, onClose }: Props) {
           <ul className="max-h-40 space-y-1 overflow-y-auto text-sm text-gray-600">
             {selectedPipelines.map((p) => (
               <li key={p.external_id}>
-                {p.name} ({p.stages.length} stages)
+                {p.name} ({pipelineStages(p).length} stages)
               </li>
             ))}
           </ul>

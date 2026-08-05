@@ -3,6 +3,7 @@ package integrations
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/echayko/leadrula/backend/internal/integrations/providers"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
@@ -18,7 +19,8 @@ func (s *Service) ConnectionStageMap(ctx context.Context, accountID, connectionI
 }
 
 // MergeCRMPipelineStageMap appends pipeline/stage map entries to any supported CRM connection.
-func (s *Service) MergeCRMPipelineStageMap(ctx context.Context, accountID, connectionID int64, newEntries []providers.GHLPipelineStageMapEntry) error {
+// When inboundLRPipelineID and inboundCRMPipelineID are set, inbound stage sync is enabled for that pipeline pair.
+func (s *Service) MergeCRMPipelineStageMap(ctx context.Context, accountID, connectionID int64, newEntries []providers.GHLPipelineStageMapEntry, inboundLRPipelineID int64, inboundCRMPipelineID string) error {
 	conn, err := s.GetConnection(ctx, accountID, connectionID)
 	if err != nil {
 		return err
@@ -26,15 +28,15 @@ func (s *Service) MergeCRMPipelineStageMap(ctx context.Context, accountID, conne
 	if !providers.CRMPipelineImportSupported(conn.ProviderSlug) {
 		return httpx.Validation(conn.ProviderSlug + " does not support pipeline stage mapping")
 	}
-	return s.mergePipelineStageMap(ctx, accountID, connectionID, configMap(conn.Config), newEntries)
+	return s.mergePipelineStageMap(ctx, accountID, connectionID, configMap(conn.Config), newEntries, inboundLRPipelineID, inboundCRMPipelineID)
 }
 
 // MergeGHLPipelineStageMap appends new GHL pipeline/stage map entries to a connection config.
 func (s *Service) MergeGHLPipelineStageMap(ctx context.Context, accountID, connectionID int64, newEntries []providers.GHLPipelineStageMapEntry) error {
-	return s.MergeCRMPipelineStageMap(ctx, accountID, connectionID, newEntries)
+	return s.MergeCRMPipelineStageMap(ctx, accountID, connectionID, newEntries, 0, "")
 }
 
-func (s *Service) mergePipelineStageMap(ctx context.Context, accountID, connectionID int64, cfg map[string]any, newEntries []providers.GHLPipelineStageMapEntry) error {
+func (s *Service) mergePipelineStageMap(ctx context.Context, accountID, connectionID int64, cfg map[string]any, newEntries []providers.GHLPipelineStageMapEntry, inboundLRPipelineID int64, inboundCRMPipelineID string) error {
 	merged := providers.MergePipelineStageMapEntries(
 		providers.PipelineStageMapFromConfig(cfg),
 		newEntries,
@@ -60,6 +62,12 @@ func (s *Service) mergePipelineStageMap(ctx context.Context, accountID, connecti
 		entries = append(entries, row)
 	}
 	cfg["pipeline_stage_map"] = entries
+	if inboundLRPipelineID > 0 && strings.TrimSpace(inboundCRMPipelineID) != "" {
+		cfg["inbound_stage_sync_enabled"] = true
+		cfg["inbound_sync_leadrula_pipeline_id"] = inboundLRPipelineID
+		cfg["inbound_sync_crm_pipeline_id"] = inboundCRMPipelineID
+		cfg["inbound_sync_ghl_pipeline_id"] = inboundCRMPipelineID
+	}
 	configJSON, _ := json.Marshal(cfg)
 	_, err := s.pool.Exec(ctx,
 		`UPDATE integration_connections SET config=$2, updated_at=now() WHERE id=$1 AND account_id=$3`,
