@@ -167,6 +167,9 @@ export function errorMessage(err: unknown): string {
     case "insufficient_balance":
       return "Insufficient balance.";
     case "business_rule":
+      if (e.message && e.message !== "unexpected error") {
+        return e.message.charAt(0).toUpperCase() + e.message.slice(1);
+      }
       return "This action isn't allowed.";
     case "service_unavailable":
       return e.message.charAt(0).toUpperCase() + e.message.slice(1);

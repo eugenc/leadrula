@@ -152,14 +152,145 @@ func (s *Service) Delete(ctx context.Context, p *auth.Principal, id int64) error
 	if err := s.requirePipeline(ctx, p, id); err != nil {
 		return err
 	}
+	if msg, err := s.pipelineDeleteBlocked(ctx, id); err != nil {
+		return err
+	} else if msg != "" {
+		return httpx.BusinessRule(msg)
+	}
 	ct, err := s.pool.Exec(ctx, `DELETE FROM pipelines WHERE id = $1 AND account_id = $2`, id, p.AccountID)
 	if err != nil {
+		if database.IsForeignKeyViolation(err) {
+			return httpx.BusinessRule("pipeline is referenced elsewhere and cannot be deleted")
+		}
 		return err
 	}
 	if ct.RowsAffected() == 0 {
 		return httpx.NotFound("pipeline not found")
 	}
 	return nil
+}
+
+func (s *Service) pipelineDeleteBlocked(ctx context.Context, pipelineID int64) (string, error) {
+	checks := []struct {
+		query string
+		msg   string
+	}{
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM leads
+				WHERE pipeline_id = $1 AND deleted_at IS NULL)`,
+			"cannot delete pipeline with leads assigned; move leads first",
+		},
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM leads l
+				JOIN pipeline_stages ps ON ps.id = l.stage_id
+				WHERE ps.pipeline_id = $1 AND l.deleted_at IS NULL)`,
+			"cannot delete pipeline with leads assigned; move leads first",
+		},
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM contracts
+				WHERE deleted_at IS NULL
+				  AND (source_pipeline_id = $1 OR buyer_pipeline_id = $1))`,
+			"cannot delete pipeline used by a contract",
+		},
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM contracts c
+				JOIN pipeline_stages ps ON ps.pipeline_id = $1
+				WHERE c.deleted_at IS NULL
+				  AND (c.source_stage_id = ps.id OR c.return_stage_id = ps.id))`,
+			"cannot delete pipeline used by a contract",
+		},
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM contract_return_rules crr
+				JOIN pipeline_stages ps ON ps.pipeline_id = $1
+				WHERE crr.buyer_stage_id = ps.id OR crr.return_stage_id = ps.id)`,
+			"cannot delete pipeline used by a contract return rule",
+		},
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM contract_participations cp
+				WHERE cp.buyer_pipeline_id = $1 OR cp.source_pipeline_id = $1)`,
+			"cannot delete pipeline used by a contract participation",
+		},
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM contract_participations cp
+				JOIN pipeline_stages ps ON ps.pipeline_id = $1
+				WHERE cp.buyer_target_stage_id = ps.id
+				   OR cp.source_stage_id = ps.id
+				   OR cp.return_stage_id = ps.id)`,
+			"cannot delete pipeline used by a contract participation",
+		},
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM contract_compensations cc
+				WHERE cc.source_pipeline_id = $1 OR cc.counterparty_pipeline_id = $1)`,
+			"cannot delete pipeline used by contract compensation",
+		},
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM contract_compensations cc
+				JOIN pipeline_stages ps ON ps.pipeline_id = $1
+				WHERE cc.trigger_stage_id = ps.id
+				   OR cc.source_stage_id = ps.id
+				   OR cc.counterparty_stage_id = ps.id
+				   OR cc.return_stage_id = ps.id)`,
+			"cannot delete pipeline used by contract compensation",
+		},
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM routes
+				WHERE origin_pipeline_id = $1 OR target_pipeline_id = $1)`,
+			"cannot delete pipeline used by a route",
+		},
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM routes r
+				JOIN pipeline_stages ps ON ps.pipeline_id = $1
+				WHERE r.origin_stage_id = ps.id OR r.target_stage_id = ps.id)`,
+			"cannot delete pipeline used by a route",
+		},
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM webhook_events
+				WHERE target_pipeline_id = $1)`,
+			"cannot delete pipeline used by a webhook",
+		},
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM webhook_events we
+				JOIN pipeline_stages ps ON ps.pipeline_id = $1
+				WHERE we.target_stage_id = ps.id)`,
+			"cannot delete pipeline used by a webhook",
+		},
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM disputes
+				WHERE placement_pipeline_id = $1)`,
+			"cannot delete pipeline used by a dispute",
+		},
+		{
+			`SELECT EXISTS(
+				SELECT 1 FROM disputes d
+				JOIN pipeline_stages ps ON ps.pipeline_id = $1
+				WHERE d.placement_stage_id = ps.id)`,
+			"cannot delete pipeline used by a dispute",
+		},
+	}
+	for _, c := range checks {
+		var blocked bool
+		if err := s.pool.QueryRow(ctx, c.query, pipelineID).Scan(&blocked); err != nil {
+			return "", err
+		}
+		if blocked {
+			return c.msg, nil
+		}
+	}
+	return "", nil
 }
 
 // Stages
