@@ -417,3 +417,119 @@ func TestIngest_GHLInbound_stageSyncDisabled(t *testing.T) {
 		t.Fatalf("stage_id = %v, want unchanged %d", lead.StageID, stage1ID)
 	}
 }
+
+func testAccountCustomField(ctx context.Context, t *testing.T, pool *pgxpool.Pool, accountID int64, name string) int64 {
+	t.Helper()
+	var id int64
+	err := pool.QueryRow(ctx,
+		`INSERT INTO custom_fields(account_id, name, field_key, type)
+		 VALUES ($1, $2, $3, 'text')
+		 RETURNING id`,
+		accountID, name, name).Scan(&id)
+	if err != nil {
+		t.Fatalf("insert custom field: %v", err)
+	}
+	return id
+}
+
+func TestIngest_GHLInbound_customDataUpdatesCustomField(t *testing.T) {
+	ctx := context.Background()
+	pool, err := database.Connect(ctx, "postgres://crm:crm@localhost:5432/crm?sslmode=disable")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer pool.Close()
+
+	svc := NewService(pool, nil, nil, testEncKey(t), nil)
+	repo := leads.NewRepository(pool)
+	svc.leads = repo
+
+	var accountID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM accounts ORDER BY id LIMIT 1`).Scan(&accountID); err != nil {
+		t.Skip(err)
+	}
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	customFieldID := testAccountCustomField(ctx, t, pool, accountID, "appt_disp_"+suffix)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM custom_fields WHERE id=$1`, customFieldID)
+	})
+
+	connID, connPublicID := testGHLConnection(ctx, t, pool, accountID, "GHL CustomData Conn "+suffix)
+
+	cfg := map[string]any{
+		"location_id":    "loc-test",
+		"create_contact": true,
+		"outbound_field_map": []any{
+			map[string]any{
+				"dest_key":          "opportunity.appointment_disposition",
+				"source_type":       "custom",
+				"custom_field_id":   customFieldID,
+				"ghl_field_model":   "opportunity",
+				"ghl_map_section":   "opportunity",
+			},
+		},
+	}
+	cfgJSON, _ := json.Marshal(cfg)
+	if _, err := pool.Exec(ctx, `UPDATE integration_connections SET config=$2 WHERE id=$1`, connID, cfgJSON); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := svc.ProvisionGHLWebhooks(ctx, accountID, connID, connPublicID, "GHL CustomData "+suffix)
+	if err != nil {
+		t.Fatalf("ProvisionGHLWebhooks: %v", err)
+	}
+	defer svc.DeleteGHLWebhooks(ctx, accountID, *ids)
+
+	if err := svc.SyncGHLInboundFieldMaps(ctx, ids.Inbound, cfg); err != nil {
+		t.Fatalf("SyncGHLInboundFieldMaps: %v", err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leadID, _, err := repo.InsertLead(ctx, tx, accountID, accountID, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contactID := "ghl-customdata-" + suffix
+	if err := repo.SetExternalID(ctx, tx, leadID, contactID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := svc.Ingest(ctx, &WebhookAuth{WebhookID: ids.Inbound, AccountID: accountID}, ids.InboundSlug, map[string]any{
+		"contact_id": contactID,
+		"customData": map[string]any{
+			"appointment_disposition": "Reschedule",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if len(res.Results) == 0 || res.Results[0].Status != "updated" {
+		t.Fatalf("results = %+v, want updated", res.Results)
+	}
+
+	lead, err := repo.GetByID(ctx, pool, leadID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if err := leads.LoadCustomValues(ctx, pool, lead); err != nil {
+		t.Fatalf("LoadCustomValues: %v", err)
+	}
+	raw, ok := lead.CustomValues[fmt.Sprintf("%d", customFieldID)]
+	if !ok {
+		t.Fatalf("custom field %d not set, values=%v", customFieldID, lead.CustomValues)
+	}
+	var val string
+	if err := json.Unmarshal(raw, &val); err != nil {
+		t.Fatalf("unmarshal custom value: %v", err)
+	}
+	if val != "Reschedule" {
+		t.Fatalf("custom value = %q, want Reschedule", val)
+	}
+}
