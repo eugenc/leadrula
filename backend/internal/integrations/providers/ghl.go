@@ -16,6 +16,9 @@ func (p *GHLProvider) Deliver(ctx context.Context, credentials []byte, payload D
 	}
 
 	if cfg.DeliveryMode == "webhook" {
+		if ghlSkipOpportunityStage(payload.Config) {
+			return nil, &DeliverySkippedError{Reason: "GHL stage already synced — webhook skipped"}
+		}
 		if len(cfg.PipelineStageMap) == 0 || !MatchesGHLWebhookTrigger(cfg.PipelineStageMap, payload.PipelineID, payload.StageID) {
 			return nil, &DeliverySkippedError{Reason: "GHL webhook mode — lead stage not in outbound trigger map"}
 		}
@@ -33,7 +36,7 @@ func (p *GHLProvider) Deliver(ctx context.Context, credentials []byte, payload D
 		return result, err
 	}
 
-	if cfg.CreateOpportunity {
+	if cfg.CreateOpportunity && !ghlSkipOpportunityStage(payload.Config) {
 		ghlPipelineID, ghlStageID, err := resolveGHLStage(cfg.PipelineStageMap, payload.PipelineID, payload.StageID)
 		if err != nil {
 			return result, err

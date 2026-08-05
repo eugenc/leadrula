@@ -493,6 +493,11 @@ func resolveGHLStage(mapEntries []GHLPipelineStageMapEntry, pipelineID, stageID 
 	return "", "", fmt.Errorf("no GHL stage mapped for Leadrula pipeline %d stage %d", pipelineID, stageID)
 }
 
+// ResolveGHLStage maps a Leadrula pipeline/stage to GHL pipeline and stage IDs.
+func ResolveGHLStage(mapEntries []GHLPipelineStageMapEntry, pipelineID, stageID int64) (string, string, error) {
+	return resolveGHLStage(mapEntries, pipelineID, stageID)
+}
+
 func validateInboundStageSync(cfg GHLConfig) error {
 	if !cfg.InboundStageSyncEnabled {
 		return nil

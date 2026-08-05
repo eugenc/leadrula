@@ -151,9 +151,47 @@ func ghlCreateOpportunity(ctx context.Context, token string, cfg GHLConfig, cont
 	return result, nil
 }
 
+// GHLOpportunityRef is a GHL opportunity matched by contact and pipeline.
+type GHLOpportunityRef struct {
+	ID              string
+	PipelineID      string
+	PipelineStageID string
+}
+
 func ghlFindOpportunityByContact(ctx context.Context, token, locationID, contactID, pipelineID string) (string, error) {
+	ref, err := FindGHLOpportunityByContact(ctx, token, locationID, contactID, pipelineID)
+	if err != nil {
+		return "", err
+	}
+	return ref.ID, nil
+}
+
+func parseGHLOpportunitySearch(body []byte) (GHLOpportunityRef, error) {
+	var parsed struct {
+		Opportunities []struct {
+			ID              string `json:"id"`
+			PipelineID      string `json:"pipelineId"`
+			PipelineStageID string `json:"pipelineStageId"`
+		} `json:"opportunities"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return GHLOpportunityRef{}, err
+	}
+	if len(parsed.Opportunities) == 0 {
+		return GHLOpportunityRef{}, nil
+	}
+	opp := parsed.Opportunities[0]
+	return GHLOpportunityRef{
+		ID:              strings.TrimSpace(opp.ID),
+		PipelineID:      strings.TrimSpace(opp.PipelineID),
+		PipelineStageID: strings.TrimSpace(opp.PipelineStageID),
+	}, nil
+}
+
+// FindGHLOpportunityByContact returns the first matching GHL opportunity for a contact.
+func FindGHLOpportunityByContact(ctx context.Context, token, locationID, contactID, pipelineID string) (GHLOpportunityRef, error) {
 	if contactID == "" {
-		return "", fmt.Errorf("contact id required")
+		return GHLOpportunityRef{}, fmt.Errorf("contact id required")
 	}
 	q := url.Values{}
 	q.Set("location_id", locationID)
@@ -164,23 +202,12 @@ func ghlFindOpportunityByContact(ctx context.Context, token, locationID, contact
 	path := "/opportunities/search?" + q.Encode()
 	res, err := ghlDo(ctx, http.MethodGet, path, token, locationID, nil)
 	if err != nil {
-		return "", err
+		return GHLOpportunityRef{}, err
 	}
 	if res.Status < 200 || res.Status >= 300 {
-		return "", fmt.Errorf("%s", ghlErrorMessage(res))
+		return GHLOpportunityRef{}, fmt.Errorf("%s", ghlErrorMessage(res))
 	}
-	var parsed struct {
-		Opportunities []struct {
-			ID string `json:"id"`
-		} `json:"opportunities"`
-	}
-	if err := json.Unmarshal(res.Body, &parsed); err != nil {
-		return "", err
-	}
-	if len(parsed.Opportunities) == 0 {
-		return "", nil
-	}
-	return strings.TrimSpace(parsed.Opportunities[0].ID), nil
+	return parseGHLOpportunitySearch(res.Body)
 }
 
 func ghlUpdateOpportunityStage(ctx context.Context, token, locationID, opportunityID, pipelineID, stageID string) (*DeliveryResult, error) {

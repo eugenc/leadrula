@@ -45,6 +45,7 @@ type Service struct {
 	encKey    []byte
 	oauth     OAuthConfig
 	providers map[string]providers.Provider
+	leadSvc   *leads.Service
 }
 
 func NewService(pool *pgxpool.Pool, encKey []byte, oauth OAuthConfig) *Service {
@@ -64,6 +65,11 @@ func NewService(pool *pgxpool.Pool, encKey []byte, oauth OAuthConfig) *Service {
 			"twilio":       &providers.TwilioProvider{},
 		},
 	}
+}
+
+// SetLeadService wires lead stage moves used by GHL outbound reconciliation.
+func (s *Service) SetLeadService(leadSvc *leads.Service) {
+	s.leadSvc = leadSvc
 }
 
 // DecryptedCredentials returns a connection's stored credentials as a string map.

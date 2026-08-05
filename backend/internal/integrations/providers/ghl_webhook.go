@@ -28,6 +28,20 @@ func ParseGHLDeliveryModeFromConfig(config map[string]any) string {
 	return "api"
 }
 
+func ghlSkipOpportunityStage(config map[string]any) bool {
+	if config == nil {
+		return false
+	}
+	switch v := config["skip_opportunity_stage"].(type) {
+	case bool:
+		return v
+	case string:
+		return strings.EqualFold(strings.TrimSpace(v), "true")
+	default:
+		return false
+	}
+}
+
 func ghlWebhookURLValid(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""

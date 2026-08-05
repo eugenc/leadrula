@@ -83,6 +83,7 @@ func tryApplyCRMInboundStageSync(ctx context.Context, s *Service, webhook Webhoo
 	}
 	if pendingOutbound {
 		_ = s.leads.LogCRMSyncSkipped(ctx, s.leads.Pool(), leadID, lead.OwnerAccountID, actor, "outbound delivery pending for lead")
+		s.enqueueCRMInboundStageSyncRetry(ctx, webhook, leadID, flat)
 		return
 	}
 
