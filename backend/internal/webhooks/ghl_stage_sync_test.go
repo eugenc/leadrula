@@ -815,3 +815,263 @@ func TestTryApplyGHLInboundStageSync_releasesInflightAfterApply(t *testing.T) {
 		t.Fatalf("inflight rows = %d, want 0 after apply", inflightCount)
 	}
 }
+
+func TestShouldTryGHLInboundStageAPIFallback(t *testing.T) {
+	diag := providers.InboundStageSyncDiagnosis{SkipReason: "lead already at target stage"}
+	if !shouldTryGHLInboundStageAPIFallback(diag, true) {
+		t.Fatal("expected stale name-based skip to trigger API fallback")
+	}
+	if shouldTryGHLInboundStageAPIFallback(diag, false) {
+		t.Fatal("expected direct skip without nameBased to not trigger API fallback")
+	}
+	diag = providers.InboundStageSyncDiagnosis{SkipReason: "payload missing pipelineId or pipelineStageId"}
+	if !shouldTryGHLInboundStageAPIFallback(diag, false) {
+		t.Fatal("expected missing stage id to trigger API fallback")
+	}
+	diag = providers.InboundStageSyncDiagnosis{SkipReason: `no stage map entry for GHL stage name "Sit"`}
+	if !shouldTryGHLInboundStageAPIFallback(diag, true) {
+		t.Fatal("expected missing name map to trigger API fallback")
+	}
+	diag = providers.InboundStageSyncDiagnosis{SkipReason: "outbound delivery pending for lead"}
+	if shouldTryGHLInboundStageAPIFallback(diag, false) {
+		t.Fatal("expected unrelated skip to not trigger API fallback")
+	}
+}
+
+func TestTryApplyGHLInboundStageSync_stalePayloadAPIFallback(t *testing.T) {
+	ctx := context.Background()
+	pool, err := database.Connect(ctx, "postgres://crm:crm@localhost:5432/crm?sslmode=disable")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer pool.Close()
+
+	repo := leads.NewRepository(pool)
+	pipesSvc := pipelines.NewService(pool, nil)
+	leadSvc := leads.NewService(repo, nil, nil, pipesSvc, nil)
+	svc := NewService(pool, repo, leadSvc, testEncKey(t), nil)
+
+	var accountID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM accounts ORDER BY id LIMIT 1`).Scan(&accountID); err != nil {
+		t.Skip(err)
+	}
+	pipelineID, stage1ID, stage2ID := testAccountPipelineStages(ctx, t, pool, accountID)
+
+	var stage1Name string
+	if err := pool.QueryRow(ctx, `SELECT name FROM pipeline_stages WHERE id=$1`, stage1ID).Scan(&stage1Name); err != nil {
+		t.Fatal(err)
+	}
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	connID, connPublicID := testGHLConnection(ctx, t, pool, accountID, "GHL StaleAPI "+suffix)
+	ghlPipelineID := "ghl-pipe-stale-" + suffix
+	ghlStage1ID := "ghl-stage-1-stale-" + suffix
+	ghlStage2ID := "ghl-stage-2-stale-" + suffix
+	cfg := map[string]any{
+		"location_id":                       "loc-stale-api",
+		"create_contact":                    true,
+		"inbound_stage_sync_enabled":        true,
+		"inbound_sync_leadrula_pipeline_id": pipelineID,
+		"inbound_sync_ghl_pipeline_id":      ghlPipelineID,
+		"pipeline_stage_map": []any{
+			map[string]any{
+				"leadrula_pipeline_id":  pipelineID,
+				"leadrula_stage_id":     stage1ID,
+				"ghl_pipeline_id":       ghlPipelineID,
+				"ghl_pipeline_stage_id": ghlStage1ID,
+				"ghl_stage_name":        stage1Name,
+			},
+			map[string]any{
+				"leadrula_pipeline_id":  pipelineID,
+				"leadrula_stage_id":     stage2ID,
+				"ghl_pipeline_id":       ghlPipelineID,
+				"ghl_pipeline_stage_id": ghlStage2ID,
+			},
+		},
+	}
+	cfgJSON, _ := json.Marshal(cfg)
+	if _, err := pool.Exec(ctx,
+		`UPDATE integration_connections SET config=$2, credentials=$3::bytea WHERE id=$1`,
+		connID, cfgJSON, []byte(`{"private_integration_token":"test-token"}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := svc.ProvisionGHLWebhooks(ctx, accountID, connID, connPublicID, "GHL StaleAPI "+suffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.DeleteGHLWebhooks(ctx, accountID, *ids)
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contactID := "contact-stale-" + suffix
+	leadID, _, err := repo.InsertLead(ctx, tx, accountID, accountID, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetExternalID(ctx, tx, leadID, contactID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.PlaceInPipeline(ctx, tx, leadID, accountID, pipelineID, stage1ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	prevLookup := ghlInboundOpportunityLookup
+	ghlInboundOpportunityLookup = func(_ context.Context, _, _, _, _ string) (providers.GHLOpportunityRef, error) {
+		return providers.GHLOpportunityRef{
+			ID:              "opp-stale-" + suffix,
+			PipelineID:      ghlPipelineID,
+			PipelineStageID: ghlStage2ID,
+		}, nil
+	}
+	t.Cleanup(func() { ghlInboundOpportunityLookup = prevLookup })
+
+	webhook := Webhook{
+		ID:                      ids.Inbound,
+		AccountID:               accountID,
+		IntegrationConnectionID: &connID,
+		Name:                    "GHL StaleAPI",
+	}
+	tryApplyGHLInboundStageSync(ctx, svc, webhook, leadID, map[string]any{
+		"contact_id":      contactID,
+		"pipeline_id":     ghlPipelineID,
+		"pipleline_stage": stage1Name,
+	})
+
+	leadAfter, err := repo.GetByID(ctx, pool, leadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leadAfter.StageID == nil || *leadAfter.StageID != stage2ID {
+		t.Fatalf("stage_id = %v, want %d (stale payload should resolve via GHL API)", leadAfter.StageID, stage2ID)
+	}
+}
+
+func TestTryApplyGHLInboundStageSync_novaStractaSit(t *testing.T) {
+	ctx := context.Background()
+	pool, err := database.Connect(ctx, "postgres://crm:crm@localhost:5432/crm?sslmode=disable")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer pool.Close()
+
+	repo := leads.NewRepository(pool)
+	pipesSvc := pipelines.NewService(pool, nil)
+	leadSvc := leads.NewService(repo, nil, nil, pipesSvc, nil)
+	svc := NewService(pool, repo, leadSvc, testEncKey(t), nil)
+
+	var accountID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM accounts ORDER BY id LIMIT 1`).Scan(&accountID); err != nil {
+		t.Skip(err)
+	}
+	pipelineID, setStageID, sitStageID := testAccountPipelineStages(ctx, t, pool, accountID)
+
+	var originalSetName, originalSitName string
+	if err := pool.QueryRow(ctx, `SELECT name FROM pipeline_stages WHERE id=$1`, setStageID).Scan(&originalSetName); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT name FROM pipeline_stages WHERE id=$1`, sitStageID).Scan(&originalSitName); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE pipeline_stages SET name='Set' WHERE id=$1`, setStageID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE pipeline_stages SET name='Sit' WHERE id=$1`, sitStageID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `UPDATE pipeline_stages SET name=$2 WHERE id=$1`, setStageID, originalSetName)
+		_, _ = pool.Exec(ctx, `UPDATE pipeline_stages SET name=$2 WHERE id=$1`, sitStageID, originalSitName)
+	})
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	connID, connPublicID := testGHLConnection(ctx, t, pool, accountID, "GHL NovaSit "+suffix)
+	ghlPipelineID := "jjFgv4ewhw0aO9ziDEUO"
+	ghlSetStageID := "ghl-set-" + suffix
+	ghlSitStageID := "ghl-sit-" + suffix
+	cfg := map[string]any{
+		"location_id":                       "loc-nova-sit",
+		"create_contact":                    true,
+		"inbound_stage_sync_enabled":        true,
+		"inbound_sync_leadrula_pipeline_id": pipelineID,
+		"inbound_sync_ghl_pipeline_id":      ghlPipelineID,
+		"pipeline_stage_map": []any{
+			map[string]any{
+				"leadrula_pipeline_id":  pipelineID,
+				"leadrula_stage_id":     setStageID,
+				"ghl_pipeline_id":       ghlPipelineID,
+				"ghl_pipeline_stage_id": ghlSetStageID,
+				"ghl_stage_name":        "Set",
+			},
+			map[string]any{
+				"leadrula_pipeline_id":  pipelineID,
+				"leadrula_stage_id":     sitStageID,
+				"ghl_pipeline_id":       ghlPipelineID,
+				"ghl_pipeline_stage_id": ghlSitStageID,
+				"ghl_stage_name":        "Sit",
+			},
+		},
+	}
+	cfgJSON, _ := json.Marshal(cfg)
+	if _, err := pool.Exec(ctx, `UPDATE integration_connections SET config=$2 WHERE id=$1`, connID, cfgJSON); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := svc.ProvisionGHLWebhooks(ctx, accountID, connID, connPublicID, "GHL NovaSit "+suffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.DeleteGHLWebhooks(ctx, accountID, *ids)
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contactID := "riy9z40Tg5TW9RGFEqRD"
+	leadID, _, err := repo.InsertLead(ctx, tx, accountID, accountID, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetExternalID(ctx, tx, leadID, contactID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.PlaceInPipeline(ctx, tx, leadID, accountID, pipelineID, setStageID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	prevLookup := ghlInboundOpportunityLookup
+	ghlInboundOpportunityLookup = func(_ context.Context, _, _, _, _ string) (providers.GHLOpportunityRef, error) {
+		t.Fatal("API fallback should not run when webhook payload has Sit")
+		return providers.GHLOpportunityRef{}, nil
+	}
+	t.Cleanup(func() { ghlInboundOpportunityLookup = prevLookup })
+
+	webhook := Webhook{
+		ID:                      ids.Inbound,
+		AccountID:               accountID,
+		IntegrationConnectionID: &connID,
+		Name:                    "GHL NovaSit",
+	}
+	tryApplyGHLInboundStageSync(ctx, svc, webhook, leadID, map[string]any{
+		"contact_id":      contactID,
+		"pipeline_id":     ghlPipelineID,
+		"pipeline_name":   "Solar Dynamics Leads",
+		"pipleline_stage": "Sit",
+	})
+
+	leadAfter, err := repo.GetByID(ctx, pool, leadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leadAfter.StageID == nil || *leadAfter.StageID != sitStageID {
+		t.Fatalf("stage_id = %v, want %d (Nova Stracta Sit payload)", leadAfter.StageID, sitStageID)
+	}
+}

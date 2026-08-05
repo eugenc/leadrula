@@ -4,7 +4,8 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { IconButton } from "@/components/layout/IconButton";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { useCustomFields } from "@/features/leads/hooks";
-import { SUNBASE_OUTBOUND_BUILTINS } from "@/features/integrations/sunbaseConstants";
+import { GHL_FIELD_MAP_BUILTINS } from "@/features/integrations/ghlConstants";
+import { builtinFieldLabel } from "@/features/leads/csvMapping";
 import type { GHLMapSection } from "@/features/integrations/ghlConstants";
 import type { GhlCustomField } from "@/features/integrations/hooks";
 import type { OutboundFieldMapEntry } from "@/types";
@@ -258,9 +259,9 @@ export function GhlEntityFieldMapSection({
                       value={e.builtin_field ?? "last_name"}
                       onChange={(ev) => updateRow(idx, { builtin_field: ev.target.value })}
                     >
-                      {SUNBASE_OUTBOUND_BUILTINS.filter((b) => b !== "schema_name").map((b) => (
+                      {GHL_FIELD_MAP_BUILTINS.map((b) => (
                         <option key={b} value={b}>
-                          {b}
+                          {builtinFieldLabel(b)}
                         </option>
                       ))}
                     </Select>

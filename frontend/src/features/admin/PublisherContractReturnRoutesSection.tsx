@@ -23,7 +23,14 @@ function ReturnRouteRow({
   sortedPublisher,
   onUpdate,
 }: {
-  rule: { id: number; buyer_stage_id: number; buyer_stage_name?: string; return_stage_id?: number | null };
+  rule: {
+    id: number;
+    buyer_stage_id: number;
+    buyer_stage_name?: string;
+    buyer_pipeline_name?: string;
+    stale?: boolean;
+    return_stage_id?: number | null;
+  };
   sortedPublisher: { id: number; name: string }[];
   onUpdate: (ruleId: number, returnStageId: number) => void;
 }) {
@@ -34,7 +41,15 @@ function ReturnRouteRow({
         <div className="mb-1 text-xs font-semibold text-gray-500">Return start</div>
         <div className="rounded border border-gray-100 bg-gray-50 px-2 py-1.5 text-sm text-gray-700">
           {rule.buyer_stage_name || `#${rule.buyer_stage_id}`}
+          {rule.buyer_pipeline_name ? (
+            <span className="block text-xs text-gray-400">{rule.buyer_pipeline_name}</span>
+          ) : null}
         </div>
+        {rule.stale && (
+          <p className="mt-1 text-xs text-amber-700">
+            Stage is from an old buyer pipeline — buyer must re-add this return route.
+          </p>
+        )}
       </div>
       <div className="min-w-[120px] flex-1">
         <div className="mb-1 text-xs font-semibold text-gray-500">Return destination</div>
@@ -171,6 +186,7 @@ function DirectContractReturnRoutes({
 
   const sortedPublisher = [...(publisherStages ?? [])].sort((a, b) => a.position - b.position);
   const routeList = (rules ?? []) as ReturnRule[];
+  const hasStaleReturnRoutes = routeList.some((r) => r.stale);
 
   return (
     <div>
@@ -178,6 +194,12 @@ function DirectContractReturnRoutes({
         The buyer configures trigger stages on their contract. Map each buyer return start stage to a stage on your
         pipeline.
       </p>
+      {hasStaleReturnRoutes && (
+        <p className="mb-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          Some return routes point at stages from an old buyer pipeline and will not trigger returns until the buyer
+          re-adds them.
+        </p>
+      )}
       {routeList.length === 0 ? (
         <p className="text-sm text-gray-500">No return routes yet. The buyer configures trigger stages on their contract.</p>
       ) : (

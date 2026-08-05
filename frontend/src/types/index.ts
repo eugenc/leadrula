@@ -455,6 +455,8 @@ export interface ReturnRule {
   buyer_stage_id: number;
   return_stage_id?: number | null;
   buyer_stage_name?: string;
+  buyer_pipeline_name?: string;
+  stale?: boolean;
 }
 
 export interface ParticipationReturnRule extends ReturnRule {

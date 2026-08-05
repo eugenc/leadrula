@@ -99,6 +99,7 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
   const buyerPipelineSelected = pipelineId > 0;
   const deliveryValid = participationDeliveryValid(delivery, pipelineId, stageId, webhookId);
   const returnRoutesValid = !pipelineDelivery || (returnRoutes?.length ?? 0) > 0;
+  const hasStaleReturnRoutes = (returnRoutes ?? []).some((r) => r.stale);
   const deliverySaveBlock = deliverySaveBlockReason(delivery, pipelineId, stageId, webhookId);
 
   const hasTriggerComps = (compensations ?? []).some(
@@ -283,7 +284,14 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
                   </p>
                 )}
                 {(returnRoutesLoading || (buyerPipelineSelected && publisherPipelineConfigured)) && (
-                  <ContractReturnRulesEditor
+                  <>
+                    {hasStaleReturnRoutes && (
+                      <p className="mb-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                        Some return routes point at stages from an old buyer pipeline and will not trigger returns.
+                        Delete them and re-add after your Delivery pipeline is correct.
+                      </p>
+                    )}
+                    <ContractReturnRulesEditor
                     side="buyer"
                     buyerStages={buyerStages ?? []}
                     publisherStages={[]}
@@ -317,6 +325,7 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
                       )
                     }
                   />
+                  </>
                 )}
               </div>
             ) : (

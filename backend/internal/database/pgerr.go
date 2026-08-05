@@ -32,3 +32,12 @@ func IsForeignKeyViolation(err error) bool {
 	}
 	return false
 }
+
+// ForeignKeyConstraintName returns the Postgres constraint name for a foreign_key_violation.
+func ForeignKeyConstraintName(err error) string {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+		return pgErr.ConstraintName
+	}
+	return ""
+}

@@ -222,6 +222,14 @@ function RuleRow({
               </option>
             ))}
           </Select>
+          {rule.stale && (
+            <p className="mt-1 text-xs text-amber-700">
+              This route points at an old pipeline stage and will not trigger returns. Delete and re-add it.
+            </p>
+          )}
+          {rule.buyer_pipeline_name && !rule.stale && (
+            <p className="mt-1 text-xs text-gray-400">{rule.buyer_pipeline_name}</p>
+          )}
         </div>
         <IconButton variant="danger" aria-label="Delete rule" onClick={() => onDelete(rule.id)}>
           <Trash2 className="h-4 w-4" />

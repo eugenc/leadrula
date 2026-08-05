@@ -1055,17 +1055,43 @@ func (r *Repository) SoftDelete(ctx context.Context, q database.Querier, account
 
 // Delete removes leads owned by the account.
 func (r *Repository) Delete(ctx context.Context, p *auth.Principal, leadIDs []int64) (int64, error) {
+	if err := r.assertNoOpenDisputes(ctx, leadIDs); err != nil {
+		return 0, err
+	}
 	where, args := r.listWhere(p, ListFilters{})
 	args = append(args, leadIDs)
 	tag, err := r.pool.Exec(ctx,
 		`DELETE FROM leads l WHERE `+where+` AND l.id = ANY($`+fmt.Sprint(len(args))+`)`, args...)
 	if err != nil {
 		if database.IsForeignKeyViolation(err) {
-			return 0, httpx.BusinessRule("lead cannot be deleted while referenced by billing records")
+			return 0, httpx.BusinessRule(leadDeleteFKMessage(err))
 		}
 		return 0, err
 	}
 	return tag.RowsAffected(), nil
+}
+
+func (r *Repository) assertNoOpenDisputes(ctx context.Context, leadIDs []int64) error {
+	var blocked bool
+	err := r.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM disputes WHERE lead_id = ANY($1) AND status = 'open')`,
+		leadIDs).Scan(&blocked)
+	if err != nil {
+		return err
+	}
+	if blocked {
+		return httpx.BusinessRule("lead cannot be deleted while it has a dispute")
+	}
+	return nil
+}
+
+func leadDeleteFKMessage(err error) string {
+	switch database.ForeignKeyConstraintName(err) {
+	case "disputes_lead_id_fkey":
+		return "lead cannot be deleted while it has a dispute"
+	default:
+		return "lead cannot be deleted while referenced by other records"
+	}
 }
 
 // BulkSetAssignee sets assignee on leads owned by the account.
