@@ -15,7 +15,7 @@ type InboundStageSyncDiagnosis struct {
 }
 
 // DiagnoseCRMInboundStageSync checks whether a flattened webhook payload can move a lead stage.
-func DiagnoseCRMInboundStageSync(slug string, flat map[string]any, cfg InboundStageSyncConfig, currentStageID *int64) InboundStageSyncDiagnosis {
+func DiagnoseCRMInboundStageSync(slug string, flat map[string]any, cfg InboundStageSyncConfig, currentStageID *int64, currentPipelineID *int64) InboundStageSyncDiagnosis {
 	if !cfg.Enabled {
 		return InboundStageSyncDiagnosis{SkipReason: "inbound stage sync disabled"}
 	}
@@ -47,6 +47,14 @@ func DiagnoseCRMInboundStageSync(slug string, flat map[string]any, cfg InboundSt
 	if currentStageID != nil && *currentStageID == targetStageID {
 		return InboundStageSyncDiagnosis{
 			SkipReason:    "lead already at target stage",
+			TargetStageID: targetStageID,
+			CRMPipelineID: crmPipelineID,
+			CRMStageID:    crmStageID,
+		}
+	}
+	if currentPipelineID != nil && *currentPipelineID != 0 && *currentPipelineID != cfg.LeadrulaPipelineID {
+		return InboundStageSyncDiagnosis{
+			SkipReason:    "lead not in inbound sync pipeline",
 			TargetStageID: targetStageID,
 			CRMPipelineID: crmPipelineID,
 			CRMStageID:    crmStageID,

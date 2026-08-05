@@ -31,11 +31,13 @@ export function CrmPipelineStageMapSection({
   defaultLeadrulaPipelineId?: number;
 }) {
   const { data: pipelines } = usePipelines();
+  const rows = entries ?? [];
+  const crmOpts = crmPipelines ?? [];
   const showCrmFields = !triggerOnly;
 
   function addRow() {
     onChange([
-      ...entries,
+      ...rows,
       {
         leadrula_pipeline_id: defaultLeadrulaPipelineId ?? 0,
         leadrula_stage_id: 0,
@@ -46,11 +48,11 @@ export function CrmPipelineStageMapSection({
   }
 
   function removeRow(idx: number) {
-    onChange(entries.filter((_, i) => i !== idx));
+    onChange(rows.filter((_, i) => i !== idx));
   }
 
   function updateRow(idx: number, patch: Partial<CRMPipelineStageMapEntry>) {
-    const next = [...entries];
+    const next = [...rows];
     next[idx] = { ...next[idx], ...patch };
     onChange(next);
   }
@@ -70,12 +72,12 @@ export function CrmPipelineStageMapSection({
             ? `Map each Leadrula stage to its ${providerLabel} counterpart for inbound stage sync.`
             : `Map Leadrula stages to ${providerLabel} pipeline stages.`}
       </p>
-      {showCrmFields && !crmPipelinesLoading && crmPipelines.length === 0 && (
+      {showCrmFields && !crmPipelinesLoading && crmOpts.length === 0 && (
         <p className="text-xs text-gray-400">
           {providerLabel} pipeline and stage IDs can be entered manually if pipelines are not loaded yet.
         </p>
       )}
-      {entries.length === 0 ? (
+      {rows.length === 0 ? (
         <p className="text-sm text-gray-400">No mappings yet.</p>
       ) : (
         <Table>
@@ -93,12 +95,12 @@ export function CrmPipelineStageMapSection({
             </tr>
           </THead>
           <TBody>
-            {entries.map((e, idx) => (
+            {rows.map((e, idx) => (
               <PipelineStageRow
                 key={idx}
                 entry={e}
                 pipelines={pipelines ?? []}
-                crmPipelines={crmPipelines}
+                crmPipelines={crmOpts}
                 providerLabel={providerLabel}
                 triggerOnly={triggerOnly}
                 showCrmFields={showCrmFields}
@@ -191,8 +193,10 @@ function PipelineStageRow({
                   onChange({
                     crm_pipeline_id: ev.target.value,
                     crm_stage_id: "",
+                    crm_stage_name: "",
                     ghl_pipeline_id: ev.target.value,
                     ghl_pipeline_stage_id: "",
+                    ghl_stage_name: "",
                   });
                 }}
               >
@@ -212,7 +216,9 @@ function PipelineStageRow({
                     crm_pipeline_id: ev.target.value,
                     ghl_pipeline_id: ev.target.value,
                     crm_stage_id: "",
+                    crm_stage_name: "",
                     ghl_pipeline_stage_id: "",
+                    ghl_stage_name: "",
                   })
                 }
                 placeholder={`${providerLabel} pipeline ID`}
@@ -224,9 +230,15 @@ function PipelineStageRow({
               <Select
                 className="!h-8 !text-sm"
                 value={entryCrmStageId(entry)}
-                onChange={(ev) =>
-                  onChange({ crm_stage_id: ev.target.value, ghl_pipeline_stage_id: ev.target.value })
-                }
+                onChange={(ev) => {
+                  const stage = crmStages.find((s) => s.id === ev.target.value);
+                  onChange({
+                    crm_stage_id: ev.target.value,
+                    crm_stage_name: stage?.name ?? "",
+                    ghl_pipeline_stage_id: ev.target.value,
+                    ghl_stage_name: stage?.name ?? "",
+                  });
+                }}
               >
                 <option value="">Select…</option>
                 {crmStages.map((s) => (
@@ -240,7 +252,12 @@ function PipelineStageRow({
                 className="!h-8 !text-sm font-mono"
                 value={entry.crm_stage_id ?? entry.ghl_pipeline_stage_id ?? ""}
                 onChange={(ev) =>
-                  onChange({ crm_stage_id: ev.target.value, ghl_pipeline_stage_id: ev.target.value })
+                  onChange({
+                    crm_stage_id: ev.target.value,
+                    crm_stage_name: "",
+                    ghl_pipeline_stage_id: ev.target.value,
+                    ghl_stage_name: "",
+                  })
                 }
                 placeholder={`${providerLabel} stage ID`}
               />

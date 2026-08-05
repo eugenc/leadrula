@@ -20,6 +20,7 @@ export interface BoardUiState {
   sort_dir: SortDir;
   card_fields: string[];
   active_view_id?: string;
+  pipeline_id?: number;
 }
 
 function listKey(userId: string) {
@@ -84,6 +85,7 @@ export function loadBoardUi(
         Array.isArray(stored.card_fields) ? stored.card_fields : [],
         validColumnIds
       ),
+      ...(typeof stored.pipeline_id === "number" ? { pipeline_id: stored.pipeline_id } : {}),
     };
   }
   if (legacyBackendCardFields?.length) {

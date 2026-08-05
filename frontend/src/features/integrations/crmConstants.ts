@@ -87,11 +87,15 @@ export type CrmPipelineOption = {
 };
 
 export function crmPipelinesToOptions(
-  pipelines: { external_id: string; name: string; stages: { external_id: string; name: string }[] }[]
+  pipelines: {
+    external_id: string;
+    name: string;
+    stages?: { external_id: string; name: string }[] | null;
+  }[]
 ): CrmPipelineOption[] {
   return pipelines.map((p) => ({
     id: p.external_id,
     name: p.name,
-    stages: p.stages.map((s) => ({ id: s.external_id, name: s.name })),
+    stages: (p.stages ?? []).map((s) => ({ id: s.external_id, name: s.name })),
   }));
 }

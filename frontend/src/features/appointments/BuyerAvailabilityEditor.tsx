@@ -604,13 +604,28 @@ export function BuyerAvailabilityEditor({
   const savedSnapshot = useRef<{ schedule: Schedule; timezone: string; location: string; bufferMin: number } | null>(null);
   const stateRef = useRef({ schedule, timezone, location, bufferMin });
   const slotsInitialized = useRef(false);
+  const calendarLoadedRef = useRef(false);
+  const lastHydratedKey = useRef<string | null>(null);
 
   useEffect(() => {
     stateRef.current = { schedule, timezone, location, bufferMin };
   }, [schedule, timezone, location, bufferMin]);
 
   useEffect(() => {
-    if (!calendar) return;
+    lastHydratedKey.current = null;
+    calendarLoadedRef.current = false;
+  }, [calendarId]);
+
+  useEffect(() => {
+    if (!calendar) {
+      calendarLoadedRef.current = false;
+      return;
+    }
+    if (saveTimer.current) return;
+    const hydrationKey = `${calendar.id}:${calendar.updated_at}`;
+    if (lastHydratedKey.current === hydrationKey) return;
+    lastHydratedKey.current = hydrationKey;
+
     const sched = (calendar.schedule as Schedule) ?? {};
     setSchedule(sched);
     setTimezone(calendar.timezone);
@@ -622,8 +637,9 @@ export function BuyerAvailabilityEditor({
       location: calendar.location ?? "",
       bufferMin: calendar.buffer_min,
     };
+    calendarLoadedRef.current = true;
     slotsInitialized.current = false;
-  }, [calendar]);
+  }, [calendar?.id, calendar?.updated_at, calendar?.schedule, calendar?.timezone, calendar?.location, calendar?.buffer_min]);
 
   useEffect(() => {
     if (slotsInitialized.current) return;
@@ -634,7 +650,7 @@ export function BuyerAvailabilityEditor({
   }, [slots]);
 
   const persistIfDirty = useCallback(() => {
-    if (readOnly || !calendar) return;
+    if (readOnly || !calendarLoadedRef.current) return;
     const { schedule: sched, timezone: tz, location: loc, bufferMin: buf } = stateRef.current;
     if (scheduleHasInvalidHours(sched)) return;
     const snap = savedSnapshot.current;
@@ -650,27 +666,37 @@ export function BuyerAvailabilityEditor({
     saveAvail.mutate(
       { schedule: sched, timezone: tz, location: loc, buffer_min: buf },
       {
-        onSuccess: () => {
-          savedSnapshot.current = { schedule: sched, timezone: tz, location: loc, bufferMin: buf };
+        onSuccess: (saved) => {
+          const savedSched = (saved.schedule as Schedule) ?? {};
+          savedSnapshot.current = {
+            schedule: savedSched,
+            timezone: saved.timezone,
+            location: saved.location ?? "",
+            bufferMin: saved.buffer_min,
+          };
+          lastHydratedKey.current = `${saved.id}:${saved.updated_at}`;
         },
         onError: (e) => toast.error(errorMessage(e)),
       }
     );
-  }, [readOnly, calendar, saveAvail]);
+  }, [readOnly, saveAvail]);
+
+  const persistIfDirtyRef = useRef(persistIfDirty);
+  persistIfDirtyRef.current = persistIfDirty;
 
   const scheduleSave = useCallback(() => {
-    if (readOnly || !calendar) return;
+    if (readOnly || !calendarLoadedRef.current) return;
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(persistIfDirty, SAVE_DEBOUNCE_MS);
-  }, [readOnly, calendar, persistIfDirty]);
+  }, [readOnly, persistIfDirty]);
 
-  const flushSave = useCallback(() => {
-    clearTimeout(saveTimer.current);
-    saveTimer.current = undefined;
-    persistIfDirty();
-  }, [persistIfDirty]);
-
-  useEffect(() => () => flushSave(), [flushSave]);
+  useEffect(() => {
+    return () => {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = undefined;
+      persistIfDirtyRef.current();
+    };
+  }, []);
 
   function handleBlurSave() {
     scheduleSave();
@@ -845,12 +871,7 @@ export function BuyerAvailabilityEditor({
           value={location}
           disabled={readOnly}
           placeholder="e.g. Orlando showroom"
-          onChange={(e) => {
-            const v = e.target.value;
-            setLocation(v);
-            stateRef.current = { ...stateRef.current, location: v };
-            scheduleSave();
-          }}
+          onChange={(e) => setLocation(e.target.value)}
           onBlur={handleBlurSave}
         />
         <p className="mt-1 text-xs text-gray-400">Shown to publishers when booking appointments.</p>

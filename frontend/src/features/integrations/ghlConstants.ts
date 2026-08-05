@@ -163,6 +163,8 @@ export function normalizeGhlConfig(config: GHLConfig): GHLConfig {
     appointment_datetime,
     appointment_title_template: appointmentTitleTemplateFromConfig(config),
     opportunity_title_template: opportunityTitleTemplateFromConfig(config),
+    pipeline_stage_map: config.pipeline_stage_map ?? [],
+    outbound_field_map: config.outbound_field_map ?? [],
   };
 }
 

@@ -12,7 +12,7 @@ import (
 
 // CRMImportHelper merges CRM pipeline/stage maps and reads connection config during import.
 type CRMImportHelper interface {
-	MergeCRMPipelineStageMap(ctx context.Context, accountID, connectionID int64, entries []providers.GHLPipelineStageMapEntry) error
+	MergeCRMPipelineStageMap(ctx context.Context, accountID, connectionID int64, entries []providers.GHLPipelineStageMapEntry, inboundLRPipelineID int64, inboundCRMPipelineID string) error
 	ConnectionStageMap(ctx context.Context, accountID, connectionID int64) ([]providers.GHLPipelineStageMapEntry, error)
 }
 
@@ -95,6 +95,9 @@ func (s *Service) ImportFromCRM(ctx context.Context, p *auth.Principal, in Impor
 
 	result := &ImportFromCRMResult{}
 	var mapEntries []providers.GHLPipelineStageMapEntry
+	var wireLRPipelineID int64
+	var wireCRMPipelineID string
+	var wirePipelineCount int
 	providerLabel := providers.ProviderDisplayName(in.ProviderSlug)
 	setupMapping := in.SetupCRMMapping || in.SetupGHLMapping
 
@@ -117,6 +120,7 @@ func (s *Service) ImportFromCRM(ctx context.Context, p *auth.Principal, in Impor
 			result.Synced = append(result.Synced, synced)
 			if setupMapping {
 				mapEntries = append(mapEntries, buildMapEntries(pl.ID, pipeIn, stages)...)
+				trackInboundSyncWire(&wireLRPipelineID, &wireCRMPipelineID, &wirePipelineCount, pl.ID, pipeIn.ExternalID)
 			}
 			continue
 		}
@@ -145,16 +149,35 @@ func (s *Service) ImportFromCRM(ctx context.Context, p *auth.Principal, in Impor
 
 		if setupMapping {
 			mapEntries = append(mapEntries, buildMapEntries(pl.ID, pipeIn, stages)...)
+			trackInboundSyncWire(&wireLRPipelineID, &wireCRMPipelineID, &wirePipelineCount, pl.ID, pipeIn.ExternalID)
 		}
 	}
 
 	if len(mapEntries) > 0 && crmHelper != nil {
-		if err := crmHelper.MergeCRMPipelineStageMap(ctx, p.AccountID, in.ConnectionID, mapEntries); err != nil {
+		inboundLR := int64(0)
+		inboundCRM := ""
+		if setupMapping && wirePipelineCount == 1 {
+			inboundLR = wireLRPipelineID
+			inboundCRM = wireCRMPipelineID
+		}
+		if err := crmHelper.MergeCRMPipelineStageMap(ctx, p.AccountID, in.ConnectionID, mapEntries, inboundLR, inboundCRM); err != nil {
 			return nil, err
 		}
 	}
 
 	return result, nil
+}
+
+func trackInboundSyncWire(lrID *int64, crmID *string, count *int, pipelineID int64, externalID string) {
+	if *count == 0 {
+		*lrID = pipelineID
+		*crmID = externalID
+		*count = 1
+		return
+	}
+	if *lrID != pipelineID || *crmID != externalID {
+		*count = 2
+	}
 }
 
 func buildMapEntries(pipelineID int64, pipeIn ImportCRMPipelineInput, stages []Stage) []providers.GHLPipelineStageMapEntry {

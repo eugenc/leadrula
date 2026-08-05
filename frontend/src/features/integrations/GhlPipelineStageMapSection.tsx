@@ -26,11 +26,13 @@ export function GhlPipelineStageMapSection({
   defaultLeadrulaPipelineId?: number;
 }) {
   const { data: pipelines } = usePipelines();
+  const rows = entries ?? [];
+  const ghlOpts = ghlPipelines ?? [];
   const showGHLFields = !triggerOnly;
 
   function addRow() {
     onChange([
-      ...entries,
+      ...rows,
       {
         leadrula_pipeline_id: defaultLeadrulaPipelineId ?? 0,
         leadrula_stage_id: 0,
@@ -41,11 +43,11 @@ export function GhlPipelineStageMapSection({
   }
 
   function removeRow(idx: number) {
-    onChange(entries.filter((_, i) => i !== idx));
+    onChange(rows.filter((_, i) => i !== idx));
   }
 
   function updateRow(idx: number, patch: Partial<GHLPipelineStageMapEntry>) {
-    const next = [...entries];
+    const next = [...rows];
     next[idx] = { ...next[idx], ...patch };
     onChange(next);
   }
@@ -65,15 +67,15 @@ export function GhlPipelineStageMapSection({
             ? "Map each Leadrula stage to its GHL counterpart for bidirectional sync."
             : "Map each Leadrula stage to a GHL pipeline stage when pushing opportunities."}
       </p>
-      {showGHLFields && !ghlPipelinesLoading && ghlPipelines.length === 0 && (
+      {showGHLFields && !ghlPipelinesLoading && ghlOpts.length === 0 && (
         <p className="text-xs text-gray-400">
           GHL pipeline and stage IDs can be entered manually, or click Test connection to load pipelines from GHL.
         </p>
       )}
-      {!triggerOnly && !ghlPipelinesLoading && ghlPipelines.length === 0 && !syncEnabled && (
+      {!triggerOnly && !ghlPipelinesLoading && ghlOpts.length === 0 && !syncEnabled && (
         <p className="text-xs text-gray-400">Click Test connection to load pipelines from GHL.</p>
       )}
-      {entries.length === 0 ? (
+      {rows.length === 0 ? (
         <p className="text-sm text-gray-400">No mappings yet.</p>
       ) : (
         <Table>
@@ -91,12 +93,12 @@ export function GhlPipelineStageMapSection({
             </tr>
           </THead>
           <TBody>
-            {entries.map((e, idx) => (
+            {rows.map((e, idx) => (
               <PipelineStageRow
                 key={idx}
                 entry={e}
                 pipelines={pipelines ?? []}
-                ghlPipelines={ghlPipelines}
+                ghlPipelines={ghlOpts}
                 triggerOnly={triggerOnly}
                 showGHLFields={showGHLFields}
                 lockLeadrulaPipeline={defaultLeadrulaPipelineId}

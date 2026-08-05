@@ -116,7 +116,7 @@ func TestDiagnoseCRMInboundStageSync_missingStageFields(t *testing.T) {
 			{LeadrulaPipelineID: 1, LeadrulaStageID: 5, CRMPipelineID: "p1", CRMStageID: "s1"},
 		},
 	}
-	diag := DiagnoseCRMInboundStageSync("ghl", map[string]any{"contact_id": "c1"}, cfg, nil)
+	diag := DiagnoseCRMInboundStageSync("ghl", map[string]any{"contact_id": "c1"}, cfg, nil, nil)
 	if diag.CanSync || diag.SkipReason != "payload missing pipelineId or pipelineStageId" {
 		t.Fatalf("diag = %+v", diag)
 	}
@@ -134,8 +134,27 @@ func TestDiagnoseCRMInboundStageSync_ready(t *testing.T) {
 	diag := DiagnoseCRMInboundStageSync("ghl", map[string]any{
 		"pipelineId":      "p1",
 		"pipelineStageId": "s1",
-	}, cfg, nil)
+	}, cfg, nil, nil)
 	if !diag.CanSync || diag.TargetStageID != 5 {
+		t.Fatalf("diag = %+v", diag)
+	}
+}
+
+func TestDiagnoseCRMInboundStageSync_leadOutsideSyncPipeline(t *testing.T) {
+	cfg := InboundStageSyncConfig{
+		Enabled:            true,
+		LeadrulaPipelineID: 1,
+		CRMPipelineID:      "p1",
+		PipelineStageMap: []CRMPipelineStageMapEntry{
+			{LeadrulaPipelineID: 1, LeadrulaStageID: 5, CRMPipelineID: "p1", CRMStageID: "s1"},
+		},
+	}
+	otherPipeline := int64(99)
+	diag := DiagnoseCRMInboundStageSync("ghl", map[string]any{
+		"pipelineId":      "p1",
+		"pipelineStageId": "s1",
+	}, cfg, nil, &otherPipeline)
+	if diag.CanSync || diag.SkipReason != "lead not in inbound sync pipeline" {
 		t.Fatalf("diag = %+v", diag)
 	}
 }
@@ -213,7 +232,7 @@ func TestDiagnoseCRMInboundStageSync_novaStractaPayload(t *testing.T) {
 		"pipeline_name":   "Solar Dynamics Leads",
 		"pipleline_stage": "PTO",
 	}
-	diag := DiagnoseCRMInboundStageSync("ghl", flat, cfg, nil)
+	diag := DiagnoseCRMInboundStageSync("ghl", flat, cfg, nil, nil)
 	if diag.CanSync || diag.SkipReason != "payload missing pipelineId or pipelineStageId" {
 		t.Fatalf("expected missing stage id, got %+v", diag)
 	}
