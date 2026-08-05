@@ -60,6 +60,19 @@ func tryApplyCRMInboundStageSync(ctx context.Context, s *Service, webhook Webhoo
 			diag = byName
 		}
 	}
+	if !diag.CanSync && slug == "ghl" && shouldTryGHLInboundStageAPIFallback(diag, nameBased) {
+		apiDiag, apiErrReason := tryGHLInboundStageSyncFromAPI(ctx, s, syncCfg, configJSON, connID, lead)
+		if apiDiag.CanSync {
+			diag = apiDiag
+			nameBased = false
+		} else if apiErrReason != "" {
+			_ = s.leads.LogCRMSyncSkipped(ctx, s.leads.Pool(), leadID, lead.OwnerAccountID, actor, apiErrReason)
+			return
+		} else if apiDiag.SkipReason != "" {
+			_ = s.leads.LogCRMSyncSkipped(ctx, s.leads.Pool(), leadID, lead.OwnerAccountID, actor, apiDiag.SkipReason)
+			return
+		}
+	}
 	if !diag.CanSync {
 		reason := diag.SkipReason
 		if nameBased && reason == "lead already at target stage" {

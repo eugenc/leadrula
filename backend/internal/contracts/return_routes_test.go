@@ -513,3 +513,203 @@ func TestUpdateDelivery_preservesBuyerPipeline(t *testing.T) {
 		t.Fatalf("buyer_pipeline_id = %v, want %d preserved", updated.BuyerPipelineID, buyerPipelineID)
 	}
 }
+
+func TestFindReturnRule_ignoresRuleOnWrongBuyerPipeline(t *testing.T) {
+	pool := connectContractsTestDB(t)
+	ctx := context.Background()
+
+	var buyerID, contractID, buyerPipelineID, returnStageID int64
+	var buyerStageOnContract int64
+	err := pool.QueryRow(ctx,
+		`SELECT c.buyer_id, c.id, c.buyer_pipeline_id, c.return_stage_id,
+		        (SELECT ps.id FROM pipeline_stages ps
+		         WHERE ps.pipeline_id = c.buyer_pipeline_id
+		         ORDER BY ps.position, ps.id LIMIT 1)
+		 FROM contracts c
+		 WHERE c.buyer_id IS NOT NULL AND c.buyer_pipeline_id IS NOT NULL
+		   AND c.return_stage_id IS NOT NULL AND c.source_pipeline_id IS NOT NULL
+		   AND c.deleted_at IS NULL AND c.contract_type = 'sell'
+		 LIMIT 1`).Scan(&buyerID, &contractID, &buyerPipelineID, &returnStageID, &buyerStageOnContract)
+	if err != nil {
+		t.Skip("no direct buyer contract in database")
+	}
+
+	var otherPipelineID int64
+	err = pool.QueryRow(ctx,
+		`SELECT p.id FROM pipelines p
+		 WHERE p.account_id = $1 AND p.id <> $2
+		 ORDER BY p.id LIMIT 1`, buyerID, buyerPipelineID).Scan(&otherPipelineID)
+	if err != nil {
+		t.Skip("buyer has no alternate pipeline")
+	}
+
+	var otherStageID int64
+	err = pool.QueryRow(ctx,
+		`SELECT id FROM pipeline_stages WHERE pipeline_id = $1 ORDER BY position, id LIMIT 1`,
+		otherPipelineID).Scan(&otherStageID)
+	if err != nil {
+		t.Skip("alternate pipeline has no stages")
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+
+	var ruleID int64
+	err = tx.QueryRow(ctx,
+		`INSERT INTO contract_return_rules(contract_id, buyer_stage_id, return_stage_id)
+		 VALUES ($1,$2,$3)
+		 ON CONFLICT (contract_id, buyer_stage_id) WHERE participation_id IS NULL
+		 DO UPDATE SET return_stage_id = EXCLUDED.return_stage_id
+		 RETURNING id`,
+		contractID, otherStageID, returnStageID).Scan(&ruleID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := FindReturnRule(ctx, tx, contractID, buyerID, otherStageID)
+	if err != nil {
+		t.Fatalf("FindReturnRule: %v", err)
+	}
+	if info != nil {
+		t.Fatalf("expected no return for stage on wrong pipeline, got %+v", info)
+	}
+
+	info, err = FindReturnRule(ctx, tx, contractID, buyerID, buyerStageOnContract)
+	if err != nil {
+		t.Fatalf("FindReturnRule on contract pipeline: %v", err)
+	}
+	// May be nil if no rule for that stage — only asserting wrong-pipeline rule does not match.
+	_ = info
+}
+
+func TestDeleteContractReturnRulesOffPipeline(t *testing.T) {
+	pool := connectContractsTestDB(t)
+	ctx := context.Background()
+
+	var contractID, buyerPipelineID, otherPipelineID int64
+	var stageOnContract, stageOnOther int64
+	err := pool.QueryRow(ctx,
+		`SELECT c.id, c.buyer_pipeline_id, p.id,
+		        (SELECT ps.id FROM pipeline_stages ps WHERE ps.pipeline_id = c.buyer_pipeline_id ORDER BY ps.position, ps.id LIMIT 1),
+		        (SELECT ps.id FROM pipeline_stages ps WHERE ps.pipeline_id = p.id ORDER BY ps.position, ps.id LIMIT 1)
+		 FROM contracts c
+		 JOIN pipelines p ON p.account_id = c.buyer_id AND p.id <> c.buyer_pipeline_id
+		 WHERE c.buyer_id IS NOT NULL AND c.buyer_pipeline_id IS NOT NULL
+		   AND c.return_stage_id IS NOT NULL AND c.deleted_at IS NULL
+		 LIMIT 1`).Scan(&contractID, &buyerPipelineID, &otherPipelineID, &stageOnContract, &stageOnOther)
+	if err != nil {
+		t.Skip("no contract with two buyer pipelines in database")
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+
+	var ruleID int64
+	err = tx.QueryRow(ctx,
+		`INSERT INTO contract_return_rules(contract_id, buyer_stage_id, return_stage_id)
+		 VALUES ($1,$2,(SELECT return_stage_id FROM contracts WHERE id = $1))
+		 RETURNING id`,
+		contractID, stageOnOther).Scan(&ruleID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := deleteContractReturnRulesOffPipeline(ctx, tx, contractID, buyerPipelineID); err != nil {
+		t.Fatal(err)
+	}
+
+	var remaining int
+	if err := tx.QueryRow(ctx,
+		`SELECT COUNT(*) FROM contract_return_rules WHERE id = $1`, ruleID).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 0 {
+		t.Fatalf("expected off-pipeline rule deleted, still exists")
+	}
+
+	// Rule on contract pipeline should survive if we insert one.
+	err = tx.QueryRow(ctx,
+		`INSERT INTO contract_return_rules(contract_id, buyer_stage_id, return_stage_id)
+		 VALUES ($1,$2,(SELECT return_stage_id FROM contracts WHERE id = $1))
+		 ON CONFLICT (contract_id, buyer_stage_id) WHERE participation_id IS NULL
+		 DO UPDATE SET return_stage_id = EXCLUDED.return_stage_id
+		 RETURNING id`,
+		contractID, stageOnContract).Scan(&ruleID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := deleteContractReturnRulesOffPipeline(ctx, tx, contractID, buyerPipelineID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.QueryRow(ctx,
+		`SELECT COUNT(*) FROM contract_return_rules WHERE id = $1`, ruleID).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 1 {
+		t.Fatalf("expected on-pipeline rule kept, count = %d", remaining)
+	}
+}
+
+func TestListReturnRules_marksStaleWhenStageOffPipeline(t *testing.T) {
+	pool := connectContractsTestDB(t)
+	ctx := context.Background()
+	svc := NewService(pool)
+
+	var contractID, buyerPipelineID, otherPipelineID int64
+	var stageOnOther int64
+	err := pool.QueryRow(ctx,
+		`SELECT c.id, c.buyer_pipeline_id, p.id,
+		        (SELECT ps.id FROM pipeline_stages ps WHERE ps.pipeline_id = p.id ORDER BY ps.position, ps.id LIMIT 1)
+		 FROM contracts c
+		 JOIN pipelines p ON p.account_id = c.buyer_id AND p.id <> c.buyer_pipeline_id
+		 WHERE c.buyer_id IS NOT NULL AND c.buyer_pipeline_id IS NOT NULL
+		   AND c.return_stage_id IS NOT NULL AND c.deleted_at IS NULL
+		 LIMIT 1`).Scan(&contractID, &buyerPipelineID, &otherPipelineID, &stageOnOther)
+	if err != nil {
+		t.Skip("no contract with two buyer pipelines in database")
+	}
+
+	var ruleID int64
+	err = pool.QueryRow(ctx,
+		`INSERT INTO contract_return_rules(contract_id, buyer_stage_id, return_stage_id)
+		 VALUES ($1,$2,(SELECT return_stage_id FROM contracts WHERE id = $1))
+		 ON CONFLICT (contract_id, buyer_stage_id) WHERE participation_id IS NULL
+		 DO UPDATE SET return_stage_id = EXCLUDED.return_stage_id
+		 RETURNING id`,
+		contractID, stageOnOther).Scan(&ruleID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM contract_return_rules WHERE id = $1`, ruleID)
+	})
+
+	rules, err := svc.ListReturnRules(ctx, contractID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *ReturnRule
+	for i := range rules {
+		if rules[i].ID == ruleID {
+			found = &rules[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("inserted return rule not listed")
+	}
+	if !found.Stale {
+		t.Fatal("expected stale=true for return rule on wrong buyer pipeline")
+	}
+	if found.BuyerPipelineName == "" {
+		t.Fatal("expected buyer_pipeline_name on enriched return rule")
+	}
+	_ = buyerPipelineID
+}
+

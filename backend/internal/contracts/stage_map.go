@@ -268,3 +268,37 @@ func ClearPublisherTracking(ctx context.Context, q database.Querier, leadID int6
 func SyncPublisherStage(ctx context.Context, q database.Querier, contractID, leadID, buyerID, buyerStageID int64) error {
 	return ClearPublisherTracking(ctx, q, leadID)
 }
+
+// deleteContractReturnRulesOffPipeline removes contract-level return routes whose buyer
+// stage no longer belongs to the contract's current buyer pipeline.
+func deleteContractReturnRulesOffPipeline(ctx context.Context, q database.Querier, contractID, buyerPipelineID int64) error {
+	if buyerPipelineID == 0 {
+		return nil
+	}
+	_, err := q.Exec(ctx,
+		`DELETE FROM contract_return_rules rr
+		 WHERE rr.contract_id = $1 AND rr.participation_id IS NULL
+		   AND NOT EXISTS (
+		     SELECT 1 FROM pipeline_stages ps
+		     WHERE ps.id = rr.buyer_stage_id AND ps.pipeline_id = $2
+		   )`,
+		contractID, buyerPipelineID)
+	return err
+}
+
+// deleteParticipationReturnRulesOffPipeline removes participation return routes whose buyer
+// stage no longer belongs to the participation's current buyer pipeline.
+func deleteParticipationReturnRulesOffPipeline(ctx context.Context, q database.Querier, participationID, buyerPipelineID int64) error {
+	if buyerPipelineID == 0 {
+		return nil
+	}
+	_, err := q.Exec(ctx,
+		`DELETE FROM contract_return_rules rr
+		 WHERE rr.participation_id = $1
+		   AND NOT EXISTS (
+		     SELECT 1 FROM pipeline_stages ps
+		     WHERE ps.id = rr.buyer_stage_id AND ps.pipeline_id = $2
+		   )`,
+		participationID, buyerPipelineID)
+	return err
+}

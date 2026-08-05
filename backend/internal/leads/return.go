@@ -3,6 +3,7 @@ package leads
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/echayko/leadrula/backend/internal/billing"
 	"github.com/echayko/leadrula/backend/internal/contracts"
@@ -58,6 +59,7 @@ func TryReturnLead(ctx context.Context, q database.Querier, deps ReturnDeps, lea
 	}
 	// Frozen leads under dispute never auto-return.
 	if lead.Status == "disputed" {
+		log.Printf("TryReturnLead lead=%d: skip disputed", leadID)
 		return &ReturnOutcome{Lead: lead}, nil
 	}
 	contractID, err := resolveLeadContractID(ctx, q, lead)
@@ -65,6 +67,11 @@ func TryReturnLead(ctx context.Context, q database.Querier, deps ReturnDeps, lea
 		return nil, err
 	}
 	if contractID == nil || lead.StageID == nil {
+		if contractID == nil {
+			log.Printf("TryReturnLead lead=%d: skip no contract", leadID)
+		} else {
+			log.Printf("TryReturnLead lead=%d contract=%d: skip no stage", leadID, *contractID)
+		}
 		return &ReturnOutcome{Lead: lead}, nil
 	}
 	if lead.ContractID == nil {
@@ -79,6 +86,7 @@ func TryReturnLead(ctx context.Context, q database.Querier, deps ReturnDeps, lea
 		return nil, err
 	}
 	if returnInfo == nil {
+		log.Printf("TryReturnLead lead=%d contract=%d stage=%d: no matching return rule", leadID, *lead.ContractID, *lead.StageID)
 		return &ReturnOutcome{Lead: lead}, nil
 	}
 

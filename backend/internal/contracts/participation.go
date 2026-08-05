@@ -610,7 +610,16 @@ func (s *Service) UpdateParticipationDelivery(ctx context.Context, buyerID, part
 			return nil, err
 		}
 	}
-	updated, err := scanParticipation(s.pool.QueryRow(ctx,
+	oldBuyerPipelineID := int64(0)
+	if part.BuyerPipelineID != nil {
+		oldBuyerPipelineID = *part.BuyerPipelineID
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	updated, err := scanParticipation(tx.QueryRow(ctx,
 		`UPDATE contract_participations SET
 		   delivery = $2,
 		   buyer_pipeline_id = NULLIF($3,0), buyer_target_stage_id = NULLIF($4,0),
@@ -623,11 +632,19 @@ func (s *Service) UpdateParticipationDelivery(ctx context.Context, buyerID, part
 		return nil, err
 	}
 	if validated.delivery == "leads_pipeline" {
-		if err := RebuildParticipationStageMaps(ctx, s.pool, part.ContractID, participationID, RebuildStageMapParams{
+		if oldBuyerPipelineID != validated.buyerPipelineID {
+			if err := deleteParticipationReturnRulesOffPipeline(ctx, tx, participationID, validated.buyerPipelineID); err != nil {
+				return nil, err
+			}
+		}
+		if err := RebuildParticipationStageMaps(ctx, tx, part.ContractID, participationID, RebuildStageMapParams{
 			BuyerTargetStageID: validated.buyerStageID,
 		}); err != nil {
 			return nil, err
 		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
 	}
 	return updated, nil
 }

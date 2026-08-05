@@ -1,4 +1,10 @@
 import type { OutboundFieldMapEntry } from "@/types";
+import { SUNBASE_OUTBOUND_BUILTINS } from "@/features/integrations/sunbaseConstants";
+
+export const GHL_FIELD_MAP_BUILTINS = [
+  ...SUNBASE_OUTBOUND_BUILTINS.filter((b) => b !== "schema_name"),
+  "note",
+];
 
 export const GHL_STANDARD_CONTACT_FIELDS: { ghl: string; leadrula: string }[] = [
   { ghl: "firstName", leadrula: "first_name" },

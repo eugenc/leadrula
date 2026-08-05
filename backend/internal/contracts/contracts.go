@@ -52,12 +52,15 @@ type Contract struct {
 }
 
 type ReturnRule struct {
-	ID              int64     `json:"id"`
-	ContractID      int64     `json:"contract_id"`
-	ParticipationID *int64    `json:"participation_id,omitempty"`
-	BuyerStageID    int64     `json:"buyer_stage_id"`
-	ReturnStageID   *int64    `json:"return_stage_id,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
+	ID                int64     `json:"id"`
+	ContractID        int64     `json:"contract_id"`
+	ParticipationID   *int64    `json:"participation_id,omitempty"`
+	BuyerStageID      int64     `json:"buyer_stage_id"`
+	ReturnStageID     *int64    `json:"return_stage_id,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	BuyerStageName    string    `json:"buyer_stage_name,omitempty"`
+	BuyerPipelineName string    `json:"buyer_pipeline_name,omitempty"`
+	Stale             bool      `json:"stale,omitempty"`
 }
 
 // ParticipationReturnRule is a buyer participation return route exposed to the publisher.
@@ -70,7 +73,6 @@ type ParticipationReturnRule struct {
 // PublisherReturnRule is a contract-level return route exposed to the publisher.
 type PublisherReturnRule struct {
 	ReturnRule
-	BuyerStageName string `json:"buyer_stage_name"`
 }
 
 // PublisherStage is a pipeline stage exposed to buyers for return-rule To Stage picks.
@@ -486,15 +488,20 @@ func (s *Service) Delete(ctx context.Context, publisherID, id int64) error {
 
 func (s *Service) ListReturnRules(ctx context.Context, contractID int64) ([]ReturnRule, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, contract_id, participation_id, buyer_stage_id, return_stage_id, created_at
-		 FROM contract_return_rules
-		 WHERE contract_id = $1 AND participation_id IS NULL
-		 ORDER BY id`, contractID)
+		`SELECT rr.id, rr.contract_id, rr.participation_id, rr.buyer_stage_id, rr.return_stage_id, rr.created_at,
+		        COALESCE(bs.name, ''), COALESCE(bp.name, ''),
+		        (c.buyer_pipeline_id IS NOT NULL AND bs.pipeline_id IS DISTINCT FROM c.buyer_pipeline_id)
+		 FROM contract_return_rules rr
+		 JOIN contracts c ON c.id = rr.contract_id
+		 LEFT JOIN pipeline_stages bs ON bs.id = rr.buyer_stage_id
+		 LEFT JOIN pipelines bp ON bp.id = bs.pipeline_id
+		 WHERE rr.contract_id = $1 AND rr.participation_id IS NULL
+		 ORDER BY rr.id`, contractID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	return scanReturnRules(rows)
+	return scanEnrichedReturnRules(rows)
 }
 
 func (s *Service) ListReturnRulesForPublisher(ctx context.Context, publisherID, contractID int64) ([]PublisherReturnRule, error) {
@@ -503,10 +510,12 @@ func (s *Service) ListReturnRulesForPublisher(ctx context.Context, publisherID, 
 	}
 	rows, err := s.pool.Query(ctx,
 		`SELECT rr.id, rr.contract_id, rr.participation_id, rr.buyer_stage_id, rr.return_stage_id, rr.created_at,
-		        COALESCE(bs.name, '')
+		        COALESCE(bs.name, ''), COALESCE(bp.name, ''),
+		        (c.buyer_pipeline_id IS NOT NULL AND bs.pipeline_id IS DISTINCT FROM c.buyer_pipeline_id)
 		 FROM contract_return_rules rr
 		 JOIN contracts c ON c.id = rr.contract_id
 		 LEFT JOIN pipeline_stages bs ON bs.id = rr.buyer_stage_id
+		 LEFT JOIN pipelines bp ON bp.id = bs.pipeline_id
 		 WHERE rr.contract_id = $1 AND rr.participation_id IS NULL AND c.publisher_id = $2
 		 ORDER BY rr.id`, contractID, publisherID)
 	if err != nil {
@@ -518,7 +527,7 @@ func (s *Service) ListReturnRulesForPublisher(ctx context.Context, publisherID, 
 		var rr PublisherReturnRule
 		if err := rows.Scan(
 			&rr.ID, &rr.ContractID, &rr.ParticipationID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt,
-			&rr.BuyerStageName,
+			&rr.BuyerStageName, &rr.BuyerPipelineName, &rr.Stale,
 		); err != nil {
 			return nil, err
 		}
@@ -577,6 +586,21 @@ func scanReturnRules(rows pgx.Rows) ([]ReturnRule, error) {
 	for rows.Next() {
 		var rr ReturnRule
 		if err := rows.Scan(&rr.ID, &rr.ContractID, &rr.ParticipationID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, rr)
+	}
+	return out, rows.Err()
+}
+
+func scanEnrichedReturnRules(rows pgx.Rows) ([]ReturnRule, error) {
+	var out []ReturnRule
+	for rows.Next() {
+		var rr ReturnRule
+		if err := rows.Scan(
+			&rr.ID, &rr.ContractID, &rr.ParticipationID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt,
+			&rr.BuyerStageName, &rr.BuyerPipelineName, &rr.Stale,
+		); err != nil {
 			return nil, err
 		}
 		out = append(out, rr)
@@ -1187,6 +1211,12 @@ func (s *Service) UpdateBuyerContractDelivery(ctx context.Context, buyerID, cont
 	if err != nil {
 		return nil, err
 	}
+	var oldBuyerPipelineID int64
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(buyer_pipeline_id, 0) FROM contracts WHERE id = $1 AND deleted_at IS NULL`,
+		contractID).Scan(&oldBuyerPipelineID); err != nil {
+		return nil, err
+	}
 	if validated.delivery == "leads_pipeline" {
 		if err := applyBuyerStageTriggersToWon(ctx, s.pool, contractID, 0, validated.buyerPipelineID); err != nil {
 			return nil, err
@@ -1223,6 +1253,11 @@ func (s *Service) UpdateBuyerContractDelivery(ctx context.Context, buyerID, cont
 		return nil, httpx.Validation("contract compensation is not configured")
 	}
 	if validated.delivery == "leads_pipeline" {
+		if oldBuyerPipelineID != validated.buyerPipelineID {
+			if err := deleteContractReturnRulesOffPipeline(ctx, tx, contractID, validated.buyerPipelineID); err != nil {
+				return nil, err
+			}
+		}
 		if err := RebuildContractStageMaps(ctx, tx, contractID, RebuildStageMapParams{
 			BuyerTargetStageID: validated.buyerStageID,
 		}); err != nil {
@@ -1342,6 +1377,11 @@ func FindReturnRule(ctx context.Context, q database.Querier, contractID, buyerAc
 		 WHERE rr.contract_id = $1 AND rr.buyer_stage_id = $3
 		   AND rr.return_stage_id IS NOT NULL
 		   AND (rr.participation_id IS NULL OR p.buyer_id = $2)
+		   AND EXISTS (
+		     SELECT 1 FROM pipeline_stages ps
+		     WHERE ps.id = rr.buyer_stage_id
+		       AND ps.pipeline_id = COALESCE(p.buyer_pipeline_id, c.buyer_pipeline_id)
+		   )
 		 ORDER BY CASE WHEN rr.participation_id IS NULL THEN 1 ELSE 0 END, rr.id
 		 LIMIT 1`,
 		contractID, buyerAccountID, newStageID).Scan(&sourcePipelineID, &returnStageID, &publisherID)
