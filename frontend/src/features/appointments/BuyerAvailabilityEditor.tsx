@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/layout/IconButton";
@@ -33,6 +33,8 @@ import {
 } from "@/features/appointments/hooks";
 import { CopyToWeekdaysPopover } from "@/features/appointments/CopyToWeekdaysPopover";
 import { TimeFieldInput } from "@/features/appointments/TimeFieldInput";
+import { Spinner } from "@/components/ui/misc";
+import type { BuyerAppointmentSlot } from "@/types";
 
 type DayHours = { start: string; end: string };
 type Schedule = Record<string, DayHours>;
@@ -589,9 +591,11 @@ export function BuyerAvailabilityEditor({
   calendarId: number;
   readOnly?: boolean;
 }) {
-  const { data: calendar } = useBookingCalendar(calendarId);
+  const { data: calendar, isLoading: calendarLoading } = useBookingCalendar(calendarId);
   const saveAvail = useSaveBookingCalendar(calendarId);
-  const { data: slots = [] } = useCalendarSlots(calendarId);
+  const { data: slotsData } = useCalendarSlots(calendarId);
+  const emptySlots = useMemo(() => [] as BuyerAppointmentSlot[], []);
+  const slots = slotsData ?? emptySlots;
   const createSlot = useCreateCalendarSlot(calendarId);
   const patchSlot = usePatchCalendarSlot(calendarId);
 
@@ -639,7 +643,7 @@ export function BuyerAvailabilityEditor({
     };
     calendarLoadedRef.current = true;
     slotsInitialized.current = false;
-  }, [calendar?.id, calendar?.updated_at, calendar?.schedule, calendar?.timezone, calendar?.location, calendar?.buffer_min]);
+  }, [calendar?.id, calendar?.updated_at]);
 
   useEffect(() => {
     if (slotsInitialized.current) return;
@@ -702,7 +706,9 @@ export function BuyerAvailabilityEditor({
     scheduleSave();
   }
 
-  if (!calendar) return null;
+  if (calendarLoading || !calendar) {
+    return <Spinner className="mx-auto h-6 w-6" />;
+  }
 
   function addSlot(
     params: {
