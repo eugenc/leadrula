@@ -154,9 +154,9 @@ export function useChangeStage() {
     onSuccess: (updated, { leadId }) => {
       qc.setQueryData(["lead", accountType, leadId], updated);
       const merged = { ...updated, board_stage_id: computeBoardStageId(updated, accountType) };
-      qc.setQueriesData<LeadListResponse>({ queryKey: ["leads"] }, (old, query) => {
-        if (!old?.items) return old;
-        const filters = (query.queryKey[1] ?? {}) as LeadFilters;
+      for (const [queryKey, old] of qc.getQueriesData<LeadListResponse>({ queryKey: ["leads"] })) {
+        if (!old?.items) continue;
+        const filters = (queryKey[1] ?? {}) as LeadFilters;
         const hadLead = old.items.some((l) => l.id === leadId);
         let items = old.items.filter((l) => l.id !== leadId);
         let total = old.total ?? old.items.length;
@@ -165,8 +165,8 @@ export function useChangeStage() {
           items = [...items, merged];
           total += 1;
         }
-        return { ...old, items, total };
-      });
+        qc.setQueryData(queryKey, { ...old, items, total });
+      }
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["lead-history", leadId] });
     },

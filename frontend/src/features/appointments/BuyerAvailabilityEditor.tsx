@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/layout/IconButton";
@@ -33,6 +33,8 @@ import {
 } from "@/features/appointments/hooks";
 import { CopyToWeekdaysPopover } from "@/features/appointments/CopyToWeekdaysPopover";
 import { TimeFieldInput } from "@/features/appointments/TimeFieldInput";
+import { Spinner } from "@/components/ui/misc";
+import type { BuyerAppointmentSlot } from "@/types";
 
 type DayHours = { start: string; end: string };
 type Schedule = Record<string, DayHours>;
@@ -385,6 +387,7 @@ function BookingSlotsPanel({
   onEdit,
   onRemove,
   onCopy,
+  onClearAll,
   savePending = false,
 }: {
   schedule: Schedule;
@@ -402,6 +405,7 @@ function BookingSlotsPanel({
   onEdit: (id: number | string, params: SlotParams, onDone: (ok: boolean) => void) => void;
   onRemove: (id: number | string) => void;
   onCopy: (slot: SlotRow, toWeekdays: number[]) => void;
+  onClearAll?: () => void;
   savePending?: boolean;
 }) {
   const days = openWeekdays(schedule);
@@ -498,6 +502,19 @@ function BookingSlotsPanel({
       </div>
 
       <div className="space-y-1">
+        {slots.length > 0 && onClearAll && (
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={savePending}
+              onClick={onClearAll}
+            >
+              Clear all
+            </Button>
+          </div>
+        )}
         {slots.length > 0 && (
           <div className={cn(SLOT_ROW_GRID, "px-0")}>
             <span />
@@ -589,9 +606,11 @@ export function BuyerAvailabilityEditor({
   calendarId: number;
   readOnly?: boolean;
 }) {
-  const { data: calendar } = useBookingCalendar(calendarId);
+  const { data: calendar, isLoading: calendarLoading } = useBookingCalendar(calendarId);
   const saveAvail = useSaveBookingCalendar(calendarId);
-  const { data: slots = [] } = useCalendarSlots(calendarId);
+  const { data: slotsData } = useCalendarSlots(calendarId);
+  const emptySlots = useMemo(() => [] as BuyerAppointmentSlot[], []);
+  const slots = slotsData ?? emptySlots;
   const createSlot = useCreateCalendarSlot(calendarId);
   const patchSlot = usePatchCalendarSlot(calendarId);
 
@@ -639,7 +658,7 @@ export function BuyerAvailabilityEditor({
     };
     calendarLoadedRef.current = true;
     slotsInitialized.current = false;
-  }, [calendar?.id, calendar?.updated_at, calendar?.schedule, calendar?.timezone, calendar?.location, calendar?.buffer_min]);
+  }, [calendar?.id, calendar?.updated_at]);
 
   useEffect(() => {
     if (slotsInitialized.current) return;
@@ -702,7 +721,9 @@ export function BuyerAvailabilityEditor({
     scheduleSave();
   }
 
-  if (!calendar) return null;
+  if (calendarLoading || !calendar) {
+    return <Spinner className="mx-auto h-6 w-6" />;
+  }
 
   function addSlot(
     params: {
@@ -837,6 +858,22 @@ export function BuyerAvailabilityEditor({
     if (copied) toast.success(copied === 1 ? "Slot copied" : "Slots copied");
   }
 
+  async function clearAllSlots() {
+    const active = slots.filter((s) => !s.disabled_at);
+    if (!active.length) return;
+    if (!window.confirm(`Remove all ${active.length} booking slots?`)) return;
+    let cleared = 0;
+    for (const s of active) {
+      try {
+        await patchSlot.mutateAsync({ id: s.id, body: { disabled: true } });
+        cleared++;
+      } catch (e) {
+        toast.error(`${WEEKDAYS[s.weekday]} ${s.start_time}: ${errorMessage(e)}`);
+      }
+    }
+    if (cleared === active.length) toast.success("All booking slots cleared");
+  }
+
   const slotRows: SlotRow[] = slots
     .filter((s) => !s.disabled_at)
     .map((s) => ({
@@ -912,6 +949,7 @@ export function BuyerAvailabilityEditor({
               )
             }
             onCopy={copySlot}
+            onClearAll={readOnly ? undefined : clearAllSlots}
             savePending={createSlot.isPending || patchSlot.isPending}
           />
         </div>
@@ -1182,6 +1220,7 @@ export function BuyerSetupWizard({
               onEdit={(id, params, onDone) => onDone(updateDraft(id, params))}
               onRemove={(id) => setSlotDrafts((prev) => prev.filter((d) => d.id !== id))}
               onCopy={copySingleDraft}
+              onClearAll={() => setSlotDrafts([])}
             />
           </div>
         )}

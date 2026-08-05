@@ -1,6 +1,7 @@
 import { Fragment, useState } from "react";
 import { useRejectQueue } from "@/features/admin/hooks";
 import { diagnoseGhlInboundStageSyncPayload } from "@/features/integrations/ghlStageSyncDiagnosis";
+import { useIntegrationDelivery, useRetryIntegrationDelivery } from "@/features/intake/hooks";
 import { useReplayWebhookDelivery, useWebhookDelivery } from "@/features/webhooks/hooks";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
