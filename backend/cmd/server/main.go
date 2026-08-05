@@ -140,7 +140,6 @@ func main() {
 		integrationsEnq = integrationsSvc
 		pipelinesH.SetCRMImportHelper(integrationsSvc)
 		routingSvc.SetCallWebhooks(integrationsSvc, cfg.WebhookBaseURL)
-		go integrationsSvc.RunWorker(ctx)
 	} else if cfg.IntegrationEncKey != "" {
 		log.Println("warning: INTEGRATION_ENC_KEY must be 64 hex chars (32 bytes) — integrations disabled")
 	}
@@ -148,6 +147,10 @@ func main() {
 	leadsRepo := leads.NewRepository(pool)
 	leadsSvc := leads.NewService(leadsRepo, notifSvc, accountsRepo, pipelinesSvc, integrationsEnq)
 	leadsH := leads.NewHandler(leadsSvc)
+	if integrationsSvc != nil {
+		integrationsSvc.SetLeadService(leadsSvc)
+		go integrationsSvc.RunWorker(ctx)
+	}
 
 	dashboardRepo := dashboard.NewRepository(pool)
 	dashboardSvc := dashboard.NewService(dashboardRepo)
@@ -168,6 +171,7 @@ func main() {
 	if err := webhooksSvc.SyncAllSunbaseInboundWebhooks(ctx); err != nil {
 		log.Printf("warning: sync sunbase inbound webhooks: %v", err)
 	}
+	go webhooksSvc.RunCRMInboundStageSyncRetryWorker(ctx)
 	webhooksH := webhooks.NewHandler(webhooksSvc)
 	leadsSvc.SetWebhookFirer(webhooksSvc)
 

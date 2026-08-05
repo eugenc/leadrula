@@ -151,10 +151,30 @@ func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, p
 		return
 	}
 
+	enqueuedPayload := append([]byte(nil), payload...)
+
 	if leadID != 0 && (providerSlug == "sunbase" || providerSlug == "ghl") {
 		repo := leads.NewRepository(s.pool)
 		if refreshed, err := leads.RefreshDeliveryPayload(ctx, s.pool, repo, leadID, payload); err == nil {
 			payload = refreshed
+		}
+	}
+
+	if providerSlug == "ghl" && leadID != 0 {
+		if token, tokErr := ghlDeliveryToken(credentials, providerSlug); tokErr == nil && token != "" {
+			if refreshed, _, recErr := s.reconcileGHLStageBeforeDeliver(ctx, connID, leadID, token, connConfig, payload); recErr == nil {
+				payload = refreshed
+			}
+			plan := s.planGHLOutboundDeliver(ctx, leadID, token, connConfig, enqueuedPayload, payload)
+			switch plan.Action {
+			case ghlOutboundDeliverSkip:
+				duration := int(time.Since(start).Milliseconds())
+				s.logAttempt(ctx, jobID, attempts, "skipped", 0, payload, nil, duration, ghlAlreadyAtTargetStageReason)
+				s.markSkipped(ctx, jobID, ghlAlreadyAtTargetStageReason)
+				return
+			case ghlOutboundDeliverContactOnly:
+				payload = setSkipOpportunityStage(payload)
+			}
 		}
 	}
 

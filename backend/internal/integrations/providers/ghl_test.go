@@ -92,6 +92,21 @@ func TestResolveLeadrulaStage(t *testing.T) {
 	}
 }
 
+func TestParseGHLOpportunitySearch(t *testing.T) {
+	body := []byte(`{"opportunities":[{"id":"opp-1","pipelineId":"pipe-1","pipelineStageId":"stage-sit"}]}`)
+	ref, err := parseGHLOpportunitySearch(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.ID != "opp-1" || ref.PipelineID != "pipe-1" || ref.PipelineStageID != "stage-sit" {
+		t.Fatalf("unexpected ref: %+v", ref)
+	}
+	ref, err = parseGHLOpportunitySearch([]byte(`{"opportunities":[]}`))
+	if err != nil || ref.ID != "" {
+		t.Fatalf("empty search: ref=%+v err=%v", ref, err)
+	}
+}
+
 func TestGHLInboundPipelineStage(t *testing.T) {
 	p, s := GHLInboundPipelineStage(map[string]any{
 		"pipelineId":      "gp1",
@@ -532,6 +547,45 @@ func TestGHLInboundMapsFromConfig_invertsOutbound(t *testing.T) {
 	}
 	if !foundSolar || !foundMonetary {
 		t.Fatalf("missing inverted maps: solar=%v monetary=%v maps=%+v", foundSolar, foundMonetary, maps)
+	}
+}
+
+func TestGhlSkipOpportunityStage(t *testing.T) {
+	if !ghlSkipOpportunityStage(map[string]any{"skip_opportunity_stage": true}) {
+		t.Fatal("expected true for bool flag")
+	}
+	if !ghlSkipOpportunityStage(map[string]any{"skip_opportunity_stage": "true"}) {
+		t.Fatal("expected true for string flag")
+	}
+	if ghlSkipOpportunityStage(map[string]any{"skip_opportunity_stage": false}) {
+		t.Fatal("expected false")
+	}
+	if ghlSkipOpportunityStage(nil) {
+		t.Fatal("expected false for nil config")
+	}
+}
+
+func TestGHLProviderDeliver_webhookSkippedWhenStageSynced(t *testing.T) {
+	p := &GHLProvider{}
+	cfg := map[string]any{
+		"delivery_mode":            "webhook",
+		"webhook_url":              "https://example.com/hook",
+		"location_id":              "loc1",
+		"skip_opportunity_stage":   true,
+		"pipeline_stage_map": []map[string]any{
+			{"leadrula_pipeline_id": 1, "leadrula_stage_id": 5},
+		},
+	}
+	_, err := p.Deliver(context.Background(), nil, DeliveryPayload{
+		PipelineID: 1,
+		StageID:    5,
+		Config:     cfg,
+	})
+	if err == nil {
+		t.Fatal("expected skip error when stage already synced")
+	}
+	if !IsDeliverySkipped(err) {
+		t.Fatalf("expected DeliverySkippedError, got %v", err)
 	}
 }
 
