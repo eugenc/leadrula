@@ -171,7 +171,6 @@ func main() {
 	if err := webhooksSvc.SyncAllSunbaseInboundWebhooks(ctx); err != nil {
 		log.Printf("warning: sync sunbase inbound webhooks: %v", err)
 	}
-	go webhooksSvc.RunCRMInboundStageSyncRetryWorker(ctx)
 	webhooksH := webhooks.NewHandler(webhooksSvc)
 	leadsSvc.SetWebhookFirer(webhooksSvc)
 
