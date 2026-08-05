@@ -268,7 +268,7 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		if payloadJSON, err := BuildDeliveryPayload(updated); err == nil {
 			skipConnIDs := append([]int64{}, enqueuedConnIDs...)
 			skipConnIDs = append(skipConnIDs, extraSkipIntegrationConnIDs...)
-			_ = s.integrations.TryEnqueueGHLWebhookOnStageMove(ctx, updated.OwnerAccountID, *updated.PipelineID, *updated.StageID, leadID, payloadJSON, skipConnIDs)
+			_ = s.integrations.TryEnqueueGHLOnStageMove(ctx, updated.OwnerAccountID, *updated.PipelineID, *updated.StageID, leadID, payloadJSON, skipConnIDs)
 		}
 	}
 	var auditChanges []auth.ImpersonationChange

@@ -82,8 +82,11 @@ func (r *Repository) LogLeadCreated(ctx context.Context, q database.Querier, lea
 	return r.InsertChangeLog(ctx, q, leadID, ownerAccountID, actor, "lead_created", "Created", "", source)
 }
 
-func (r *Repository) LogCRMSyncSkipped(ctx context.Context, q database.Querier, leadID, ownerAccountID int64, actor HistoryActor) error {
-	return r.InsertChangeLog(ctx, q, leadID, ownerAccountID, actor, "crm_sync_skipped", "CRM sync", "", "Skipped — no integration linked")
+func (r *Repository) LogCRMSyncSkipped(ctx context.Context, q database.Querier, leadID, ownerAccountID int64, actor HistoryActor, reason string) error {
+	if reason == "" {
+		reason = "Skipped — no integration linked"
+	}
+	return r.InsertChangeLog(ctx, q, leadID, ownerAccountID, actor, "crm_sync_skipped", "CRM sync", "", reason)
 }
 
 func (r *Repository) BuyerHasActiveCRMConnection(ctx context.Context, q database.Querier, buyerID int64) (bool, error) {

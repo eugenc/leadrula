@@ -141,11 +141,82 @@ func ghlCreateOpportunity(ctx context.Context, token string, cfg GHLConfig, cont
 	}
 	if res.Status < 200 || res.Status >= 300 {
 		if ghlIsDuplicateOpportunity(res) {
+			if oppID, findErr := ghlFindOpportunityByContact(ctx, token, cfg.LocationID, contactID, pipelineID); findErr == nil && oppID != "" {
+				return ghlUpdateOpportunityStage(ctx, token, cfg.LocationID, oppID, pipelineID, stageID)
+			}
 			return result, nil
 		}
 		return result, fmt.Errorf("%s", ghlErrorMessage(res))
 	}
 	return result, nil
+}
+
+func ghlFindOpportunityByContact(ctx context.Context, token, locationID, contactID, pipelineID string) (string, error) {
+	if contactID == "" {
+		return "", fmt.Errorf("contact id required")
+	}
+	q := url.Values{}
+	q.Set("location_id", locationID)
+	q.Set("contact_id", contactID)
+	if pipelineID != "" {
+		q.Set("pipeline_id", pipelineID)
+	}
+	path := "/opportunities/search?" + q.Encode()
+	res, err := ghlDo(ctx, http.MethodGet, path, token, locationID, nil)
+	if err != nil {
+		return "", err
+	}
+	if res.Status < 200 || res.Status >= 300 {
+		return "", fmt.Errorf("%s", ghlErrorMessage(res))
+	}
+	var parsed struct {
+		Opportunities []struct {
+			ID string `json:"id"`
+		} `json:"opportunities"`
+	}
+	if err := json.Unmarshal(res.Body, &parsed); err != nil {
+		return "", err
+	}
+	if len(parsed.Opportunities) == 0 {
+		return "", nil
+	}
+	return strings.TrimSpace(parsed.Opportunities[0].ID), nil
+}
+
+func ghlUpdateOpportunityStage(ctx context.Context, token, locationID, opportunityID, pipelineID, stageID string) (*DeliveryResult, error) {
+	if opportunityID == "" {
+		return nil, fmt.Errorf("opportunity id required")
+	}
+	body := map[string]any{
+		"pipelineStageId": stageID,
+	}
+	if pipelineID != "" {
+		body["pipelineId"] = pipelineID
+	}
+	path := "/opportunities/" + url.PathEscape(opportunityID)
+	res, err := ghlDo(ctx, http.MethodPut, path, token, locationID, body)
+	mapped := AnyMapToMapped(body)
+	result := &DeliveryResult{
+		HTTPStatus: res.Status,
+		Raw:        res.Body,
+		Request:    marshalRequestLog(mapped),
+	}
+	if err != nil {
+		return result, err
+	}
+	if res.Status < 200 || res.Status >= 300 {
+		return result, fmt.Errorf("%s", ghlErrorMessage(res))
+	}
+	return result, nil
+}
+
+func ghlCreateOrUpdateOpportunity(ctx context.Context, token string, cfg GHLConfig, contactID, pipelineID, stageID string, payload DeliveryPayload) (*DeliveryResult, error) {
+	if oppID, err := ghlFindOpportunityByContact(ctx, token, cfg.LocationID, contactID, pipelineID); err != nil {
+		return nil, err
+	} else if oppID != "" {
+		return ghlUpdateOpportunityStage(ctx, token, cfg.LocationID, oppID, pipelineID, stageID)
+	}
+	return ghlCreateOpportunity(ctx, token, cfg, contactID, pipelineID, stageID, payload)
 }
 
 func ghlIsDuplicateOpportunity(res ghlHTTPResult) bool {

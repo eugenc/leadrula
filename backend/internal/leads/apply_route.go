@@ -19,6 +19,7 @@ type IntegrationEnqueuer interface {
 	EnqueueDelivery(ctx context.Context, routeID, leadID int64, branchPosition int, payloadJSON []byte, enqueued *[]int64) error
 	EnqueueConnectionDelivery(ctx context.Context, connectionID, leadID int64, payloadJSON []byte, enqueued *[]int64) error
 	EnqueueParticipationWebhook(ctx context.Context, webhookID, leadID int64, payloadJSON []byte) error
+	TryEnqueueGHLOnStageMove(ctx context.Context, ownerAccountID, pipelineID, stageID, leadID int64, payloadJSON []byte, skipConnIDs []int64) error
 	TryEnqueueGHLWebhookOnStageMove(ctx context.Context, ownerAccountID, pipelineID, stageID, leadID int64, payloadJSON []byte, skipConnIDs []int64) error
 }
 
@@ -422,7 +423,7 @@ func enqueueParticipationIntegration(ctx context.Context, deps RouteApplyDeps, t
 		}
 	} else if target.BuyerID != 0 {
 		if hasCRM, err := deps.Repo.BuyerHasActiveCRMConnection(ctx, deps.Repo.Pool(), target.BuyerID); err == nil && hasCRM {
-			_ = deps.Repo.LogCRMSyncSkipped(ctx, deps.Repo.Pool(), lead.ID, target.BuyerID, ActorSystem("Route"))
+			_ = deps.Repo.LogCRMSyncSkipped(ctx, deps.Repo.Pool(), lead.ID, target.BuyerID, ActorSystem("Route"), "Skipped — no integration linked")
 		}
 	}
 	if target.Delivery == "webhook" && target.WebhookID != 0 {

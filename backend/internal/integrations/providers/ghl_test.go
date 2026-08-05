@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -519,5 +520,28 @@ func TestGHLInboundMapsFromConfig_invertsOutbound(t *testing.T) {
 	}
 	if !foundSolar || !foundMonetary {
 		t.Fatalf("missing inverted maps: solar=%v monetary=%v maps=%+v", foundSolar, foundMonetary, maps)
+	}
+}
+
+func TestGHLProviderDeliver_webhookUnmappedStageSkipped(t *testing.T) {
+	p := &GHLProvider{}
+	cfg := map[string]any{
+		"delivery_mode": "webhook",
+		"webhook_url":   "https://example.com/hook",
+		"location_id":   "loc1",
+		"pipeline_stage_map": []map[string]any{
+			{"leadrula_pipeline_id": 1, "leadrula_stage_id": 5},
+		},
+	}
+	_, err := p.Deliver(context.Background(), nil, DeliveryPayload{
+		PipelineID: 1,
+		StageID:    99,
+		Config:     cfg,
+	})
+	if err == nil {
+		t.Fatal("expected skip error for unmapped stage")
+	}
+	if !IsDeliverySkipped(err) {
+		t.Fatalf("expected DeliverySkippedError, got %v", err)
 	}
 }
