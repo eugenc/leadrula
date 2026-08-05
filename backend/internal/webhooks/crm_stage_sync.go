@@ -43,7 +43,8 @@ func tryApplyCRMInboundStageSync(ctx context.Context, s *Service, webhook Webhoo
 
 	diag := providers.DiagnoseCRMInboundStageSync(slug, flat, syncCfg, lead.StageID)
 	if !diag.CanSync && slug == "ghl" {
-		if byName, ok := tryGHLInboundStageSyncByName(flat, syncCfg, lead.StageID); ok {
+		byName, tried := tryGHLInboundStageSyncByName(ctx, s, flat, syncCfg, lead.StageID)
+		if tried {
 			diag = byName
 		}
 	}
@@ -75,7 +76,7 @@ func tryApplyGHLInboundStageSync(ctx context.Context, s *Service, webhook Webhoo
 	tryApplyCRMInboundStageSync(ctx, s, webhook, leadID, flat, "ghl")
 }
 
-func tryGHLInboundStageSyncByName(flat map[string]any, syncCfg providers.InboundStageSyncConfig, currentStageID *int64) (providers.InboundStageSyncDiagnosis, bool) {
+func tryGHLInboundStageSyncByName(ctx context.Context, s *Service, flat map[string]any, syncCfg providers.InboundStageSyncConfig, currentStageID *int64) (providers.InboundStageSyncDiagnosis, bool) {
 	crmPipelineID, crmStageID := providers.GHLInboundPipelineStage(flat)
 	if crmPipelineID == "" || crmStageID != "" || crmPipelineID != syncCfg.CRMPipelineID {
 		return providers.InboundStageSyncDiagnosis{}, false
@@ -89,10 +90,13 @@ func tryGHLInboundStageSyncByName(flat map[string]any, syncCfg providers.Inbound
 		syncCfg.PipelineStageMap, syncCfg.LeadrulaPipelineID, crmPipelineID, stageName,
 	)
 	if !ok {
+		targetStageID, ok = resolveGHLInboundStageByLeadrulaName(ctx, s, syncCfg, crmPipelineID, stageName)
+	}
+	if !ok {
 		return providers.InboundStageSyncDiagnosis{
 			SkipReason:    fmt.Sprintf("no stage map entry for GHL stage name %q", stageName),
 			CRMPipelineID: crmPipelineID,
-		}, false
+		}, true
 	}
 	if currentStageID != nil && *currentStageID == targetStageID {
 		return providers.InboundStageSyncDiagnosis{
@@ -106,4 +110,23 @@ func tryGHLInboundStageSyncByName(flat map[string]any, syncCfg providers.Inbound
 		TargetStageID: targetStageID,
 		CRMPipelineID: crmPipelineID,
 	}, true
+}
+
+func resolveGHLInboundStageByLeadrulaName(ctx context.Context, s *Service, syncCfg providers.InboundStageSyncConfig, crmPipelineID, stageName string) (int64, bool) {
+	if s == nil || s.pool == nil {
+		return 0, false
+	}
+	var targetStageID int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT ps.id FROM pipeline_stages ps
+		 WHERE ps.pipeline_id = $1 AND lower(trim(ps.name)) = lower(trim($2))
+		 LIMIT 1`,
+		syncCfg.LeadrulaPipelineID, stageName).Scan(&targetStageID)
+	if err != nil {
+		return 0, false
+	}
+	if !providers.HasCRMStageMapEntry(syncCfg.PipelineStageMap, syncCfg.LeadrulaPipelineID, crmPipelineID, targetStageID) {
+		return 0, false
+	}
+	return targetStageID, true
 }
