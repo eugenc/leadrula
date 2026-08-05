@@ -265,7 +265,7 @@ func CRMInboundContactID(slug string, flat map[string]any) string {
 }
 
 func ghlInboundContactID(flat map[string]any) string {
-	for _, key := range []string{"contact_id", "contactId", "id"} {
+	for _, key := range []string{"contact_id", "contactId", "contact.id", "contact.contactId", "contact.contact_id", "id"} {
 		if v, ok := flat[key]; ok {
 			if s := strings.TrimSpace(toGHLText(v)); s != "" && s != "null" {
 				return s

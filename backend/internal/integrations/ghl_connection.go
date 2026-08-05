@@ -186,7 +186,7 @@ func (s *Service) ghlMetadataByKind(ctx context.Context, token, locationID, kind
 func BuildGHLInboundWebhookInfo(apiBaseURL string, webhookID int64, slug string) *InboundWebhookInfo {
 	info := BuildInboundWebhookInfo(apiBaseURL, webhookID, slug)
 	if info != nil {
-		info.SetupHint = "In GoHighLevel, add this URL to a Workflow triggered on Opportunity Stage Changed. Include contact_id, pipelineId, and pipelineStageId in the webhook body for pipeline stage auto-sync."
+		info.SetupHint = "In GoHighLevel, add this URL to a Workflow triggered on Opportunity Stage Changed using the default webhook payload (no custom body required)."
 	}
 	return info
 }

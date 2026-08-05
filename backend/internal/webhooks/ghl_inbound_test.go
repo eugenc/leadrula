@@ -41,6 +41,9 @@ func TestGHLInboundContactID(t *testing.T) {
 	if got := ghlInboundContactID(map[string]any{"contact_id": "first", "contactId": "second"}); got != "first" {
 		t.Fatalf("priority: got %q", got)
 	}
+	if got := ghlInboundContactID(map[string]any{"contactId": "contact-win", "id": "opportunity-id"}); got != "contact-win" {
+		t.Fatalf("contactId over id: got %q", got)
+	}
 }
 
 func TestIngest_GHLInbound_updatesExternalIDByLeadID(t *testing.T) {
