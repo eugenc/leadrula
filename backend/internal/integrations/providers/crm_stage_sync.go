@@ -1,8 +1,64 @@
 package providers
 
 import (
+	"fmt"
 	"strings"
 )
+
+// InboundStageSyncDiagnosis explains why inbound CRM stage sync did or did not run.
+type InboundStageSyncDiagnosis struct {
+	CanSync       bool
+	SkipReason    string
+	TargetStageID int64
+	CRMPipelineID string
+	CRMStageID    string
+}
+
+// DiagnoseCRMInboundStageSync checks whether a flattened webhook payload can move a lead stage.
+func DiagnoseCRMInboundStageSync(slug string, flat map[string]any, cfg InboundStageSyncConfig, currentStageID *int64) InboundStageSyncDiagnosis {
+	if !cfg.Enabled {
+		return InboundStageSyncDiagnosis{SkipReason: "inbound stage sync disabled"}
+	}
+	if cfg.LeadrulaPipelineID <= 0 || strings.TrimSpace(cfg.CRMPipelineID) == "" {
+		return InboundStageSyncDiagnosis{SkipReason: "inbound sync pipeline not configured"}
+	}
+	if !hasCompleteCRMInboundStageMap(cfg.PipelineStageMap, cfg.LeadrulaPipelineID) {
+		return InboundStageSyncDiagnosis{SkipReason: "stage map incomplete for sync pipeline"}
+	}
+	crmPipelineID, crmStageID := CRMInboundPipelineStage(slug, flat)
+	if crmPipelineID == "" || crmStageID == "" {
+		return InboundStageSyncDiagnosis{SkipReason: "payload missing pipelineId or pipelineStageId"}
+	}
+	if crmPipelineID != cfg.CRMPipelineID {
+		return InboundStageSyncDiagnosis{
+			SkipReason:    fmt.Sprintf("pipeline %s does not match configured sync pipeline", crmPipelineID),
+			CRMPipelineID: crmPipelineID,
+			CRMStageID:    crmStageID,
+		}
+	}
+	targetStageID, ok := ResolveCRMLeadrulaStage(cfg.PipelineStageMap, cfg.LeadrulaPipelineID, crmPipelineID, crmStageID)
+	if !ok {
+		return InboundStageSyncDiagnosis{
+			SkipReason:    fmt.Sprintf("no Leadrula stage mapped for CRM stage %s", crmStageID),
+			CRMPipelineID: crmPipelineID,
+			CRMStageID:    crmStageID,
+		}
+	}
+	if currentStageID != nil && *currentStageID == targetStageID {
+		return InboundStageSyncDiagnosis{
+			SkipReason:    "lead already at target stage",
+			TargetStageID: targetStageID,
+			CRMPipelineID: crmPipelineID,
+			CRMStageID:    crmStageID,
+		}
+	}
+	return InboundStageSyncDiagnosis{
+		CanSync:       true,
+		TargetStageID: targetStageID,
+		CRMPipelineID: crmPipelineID,
+		CRMStageID:    crmStageID,
+	}
+}
 
 // CRMPipelineStageMapEntry is the normalized pipeline/stage map entry for all CRMs.
 type CRMPipelineStageMapEntry struct {

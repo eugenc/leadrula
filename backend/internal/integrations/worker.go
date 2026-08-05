@@ -211,6 +211,10 @@ func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, p
 
 	if err != nil {
 		s.logAttempt(ctx, jobID, attempts, "failed", httpStatus, reqLog, respRaw, duration, err.Error())
+		if providers.IsDeliverySkipped(err) {
+			s.markSkipped(ctx, jobID, err.Error())
+			return
+		}
 		s.markFailed(ctx, jobID, attempts, err.Error())
 		return
 	}
@@ -240,6 +244,15 @@ func (s *Service) markSuccess(ctx context.Context, jobID int64, externalID strin
 		 SET status = 'success', external_id = $2, delivered_at = now(), updated_at = now()
 		 WHERE id = $1`, jobID, externalID); err != nil {
 		log.Printf("integrations worker: markSuccess job %d: %v", jobID, err)
+	}
+}
+
+func (s *Service) markSkipped(ctx context.Context, jobID int64, errMsg string) {
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE integration_delivery_queue
+		 SET status = 'dead'::delivery_status, attempts = max_attempts, last_error = $2, updated_at = now()
+		 WHERE id = $1`, jobID, errMsg); err != nil {
+		log.Printf("integrations worker: markSkipped job %d: %v", jobID, err)
 	}
 }
 

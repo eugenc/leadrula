@@ -1,6 +1,6 @@
 import { Fragment, useState } from "react";
 import { useRejectQueue } from "@/features/admin/hooks";
-import { useIntegrationDelivery, useRetryIntegrationDelivery } from "@/features/intake/hooks";
+import { diagnoseGhlInboundStageSyncPayload } from "@/features/integrations/ghlStageSyncDiagnosis";
 import { useReplayWebhookDelivery, useWebhookDelivery } from "@/features/webhooks/hooks";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -531,6 +531,15 @@ export function UnifiedInboundLogTable({
                       <pre className="max-h-48 overflow-auto rounded-md border border-gray-100 bg-gray-50 p-3 font-mono text-xs">
                         {JSON.stringify(expandedDelivery?.request_payload ?? {}, null, 2)}
                       </pre>
+                      {integrationLogMode && d.provider_slug === "ghl" && (() => {
+                        const diag = diagnoseGhlInboundStageSyncPayload(expandedDelivery?.request_payload);
+                        return (
+                          <p className={`mt-2 text-xs ${diag.status === "warning" ? "text-amber-700" : "text-gray-600"}`}>
+                            <span className="font-medium">Stage sync: </span>
+                            {diag.message}
+                          </p>
+                        );
+                      })()}
                       {d.error_message && <p className="mt-1 text-xs text-red-600">{d.error_message}</p>}
                     </td>
                   </tr>

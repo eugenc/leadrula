@@ -409,8 +409,8 @@ func (s *Service) EnqueueConnectionDelivery(ctx context.Context, connectionID, l
 	return nil
 }
 
-// TryEnqueueGHLWebhookOnStageMove enqueues GHL webhook deliveries when a lead enters a configured trigger stage.
-func (s *Service) TryEnqueueGHLWebhookOnStageMove(ctx context.Context, ownerAccountID, pipelineID, stageID, leadID int64, payloadJSON []byte, skipConnIDs []int64) error {
+// TryEnqueueGHLOnStageMove enqueues GHL deliveries when a lead enters a configured mapped stage.
+func (s *Service) TryEnqueueGHLOnStageMove(ctx context.Context, ownerAccountID, pipelineID, stageID, leadID int64, payloadJSON []byte, skipConnIDs []int64) error {
 	if pipelineID == 0 || stageID == 0 {
 		return nil
 	}
@@ -419,8 +419,7 @@ func (s *Service) TryEnqueueGHLWebhookOnStageMove(ctx context.Context, ownerAcco
 		`SELECT c.id, c.config
 		 FROM integration_connections c
 		 JOIN integration_providers p ON p.id = c.provider_id
-		 WHERE c.account_id = $1 AND c.status = 'active' AND p.slug = 'ghl'
-		   AND COALESCE(c.config->>'delivery_mode', 'api') = 'webhook'`, ownerAccountID)
+		 WHERE c.account_id = $1 AND c.status = 'active' AND p.slug = 'ghl'`, ownerAccountID)
 	if err != nil {
 		return err
 	}
@@ -434,11 +433,7 @@ func (s *Service) TryEnqueueGHLWebhookOnStageMove(ctx context.Context, ownerAcco
 		if skip[connID] {
 			continue
 		}
-		cfg, err := ghlConfigFromJSON(connConfig)
-		if err != nil {
-			continue
-		}
-		if !providers.MatchesGHLWebhookTrigger(cfg.PipelineStageMap, pipelineID, stageID) {
+		if !ghlStageMoveShouldEnqueue(connConfig, pipelineID, stageID) {
 			continue
 		}
 		if _, err := s.pool.Exec(ctx,
@@ -449,6 +444,11 @@ func (s *Service) TryEnqueueGHLWebhookOnStageMove(ctx context.Context, ownerAcco
 		}
 	}
 	return rows.Err()
+}
+
+// TryEnqueueGHLWebhookOnStageMove enqueues GHL webhook deliveries when a lead enters a configured trigger stage.
+func (s *Service) TryEnqueueGHLWebhookOnStageMove(ctx context.Context, ownerAccountID, pipelineID, stageID, leadID int64, payloadJSON []byte, skipConnIDs []int64) error {
+	return s.TryEnqueueGHLOnStageMove(ctx, ownerAccountID, pipelineID, stageID, leadID, payloadJSON, skipConnIDs)
 }
 
 func payloadPipelineStage(payload map[string]any) (pipelineID, stageID int64) {
@@ -494,6 +494,20 @@ func ghlWebhookSkipReason(providerSlug string, connConfig json.RawMessage, pipel
 		return ""
 	}
 	return "Skipped: GHL webhook mode — lead stage not in outbound trigger map"
+}
+
+func ghlStageMoveShouldEnqueue(connConfig json.RawMessage, pipelineID, stageID int64) bool {
+	cfg, err := ghlConfigFromJSON(connConfig)
+	if err != nil {
+		return false
+	}
+	if !providers.MatchesGHLWebhookTrigger(cfg.PipelineStageMap, pipelineID, stageID) {
+		return false
+	}
+	if cfg.DeliveryMode == "webhook" {
+		return true
+	}
+	return cfg.CreateOpportunity
 }
 
 func (s *Service) insertSkippedIntegrationDelivery(ctx context.Context, connectionID, leadID int64, routeID *int64, payloadJSON []byte, reason string) error {

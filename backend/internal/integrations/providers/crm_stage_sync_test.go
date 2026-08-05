@@ -106,3 +106,36 @@ func TestParseInboundStageSync_ghlPipelineFallback(t *testing.T) {
 		t.Fatal("expected ready with ghl legacy keys")
 	}
 }
+
+func TestDiagnoseCRMInboundStageSync_missingStageFields(t *testing.T) {
+	cfg := InboundStageSyncConfig{
+		Enabled:            true,
+		LeadrulaPipelineID: 1,
+		CRMPipelineID:      "p1",
+		PipelineStageMap: []CRMPipelineStageMapEntry{
+			{LeadrulaPipelineID: 1, LeadrulaStageID: 5, CRMPipelineID: "p1", CRMStageID: "s1"},
+		},
+	}
+	diag := DiagnoseCRMInboundStageSync("ghl", map[string]any{"contact_id": "c1"}, cfg, nil)
+	if diag.CanSync || diag.SkipReason != "payload missing pipelineId or pipelineStageId" {
+		t.Fatalf("diag = %+v", diag)
+	}
+}
+
+func TestDiagnoseCRMInboundStageSync_ready(t *testing.T) {
+	cfg := InboundStageSyncConfig{
+		Enabled:            true,
+		LeadrulaPipelineID: 1,
+		CRMPipelineID:      "p1",
+		PipelineStageMap: []CRMPipelineStageMapEntry{
+			{LeadrulaPipelineID: 1, LeadrulaStageID: 5, CRMPipelineID: "p1", CRMStageID: "s1"},
+		},
+	}
+	diag := DiagnoseCRMInboundStageSync("ghl", map[string]any{
+		"pipelineId":      "p1",
+		"pipelineStageId": "s1",
+	}, cfg, nil)
+	if !diag.CanSync || diag.TargetStageID != 5 {
+		t.Fatalf("diag = %+v", diag)
+	}
+}

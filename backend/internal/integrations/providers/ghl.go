@@ -17,7 +17,7 @@ func (p *GHLProvider) Deliver(ctx context.Context, credentials []byte, payload D
 
 	if cfg.DeliveryMode == "webhook" {
 		if len(cfg.PipelineStageMap) == 0 || !MatchesGHLWebhookTrigger(cfg.PipelineStageMap, payload.PipelineID, payload.StageID) {
-			return &DeliveryResult{}, nil
+			return nil, &DeliverySkippedError{Reason: "GHL webhook mode — lead stage not in outbound trigger map"}
 		}
 		body := buildGHLWebhookPayload(cfg, payload)
 		return ghlDeliverWebhook(ctx, cfg.WebhookURL, body)
@@ -38,7 +38,7 @@ func (p *GHLProvider) Deliver(ctx context.Context, credentials []byte, payload D
 		if err != nil {
 			return result, err
 		}
-		oppResult, err := ghlCreateOpportunity(ctx, token, cfg, contactID, ghlPipelineID, ghlStageID, payload)
+		oppResult, err := ghlCreateOrUpdateOpportunity(ctx, token, cfg, contactID, ghlPipelineID, ghlStageID, payload)
 		if err != nil {
 			if oppResult != nil {
 				result.HTTPStatus = oppResult.HTTPStatus

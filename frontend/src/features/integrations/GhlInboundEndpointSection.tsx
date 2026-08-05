@@ -27,6 +27,17 @@ export function GhlInboundEndpointSection({
           {inbound.setup_hint ||
             "In GHL, add this URL to a Workflow or Custom Webhook trigger for Contact, Opportunity, or Appointment events."}
         </p>
+        {inboundStageSyncEnabled && (
+          <div className="mt-2 space-y-1 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+            <p className="font-medium">Stage sync requires these fields in the GHL webhook body:</p>
+            <ul className="list-disc pl-4">
+              <li><code className="font-mono">contact_id</code> or <code className="font-mono">contactId</code></li>
+              <li><code className="font-mono">pipelineId</code></li>
+              <li><code className="font-mono">pipelineStageId</code></li>
+            </ul>
+            <p>Use a GHL Workflow triggered on <strong>Opportunity Stage Changed</strong> and map those values into the webhook action.</p>
+          </div>
+        )}
         {inboundStageSyncEnabled && syncPipelineName && (
           <p className="mt-2 text-xs font-medium text-success-fg">
             Pipeline stage auto-sync is on for {syncPipelineName}.
