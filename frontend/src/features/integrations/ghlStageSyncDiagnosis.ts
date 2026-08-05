@@ -6,6 +6,7 @@ export type GhlStageSyncDiagnosis = {
 
 const PIPELINE_KEYS = ["pipelineId", "pipeline_id"];
 const STAGE_KEYS = ["pipelineStageId", "pipeline_stage_id", "stageId"];
+const STAGE_NAME_KEYS = ["pipeline_stage", "pipleline_stage", "pippleine_stage", "stage_name"];
 
 function pickString(payload: Record<string, unknown>, keys: string[]): string {
   for (const key of keys) {
@@ -26,6 +27,7 @@ export function diagnoseGhlInboundStageSyncPayload(payload: unknown): GhlStageSy
   const flat = payload as Record<string, unknown>;
   const pipelineId = pickString(flat, PIPELINE_KEYS);
   const stageId = pickString(flat, STAGE_KEYS);
+  const stageName = pickString(flat, STAGE_NAME_KEYS);
   const contactId = pickString(flat, ["contact_id", "contactId", "id"]);
 
   const missing: string[] = [];
@@ -34,9 +36,13 @@ export function diagnoseGhlInboundStageSyncPayload(payload: unknown): GhlStageSy
   if (!stageId) missing.push("pipelineStageId");
 
   if (missing.length > 0) {
+    const stageHint =
+      !stageId && stageName
+        ? ` Found stage name "${stageName}" — sync will match it against stored GHL stage names in your map if pipelineStageId is missing.`
+        : "";
     return {
       status: "warning",
-      message: `Stage sync will not run — missing ${missing.join(", ")}. Webhook capture can still succeed without moving the lead.`,
+      message: `Stage sync will not run — missing ${missing.join(", ")}.${stageHint} Webhook capture can still succeed without moving the lead.`,
     };
   }
 

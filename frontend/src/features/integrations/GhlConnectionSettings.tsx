@@ -31,7 +31,7 @@ import {
 } from "@/features/integrations/GhlStandardFieldGroup";
 import { CrmInboundStageSyncSection } from "@/features/integrations/CrmInboundStageSyncSection";
 import { CrmPipelineStageMapSection } from "@/features/integrations/CrmPipelineStageMapSection";
-import { crmPipelinesToOptions } from "@/features/integrations/crmConstants";
+import { crmPipelinesToOptions, enrichStageMapNames } from "@/features/integrations/crmConstants";
 import { GhlTitleTemplateEditor } from "@/features/integrations/GhlTitleTemplateEditor";
 import type { GhlCustomField } from "@/features/integrations/hooks";
 import type { OutboundFieldMapEntry } from "@/types";
@@ -145,6 +145,7 @@ export function GhlConnectionSettings({
       ...e,
       ghl_pipeline_id: e.crm_pipeline_id ?? e.ghl_pipeline_id ?? "",
       ghl_pipeline_stage_id: e.crm_stage_id ?? e.ghl_pipeline_stage_id ?? "",
+      ghl_stage_name: e.crm_stage_name ?? e.ghl_stage_name ?? "",
     })) as GHLPipelineStageMapEntry[];
     if (!inboundSyncEnabled || inboundSyncPipelineID <= 0) {
       patch({ pipeline_stage_map: mapped });
@@ -167,6 +168,16 @@ export function GhlConnectionSettings({
       patch({ appointment_datetime: DEFAULT_APPOINTMENT_DATETIME });
     }
   }, [webhookMode, config.create_appointment, config.appointment_datetime]);
+
+  useEffect(() => {
+    if (ghlPipelines.length === 0) return;
+    const current = config.pipeline_stage_map ?? [];
+    const enriched = enrichStageMapNames(current, ghlPipelines);
+    const changed = enriched.some(
+      (e, i) => e.ghl_stage_name !== current[i]?.ghl_stage_name || e.crm_stage_name !== current[i]?.crm_stage_name
+    );
+    if (changed) patch({ pipeline_stage_map: enriched });
+  }, [ghlPipelines]);
 
   return (
     <div className="space-y-4">

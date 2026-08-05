@@ -3,8 +3,10 @@ export type CRMPipelineStageMapEntry = {
   leadrula_stage_id: number;
   crm_pipeline_id?: string;
   crm_stage_id?: string;
+  crm_stage_name?: string;
   ghl_pipeline_id?: string;
   ghl_pipeline_stage_id?: string;
+  ghl_stage_name?: string;
 };
 
 export type CRMInboundConfig = {
@@ -42,6 +44,23 @@ export function entryCrmPipelineId(e: CRMPipelineStageMapEntry): string {
 
 export function entryCrmStageId(e: CRMPipelineStageMapEntry): string {
   return (e.crm_stage_id || e.ghl_pipeline_stage_id || "").trim();
+}
+
+export function entryCrmStageName(e: CRMPipelineStageMapEntry): string {
+  return (e.crm_stage_name || e.ghl_stage_name || "").trim();
+}
+
+export function enrichStageMapNames<T extends CRMPipelineStageMapEntry>(
+  entries: T[],
+  ghlPipelines: { id: string; stages?: { id: string; name: string }[] }[]
+): T[] {
+  return entries.map((entry) => {
+    if (entryCrmStageName(entry)) return entry;
+    const pipe = ghlPipelines.find((p) => p.id === entryCrmPipelineId(entry));
+    const stage = pipe?.stages?.find((s) => s.id === entryCrmStageId(entry));
+    if (!stage) return entry;
+    return { ...entry, crm_stage_name: stage.name, ghl_stage_name: stage.name };
+  });
 }
 
 export function syncCrmPipelineId(config: CRMInboundConfig): string {

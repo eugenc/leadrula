@@ -66,8 +66,10 @@ type CRMPipelineStageMapEntry struct {
 	LeadrulaStageID    int64  `json:"leadrula_stage_id"`
 	CRMPipelineID      string `json:"crm_pipeline_id,omitempty"`
 	CRMStageID         string `json:"crm_stage_id,omitempty"`
+	CRMStageName       string `json:"crm_stage_name,omitempty"`
 	GHLPipelineID      string `json:"ghl_pipeline_id,omitempty"`
 	GHLPipelineStageID string `json:"ghl_pipeline_stage_id,omitempty"`
+	GHLStageName       string `json:"ghl_stage_name,omitempty"`
 }
 
 type InboundStageSyncConfig struct {
@@ -89,6 +91,13 @@ func entryCRMStageID(e CRMPipelineStageMapEntry) string {
 		return id
 	}
 	return strings.TrimSpace(e.GHLPipelineStageID)
+}
+
+func entryCRMStageName(e CRMPipelineStageMapEntry) string {
+	if name := strings.TrimSpace(e.CRMStageName); name != "" {
+		return name
+	}
+	return strings.TrimSpace(e.GHLStageName)
 }
 
 func NormalizePipelineStageMapEntries(entries []GHLPipelineStageMapEntry) []CRMPipelineStageMapEntry {
@@ -153,6 +162,48 @@ func hasCompleteCRMInboundStageMap(entries []CRMPipelineStageMapEntry, lrPipelin
 		}
 	}
 	return false
+}
+
+// HasCRMStageMapEntry reports whether the stage map links a Leadrula stage to a CRM pipeline.
+func HasCRMStageMapEntry(entries []CRMPipelineStageMapEntry, lrPipelineID int64, crmPipelineID string, lrStageID int64) bool {
+	crmPipelineID = strings.TrimSpace(crmPipelineID)
+	if lrPipelineID <= 0 || crmPipelineID == "" || lrStageID <= 0 {
+		return false
+	}
+	for _, e := range entries {
+		if e.LeadrulaPipelineID != lrPipelineID || e.LeadrulaStageID != lrStageID {
+			continue
+		}
+		if entryCRMPipelineID(e) == crmPipelineID && entryCRMStageID(e) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolveCRMLeadrulaStageByGHLStageName maps a stored GHL stage name to a Leadrula stage ID.
+func ResolveCRMLeadrulaStageByGHLStageName(entries []CRMPipelineStageMapEntry, lrPipelineID int64, crmPipelineID, stageName string) (stageID int64, ok bool) {
+	crmPipelineID = strings.TrimSpace(crmPipelineID)
+	stageName = strings.TrimSpace(stageName)
+	if lrPipelineID <= 0 || crmPipelineID == "" || stageName == "" {
+		return 0, false
+	}
+	want := strings.ToLower(stageName)
+	for _, e := range entries {
+		if e.LeadrulaPipelineID != lrPipelineID {
+			continue
+		}
+		if entryCRMPipelineID(e) != crmPipelineID {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(entryCRMStageName(e))) != want {
+			continue
+		}
+		if e.LeadrulaStageID > 0 {
+			return e.LeadrulaStageID, true
+		}
+	}
+	return 0, false
 }
 
 // ResolveCRMLeadrulaStage maps a CRM pipeline/stage to a Leadrula stage ID.

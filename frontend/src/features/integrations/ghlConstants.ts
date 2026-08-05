@@ -24,8 +24,10 @@ export type GHLPipelineStageMapEntry = {
   leadrula_stage_id: number;
   crm_pipeline_id?: string;
   crm_stage_id?: string;
+  crm_stage_name?: string;
   ghl_pipeline_id: string;
   ghl_pipeline_stage_id: string;
+  ghl_stage_name?: string;
 };
 
 export type GHLDeliveryMode = "api" | "webhook";

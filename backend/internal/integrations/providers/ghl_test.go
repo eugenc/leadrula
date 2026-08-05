@@ -109,6 +109,18 @@ func TestGHLInboundPipelineStage(t *testing.T) {
 	}
 }
 
+func TestGHLInboundPipelineStageName(t *testing.T) {
+	if got := GHLInboundPipelineStageName(map[string]any{"pipleline_stage": "PTO"}); got != "PTO" {
+		t.Fatalf("pipleline_stage: got %q", got)
+	}
+	if got := GHLInboundPipelineStageName(map[string]any{"pippleine_stage": "Installed"}); got != "Installed" {
+		t.Fatalf("pippleine_stage: got %q", got)
+	}
+	if got := GHLInboundPipelineStageName(map[string]any{"pipelineStageId": "uuid"}); got != "" {
+		t.Fatalf("expected empty when only stage id present, got %q", got)
+	}
+}
+
 func TestValidateInboundStageSync(t *testing.T) {
 	cfg := GHLConfig{
 		InboundStageSyncEnabled:       true,
