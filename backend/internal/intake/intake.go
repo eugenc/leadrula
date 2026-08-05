@@ -78,6 +78,8 @@ func resolveIngestSource(raw map[string]any) string {
 	return ""
 }
 
+var phoneFallbackKeys = []string{"phone_number", "mobile", "cell", "caller_phone", "caller_id"}
+
 func extractPhoneFromPayload(flat map[string]any, maps []routing.SourceFieldMapEntry) string {
 	if v, ok := flat["phone"]; ok {
 		if s := toText(v); s != "" {
@@ -94,7 +96,48 @@ func extractPhoneFromPayload(flat map[string]any, maps []routing.SourceFieldMapE
 			}
 		}
 	}
+	for _, k := range phoneFallbackKeys {
+		if v, ok := flat[k]; ok {
+			if s := toText(v); s != "" {
+				return s
+			}
+		}
+	}
 	return ""
+}
+
+// resolvePhoneForLookup returns a phone string from the payload or an already-mapped lead record.
+func resolvePhoneForLookup(flat map[string]any, maps []routing.SourceFieldMapEntry, lead *leads.Lead) string {
+	if phone := extractPhoneFromPayload(flat, maps); phone != "" {
+		return phone
+	}
+	if lead != nil && lead.Phone != nil && *lead.Phone != "" {
+		return *lead.Phone
+	}
+	return ""
+}
+
+// updateExistingLeadByPhone applies payload mappings to a publisher lead matched by phone.
+// excludeLeadID skips the given lead (0 = no skip). Returns the matched lead when updated.
+func (s *Service) updateExistingLeadByPhone(ctx context.Context, tx database.Querier, publisherID int64, phone string, excludeLeadID int64, authorName string, flat map[string]any, maps []routing.SourceFieldMapEntry) (*leads.Lead, bool, error) {
+	if phone == "" {
+		return nil, false, nil
+	}
+	existing, lookupErr := s.leads.GetByPhoneNormalizedForPublisher(ctx, tx, publisherID, phone)
+	if lookupErr != nil {
+		var appErr *httpx.AppError
+		if errors.As(lookupErr, &appErr) && appErr.Code == httpx.CodeNotFound {
+			return nil, false, nil
+		}
+		return nil, false, lookupErr
+	}
+	if excludeLeadID != 0 && existing.ID == excludeLeadID {
+		return nil, false, nil
+	}
+	if err := applyPayloadMappings(ctx, tx, s.leads, publisherID, existing.ID, authorName, flat, maps); err != nil {
+		return nil, false, err
+	}
+	return existing, true, nil
 }
 
 func sourceAuthorName(name, slug string) string {
@@ -209,20 +252,13 @@ func (s *Service) IngestFromSource(ctx context.Context, publisherID int64, slug 
 	authorName := sourceAuthorName(src.Name, slug)
 
 	if phone := extractPhoneFromPayload(sources, maps); phone != "" {
-		lead, lookupErr := s.leads.GetByPhoneNormalizedForPublisher(ctx, tx, publisherID, phone)
-		if lookupErr != nil {
-			var appErr *httpx.AppError
-			if !errors.As(lookupErr, &appErr) || appErr.Code != httpx.CodeNotFound {
-				return nil, lookupErr
-			}
-		} else {
-			if err := applyPayloadMappings(ctx, tx, s.leads, publisherID, lead.ID, authorName, sources, maps); err != nil {
-				return nil, err
-			}
+		if existing, updated, err := s.updateExistingLeadByPhone(ctx, tx, publisherID, phone, 0, authorName, sources, maps); err != nil {
+			return nil, err
+		} else if updated {
 			if err := tx.Commit(ctx); err != nil {
 				return nil, err
 			}
-			return &IngestResult{LeadID: lead.PublicID, Status: "updated"}, nil
+			return &IngestResult{LeadID: existing.PublicID, Status: "updated"}, nil
 		}
 	}
 
@@ -237,8 +273,18 @@ func (s *Service) IngestFromSource(ctx context.Context, publisherID int64, slug 
 	if err != nil {
 		return nil, err
 	}
-	if err := leads.CheckDuplicate(ctx, tx, publisherID, lead.Phone, lead.Email, leadID); err != nil {
-		return nil, err
+	if phone := resolvePhoneForLookup(sources, maps, lead); phone != "" {
+		if existing, updated, err := s.updateExistingLeadByPhone(ctx, tx, publisherID, phone, leadID, authorName, sources, maps); err != nil {
+			return nil, err
+		} else if updated {
+			if err := s.leads.SoftDelete(ctx, tx, publisherID, leadID); err != nil {
+				return nil, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return nil, err
+			}
+			return &IngestResult{LeadID: existing.PublicID, Status: "updated"}, nil
+		}
 	}
 
 	rt, err := routing.RouteForSource(ctx, tx, src.ID, leadID, sources)
