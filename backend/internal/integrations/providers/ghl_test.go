@@ -131,8 +131,59 @@ func TestGHLInboundPipelineStageName(t *testing.T) {
 	if got := GHLInboundPipelineStageName(map[string]any{"pippleine_stage": "Installed"}); got != "Installed" {
 		t.Fatalf("pippleine_stage: got %q", got)
 	}
+	if got := GHLInboundPipelineStageName(map[string]any{"stageName": "Sit"}); got != "Sit" {
+		t.Fatalf("stageName: got %q", got)
+	}
+	if got := GHLInboundPipelineStageName(map[string]any{"opportunity.pipeline_stage_name": "Signed"}); got != "Signed" {
+		t.Fatalf("opportunity.pipeline_stage_name: got %q", got)
+	}
 	if got := GHLInboundPipelineStageName(map[string]any{"pipelineStageId": "uuid"}); got != "" {
 		t.Fatalf("expected empty when only stage id present, got %q", got)
+	}
+}
+
+func TestNormalizeGHLInboundFlat_defaultPayload(t *testing.T) {
+	flat := NormalizeGHLInboundFlat(map[string]any{
+		"contactId":       "contact-1",
+		"id":              "opportunity-9",
+		"pipeline_id":     "pipe-1",
+		"pipleline_stage": "Sit",
+	})
+	if got := ghlInboundContactID(flat); got != "contact-1" {
+		t.Fatalf("contact id = %q, want contact-1", got)
+	}
+	p, s := GHLInboundPipelineStage(flat)
+	if p != "pipe-1" || s != "" {
+		t.Fatalf("pipeline=%q stage=%q", p, s)
+	}
+	if got := GHLInboundPipelineStageName(flat); got != "Sit" {
+		t.Fatalf("stage name = %q", got)
+	}
+}
+
+func TestNormalizeGHLInboundFlat_nestedOpportunity(t *testing.T) {
+	flat := NormalizeGHLInboundFlat(map[string]any{
+		"contactId":                    "contact-2",
+		"opportunity.pipelineId":       "pipe-2",
+		"opportunity.pipelineStageId":  "stage-2",
+		"opportunity.pipeline_stage_name": "Signed",
+	})
+	p, s := GHLInboundPipelineStage(flat)
+	if p != "pipe-2" || s != "stage-2" {
+		t.Fatalf("pipeline=%q stage=%q", p, s)
+	}
+	if got := GHLInboundPipelineStageName(flat); got != "Signed" {
+		t.Fatalf("stage name = %q", got)
+	}
+}
+
+func TestGHLInboundContactID_prefersContactIdOverRootID(t *testing.T) {
+	got := ghlInboundContactID(map[string]any{
+		"contactId": "contact-abc",
+		"id":        "opportunity-xyz",
+	})
+	if got != "contact-abc" {
+		t.Fatalf("got %q, want contact-abc", got)
 	}
 }
 

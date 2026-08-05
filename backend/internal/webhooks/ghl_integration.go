@@ -43,7 +43,16 @@ var defaultGHLInboundFields = []GHLInboundField{
 }
 
 func ghlInboundContactID(flat map[string]any) string {
-	for _, key := range []string{"contact_id", "contactId", "id"} {
+	for _, key := range []string{"contact_id", "contactId", "contact.id", "contact.contactId", "contact.contact_id"} {
+		v, ok := flat[key]
+		if !ok || v == nil {
+			continue
+		}
+		if s := strings.TrimSpace(toText(v)); s != "" && s != "null" {
+			return s
+		}
+	}
+	for _, key := range []string{"id"} {
 		v, ok := flat[key]
 		if !ok || v == nil {
 			continue

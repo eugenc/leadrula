@@ -211,11 +211,6 @@ function AddConnectionDrawer({
   const { data: ghlCustomFieldsData, isLoading: ghlCustomFieldsLoading } = useGhlCustomFields(ghlDetailId);
   const { data: lrPipelines } = usePipelines();
 
-  const ghlInboundSyncPipelineName =
-    ghlConfig.inbound_stage_sync_enabled && ghlConfig.inbound_sync_leadrula_pipeline_id
-      ? lrPipelines?.find((p) => p.id === ghlConfig.inbound_sync_leadrula_pipeline_id)?.name
-      : undefined;
-
   const crmInboundSyncPipelineName =
     crmConfig.inbound_stage_sync_enabled && crmConfig.inbound_sync_leadrula_pipeline_id
       ? lrPipelines?.find((p) => p.id === crmConfig.inbound_sync_leadrula_pipeline_id)?.name
@@ -872,7 +867,6 @@ function AddConnectionDrawer({
           <GhlInboundEndpointSection
             inbound={inboundWebhook}
             inboundStageSyncEnabled={!!ghlConfig.inbound_stage_sync_enabled}
-            syncPipelineName={ghlInboundSyncPipelineName}
           />
         )}
 

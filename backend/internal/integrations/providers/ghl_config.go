@@ -562,12 +562,23 @@ func mapEntries(entries []GHLPipelineStageMapEntry) []CRMPipelineStageMapEntry {
 	return out
 }
 
-// GHLInboundPipelineStageName reads a human-readable stage name from common GHL workflow custom fields.
-// Used as a fallback when pipelineStageId is missing (e.g. typo keys like pipleline_stage).
-func GHLInboundPipelineStageName(flat map[string]any) string {
-	for _, key := range []string{"pipeline_stage", "pipleline_stage", "pippleine_stage", "stage_name"} {
+var ghlInboundPipelineIDKeys = []string{
+	"pipelineId", "pipeline_id",
+	"opportunity.pipelineId", "opportunity.pipeline_id",
+}
+var ghlInboundStageIDKeys = []string{
+	"pipelineStageId", "pipeline_stage_id", "stageId",
+	"opportunity.pipelineStageId", "opportunity.pipeline_stage_id",
+}
+var ghlInboundStageNameKeys = []string{
+	"pipeline_stage", "pipleline_stage", "pippleine_stage", "stage_name", "stageName",
+	"opportunity.pipeline_stage_name", "opportunity.stageName",
+}
+
+func ghlFlatText(flat map[string]any, keys ...string) string {
+	for _, key := range keys {
 		if v, ok := flat[key]; ok {
-			if s := strings.TrimSpace(toGHLText(v)); s != "" {
+			if s := strings.TrimSpace(toGHLText(v)); s != "" && s != "null" {
 				return s
 			}
 		}
@@ -575,25 +586,44 @@ func GHLInboundPipelineStageName(flat map[string]any) string {
 	return ""
 }
 
+func copyGHLFlatKeyIfEmpty(out map[string]any, dest string, sources ...string) {
+	if ghlFlatText(out, dest) != "" {
+		return
+	}
+	for _, src := range sources {
+		if s := ghlFlatText(out, src); s != "" {
+			out[dest] = out[src]
+			return
+		}
+	}
+}
+
+// NormalizeGHLInboundFlat promotes nested GHL default webhook keys to the flat keys stage sync expects.
+func NormalizeGHLInboundFlat(flat map[string]any) map[string]any {
+	if flat == nil {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(flat)+8)
+	for k, v := range flat {
+		out[k] = v
+	}
+	copyGHLFlatKeyIfEmpty(out, "contactId", "contact_id", "contact.id", "contact.contactId", "contact.contact_id")
+	copyGHLFlatKeyIfEmpty(out, "contact_id", "contactId", "contact.contact_id", "contact.id", "contact.contactId")
+	copyGHLFlatKeyIfEmpty(out, "pipelineId", "pipeline_id", "opportunity.pipelineId", "opportunity.pipeline_id")
+	copyGHLFlatKeyIfEmpty(out, "pipeline_id", "pipelineId", "opportunity.pipeline_id", "opportunity.pipelineId")
+	copyGHLFlatKeyIfEmpty(out, "pipelineStageId", "pipeline_stage_id", "stageId", "opportunity.pipelineStageId", "opportunity.pipeline_stage_id")
+	copyGHLFlatKeyIfEmpty(out, "pipleline_stage", "pipeline_stage", "pippleine_stage", "stage_name", "stageName", "opportunity.pipeline_stage_name", "opportunity.stageName")
+	return out
+}
+
+// GHLInboundPipelineStageName reads a human-readable stage name from GHL default or custom webhook fields.
+func GHLInboundPipelineStageName(flat map[string]any) string {
+	return ghlFlatText(flat, ghlInboundStageNameKeys...)
+}
+
 // GHLInboundPipelineStage reads GHL pipeline and stage IDs from a flattened webhook payload.
 func GHLInboundPipelineStage(flat map[string]any) (pipelineID, stageID string) {
-	for _, key := range []string{"pipelineId", "pipeline_id"} {
-		if v, ok := flat[key]; ok {
-			pipelineID = strings.TrimSpace(toGHLText(v))
-			if pipelineID != "" {
-				break
-			}
-		}
-	}
-	for _, key := range []string{"pipelineStageId", "pipeline_stage_id", "stageId"} {
-		if v, ok := flat[key]; ok {
-			stageID = strings.TrimSpace(toGHLText(v))
-			if stageID != "" {
-				break
-			}
-		}
-	}
-	return pipelineID, stageID
+	return ghlFlatText(flat, ghlInboundPipelineIDKeys...), ghlFlatText(flat, ghlInboundStageIDKeys...)
 }
 
 func toGHLText(v any) string {

@@ -214,6 +214,97 @@ func TestTryApplyGHLInboundStageSync_stageNameFallback(t *testing.T) {
 	}
 }
 
+func TestTryApplyGHLInboundStageSync_defaultGHLPayload(t *testing.T) {
+	ctx := context.Background()
+	pool, err := database.Connect(ctx, "postgres://crm:crm@localhost:5432/crm?sslmode=disable")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer pool.Close()
+
+	repo := leads.NewRepository(pool)
+	pipesSvc := pipelines.NewService(pool, nil)
+	leadSvc := leads.NewService(repo, nil, nil, pipesSvc, nil)
+	svc := NewService(pool, repo, leadSvc, testEncKey(t), nil)
+
+	var accountID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM accounts ORDER BY id LIMIT 1`).Scan(&accountID); err != nil {
+		t.Skip(err)
+	}
+	pipelineID, stage1ID, stage2ID := testAccountPipelineStages(ctx, t, pool, accountID)
+
+	var stage2Name string
+	if err := pool.QueryRow(ctx, `SELECT name FROM pipeline_stages WHERE id=$1`, stage2ID).Scan(&stage2Name); err != nil {
+		t.Fatal(err)
+	}
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	connID, connPublicID := testGHLConnection(ctx, t, pool, accountID, "GHL DefaultPayload "+suffix)
+	ghlPipelineID := "ghl-pipe-default-" + suffix
+	ghlStage2ID := "ghl-stage-default-" + suffix
+	cfg := map[string]any{
+		"location_id":                       "loc-test",
+		"create_contact":                    true,
+		"inbound_stage_sync_enabled":        true,
+		"inbound_sync_leadrula_pipeline_id": pipelineID,
+		"inbound_sync_ghl_pipeline_id":      ghlPipelineID,
+		"pipeline_stage_map": []any{
+			map[string]any{
+				"leadrula_pipeline_id":  pipelineID,
+				"leadrula_stage_id":     stage2ID,
+				"ghl_pipeline_id":       ghlPipelineID,
+				"ghl_pipeline_stage_id": ghlStage2ID,
+				"ghl_stage_name":        stage2Name,
+			},
+		},
+	}
+	cfgJSON, _ := json.Marshal(cfg)
+	if _, err := pool.Exec(ctx, `UPDATE integration_connections SET config=$2 WHERE id=$1`, connID, cfgJSON); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := svc.ProvisionGHLWebhooks(ctx, accountID, connID, connPublicID, "GHL DefaultPayload "+suffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.DeleteGHLWebhooks(ctx, accountID, *ids)
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leadID, _, err := repo.InsertLead(ctx, tx, accountID, accountID, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.PlaceInPipeline(ctx, tx, leadID, accountID, pipelineID, stage1ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	webhook := Webhook{
+		ID:                      ids.Inbound,
+		AccountID:               accountID,
+		IntegrationConnectionID: &connID,
+	}
+	tryApplyGHLInboundStageSync(ctx, svc, webhook, leadID, map[string]any{
+		"contactId":       "contact-default-" + suffix,
+		"id":              "opportunity-" + suffix,
+		"pipeline_id":     ghlPipelineID,
+		"pipleline_stage": stage2Name,
+	})
+
+	leadAfter, err := repo.GetByID(ctx, pool, leadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leadAfter.StageID == nil || *leadAfter.StageID != stage2ID {
+		t.Fatalf("stage_id = %v, want %d (default payload stage %q)", leadAfter.StageID, stage2ID, stage2Name)
+	}
+}
+
 func TestTryApplyGHLInboundStageSync_leadrulaNameFallback(t *testing.T) {
 	ctx := context.Background()
 	pool, err := database.Connect(ctx, "postgres://crm:crm@localhost:5432/crm?sslmode=disable")

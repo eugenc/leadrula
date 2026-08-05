@@ -47,16 +47,27 @@ func tryApplyCRMInboundStageSync(ctx context.Context, s *Service, webhook Webhoo
 		return
 	}
 
+	if slug == "ghl" {
+		flat = providers.NormalizeGHLInboundFlat(flat)
+	}
+
 	diag := providers.DiagnoseCRMInboundStageSync(slug, flat, syncCfg, lead.StageID, lead.PipelineID)
+	nameBased := false
 	if !diag.CanSync && slug == "ghl" {
 		byName, tried := tryGHLInboundStageSyncByName(ctx, s, flat, syncCfg, lead.StageID)
 		if tried {
+			nameBased = true
 			diag = byName
 		}
 	}
 	if !diag.CanSync {
-		if diag.SkipReason != "" && diag.SkipReason != "lead already at target stage" {
-			_ = s.leads.LogCRMSyncSkipped(ctx, s.leads.Pool(), leadID, lead.OwnerAccountID, actor, diag.SkipReason)
+		reason := diag.SkipReason
+		if nameBased && reason == "lead already at target stage" {
+			stageName := providers.GHLInboundPipelineStageName(flat)
+			reason = fmt.Sprintf(`GHL pipleline_stage %q matches current LR stage — if GHL shows a different stage, the default webhook payload may be stale`, stageName)
+		}
+		if reason != "" && (diag.SkipReason != "lead already at target stage" || nameBased) {
+			_ = s.leads.LogCRMSyncSkipped(ctx, s.leads.Pool(), leadID, lead.OwnerAccountID, actor, reason)
 		}
 		return
 	}
