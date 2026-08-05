@@ -170,6 +170,9 @@ func (s *Service) ingestPayload(ctx context.Context, wa *WebhookAuth, slug strin
 
 	isSunbaseInbound := providerSlug != nil && *providerSlug == "sunbase"
 	isGHLInbound := providerSlug != nil && *providerSlug == "ghl"
+	if isGHLInbound {
+		flat = providers.PrepareGHLInboundFlat(flat)
+	}
 
 	var results []ActionResult
 	var firstLeadID *int64

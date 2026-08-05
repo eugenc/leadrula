@@ -616,6 +616,52 @@ func NormalizeGHLInboundFlat(flat map[string]any) map[string]any {
 	return out
 }
 
+// PrepareGHLInboundFlat normalizes GHL inbound payloads for field mapping and stage sync.
+func PrepareGHLInboundFlat(flat map[string]any) map[string]any {
+	out := NormalizeGHLInboundFlat(flat)
+
+	if customData, ok := out["customData"].(map[string]any); ok {
+		for k, v := range customData {
+			if ghlFlatText(out, k) == "" {
+				out[k] = v
+			}
+			oppKey := "opportunity." + k
+			if ghlFlatText(out, oppKey) == "" {
+				out[oppKey] = v
+			}
+		}
+	}
+
+	expandGHLCustomFieldsArray(out, out["customFields"])
+	expandGHLCustomFieldsArray(out, out["opportunity.customFields"])
+
+	return out
+}
+
+func expandGHLCustomFieldsArray(out map[string]any, raw any) {
+	items, ok := raw.([]any)
+	if !ok {
+		return
+	}
+	for _, item := range items {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		key := strings.TrimSpace(toGHLText(m["key"]))
+		if key == "" {
+			continue
+		}
+		val := m["field_value"]
+		if val == nil {
+			val = m["value"]
+		}
+		if ghlFlatText(out, key) == "" {
+			out[key] = val
+		}
+	}
+}
+
 // GHLInboundPipelineStageName reads a human-readable stage name from GHL default or custom webhook fields.
 func GHLInboundPipelineStageName(flat map[string]any) string {
 	return ghlFlatText(flat, ghlInboundStageNameKeys...)

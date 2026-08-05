@@ -177,6 +177,50 @@ func TestNormalizeGHLInboundFlat_nestedOpportunity(t *testing.T) {
 	}
 }
 
+func TestPrepareGHLInboundFlat_customData(t *testing.T) {
+	flat := PrepareGHLInboundFlat(map[string]any{
+		"contact_id": "c1",
+		"customData": map[string]any{
+			"appointment_disposition": "Reschedule",
+		},
+	})
+	if got := ghlFlatText(flat, "appointment_disposition"); got != "Reschedule" {
+		t.Fatalf("appointment_disposition = %q", got)
+	}
+	if got := ghlFlatText(flat, "opportunity.appointment_disposition"); got != "Reschedule" {
+		t.Fatalf("opportunity.appointment_disposition = %q", got)
+	}
+}
+
+func TestPrepareGHLInboundFlat_customFieldsArray(t *testing.T) {
+	flat := PrepareGHLInboundFlat(map[string]any{
+		"customFields": []any{
+			map[string]any{
+				"key":          "opportunity.disposition",
+				"field_value":  "Showed",
+			},
+		},
+	})
+	if got := ghlFlatText(flat, "opportunity.disposition"); got != "Showed" {
+		t.Fatalf("opportunity.disposition = %q", got)
+	}
+}
+
+func TestPrepareGHLInboundFlat_customFieldsDoesNotOverwrite(t *testing.T) {
+	flat := PrepareGHLInboundFlat(map[string]any{
+		"opportunity.disposition": "Existing",
+		"customFields": []any{
+			map[string]any{
+				"key":         "opportunity.disposition",
+				"field_value": "Showed",
+			},
+		},
+	})
+	if got := ghlFlatText(flat, "opportunity.disposition"); got != "Existing" {
+		t.Fatalf("expected existing value preserved, got %q", got)
+	}
+}
+
 func TestGHLInboundContactID_prefersContactIdOverRootID(t *testing.T) {
 	got := ghlInboundContactID(map[string]any{
 		"contactId": "contact-abc",
