@@ -7,7 +7,6 @@ import {
   GHL_STANDARD_CONTACT_FIELDS,
   DEFAULT_GHL_CONTACT_STANDARD_FIELDS,
   mergeGhlContactStandardFields,
-  isGhlFieldSourceSet,
   type GHLAppointmentStandardFields,
   type GHLContactStandardFields,
   type GHLFieldSource,
@@ -74,16 +73,16 @@ export function GhlContactStandardFieldsSection({
 
   function patch(key: keyof GHLContactStandardFields, fs: GHLFieldSource | undefined) {
     const next = { ...merged };
-    if (fs && isGhlFieldSourceSet(fs)) {
-      next[key] = fs;
-    } else {
+    if (!fs?.source_type) {
       delete next[key];
+    } else {
+      next[key] = fs;
     }
     onChange(next);
   }
 
   function displaySource(row: GHLFieldSource | undefined, required: boolean): string {
-    if (row && isGhlFieldSourceSet(row)) return row.source_type;
+    if (row?.source_type) return row.source_type;
     return required ? "builtin" : "";
   }
 
