@@ -34,6 +34,9 @@ function statusBadge(user: UserRow) {
   if (user.status === "pending") {
     return <Badge variant="pending">Pending</Badge>;
   }
+  if (user.status === "expired") {
+    return <Badge variant="overdue">Invite expired</Badge>;
+  }
   if (user.status === "active") {
     return <Badge variant="distributed">Active</Badge>;
   }
@@ -42,8 +45,13 @@ function statusBadge(user: UserRow) {
 
 function statusSubtitle(user: UserRow) {
   if (user.status === "pending") return "Pending invite";
+  if (user.status === "expired") return "Invite expired — resend to issue a new link";
   if (user.status === "active") return "Active member";
   return "Inactive member";
+}
+
+function isInviteStatus(status: UserRow["status"]) {
+  return status === "pending" || status === "expired";
 }
 
 export function UserDetailDrawer({
@@ -130,7 +138,7 @@ function DrawerContent({ user, onClose }: { user: UserRow; onClose: () => void }
     };
     const onError = (e: unknown) => toast.error(errorMessage(e));
 
-    if (user.status === "pending") {
+    if (isInviteStatus(user.status)) {
       updateInvite.mutate({ id: user.invite_id, body }, { onSuccess, onError });
     } else {
       update.mutate({ id: user.id, body }, { onSuccess, onError });
@@ -139,12 +147,12 @@ function DrawerContent({ user, onClose }: { user: UserRow; onClose: () => void }
 
   function revoke() {
     const onSuccess = () => {
-      toast.success(user.status === "pending" ? "Invite revoked" : "User deactivated");
+      toast.success(isInviteStatus(user.status) ? "Invite revoked" : "User deactivated");
       onClose();
     };
     const onError = (e: unknown) => toast.error(errorMessage(e));
 
-    if (user.status === "pending") {
+    if (isInviteStatus(user.status)) {
       removeInvite.mutate(user.invite_id, { onSuccess, onError });
     } else {
       remove.mutate(user.id, { onSuccess, onError });
@@ -185,7 +193,7 @@ function DrawerContent({ user, onClose }: { user: UserRow; onClose: () => void }
       <DrawerBody>
         {tab === "profile" && (
           <div className="flex flex-col gap-4">
-            {user.status !== "pending" && (
+            {user.status !== "pending" && user.status !== "expired" && (
               <AvatarUpload
                 name={user.full_name || user.email}
                 src={user.avatar_url}
@@ -243,7 +251,7 @@ function DrawerContent({ user, onClose }: { user: UserRow; onClose: () => void }
         <Button disabled={unchanged || invalid || saving} onClick={save}>
           Save
         </Button>
-        {user.status === "pending" && (
+        {isInviteStatus(user.status) && (
           <Button
             variant="secondary"
             disabled={resend.isPending}
@@ -258,7 +266,7 @@ function DrawerContent({ user, onClose }: { user: UserRow; onClose: () => void }
             Resend invite
           </Button>
         )}
-        {user.status !== "pending" && (
+        {!isInviteStatus(user.status) && (
           <Button
             variant="secondary"
             disabled={resetPassword.isPending}
@@ -278,7 +286,7 @@ function DrawerContent({ user, onClose }: { user: UserRow; onClose: () => void }
           disabled={user.status === "inactive" || remove.isPending || removeInvite.isPending}
           onClick={revoke}
         >
-          {user.status === "pending" ? "Revoke invite" : "Deactivate user"}
+          {isInviteStatus(user.status) ? "Revoke invite" : "Deactivate user"}
         </Button>
       </DrawerFooter>
     </div>

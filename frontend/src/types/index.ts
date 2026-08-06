@@ -1172,7 +1172,7 @@ export interface PublisherDetail {
   admin_email: string;
 }
 
-export type UserStatus = "pending" | "active" | "inactive";
+export type UserStatus = "pending" | "expired" | "active" | "inactive";
 
 export interface UserRow {
   id: number;

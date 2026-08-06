@@ -72,20 +72,3 @@ func TestSetSkipOpportunityStage(t *testing.T) {
 		t.Fatalf("_config = %v", m["_config"])
 	}
 }
-
-func TestGHLStageIsAheadOfLR(t *testing.T) {
-	tests := []struct {
-		ghlPos, lrPos int
-		want          bool
-	}{
-		{2, 1, true},
-		{1, 2, false},
-		{1, 1, false},
-	}
-	for _, tc := range tests {
-		got := ghlStageIsAheadOfLR(tc.ghlPos, tc.lrPos)
-		if got != tc.want {
-			t.Fatalf("ghlStageIsAheadOfLR(%d, %d) = %v, want %v", tc.ghlPos, tc.lrPos, got, tc.want)
-		}
-	}
-}

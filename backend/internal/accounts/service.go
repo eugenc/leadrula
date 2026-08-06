@@ -329,12 +329,31 @@ func (s *Service) Invite(ctx context.Context, accountID int64, email, fullName, 
 
 	token := randomToken()
 	expires := time.Now().Add(72 * time.Hour)
+	if existing, err := s.repo.FindUnacceptedInviteByEmail(ctx, accountID, email); err == nil {
+		rolePtr := &role
+		namePtr := &fullName
+		var permPtr *[]byte
+		if len(permRaw) > 0 {
+			permPtr = &permRaw
+		}
+		inv, err := s.repo.UpdateInvite(ctx, accountID, existing.ID, nil, namePtr, rolePtr, &token, &expires, permPtr)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.sendInviteEmail(email, fullName, token); err != nil {
+			return nil, err
+		}
+		return inv, nil
+	} else if err != ErrNotFound {
+		return nil, err
+	}
+
 	inv, err := s.repo.CreateInvite(ctx, accountID, email, fullName, role, token, expires, permRaw)
 	if err != nil {
 		return nil, err
 	}
-	if s.mail != nil {
-		_ = s.mail.SendInvite(email, fullName, token)
+	if err := s.sendInviteEmail(email, fullName, token); err != nil {
+		return nil, err
 	}
 	return inv, nil
 }
@@ -601,7 +620,7 @@ func (s *Service) ListUsers(ctx context.Context, accountID int64) ([]UserListIte
 			Email:                inv.Email,
 			FullName:             inv.FullName,
 			Role:                 inv.Role,
-			Status:               "pending",
+			Status:               inviteStatus(inv.ExpiresAt),
 			Permissions:          perms,
 			EffectivePermissions: effective,
 		})
@@ -626,10 +645,12 @@ func (s *Service) ListUsers(ctx context.Context, accountID int64) ([]UserListIte
 	}
 
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].Status == "pending" && out[j].Status != "pending" {
+		iInvite := isInviteListStatus(out[i].Status)
+		jInvite := isInviteListStatus(out[j].Status)
+		if iInvite && !jInvite {
 			return true
 		}
-		if out[i].Status != "pending" && out[j].Status == "pending" {
+		if !iInvite && jInvite {
 			return false
 		}
 		ni := strings.ToLower(out[i].FullName)
@@ -861,7 +882,7 @@ func (s *Service) UpdateInvite(ctx context.Context, accountID, inviteID int64, p
 		Email:                updated.Email,
 		FullName:             updated.FullName,
 		Role:                 updated.Role,
-		Status:               "pending",
+		Status:               inviteStatus(updated.ExpiresAt),
 		Permissions:          perms,
 		EffectivePermissions: effective,
 	}, nil
@@ -903,6 +924,17 @@ func (s *Service) ResendBuyerAdminInvite(ctx context.Context, buyerAccountID int
 		return err
 	}
 	return s.ResendInvite(ctx, buyerAccountID, inv.ID)
+}
+
+func inviteStatus(expiresAt time.Time) string {
+	if time.Now().After(expiresAt) {
+		return "expired"
+	}
+	return "pending"
+}
+
+func isInviteListStatus(status string) bool {
+	return status == "pending" || status == "expired"
 }
 
 func randomToken() string {

@@ -96,26 +96,6 @@ func tryApplyCRMInboundStageSync(ctx context.Context, s *Service, webhook Webhoo
 		return
 	}
 
-	var pendingOutbound bool
-	if err := s.pool.QueryRow(ctx,
-		`SELECT EXISTS(
-		   SELECT 1 FROM integration_delivery_queue
-		   WHERE lead_id = $1 AND connection_id = $2
-		     AND status IN ('pending', 'processing')
-		 )`, leadID, connID).Scan(&pendingOutbound); err != nil {
-		return
-	}
-	if pendingOutbound {
-		_ = s.leads.LogCRMSyncSkipped(ctx, s.leads.Pool(), leadID, lead.OwnerAccountID, actor, "outbound delivery pending for lead")
-		return
-	}
-
-	if !s.acquireCRMInboundStageSyncInflight(ctx, webhook, leadID) {
-		_ = s.leads.LogCRMSyncSkipped(ctx, s.leads.Pool(), leadID, lead.OwnerAccountID, actor, "inbound stage sync already in flight")
-		return
-	}
-	defer s.releaseCRMInboundStageSyncInflight(ctx, leadID, connID)
-
 	if _, err := s.leadSvc.ChangeStageByWebhook(ctx, webhook.AccountID, leadID, diag.TargetStageID, nil, nil, webhook.Name, connID); err != nil {
 		_ = s.leads.LogCRMSyncSkipped(ctx, s.leads.Pool(), leadID, lead.OwnerAccountID, actor, "stage move failed: "+err.Error())
 	}

@@ -7,7 +7,6 @@ import (
 
 	"github.com/echayko/leadrula/backend/internal/integrations/providers"
 	"github.com/echayko/leadrula/backend/internal/leads"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ghlInboundOpportunityLookup is overridable in tests.
@@ -106,37 +105,10 @@ func tryGHLInboundStageSyncFromAPI(
 		}, ""
 	}
 
-	ghlPos, err := pipelineStagePosition(ctx, s.pool, targetLRStageID)
-	if err != nil {
-		return providers.InboundStageSyncDiagnosis{}, fmt.Sprintf("GHL API stage position lookup failed: %v", err)
-	}
-	lrPos, err := pipelineStagePosition(ctx, s.pool, currentStageID)
-	if err != nil {
-		return providers.InboundStageSyncDiagnosis{}, fmt.Sprintf("LR stage position lookup failed: %v", err)
-	}
-	if !ghlStageIsAheadOfLR(ghlPos, lrPos) {
-		return providers.InboundStageSyncDiagnosis{
-			SkipReason:    "GHL API stage is not ahead of current LR stage",
-			TargetStageID: targetLRStageID,
-			CRMPipelineID: syncCfg.CRMPipelineID,
-			CRMStageID:    opp.PipelineStageID,
-		}, ""
-	}
-
 	return providers.InboundStageSyncDiagnosis{
 		CanSync:       true,
 		TargetStageID: targetLRStageID,
 		CRMPipelineID: syncCfg.CRMPipelineID,
 		CRMStageID:    opp.PipelineStageID,
 	}, ""
-}
-
-func ghlStageIsAheadOfLR(ghlMappedStagePos, lrStagePos int) bool {
-	return ghlMappedStagePos > lrStagePos
-}
-
-func pipelineStagePosition(ctx context.Context, pool *pgxpool.Pool, stageID int64) (int, error) {
-	var pos int
-	err := pool.QueryRow(ctx, `SELECT position FROM pipeline_stages WHERE id=$1`, stageID).Scan(&pos)
-	return pos, err
 }

@@ -130,20 +130,6 @@ func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, p
 		return
 	}
 
-	if providerSlug == "ghl" && leadID != 0 {
-		inflight, err := s.crmInboundStageSyncInflight(ctx, leadID, connID)
-		if err != nil {
-			s.markFailed(ctx, jobID, attempts, "inbound sync check failed: "+err.Error())
-			return
-		}
-		if inflight {
-			duration := int(time.Since(start).Milliseconds())
-			s.logAttempt(ctx, jobID, attempts, "deferred", 0, payload, nil, duration, inboundStageSyncInflightReason)
-			s.deferJobForInboundStageSync(ctx, jobID)
-			return
-		}
-	}
-
 	var connConfig map[string]any
 	_ = json.Unmarshal(config, &connConfig)
 

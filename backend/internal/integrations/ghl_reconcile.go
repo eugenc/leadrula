@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/echayko/leadrula/backend/internal/database"
 	"github.com/echayko/leadrula/backend/internal/integrations/providers"
 	"github.com/echayko/leadrula/backend/internal/leads"
 )
@@ -125,7 +124,7 @@ func setSkipOpportunityStage(payload []byte) []byte {
 	return b
 }
 
-// reconcileGHLStageBeforeDeliver pulls Leadrula forward when GHL already moved ahead.
+// reconcileGHLStageBeforeDeliver aligns Leadrula with the GHL opportunity stage.
 // Returns refreshed delivery payload when the lead stage was updated.
 func (s *Service) reconcileGHLStageBeforeDeliver(ctx context.Context, connID, leadID int64, token string, connConfig map[string]any, payload []byte) ([]byte, bool, error) {
 	if s == nil || s.leadSvc == nil || s.pool == nil || leadID == 0 {
@@ -174,17 +173,6 @@ func (s *Service) reconcileGHLStageBeforeDeliver(ctx context.Context, connID, le
 		return payload, false, nil
 	}
 
-	ghlPos, err := stagePosition(ctx, s.pool, targetLRStageID)
-	if err != nil {
-		return payload, false, err
-	}
-	lrPos, err := stagePosition(ctx, s.pool, lrStageID)
-	if err != nil {
-		return payload, false, err
-	}
-	if !ghlStageIsAheadOfLR(ghlPos, lrPos) {
-		return payload, false, nil
-	}
 	var accountID int64
 	if err := s.pool.QueryRow(ctx,
 		`SELECT account_id FROM integration_connections WHERE id=$1`, connID).Scan(&accountID); err != nil {
@@ -198,16 +186,6 @@ func (s *Service) reconcileGHLStageBeforeDeliver(ctx context.Context, connID, le
 		return payload, true, err
 	}
 	return refreshed, true, nil
-}
-
-func ghlStageIsAheadOfLR(ghlMappedStagePos, lrStagePos int) bool {
-	return ghlMappedStagePos > lrStagePos
-}
-
-func stagePosition(ctx context.Context, q database.Querier, stageID int64) (int, error) {
-	var pos int
-	err := q.QueryRow(ctx, `SELECT position FROM pipeline_stages WHERE id=$1`, stageID).Scan(&pos)
-	return pos, err
 }
 
 func ghlDeliveryToken(credentials []byte, providerSlug string) (string, error) {
