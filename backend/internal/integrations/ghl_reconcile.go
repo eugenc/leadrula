@@ -15,6 +15,9 @@ const (
 	ghlAlreadyAtTargetStageReason = "GHL already at target stage"
 )
 
+// ghlOutboundOpportunityLookup is overridable in tests.
+var ghlOutboundOpportunityLookup = providers.FindGHLOpportunityByContact
+
 type ghlOutboundDeliverPlan struct {
 	Action string
 }
@@ -57,7 +60,7 @@ func (s *Service) planGHLOutboundDeliver(ctx context.Context, leadID int64, toke
 		return plan
 	}
 
-	opp, err := providers.FindGHLOpportunityByContact(ctx, token, cfg.LocationID, *lead.ExternalID, cfg.InboundSyncGHLPipelineID)
+	opp, err := ghlOutboundOpportunityLookup(ctx, token, cfg.LocationID, *lead.ExternalID, cfg.InboundSyncGHLPipelineID)
 	if err != nil || opp.ID == "" || opp.PipelineStageID == "" {
 		return plan
 	}
@@ -93,70 +96,6 @@ func setSkipOpportunityStage(payload []byte) []byte {
 		return payload
 	}
 	return b
-}
-
-// reconcileGHLStageBeforeDeliver aligns Leadrula with the GHL opportunity stage.
-// Returns refreshed delivery payload when the lead stage was updated.
-func (s *Service) reconcileGHLStageBeforeDeliver(ctx context.Context, connID, leadID int64, token string, connConfig map[string]any, payload []byte) ([]byte, bool, error) {
-	if s == nil || s.leadSvc == nil || s.pool == nil || leadID == 0 {
-		return payload, false, nil
-	}
-	cfg, err := providers.ParseGHLConfig(providers.MergeGHLConfigDefaults(connConfig))
-	if err != nil || !cfg.InboundStageSyncEnabled || !cfg.CreateOpportunity {
-		return payload, false, nil
-	}
-	if cfg.InboundSyncLeadrulaPipelineID <= 0 || cfg.InboundSyncGHLPipelineID == "" {
-		return payload, false, nil
-	}
-
-	repo := leads.NewRepository(s.pool)
-	lead, err := repo.GetByID(ctx, s.pool, leadID)
-	if err != nil {
-		return payload, false, err
-	}
-	if lead.ExternalID == nil || *lead.ExternalID == "" {
-		return payload, false, nil
-	}
-	if lead.PipelineID == nil || lead.StageID == nil || *lead.PipelineID != cfg.InboundSyncLeadrulaPipelineID {
-		return payload, false, nil
-	}
-
-	lrPipelineID := *lead.PipelineID
-	lrStageID := *lead.StageID
-	lrGHLPipelineID, lrGHLStageID, err := providers.ResolveGHLStage(cfg.PipelineStageMap, lrPipelineID, lrStageID)
-	if err != nil {
-		return payload, false, nil
-	}
-	if lrGHLPipelineID != cfg.InboundSyncGHLPipelineID {
-		return payload, false, nil
-	}
-
-	opp, err := providers.FindGHLOpportunityByContact(ctx, token, cfg.LocationID, *lead.ExternalID, cfg.InboundSyncGHLPipelineID)
-	if err != nil || opp.ID == "" || opp.PipelineStageID == "" {
-		return payload, false, err
-	}
-	if opp.PipelineStageID == lrGHLStageID {
-		return payload, false, nil
-	}
-
-	targetLRStageID, ok := providers.ResolveLeadrulaStage(cfg.PipelineStageMap, cfg.InboundSyncLeadrulaPipelineID, cfg.InboundSyncGHLPipelineID, opp.PipelineStageID)
-	if !ok || targetLRStageID <= 0 || targetLRStageID == lrStageID {
-		return payload, false, nil
-	}
-
-	var accountID int64
-	if err := s.pool.QueryRow(ctx,
-		`SELECT account_id FROM integration_connections WHERE id=$1`, connID).Scan(&accountID); err != nil {
-		return payload, false, err
-	}
-	if _, err := s.leadSvc.ChangeStageByWebhook(ctx, accountID, leadID, targetLRStageID, nil, nil, "ghl stage reconcile", true, connID); err != nil {
-		return payload, false, err
-	}
-	refreshed, err := leads.RefreshDeliveryPayload(ctx, s.pool, repo, leadID, payload)
-	if err != nil {
-		return payload, true, err
-	}
-	return refreshed, true, nil
 }
 
 func ghlDeliveryToken(credentials []byte, providerSlug string) (string, error) {
