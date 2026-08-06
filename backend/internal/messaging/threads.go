@@ -163,6 +163,7 @@ func (s *Service) CreateDirect(ctx context.Context, p *auth.Principal, req Direc
 // OpenLeadThread opens (or creates) a lead-context thread between the caller
 // and the lead's counterpart account.
 func (s *Service) OpenLeadThread(ctx context.Context, p *auth.Principal, leadPublicID string) (*Thread, error) {
+	sessionAccountID := p.AccountID
 	hp, err := s.forMessaging(ctx, p)
 	if err != nil {
 		return nil, err
@@ -174,7 +175,15 @@ func (s *Service) OpenLeadThread(ctx context.Context, p *auth.Principal, leadPub
 		Scan(&ownerID, &publisherID); err != nil {
 		return nil, httpx.NotFound("lead not found")
 	}
-	counterpart, err := s.counterpartOf(p.AccountID, publisherID, ownerID)
+	callerID := p.AccountID
+	if p.AccountType == "platform" {
+		if sessionAccountID != p.AccountID {
+			callerID = sessionAccountID
+		} else {
+			callerID = ownerID
+		}
+	}
+	counterpart, err := s.counterpartOf(callerID, publisherID, ownerID)
 	if err != nil {
 		return nil, err
 	}

@@ -18,12 +18,6 @@ export const apiBaseURL = baseURL;
 
 export const api = axios.create({ baseURL });
 
-api.interceptors.request.use((cfg) => {
-  const t = useAuthStore.getState().accessToken;
-  if (t) cfg.headers.Authorization = `Bearer ${t}`;
-  return cfg;
-});
-
 let refreshing: Promise<string | null> | null = null;
 let reswitching: Promise<string | null> | null = null;
 let switchExpiredNotified = false;
@@ -220,17 +214,23 @@ function isHomeNamespacePath(path: string): boolean {
   return path.startsWith(`${accountPrefix(home)}/messages`);
 }
 
-function authConfig(path: string): { headers?: { Authorization: string } } {
-  const nested = useAuthStore.getState().impersonation || useAuthStore.getState().switchSession;
-  if (!nested || !isHomeNamespacePath(path)) return {};
-  const token = homeAccessToken();
-  if (!token) return {};
-  return { headers: { Authorization: `Bearer ${token}` } };
+// requestAuthToken picks the access token for an API path (exported for tests).
+export function requestAuthToken(path: string): string | null {
+  if (isHomeNamespacePath(path)) {
+    return homeAccessToken();
+  }
+  return useAuthStore.getState().accessToken;
 }
+
+api.interceptors.request.use((cfg) => {
+  const t = requestAuthToken(cfg.url ?? "");
+  if (t) cfg.headers.Authorization = `Bearer ${t}`;
+  return cfg;
+});
 
 export async function get<T>(path: string): Promise<T> {
   try {
-    const res = await api.get(path, authConfig(path));
+    const res = await api.get(path);
     return res.data.data as T;
   } catch (e) {
     throw apiError(e);
@@ -239,7 +239,7 @@ export async function get<T>(path: string): Promise<T> {
 
 export async function post<T>(path: string, body?: unknown): Promise<T> {
   try {
-    const res = await api.post(path, body, authConfig(path));
+    const res = await api.post(path, body);
     return res.data.data as T;
   } catch (e) {
     throw apiError(e);
@@ -248,7 +248,7 @@ export async function post<T>(path: string, body?: unknown): Promise<T> {
 
 export async function postForm<T>(path: string, form: FormData): Promise<T> {
   try {
-    const res = await api.post(path, form, authConfig(path));
+    const res = await api.post(path, form);
     return res.data.data as T;
   } catch (e) {
     throw apiError(e);
@@ -257,7 +257,7 @@ export async function postForm<T>(path: string, form: FormData): Promise<T> {
 
 export async function getBlob(path: string): Promise<Blob> {
   try {
-    const res = await api.get(path, { ...authConfig(path), responseType: "blob" });
+    const res = await api.get(path, { responseType: "blob" });
     return res.data as Blob;
   } catch (e) {
     throw apiError(e);
@@ -266,7 +266,7 @@ export async function getBlob(path: string): Promise<Blob> {
 
 export async function patch<T>(path: string, body?: unknown): Promise<T> {
   try {
-    const res = await api.patch(path, body, authConfig(path));
+    const res = await api.patch(path, body);
     return res.data.data as T;
   } catch (e) {
     throw apiError(e);
@@ -284,7 +284,7 @@ export async function put<T>(path: string, body?: unknown): Promise<T> {
 
 export async function del<T>(path: string): Promise<T> {
   try {
-    const res = await api.delete(path, authConfig(path));
+    const res = await api.delete(path);
     return res.data.data as T;
   } catch (e) {
     throw apiError(e);
