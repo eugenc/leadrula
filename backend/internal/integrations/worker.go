@@ -162,9 +162,6 @@ func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, p
 
 	if providerSlug == "ghl" && leadID != 0 {
 		if token, tokErr := ghlDeliveryToken(credentials, providerSlug); tokErr == nil && token != "" {
-			if refreshed, _, recErr := s.reconcileGHLStageBeforeDeliver(ctx, connID, leadID, token, connConfig, payload); recErr == nil {
-				payload = refreshed
-			}
 			plan := s.planGHLOutboundDeliver(ctx, leadID, token, connConfig, enqueuedPayload, payload)
 			switch plan.Action {
 			case ghlOutboundDeliverSkip:
