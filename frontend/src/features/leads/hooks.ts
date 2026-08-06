@@ -194,7 +194,7 @@ export function useUpdateLead() {
     mutationFn: ({ leadId, body }: { leadId: number; body: Record<string, unknown> }) =>
       patch<Lead>(`${ns()}/leads/${leadId}`, body),
     onSuccess: (updated, v) => {
-      qc.setQueryData(["lead", v.leadId], updated);
+      qc.setQueryData(["lead", accountType, v.leadId], updated);
       qc.setQueriesData<LeadListResponse>({ queryKey: ["leads"] }, (old) => {
         if (!old?.items) return old;
         return {
