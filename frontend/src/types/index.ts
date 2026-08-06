@@ -71,6 +71,16 @@ export interface PlatformAccount {
   created_at: string;
 }
 
+export interface PlatformBuyerBalance {
+  balance: number;
+}
+
+export interface PlatformCreditResult {
+  balance: number;
+  amount: number;
+  transaction_id: string;
+}
+
 export interface SwitchableAccount {
   id: string;
   handler_id: string;

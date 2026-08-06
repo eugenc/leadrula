@@ -2,11 +2,14 @@ package billing
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
+	"github.com/echayko/leadrula/backend/internal/accounts"
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/internal/permissions"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
@@ -44,6 +47,23 @@ func (h *Handler) RegisterPublisher(r chi.Router) {
 // RegisterPublic mounts unauthenticated billing callbacks.
 func (h *Handler) RegisterPublic(r chi.Router) {
 	r.Get("/publisher/billing/stripe/oauth/callback", h.stripeOAuthCallback)
+}
+
+// RegisterPlatform mounts platform-operator buyer balance tools.
+func (h *Handler) RegisterPlatform(r chi.Router) {
+	admin := r.With(auth.RequireRole("admin"))
+	admin.Get("/buyers/{accountId}/balance", h.platformBuyerBalance)
+	admin.Post("/buyers/{accountId}/credit", h.platformCreditBuyer)
+}
+
+type platformBuyerBalanceResponse struct {
+	Balance float64 `json:"balance"`
+}
+
+type platformCreditResponse struct {
+	Balance       float64 `json:"balance"`
+	Amount        float64 `json:"amount"`
+	TransactionID string  `json:"transaction_id"`
 }
 
 // RegisterBuyer mounts the buyer's own balance + ledger + disputes.
@@ -558,6 +578,73 @@ func (h *Handler) balance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"balance": bal})
+}
+
+func (h *Handler) platformBuyerBalance(w http.ResponseWriter, r *http.Request) {
+	buyerID, err := h.resolvePlatformBuyerID(r)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	bal, err := h.svc.GetBalance(r.Context(), buyerID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, platformBuyerBalanceResponse{Balance: bal})
+}
+
+func (h *Handler) platformCreditBuyer(w http.ResponseWriter, r *http.Request) {
+	buyerID, err := h.resolvePlatformBuyerID(r)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	var body struct {
+		Amount float64 `json:"amount"`
+		Note   string  `json:"note"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	if body.Amount <= 0 {
+		httpx.WriteError(w, httpx.Validation("amount must be positive"))
+		return
+	}
+	desc := "Platform admin credit"
+	if note := strings.TrimSpace(body.Note); note != "" {
+		desc += ": " + note
+	}
+	txn, err := h.svc.Topup(r.Context(), buyerID, body.Amount, desc)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	bal, err := h.svc.GetBalance(r.Context(), buyerID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, platformCreditResponse{
+		Balance:       bal,
+		Amount:        body.Amount,
+		TransactionID: txn.PublicID,
+	})
+}
+
+func (h *Handler) resolvePlatformBuyerID(r *http.Request) (int64, error) {
+	publicID := chi.URLParam(r, "accountId")
+	buyerID, accountType, _, _, err := h.svc.accounts.GetAccountByPublicID(r.Context(), publicID)
+	if errors.Is(err, accounts.ErrNotFound) {
+		return 0, httpx.NotFound("buyer not found")
+	}
+	if err != nil {
+		return 0, err
+	}
+	if accountType != "buyer" {
+		return 0, httpx.NotFound("buyer not found")
+	}
+	return buyerID, nil
 }
 
 func (h *Handler) buyerTransactions(w http.ResponseWriter, r *http.Request) {

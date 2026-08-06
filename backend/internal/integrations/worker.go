@@ -211,6 +211,14 @@ func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, p
 				}
 			}
 		}
+		if providerSlug == "ghl" && leadID != 0 {
+			if eventID, err := s.ghlAppointmentEventID(ctx, leadID, connID); err == nil && eventID != "" {
+				if dp.Config == nil {
+					dp.Config = map[string]any{}
+				}
+				dp.Config["ghl_appointment_event_id"] = eventID
+			}
+		}
 		result, err = p.Deliver(ctx, credentials, dp)
 	}
 	duration := int(time.Since(start).Milliseconds())
@@ -252,6 +260,9 @@ func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, p
 	if leadID != 0 && extID != "" {
 		repo := leads.NewRepository(s.pool)
 		_ = repo.SetExternalID(ctx, s.pool, leadID, extID)
+	}
+	if providerSlug == "ghl" && leadID != 0 && result != nil && result.AppointmentEventID != "" {
+		_ = s.setGHLAppointmentEventID(ctx, leadID, connID, result.AppointmentEventID)
 	}
 }
 

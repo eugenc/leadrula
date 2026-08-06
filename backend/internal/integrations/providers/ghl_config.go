@@ -660,6 +660,23 @@ func GHLContactPayloadChanged(cfg GHLConfig, before, after []byte) bool {
 	return string(ja) != string(jb)
 }
 
+// DeliveryPayloadActionAtChanged reports whether action_at differs between enqueued and refreshed payloads.
+func DeliveryPayloadActionAtChanged(before, after []byte) bool {
+	var bMap, aMap map[string]any
+	if json.Unmarshal(before, &bMap) != nil || json.Unmarshal(after, &aMap) != nil {
+		return false
+	}
+	bVal, bOK := bMap["action_at"]
+	aVal, aOK := aMap["action_at"]
+	if !bOK && !aOK {
+		return false
+	}
+	if !bOK || !aOK {
+		return true
+	}
+	return strings.TrimSpace(toGHLText(bVal)) != strings.TrimSpace(toGHLText(aVal))
+}
+
 func intFromAny(v any) int {
 	switch x := v.(type) {
 	case float64:

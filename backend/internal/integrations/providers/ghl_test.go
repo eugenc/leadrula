@@ -899,3 +899,49 @@ func TestGHLInboundMapsFromConfig_contactStandardFields(t *testing.T) {
 		t.Fatalf("expected firstName inbound map to custom 42, got %+v", maps)
 	}
 }
+
+func TestGhlExtractAppointmentEventID(t *testing.T) {
+	tests := []struct {
+		body string
+		want string
+	}{
+		{`{"id":"evt-1"}`, "evt-1"},
+		{`{"eventId":"evt-2"}`, "evt-2"},
+		{`{"event":{"id":"evt-3"}}`, "evt-3"},
+		{`{}`, ""},
+	}
+	for _, tc := range tests {
+		if got := ghlExtractAppointmentEventID([]byte(tc.body)); got != tc.want {
+			t.Fatalf("body %q: got %q want %q", tc.body, got, tc.want)
+		}
+	}
+}
+
+func TestGhlIsAppointmentNotFound(t *testing.T) {
+	if !ghlIsAppointmentNotFound(DeliveryResult{HTTPStatus: 404, Raw: []byte(`{"message":"not found"}`)}) {
+		t.Fatal("expected 404 to be not found")
+	}
+	if !ghlIsAppointmentNotFound(DeliveryResult{HTTPStatus: 400, Raw: []byte(`{"message":"Event not found"}`)}) {
+		t.Fatal("expected 400 not found message")
+	}
+	if ghlIsAppointmentNotFound(DeliveryResult{HTTPStatus: 400, Raw: []byte(`{"message":"invalid time"}`)}) {
+		t.Fatal("expected unrelated 400 to be false")
+	}
+}
+
+func TestDeliveryPayloadActionAtChanged(t *testing.T) {
+	base := []byte(`{"action_at":"2026-08-01T10:00:00-04:00","first_name":"A"}`)
+	same := []byte(`{"action_at":"2026-08-01T10:00:00-04:00","first_name":"B"}`)
+	changed := []byte(`{"action_at":"2026-08-02T14:00:00-04:00","first_name":"A"}`)
+	missing := []byte(`{"first_name":"A"}`)
+
+	if DeliveryPayloadActionAtChanged(base, same) {
+		t.Fatal("expected same action_at to be unchanged")
+	}
+	if !DeliveryPayloadActionAtChanged(base, changed) {
+		t.Fatal("expected action_at change")
+	}
+	if !DeliveryPayloadActionAtChanged(base, missing) {
+		t.Fatal("expected missing action_at to count as changed")
+	}
+}

@@ -167,6 +167,57 @@ func TestPlanGHLOutboundDeliver_alreadySyncedSkips(t *testing.T) {
 	}
 }
 
+func TestPlanGHLOutboundDeliver_actionAtChangedDeliverFull(t *testing.T) {
+	ctx := context.Background()
+	pool := planTestPool(t)
+	_, pipelineID, sitStageID, installedStageID, leadID, contactID := planTestLead(ctx, t, pool)
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	ghlPipelineID := "ghl-pipe-plan-" + suffix
+	ghlSitStageID := "ghl-sit-" + suffix
+	ghlInstalledStageID := "ghl-installed-" + suffix
+	connConfig := planTestConnConfig(pipelineID, sitStageID, installedStageID, ghlPipelineID, ghlSitStageID, ghlInstalledStageID)
+	connConfig["create_appointment"] = true
+	connConfig["calendar_id"] = "cal-plan-" + suffix
+	connConfig["appointment_timezone"] = "America/New_York"
+	connConfig["appointment_title_template"] = "{{first_name}} {{last_name}}"
+
+	prev := ghlOutboundOpportunityLookup
+	ghlOutboundOpportunityLookup = func(_ context.Context, _, _, gotContactID, _ string) (providers.GHLOpportunityRef, error) {
+		if gotContactID != contactID {
+			t.Fatalf("contactID = %q, want %q", gotContactID, contactID)
+		}
+		return providers.GHLOpportunityRef{
+			ID:              "opp-plan-" + suffix,
+			PipelineID:      ghlPipelineID,
+			PipelineStageID: ghlInstalledStageID,
+		}, nil
+	}
+	t.Cleanup(func() { ghlOutboundOpportunityLookup = prev })
+
+	enqueued, _ := json.Marshal(map[string]any{
+		"first_name":  "Paul",
+		"last_name":   "Toro",
+		"phone":       "555",
+		"pipeline_id": pipelineID,
+		"stage_id":    installedStageID,
+		"action_at":   "2026-08-01T10:00:00-04:00",
+	})
+	refreshed, _ := json.Marshal(map[string]any{
+		"first_name":  "Paul",
+		"last_name":   "Toro",
+		"phone":       "555",
+		"pipeline_id": pipelineID,
+		"stage_id":    installedStageID,
+		"action_at":   "2026-08-02T14:00:00-04:00",
+	})
+	s := &Service{pool: pool}
+	plan := s.planGHLOutboundDeliver(ctx, leadID, "token", connConfig, enqueued, refreshed)
+	if plan.Action != ghlOutboundDeliverFull {
+		t.Fatalf("action = %q, want %q when action_at changed", plan.Action, ghlOutboundDeliverFull)
+	}
+}
+
 func TestGHLDeliveryContactPayloadChanged(t *testing.T) {
 	cfg, err := providers.ParseGHLConfig(providers.MergeGHLConfigDefaults(map[string]any{"location_id": "loc1"}))
 	if err != nil {
