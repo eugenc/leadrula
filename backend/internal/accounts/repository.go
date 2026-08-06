@@ -432,7 +432,7 @@ func (r *Repository) CreateInvite(ctx context.Context, accountID int64, email, f
 func (r *Repository) ListPendingInvites(ctx context.Context, accountID int64) ([]Invite, error) {
 	const q = `SELECT id, account_id, email, full_name, role, expires_at, created_at, permissions
 		FROM invites
-		WHERE account_id = $1 AND accepted_at IS NULL AND expires_at > now()
+		WHERE account_id = $1 AND accepted_at IS NULL
 		ORDER BY created_at`
 	rows, err := r.pool.Query(ctx, q, accountID)
 	if err != nil {
@@ -466,10 +466,26 @@ func (r *Repository) FindPendingInviteByEmail(ctx context.Context, accountID int
 	return inv, nil
 }
 
+func (r *Repository) FindUnacceptedInviteByEmail(ctx context.Context, accountID int64, email string) (*Invite, error) {
+	const q = `SELECT id, account_id, email, full_name, role, expires_at, created_at, permissions
+		FROM invites
+		WHERE account_id = $1 AND email = $2 AND accepted_at IS NULL`
+	inv := &Invite{}
+	err := r.pool.QueryRow(ctx, q, accountID, email).Scan(
+		&inv.ID, &inv.AccountID, &inv.Email, &inv.FullName, &inv.Role, &inv.ExpiresAt, &inv.CreatedAt, &inv.Permissions)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return inv, nil
+}
+
 func (r *Repository) GetPendingInvite(ctx context.Context, accountID, inviteID int64) (*InviteRow, error) {
 	const q = `SELECT id, account_id, email, full_name, role, token, expires_at, false, permissions
 		FROM invites
-		WHERE id = $1 AND account_id = $2 AND accepted_at IS NULL AND expires_at > now()`
+		WHERE id = $1 AND account_id = $2 AND accepted_at IS NULL`
 	row := &InviteRow{}
 	err := r.pool.QueryRow(ctx, q, inviteID, accountID).Scan(
 		&row.ID, &row.AccountID, &row.Email, &row.FullName, &row.Role, &row.Token, &row.ExpiresAt, &row.Accepted, &row.Permissions)

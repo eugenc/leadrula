@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { api, get } from "@/lib/api";
+import { api, get, errorMessage } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { queryClient } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -51,8 +51,8 @@ export function InviteAcceptPage() {
       const me = await get<Me>("/auth/me");
       setAuth(access, refresh, userFromMe(me));
       navigate(homePath(me.account.type));
-    } catch {
-      setError("Invite link is invalid or expired");
+    } catch (err) {
+      setError(errorMessage(err));
       useAuthStore.getState().logout();
     } finally {
       setLoading(false);
@@ -102,7 +102,14 @@ export function InviteAcceptPage() {
               minLength={8}
             />
           </div>
-          {error && <p className="text-sm text-danger">{error}</p>}
+          {error && (
+            <>
+              <p className="text-sm text-danger">{error}</p>
+              <p className="text-xs text-gray-400">
+                If you received multiple emails, use the most recent invite link.
+              </p>
+            </>
+          )}
           <Button type="submit" className="w-full" disabled={loading || !token}>
             {loading ? <Spinner className="text-white" /> : "Create account"}
           </Button>

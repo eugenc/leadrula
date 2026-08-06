@@ -17,7 +17,6 @@ import {
   LogLeadLink,
   canReplayDelivery,
   integrationDeliveryStatusText,
-  routeDestinationLabel,
   routePipelineDestinationLabel,
   routeTriggerLabel,
   statusText,
@@ -55,6 +54,21 @@ function formatJsonBlock(value: unknown): string {
     }
   }
   return JSON.stringify(value, null, 2);
+}
+
+function JsonPayloadPanel({ payload, label = "Payload" }: { payload: unknown; label?: string }) {
+  const text = formatJsonBlock(payload);
+  if (!text) {
+    return <p className="text-xs text-gray-400">No payload recorded.</p>;
+  }
+  return (
+    <>
+      <p className="mb-1 text-xs font-medium text-gray-500">{label}</p>
+      <pre className="max-h-48 overflow-auto rounded-md border border-gray-100 bg-gray-50 p-3 font-mono text-xs text-gray-700">
+        {text}
+      </pre>
+    </>
+  );
 }
 
 function parseDeliveryRequestLog(body: unknown): DeliveryRequestLog | null {
@@ -118,7 +132,10 @@ function IntegrationDeliveryExpand({ detail }: { detail: IntegrationDeliveryDeta
       )}
       {detail.last_error && <p className="text-xs text-red-600">{detail.last_error}</p>}
       {detail.attempts.length === 0 ? (
-        <p className="text-xs text-gray-400">Not delivered yet.</p>
+        <div className="space-y-2">
+          <p className="text-xs text-gray-400">Not delivered yet.</p>
+          <JsonPayloadPanel payload={detail.payload} label="Queued payload" />
+        </div>
       ) : (
         detail.attempts.map((attempt) => {
           const reqLog = parseDeliveryRequestLog(attempt.request_body);
@@ -230,46 +247,58 @@ export function UnifiedInboundLogTable({
             if (row.kind === "source") {
               const q = row.item;
               const unmapped = q.unmapped_keys?.length ?? 0;
-              const canOpenDrawer = q.status === "pending_review" || unmapped > 0;
+              const expandKey = `source:${q.id}`;
+              const isExpanded = expandedKey === expandKey;
               return (
-                <TR
-                  key={key}
-                  onClick={() => canOpenDrawer && setDrawerItem(q)}
-                  className={canOpenDrawer ? "cursor-pointer" : undefined}
-                >
-                  <TD className="text-xs">{format(new Date(q.created_at), "MMM d, h:mma")}</TD>
-                  <TD className="text-xs text-gray-600">Source</TD>
-                  <TD className="text-xs text-gray-600">{direction}</TD>
-                  <TD>
-                    <span className="font-mono text-xs text-gray-600">{q.source ?? "—"}</span>
-                  </TD>
-                  <TD>
-                    <LogLeadLink
-                      leadId={q.lead_id || null}
-                      firstName={q.first_name}
-                      lastName={q.last_name}
-                      fallback={q.phone}
-                      onClick={openDetail}
-                    />
-                    {unmapped > 0 && (
-                      <Badge variant="pending" className="ml-2">
-                        {unmapped} unmapped
-                      </Badge>
-                    )}
-                  </TD>
-                  <TD>{statusText(q.status)}</TD>
-                  <TD>
-                    {!readOnly && (
-                      <div className="flex shrink-0 justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-                        {unmapped > 0 && (
+                <Fragment key={key}>
+                  <TR>
+                    <TD className="text-xs">{format(new Date(q.created_at), "MMM d, h:mma")}</TD>
+                    <TD className="text-xs text-gray-600">Source</TD>
+                    <TD className="text-xs text-gray-600">{direction}</TD>
+                    <TD>
+                      <span className="font-mono text-xs text-gray-600">{q.source ?? "—"}</span>
+                    </TD>
+                    <TD>
+                      <LogLeadLink
+                        leadId={q.lead_id || null}
+                        firstName={q.first_name}
+                        lastName={q.last_name}
+                        fallback={q.phone}
+                        onClick={openDetail}
+                      />
+                      {unmapped > 0 && (
+                        <Badge variant="pending" className="ml-2">
+                          {unmapped} unmapped
+                        </Badge>
+                      )}
+                    </TD>
+                    <TD>{statusText(q.status)}</TD>
+                    <TD>
+                      <div className="flex shrink-0 justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="shrink-0 whitespace-nowrap"
+                          onClick={() => setExpandedKey(isExpanded ? null : expandKey)}
+                        >
+                          {isExpanded ? "Hide" : "View"}
+                        </Button>
+                        {!readOnly && unmapped > 0 && (
                           <Button size="sm" variant="secondary" className="shrink-0 whitespace-nowrap" onClick={() => setDrawerItem(q)}>
                             Map
                           </Button>
                         )}
                       </div>
-                    )}
-                  </TD>
-                </TR>
+                    </TD>
+                  </TR>
+                  {isExpanded && (
+                    <tr>
+                      <td colSpan={7} className="min-w-0 px-4 py-2">
+                        <JsonPayloadPanel payload={q.raw_payload} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             }
 
@@ -385,48 +414,51 @@ export function UnifiedInboundLogTable({
                   {isExpanded && (
                     <tr>
                       <td colSpan={7} className="min-w-0 px-4 py-2">
-                        <div className="space-y-2 rounded-md border border-gray-100 bg-gray-50 p-3 text-xs text-gray-700">
-                          <div>
-                            <span className="font-medium text-gray-500">Trigger: </span>
-                            {routeTriggerLabel(r.trigger_type)}
-                            {r.trigger_label ? ` (${r.trigger_label})` : ""}
-                          </div>
-                          <div>
-                            <span className="font-medium text-gray-500">Destination: </span>
-                            {routePipelineDestinationLabel(
-                              r.destination,
-                              r.delivery,
-                              r.target_pipeline_name,
-                              r.target_stage_name
+                        <div className="space-y-3">
+                          <div className="space-y-2 rounded-md border border-gray-100 bg-gray-50 p-3 text-xs text-gray-700">
+                            <div>
+                              <span className="font-medium text-gray-500">Trigger: </span>
+                              {routeTriggerLabel(r.trigger_type)}
+                              {r.trigger_label ? ` (${r.trigger_label})` : ""}
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-500">Destination: </span>
+                              {routePipelineDestinationLabel(
+                                r.destination,
+                                r.delivery,
+                                r.target_pipeline_name,
+                                r.target_stage_name
+                              )}
+                            </div>
+                            {r.target_account_name && (
+                              <div>
+                                <span className="font-medium text-gray-500">Buyer: </span>
+                                {r.target_account_name}
+                              </div>
+                            )}
+                            {r.branch_position != null && r.branch_position > 0 && (
+                              <div>
+                                <span className="font-medium text-gray-500">Branch: </span>
+                                {r.branch_position}
+                              </div>
+                            )}
+                            {r.route_name && (
+                              <div>
+                                <span className="font-medium text-gray-500">Route Name: </span>
+                                {r.route_name}
+                              </div>
+                            )}
+                            {r.route_id != null && (
+                              <div>
+                                <span className="font-medium text-gray-500">Route ID: </span>
+                                {r.route_id}
+                              </div>
+                            )}
+                            {r.error_message && (
+                              <p className="text-red-600">{r.error_message}</p>
                             )}
                           </div>
-                          {r.target_account_name && (
-                            <div>
-                              <span className="font-medium text-gray-500">Buyer: </span>
-                              {r.target_account_name}
-                            </div>
-                          )}
-                          {r.branch_position != null && r.branch_position > 0 && (
-                            <div>
-                              <span className="font-medium text-gray-500">Branch: </span>
-                              {r.branch_position}
-                            </div>
-                          )}
-                          {r.route_name && (
-                            <div>
-                              <span className="font-medium text-gray-500">Route Name: </span>
-                              {r.route_name}
-                            </div>
-                          )}
-                          {r.route_id != null && (
-                            <div>
-                              <span className="font-medium text-gray-500">Route ID: </span>
-                              {r.route_id}
-                            </div>
-                          )}
-                          {r.error_message && (
-                            <p className="text-red-600">{r.error_message}</p>
-                          )}
+                          <JsonPayloadPanel payload={r.raw_payload} />
                         </div>
                       </td>
                     </tr>
@@ -526,12 +558,10 @@ export function UnifiedInboundLogTable({
                 {isInbound && isExpanded && (
                   <tr>
                     <td colSpan={7} className="min-w-0 px-4 py-2">
-                      <p className="mb-1 text-xs font-medium text-gray-500">
-                        {integrationLogMode && d.connection_name ? "Received from CRM" : "Payload"}
-                      </p>
-                      <pre className="max-h-48 overflow-auto rounded-md border border-gray-100 bg-gray-50 p-3 font-mono text-xs">
-                        {JSON.stringify(expandedDelivery?.request_payload ?? {}, null, 2)}
-                      </pre>
+                      <JsonPayloadPanel
+                        payload={expandedDelivery?.request_payload}
+                        label={integrationLogMode && d.connection_name ? "Received from CRM" : "Payload"}
+                      />
                       {integrationLogMode && d.provider_slug === "ghl" && (() => {
                         const diag = diagnoseGhlInboundStageSyncPayload(expandedDelivery?.request_payload);
                         return (

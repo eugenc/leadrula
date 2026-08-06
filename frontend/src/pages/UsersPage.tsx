@@ -25,12 +25,19 @@ const ROLES: { value: Role; label: string }[] = [
 ];
 
 function rowKey(u: UserRow) {
-  return u.status === "pending" ? `invite-${u.invite_id}` : `user-${u.id}`;
+  return u.status === "pending" || u.status === "expired" ? `invite-${u.invite_id}` : `user-${u.id}`;
+}
+
+function isInviteStatus(status: UserRow["status"]) {
+  return status === "pending" || status === "expired";
 }
 
 function statusBadge(u: UserRow) {
   if (u.status === "pending") {
     return <Badge variant="pending">Pending</Badge>;
+  }
+  if (u.status === "expired") {
+    return <Badge variant="overdue">Invite expired</Badge>;
   }
   if (u.status === "active") {
     return <Badge variant="distributed">Active</Badge>;
@@ -93,7 +100,7 @@ export function UsersPage() {
                   <TD>{formatRole(u.role)}</TD>
                   <TD>{statusBadge(u)}</TD>
                   <TD>
-                    {u.status === "pending" && (
+                    {isInviteStatus(u.status) && (
                       <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
                         <IconButton
                           aria-label="Resend invitation"

@@ -24,7 +24,8 @@ const routeLogSelectCols = `
   COALESCE(ta.name, ''),
   COALESCE(e.target_pipeline_name, ''),
   COALESCE(e.target_stage_name, ''),
-  COALESCE(e.delivery, '')`
+  COALESCE(e.delivery, ''),
+  l.raw_payload`
 
 func routeVisibilitySQL(accountType string, argN int) string {
 	if accountType == "buyer" {
@@ -104,12 +105,14 @@ func scanRouteInboundItems(rows rowScanner, viewerAccountID int64) ([]InboundLog
 		var ownerID int64
 		var targetID *int64
 		var targetPipelineName, targetStageName string
+		var raw []byte
 		if err := rows.Scan(
 			&it.ID, &it.CreatedAt, &it.RouteName, &routeID, &leadID,
 			&it.FirstName, &it.LastName, &it.Phone, &it.Status,
 			&it.TriggerType, &it.TriggerLabel, &it.Destination, &it.BranchPosition,
 			&ownerID, &targetID, &it.TargetAccountName,
 			&targetPipelineName, &targetStageName, &it.Delivery,
+			&raw,
 		); err != nil {
 			return nil, err
 		}
@@ -126,6 +129,9 @@ func scanRouteInboundItems(rows rowScanner, viewerAccountID int64) ([]InboundLog
 		it.OriginSlug = it.RouteName
 		it.LeadID = &leadID
 		it.LeadLabel = fmt.Sprintf("%s %s", it.FirstName, it.LastName)
+		if len(raw) > 0 {
+			it.RawPayload = raw
+		}
 		items = append(items, it)
 	}
 	if items == nil {
@@ -154,7 +160,7 @@ func buildRouteLogUnionSQL(accountType string, leadFilter string) string {
 	     l.last_name,
 	     l.phone,
 	     NULL::text AS source,
-	     NULL::jsonb AS raw_payload,
+	     l.raw_payload,
 	     0::bigint AS webhook_id,
 	     e.error_message,
 	     ''::text AS provider_slug,

@@ -714,18 +714,25 @@ func buildGHLContactBody(cfg GHLConfig, payload DeliveryPayload) map[string]any 
 }
 
 func ghlStandardContactFields(cfg GHLConfig, payload DeliveryPayload) map[string]any {
-	return map[string]any{
-		"firstName":  payload.FirstName,
-		"lastName":   payload.LastName,
-		"phone":      payload.Phone,
-		"email":      payload.Email,
-		"address1":   payload.Address,
-		"city":       payload.City,
-		"state":      payload.State,
-		"postalCode": payload.Zip,
-		"source":     payload.Source,
+	contact := map[string]any{
 		"locationId": cfg.LocationID,
 		"tags":       []string{"leadrula"},
+	}
+	setGHLContactField(contact, "firstName", payload.FirstName)
+	setGHLContactField(contact, "lastName", payload.LastName)
+	setGHLContactField(contact, "phone", payload.Phone)
+	setGHLContactField(contact, "email", payload.Email)
+	setGHLContactField(contact, "address1", payload.Address)
+	setGHLContactField(contact, "city", payload.City)
+	setGHLContactField(contact, "state", payload.State)
+	setGHLContactField(contact, "postalCode", payload.Zip)
+	setGHLContactField(contact, "source", payload.Source)
+	return contact
+}
+
+func setGHLContactField(contact map[string]any, key, value string) {
+	if v := strings.TrimSpace(value); v != "" {
+		contact[key] = v
 	}
 }
 

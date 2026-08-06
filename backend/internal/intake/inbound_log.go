@@ -132,7 +132,7 @@ func (s *Service) listInboundLogSources(ctx context.Context, accountID int64, p 
 	     l.last_name,
 	     l.phone,
 	     q.source,
-	     q.raw_payload
+	     COALESCE(q.raw_payload, l.raw_payload) AS raw_payload
 	   FROM lead_intake_queue q
 	   JOIN leads l ON l.id = q.lead_id
 	   WHERE ` + queueWhere
@@ -153,7 +153,7 @@ func (s *Service) listInboundLogSources(ctx context.Context, accountID int64, p 
 	     l.last_name,
 	     l.phone,
 	     NULL::text AS source,
-	     NULL::jsonb AS raw_payload
+	     l.raw_payload
 	   FROM route_executions e
 	   JOIN leads l ON l.id = e.lead_id
 	   WHERE ` + routeWhere
@@ -531,7 +531,7 @@ func (s *Service) listInboundLogAll(ctx context.Context, accountID int64, p List
 		     l.last_name,
 		     l.phone,
 		     q.source,
-		     q.raw_payload,
+		     COALESCE(q.raw_payload, l.raw_payload) AS raw_payload,
 		     0::bigint AS webhook_id,
 		     NULL::text AS error_message,
 		     ''::text AS provider_slug,

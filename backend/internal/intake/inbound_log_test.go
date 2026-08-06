@@ -21,13 +21,16 @@ func TestListInboundLog_sourceIncludesAutoRouted(t *testing.T) {
 	var execID int64
 	var leadID int64
 	var triggerLabel string
+	var leadRawPayload []byte
 	err = pool.QueryRow(ctx,
-		`SELECT e.owner_account_id, e.id, e.lead_id, COALESCE(e.trigger_label, '')
+		`SELECT e.owner_account_id, e.id, e.lead_id, COALESCE(e.trigger_label, ''), l.raw_payload
 		 FROM route_executions e
+		 JOIN leads l ON l.id = e.lead_id
 		 WHERE e.trigger_type = 'source_ingest'
 		   AND NOT EXISTS (SELECT 1 FROM lead_intake_queue q WHERE q.lead_id = e.lead_id)
+		   AND l.raw_payload IS NOT NULL
 		 ORDER BY e.created_at DESC
-		 LIMIT 1`).Scan(&ownerID, &execID, &leadID, &triggerLabel)
+		 LIMIT 1`).Scan(&ownerID, &execID, &leadID, &triggerLabel, &leadRawPayload)
 	if err != nil {
 		t.Skip("no auto-routed source_ingest execution without queue row in database")
 	}
@@ -53,6 +56,12 @@ func TestListInboundLog_sourceIncludesAutoRouted(t *testing.T) {
 			}
 			if it.Status != "routed" {
 				t.Fatalf("status = %q, want routed", it.Status)
+			}
+			if len(it.RawPayload) == 0 {
+				t.Fatal("raw_payload empty for auto-routed source entry")
+			}
+			if string(it.RawPayload) != string(leadRawPayload) {
+				t.Fatalf("raw_payload = %q, want %q", it.RawPayload, leadRawPayload)
 			}
 			break
 		}

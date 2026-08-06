@@ -32,6 +32,7 @@ export interface RouteExecutionRow {
   target_pipeline_name?: string | null;
   target_stage_name?: string | null;
   delivery?: string;
+  raw_payload?: Record<string, unknown>;
 }
 
 export type InboundLogRow =
@@ -124,6 +125,7 @@ function inboundItemToRouteExecution(item: InboundLogItem): RouteExecutionRow {
     target_pipeline_name: item.target_pipeline_name,
     target_stage_name: item.target_stage_name,
     delivery: item.delivery,
+    raw_payload: item.raw_payload,
   };
 }
 

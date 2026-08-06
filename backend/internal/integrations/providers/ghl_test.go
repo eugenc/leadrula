@@ -294,6 +294,24 @@ func TestBuildGHLContactBody_defaults(t *testing.T) {
 	}
 }
 
+func TestBuildGHLContactBody_phoneOnlyOmitsEmail(t *testing.T) {
+	cfg := GHLConfig{LocationID: "loc1", CreateContact: true}
+	body := buildGHLContactBody(cfg, DeliveryPayload{
+		FirstName: "James",
+		LastName:  "Gabriel",
+		Phone:     "+16314187142",
+	})
+	if _, ok := body["email"]; ok {
+		t.Fatalf("email should be omitted for phone-only lead, body: %v", body)
+	}
+	if body["phone"] != "+16314187142" {
+		t.Fatalf("phone: got %v", body["phone"])
+	}
+	if body["locationId"] != "loc1" {
+		t.Fatalf("locationId: got %v", body["locationId"])
+	}
+}
+
 func TestParseGHLCredentials_PIT(t *testing.T) {
 	token, err := ParseGHLCredentials([]byte(`{"private_integration_token":"pit-abc"}`))
 	if err != nil || token != "pit-abc" {
