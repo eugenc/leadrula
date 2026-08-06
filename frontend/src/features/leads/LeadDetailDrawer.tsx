@@ -267,7 +267,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
     setFields(f);
   }, [lead]);
 
-  const formattedAddress = formatLeadAddress(lead);
+  const formattedAddress = formatLeadAddress(fields);
 
   function saveValidatedAddress(validated: {
     address: string;
@@ -285,6 +285,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   }
 
   function saveAddressField(key: keyof typeof fields) {
+    setFields((prev) => ({ ...prev, address_place_id: "" }));
     update.mutate(
       {
         leadId: lead.id,
@@ -871,7 +872,7 @@ function ContactSection({
       case "address":
         return (
           <div key={key} className="flex flex-col gap-2.5">
-            {mapsConnected && lead.address_place_id && formattedAddress && (
+            {mapsConnected && fields.address_place_id && formattedAddress && (
               <div>
                 <Label>Verified address</Label>
                 <div className="mt-1 flex items-center gap-1.5">
@@ -880,7 +881,7 @@ function ContactSection({
                 </div>
               </div>
             )}
-            {mapsConnected && !lead.address_place_id && formattedAddress && (
+            {mapsConnected && !fields.address_place_id && formattedAddress && (
               <p className="text-xs text-amber-700">
                 Select an address from suggestions to verify and enable map.
               </p>
@@ -922,7 +923,7 @@ function ContactSection({
       <AddressMapDialog
         open={mapOpen}
         onClose={() => setMapOpen(false)}
-        placeId={lead.address_place_id ?? ""}
+        placeId={fields.address_place_id ?? ""}
         formattedAddress={formattedAddress}
       />
     </div>
