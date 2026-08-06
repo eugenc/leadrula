@@ -260,6 +260,76 @@ func ghlIsDuplicateOpportunity(res ghlHTTPResult) bool {
 }
 
 func ghlCreateAppointment(ctx context.Context, token string, cfg GHLConfig, contactID string, payload DeliveryPayload) (*DeliveryResult, error) {
+	event, err := buildGHLAppointmentBody(ctx, token, cfg, contactID, payload)
+	if err != nil {
+		return nil, err
+	}
+	res, err := ghlDo(ctx, http.MethodPost, "/calendars/events/appointments", token, cfg.LocationID, event)
+	mapped := AnyMapToMapped(event)
+	result := &DeliveryResult{
+		HTTPStatus: res.Status,
+		Raw:        res.Body,
+		Request:    marshalRequestLog(mapped),
+	}
+	if err != nil {
+		return result, err
+	}
+	if res.Status < 200 || res.Status >= 300 {
+		return result, fmt.Errorf("%s", ghlErrorMessage(res))
+	}
+	result.AppointmentEventID = ghlExtractAppointmentEventID(res.Body)
+	return result, nil
+}
+
+func ghlUpdateAppointment(ctx context.Context, token string, cfg GHLConfig, eventID string, payload DeliveryPayload) (*DeliveryResult, error) {
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return nil, fmt.Errorf("appointment event id required")
+	}
+	datetimeStr := resolveGHLFieldSourceValue(cfg.AppointmentDatetime, payload)
+	duration := appointmentDurationMinutes(cfg.AppointmentStandardFields)
+	startISO, endISO, err := parseAppointmentTimes(datetimeStr, cfg.AppointmentTimezone, duration)
+	if err != nil {
+		return nil, err
+	}
+	body := map[string]any{
+		"startTime":         startISO,
+		"endTime":           endISO,
+		"appointmentStatus": "confirmed",
+	}
+	res, err := ghlDo(ctx, http.MethodPut, "/calendars/events/appointments/"+url.PathEscape(eventID), token, cfg.LocationID, body)
+	mapped := AnyMapToMapped(body)
+	result := &DeliveryResult{
+		HTTPStatus:         res.Status,
+		Raw:                res.Body,
+		Request:            marshalRequestLog(mapped),
+		AppointmentEventID: eventID,
+	}
+	if err != nil {
+		return result, err
+	}
+	if res.Status < 200 || res.Status >= 300 {
+		return result, fmt.Errorf("%s", ghlErrorMessage(res))
+	}
+	return result, nil
+}
+
+func ghlCreateOrUpdateAppointment(ctx context.Context, token string, cfg GHLConfig, contactID, storedEventID string, payload DeliveryPayload) (*DeliveryResult, error) {
+	storedEventID = strings.TrimSpace(storedEventID)
+	if storedEventID != "" {
+		result, err := ghlUpdateAppointment(ctx, token, cfg, storedEventID, payload)
+		if err == nil {
+			return result, nil
+		}
+		if result != nil && ghlIsAppointmentNotFound(*result) {
+			return ghlCreateAppointment(ctx, token, cfg, contactID, payload)
+		}
+		return result, err
+	}
+	return ghlCreateAppointment(ctx, token, cfg, contactID, payload)
+}
+
+func buildGHLAppointmentBody(ctx context.Context, token string, cfg GHLConfig, contactID string, payload DeliveryPayload) (map[string]any, error) {
 	datetimeStr := resolveGHLFieldSourceValue(cfg.AppointmentDatetime, payload)
 	duration := appointmentDurationMinutes(cfg.AppointmentStandardFields)
 	startISO, endISO, err := parseAppointmentTimes(datetimeStr, cfg.AppointmentTimezone, duration)
@@ -296,20 +366,38 @@ func ghlCreateAppointment(ctx context.Context, token string, cfg GHLConfig, cont
 	if notes != "" {
 		event["notes"] = notes
 	}
-	res, err := ghlDo(ctx, http.MethodPost, "/calendars/events/appointments", token, cfg.LocationID, event)
-	mapped := AnyMapToMapped(event)
-	result := &DeliveryResult{
-		HTTPStatus: res.Status,
-		Raw:        res.Body,
-		Request:    marshalRequestLog(mapped),
+	return event, nil
+}
+
+func ghlExtractAppointmentEventID(body []byte) string {
+	var parsed struct {
+		Event struct {
+			ID string `json:"id"`
+		} `json:"event"`
+		ID      string `json:"id"`
+		EventID string `json:"eventId"`
 	}
-	if err != nil {
-		return result, err
+	_ = json.Unmarshal(body, &parsed)
+	if id := strings.TrimSpace(parsed.Event.ID); id != "" {
+		return id
 	}
-	if res.Status < 200 || res.Status >= 300 {
-		return result, fmt.Errorf("%s", ghlErrorMessage(res))
+	if id := strings.TrimSpace(parsed.ID); id != "" {
+		return id
 	}
-	return result, nil
+	return strings.TrimSpace(parsed.EventID)
+}
+
+func ghlIsAppointmentNotFound(result DeliveryResult) bool {
+	if result.HTTPStatus == 404 {
+		return true
+	}
+	if result.HTTPStatus != 400 {
+		return false
+	}
+	msg := strings.ToLower(ghlErrorMessage(ghlHTTPResult{Status: result.HTTPStatus, Body: result.Raw}))
+	return strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "does not exist") ||
+		strings.Contains(msg, "invalid event")
 }
 
 func marshalRequestLog(mapped map[string]string) []byte {

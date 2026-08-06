@@ -68,6 +68,10 @@ func (s *Service) planGHLOutboundDeliver(ctx context.Context, leadID int64, toke
 		return plan
 	}
 
+	if cfg.CreateAppointment && providers.DeliveryPayloadActionAtChanged(enqueuedPayload, refreshedPayload) {
+		return plan
+	}
+
 	if providers.GHLContactPayloadChanged(cfg, enqueuedPayload, refreshedPayload) {
 		if cfg.DeliveryMode == "webhook" {
 			plan.Action = ghlOutboundDeliverSkip

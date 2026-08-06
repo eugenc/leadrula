@@ -42,6 +42,20 @@ func ghlSkipOpportunityStage(config map[string]any) bool {
 	}
 }
 
+func ghlConfigString(config map[string]any, key string) string {
+	if config == nil {
+		return ""
+	}
+	v, ok := config[key]
+	if !ok || v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return strings.TrimSpace(fmt.Sprint(v))
+}
+
 func ghlWebhookURLValid(raw string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""

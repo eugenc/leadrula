@@ -7,6 +7,8 @@ import type {
   AccountOperationalStatus,
   Me,
   PlatformAccount,
+  PlatformBuyerBalance,
+  PlatformCreditResult,
   SwitchableAccount,
   SwitchLoginResult,
 } from "@/types";
@@ -209,6 +211,37 @@ export function useCreatePlatformBuyer() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["platform", "buyers"] });
       qc.invalidateQueries({ queryKey: ["switchable"] });
+    },
+  });
+}
+
+export function usePlatformBuyerBalance(buyerId: string | undefined) {
+  return useQuery({
+    queryKey: ["platform", "buyers", buyerId, "balance"],
+    queryFn: () => get<PlatformBuyerBalance>(`/platform/buyers/${buyerId}/balance`),
+    enabled: !!buyerId,
+  });
+}
+
+export function useCreditPlatformBuyer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      amount,
+      note,
+    }: {
+      id: string;
+      amount: number;
+      note?: string;
+    }) =>
+      post<PlatformCreditResult>(`/platform/buyers/${id}/credit`, {
+        amount,
+        note: note?.trim() || undefined,
+      }),
+    onSuccess: (_res, { id }) => {
+      qc.invalidateQueries({ queryKey: ["platform", "buyers", id, "balance"] });
+      qc.invalidateQueries({ queryKey: ["platform", "buyers"] });
     },
   });
 }

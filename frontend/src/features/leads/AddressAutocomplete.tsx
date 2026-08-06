@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { Input, Label } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/misc";
@@ -66,12 +67,20 @@ export function AddressAutocomplete({
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<GoogleMapsSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState(false);
   const [open, setOpen] = useState(false);
   const [sessionToken, setSessionToken] = useState(newSessionToken);
   const [selecting, setSelecting] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [panelStyle, setPanelStyle] = useState<{ top: number; left: number; width: number } | null>(
+    null
+  );
 
   const hasParsedFields = !!(city || state || zip || country);
+  const trimmedQuery = query.trim();
+  const showPanel = open && trimmedQuery.length >= 3;
 
   useEffect(() => {
     if (!connected) return;
@@ -80,30 +89,57 @@ export function AddressAutocomplete({
 
   useEffect(() => {
     if (!connected || !open) return;
-    const trimmed = query.trim();
-    if (trimmed.length < 3) {
+    if (trimmedQuery.length < 3) {
       setSuggestions([]);
+      setFetchError(false);
       return;
     }
     const timer = window.setTimeout(async () => {
       setLoading(true);
+      setFetchError(false);
       try {
-        const items = await fetchGoogleMapsAutocomplete(trimmed, sessionToken);
+        const items = await fetchGoogleMapsAutocomplete(trimmedQuery, sessionToken);
         setSuggestions(items);
       } catch {
         setSuggestions([]);
+        setFetchError(true);
       } finally {
         setLoading(false);
       }
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [connected, query, open, sessionToken]);
+  }, [connected, trimmedQuery, open, sessionToken]);
+
+  useEffect(() => {
+    if (!showPanel) {
+      setPanelStyle(null);
+      return;
+    }
+    function updatePanelPosition() {
+      const el = inputRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      setPanelStyle({
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+      });
+    }
+    updatePanelPosition();
+    window.addEventListener("scroll", updatePanelPosition, true);
+    window.addEventListener("resize", updatePanelPosition);
+    return () => {
+      window.removeEventListener("scroll", updatePanelPosition, true);
+      window.removeEventListener("resize", updatePanelPosition);
+    };
+  }, [showPanel]);
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
-      if (!containerRef.current?.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const target = e.target as Node;
+      if (containerRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
+      setOpen(false);
     }
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
@@ -125,6 +161,7 @@ export function AddressAutocomplete({
       setQuery(details.address);
       setSessionToken(newSessionToken());
       setSuggestions([]);
+      setFetchError(false);
     } finally {
       setSelecting(false);
     }
@@ -163,9 +200,11 @@ export function AddressAutocomplete({
       <div ref={containerRef} className="relative">
         <Label>Address</Label>
         <Input
+          ref={inputRef}
           value={query}
           disabled={disabled || selecting}
           placeholder="Start typing an address…"
+          autoComplete="off"
           onFocus={() => setOpen(true)}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -177,25 +216,52 @@ export function AddressAutocomplete({
             <Spinner className="h-4 w-4" />
           </div>
         )}
-        {open && suggestions.length > 0 && (
-          <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-gray-100 bg-surface-card py-1 shadow-lg">
-            {suggestions.map((item) => (
-              <li key={item.place_id}>
-                <button
-                  type="button"
-                  className="w-full px-3 py-2 text-left text-sm hover:bg-surface-hover"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => pickSuggestion(item)}
-                >
-                  <div className="font-medium text-gray-800">{item.main_text || item.description}</div>
-                  {item.secondary_text && (
-                    <div className="text-xs text-gray-500">{item.secondary_text}</div>
-                  )}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+        {showPanel &&
+          panelStyle &&
+          createPortal(
+            <div
+              ref={panelRef}
+              className="fixed z-[100] max-h-56 overflow-auto rounded-md border border-gray-100 bg-surface-card shadow-lg"
+              style={{ top: panelStyle.top, left: panelStyle.left, width: panelStyle.width }}
+            >
+              {loading && suggestions.length === 0 ? (
+                <p className="px-3 py-3 text-sm text-gray-400">Searching…</p>
+              ) : fetchError ? (
+                <p className="px-3 py-3 text-sm text-red-500">
+                  Could not load suggestions. Check your{" "}
+                  <Link to={integrationsPath} className="underline hover:text-red-600">
+                    Google Maps integration
+                  </Link>{" "}
+                  (Places API New and Maps Static API must be enabled).
+                </p>
+              ) : suggestions.length === 0 ? (
+                <p className="px-3 py-3 text-sm text-gray-400">
+                  No matching addresses — try a shorter street address
+                </p>
+              ) : (
+                <ul className="py-1">
+                  {suggestions.map((item) => (
+                    <li key={item.place_id}>
+                      <button
+                        type="button"
+                        className="w-full px-3 py-2 text-left text-sm hover:bg-surface-hover"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => pickSuggestion(item)}
+                      >
+                        <div className="font-medium text-gray-800">
+                          {item.main_text || item.description}
+                        </div>
+                        {item.secondary_text && (
+                          <div className="text-xs text-gray-500">{item.secondary_text}</div>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>,
+            document.body
+          )}
       </div>
       {hasParsedFields && (
         <AddressFieldsPreview city={city} state={state} zip={zip} country={country} />

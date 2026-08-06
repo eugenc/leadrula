@@ -243,6 +243,7 @@ func main() {
 	r.Route("/platform", func(pl chi.Router) {
 		pl.Use(requireAuth, auth.RequireAccountType("platform"))
 		accountsH.RegisterPlatformRoutes(pl)
+		billingH.RegisterPlatform(pl)
 		notifH.RegisterRoutes(pl)
 		msgH.RegisterRoutes(pl)
 		msgH.RegisterPlatformAudit(pl)

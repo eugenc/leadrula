@@ -55,7 +55,8 @@ func (p *GHLProvider) Deliver(ctx context.Context, credentials []byte, payload D
 	}
 
 	if cfg.CreateAppointment && !ghlSkipOpportunityStage(payload.Config) {
-		apptResult, err := ghlCreateAppointment(ctx, token, cfg, contactID, payload)
+		storedEventID := ghlConfigString(payload.Config, "ghl_appointment_event_id")
+		apptResult, err := ghlCreateOrUpdateAppointment(ctx, token, cfg, contactID, storedEventID, payload)
 		if err != nil {
 			if apptResult != nil {
 				result.HTTPStatus = apptResult.HTTPStatus
@@ -66,6 +67,9 @@ func (p *GHLProvider) Deliver(ctx context.Context, credentials []byte, payload D
 		}
 		result.HTTPStatus = apptResult.HTTPStatus
 		result.Raw = apptResult.Raw
+		if apptResult.AppointmentEventID != "" {
+			result.AppointmentEventID = apptResult.AppointmentEventID
+		}
 	}
 
 	result.ExternalID = contactID
