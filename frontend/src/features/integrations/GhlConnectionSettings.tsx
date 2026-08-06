@@ -2,14 +2,12 @@ import { useEffect, useState } from "react";
 import { Label, Select, Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { SectionLabel } from "@/components/layout/SectionLabel";
-import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
 import { useCustomFields } from "@/features/leads/hooks";
 import { CreateCustomFieldDrawer } from "@/features/admin/CreateCustomFieldDrawer";
 import { useCreateField } from "@/features/admin/hooks";
 import { ADD_CUSTOM_FIELD } from "@/features/admin/customFieldConstants";
 import { BUILTIN_FIELD_LABELS } from "@/features/leads/csvMapping";
 import {
-  GHL_STANDARD_CONTACT_FIELDS,
   GHL_APPOINTMENT_BUILTINS,
   GHL_TITLE_BUILTINS,
   GHL_TIMEZONES,
@@ -21,12 +19,14 @@ import {
   ghlMapSectionEntries,
   mergeGhlMapSection,
   type GHLConfig,
+  type GHLContactStandardFields,
   type GHLFieldSource,
   type GHLPipelineStageMapEntry,
 } from "@/features/integrations/ghlConstants";
 import { GhlEntityFieldMapSection } from "@/features/integrations/GhlEntityFieldMapSection";
 import {
   GhlAppointmentStandardFieldsSection,
+  GhlContactStandardFieldsSection,
   GhlOpportunityStandardFieldsSection,
 } from "@/features/integrations/GhlStandardFieldGroup";
 import { CrmInboundStageSyncSection } from "@/features/integrations/CrmInboundStageSyncSection";
@@ -297,23 +297,32 @@ export function GhlConnectionSettings({
 
       <div className="space-y-3 rounded-lg border border-gray-100 p-3">
         <SectionLabel>Contact</SectionLabel>
-        <Label>Standard contact fields (fixed)</Label>
-        <Table className="mt-2">
-          <THead>
-            <tr>
-              <TH>GHL field</TH>
-              <TH>Leadrula field</TH>
-            </tr>
-          </THead>
-          <TBody>
-            {GHL_STANDARD_CONTACT_FIELDS.map((row) => (
-              <TR key={row.ghl}>
-                <TD className="font-mono text-xs">{row.ghl}</TD>
-                <TD className="text-xs text-gray-600">{row.leadrula}</TD>
-              </TR>
-            ))}
-          </TBody>
-        </Table>
+        {!webhookMode && (
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={!!config.sync_contact_updates_enabled}
+              onChange={(e) => patch({ sync_contact_updates_enabled: e.target.checked })}
+              className="mt-0.5 rounded"
+            />
+            <span>
+              <span className="font-medium">Sync contact updates with GHL</span>
+              <p className="mt-0.5 text-xs text-gray-500">
+                When contact fields are edited in Leadrula, push changes to GHL for leads already
+                synced (have a GHL contact ID). Uses API contact upsert only — does not create or
+                update opportunities or appointments.
+              </p>
+            </span>
+          </label>
+        )}
+        <GhlContactStandardFieldsSection
+          values={config.contact_standard_fields}
+          configured={config.contact_standard_fields != null}
+          onChange={(contact_standard_fields: GHLContactStandardFields) =>
+            patch({ contact_standard_fields })
+          }
+          customFields={activeCustomFields}
+        />
         <GhlEntityFieldMapSection
           section="contact"
           title="Contact custom fields"

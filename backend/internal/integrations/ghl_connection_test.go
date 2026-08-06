@@ -58,4 +58,11 @@ func TestMergeGHLConfigDefaults(t *testing.T) {
 	if _, ok := cfg["appointment_datetime"]; !ok {
 		t.Fatal("expected default appointment_datetime")
 	}
+	csf, ok := cfg["contact_standard_fields"].(map[string]any)
+	if !ok || len(csf) != 9 {
+		t.Fatalf("expected 9 default contact_standard_fields, got %#v", cfg["contact_standard_fields"])
+	}
+	if first, ok := csf["firstName"].(map[string]any); !ok || first["builtin_field"] != "first_name" {
+		t.Fatalf("expected firstName -> first_name default, got %#v", csf["firstName"])
+	}
 }

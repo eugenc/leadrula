@@ -9,24 +9,24 @@ import (
 )
 
 const (
-	ghlOutboundDeliverFull         = "full"
-	ghlOutboundDeliverSkip         = "skip"
-	ghlOutboundDeliverContactOnly  = "contact_only"
-	ghlAlreadyAtTargetStageReason  = "GHL already at target stage"
+	ghlOutboundDeliverFull        = "full"
+	ghlOutboundDeliverSkip        = "skip"
+	ghlOutboundDeliverContactOnly = "contact_only"
+	ghlAlreadyAtTargetStageReason = "GHL already at target stage"
 )
 
 type ghlOutboundDeliverPlan struct {
 	Action string
 }
 
-var ghlDeliveryContactFields = []string{
-	"first_name", "last_name", "phone", "email", "address", "city", "state", "zip", "country", "source", "action_at",
-}
-
 // planGHLOutboundDeliver decides whether to skip, contact-only, or fully deliver to GHL.
 // GHL API read errors return full delivery (fail-safe).
 func (s *Service) planGHLOutboundDeliver(ctx context.Context, leadID int64, token string, connConfig map[string]any, enqueuedPayload, refreshedPayload []byte) ghlOutboundDeliverPlan {
 	plan := ghlOutboundDeliverPlan{Action: ghlOutboundDeliverFull}
+	if payloadHasSkipOpportunityStage(enqueuedPayload) {
+		plan.Action = ghlOutboundDeliverContactOnly
+		return plan
+	}
 	if s == nil || s.pool == nil || leadID == 0 || token == "" {
 		return plan
 	}
@@ -65,7 +65,7 @@ func (s *Service) planGHLOutboundDeliver(ctx context.Context, leadID int64, toke
 		return plan
 	}
 
-	if GHLDeliveryContactPayloadChanged(enqueuedPayload, refreshedPayload) {
+	if providers.GHLContactPayloadChanged(cfg, enqueuedPayload, refreshedPayload) {
 		if cfg.DeliveryMode == "webhook" {
 			plan.Action = ghlOutboundDeliverSkip
 			return plan
@@ -75,35 +75,6 @@ func (s *Service) planGHLOutboundDeliver(ctx context.Context, leadID int64, toke
 	}
 	plan.Action = ghlOutboundDeliverSkip
 	return plan
-}
-
-// GHLDeliveryContactPayloadChanged reports whether contact/custom delivery fields differ.
-func GHLDeliveryContactPayloadChanged(enqueued, refreshed []byte) bool {
-	a := ghlDeliveryContactSlice(enqueued)
-	b := ghlDeliveryContactSlice(refreshed)
-	ja, _ := json.Marshal(a)
-	jb, _ := json.Marshal(b)
-	return string(ja) != string(jb)
-}
-
-func ghlDeliveryContactSlice(payload []byte) map[string]any {
-	out := map[string]any{}
-	if len(payload) == 0 {
-		return out
-	}
-	var m map[string]any
-	if json.Unmarshal(payload, &m) != nil {
-		return out
-	}
-	for _, k := range ghlDeliveryContactFields {
-		if v, ok := m[k]; ok {
-			out[k] = v
-		}
-	}
-	if cf, ok := m["custom_fields"]; ok {
-		out["custom_fields"] = cf
-	}
-	return out
 }
 
 func setSkipOpportunityStage(payload []byte) []byte {
@@ -178,7 +149,7 @@ func (s *Service) reconcileGHLStageBeforeDeliver(ctx context.Context, connID, le
 		`SELECT account_id FROM integration_connections WHERE id=$1`, connID).Scan(&accountID); err != nil {
 		return payload, false, err
 	}
-	if _, err := s.leadSvc.ChangeStageByWebhook(ctx, accountID, leadID, targetLRStageID, nil, nil, "ghl stage reconcile", connID); err != nil {
+	if _, err := s.leadSvc.ChangeStageByWebhook(ctx, accountID, leadID, targetLRStageID, nil, nil, "ghl stage reconcile", true, connID); err != nil {
 		return payload, false, err
 	}
 	refreshed, err := leads.RefreshDeliveryPayload(ctx, s.pool, repo, leadID, payload)

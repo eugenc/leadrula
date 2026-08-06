@@ -85,7 +85,7 @@ func TestTryApplyGHLInboundStageSync_direct(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := leadSvc.ChangeStageByWebhook(ctx, accountID, leadID, stage2ID, nil, nil, "test", connID); err != nil {
+	if _, err := leadSvc.ChangeStageByWebhook(ctx, accountID, leadID, stage2ID, nil, nil, "test", false, connID); err != nil {
 		t.Fatalf("ChangeStageByWebhook: %v", err)
 	}
 	lead, err := repo.GetByID(ctx, pool, leadID)
@@ -852,5 +852,233 @@ func TestTryApplyGHLInboundStageSync_novaStractaSit(t *testing.T) {
 	}
 	if leadAfter.StageID == nil || *leadAfter.StageID != sitStageID {
 		t.Fatalf("stage_id = %v, want %d (Nova Stracta Sit payload)", leadAfter.StageID, sitStageID)
+	}
+}
+
+func TestTryApplyGHLInboundStageSync_actionStageSet(t *testing.T) {
+	ctx := context.Background()
+	pool, err := database.Connect(ctx, "postgres://crm:crm@localhost:5432/crm?sslmode=disable")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer pool.Close()
+
+	repo := leads.NewRepository(pool)
+	pipesSvc := pipelines.NewService(pool, nil)
+	leadSvc := leads.NewService(repo, nil, nil, pipesSvc, nil)
+	svc := NewService(pool, repo, leadSvc, testEncKey(t), nil)
+
+	var accountID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM accounts ORDER BY id LIMIT 1`).Scan(&accountID); err != nil {
+		t.Skip(err)
+	}
+	pipelineID, setStageID, sitStageID := testAccountPipelineStages(ctx, t, pool, accountID)
+
+	var originalSetType, originalSitType, originalSetName, originalSitName string
+	if err := pool.QueryRow(ctx, `SELECT stage_type, name FROM pipeline_stages WHERE id=$1`, setStageID).Scan(&originalSetType, &originalSetName); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT stage_type, name FROM pipeline_stages WHERE id=$1`, sitStageID).Scan(&originalSitType, &originalSitName); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE pipeline_stages SET stage_type='action', name='Set' WHERE id=$1`, setStageID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE pipeline_stages SET stage_type='action', name='Sit' WHERE id=$1`, sitStageID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `UPDATE pipeline_stages SET stage_type=$2, name=$3 WHERE id=$1`, setStageID, originalSetType, originalSetName)
+		_, _ = pool.Exec(ctx, `UPDATE pipeline_stages SET stage_type=$2, name=$3 WHERE id=$1`, sitStageID, originalSitType, originalSitName)
+	})
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	connID, connPublicID := testGHLConnection(ctx, t, pool, accountID, "GHL ActionSet "+suffix)
+	ghlPipelineID := "ghl-pipe-action-" + suffix
+	ghlSetStageID := "ghl-set-" + suffix
+	ghlSitStageID := "ghl-sit-" + suffix
+	cfg := map[string]any{
+		"location_id":                       "loc-action-set",
+		"create_contact":                    true,
+		"inbound_stage_sync_enabled":        true,
+		"inbound_sync_leadrula_pipeline_id": pipelineID,
+		"inbound_sync_ghl_pipeline_id":      ghlPipelineID,
+		"pipeline_stage_map": []any{
+			map[string]any{
+				"leadrula_pipeline_id":  pipelineID,
+				"leadrula_stage_id":     setStageID,
+				"ghl_pipeline_id":       ghlPipelineID,
+				"ghl_pipeline_stage_id": ghlSetStageID,
+				"ghl_stage_name":        "Set",
+			},
+			map[string]any{
+				"leadrula_pipeline_id":  pipelineID,
+				"leadrula_stage_id":     sitStageID,
+				"ghl_pipeline_id":       ghlPipelineID,
+				"ghl_pipeline_stage_id": ghlSitStageID,
+				"ghl_stage_name":        "Sit",
+			},
+		},
+	}
+	cfgJSON, _ := json.Marshal(cfg)
+	if _, err := pool.Exec(ctx, `UPDATE integration_connections SET config=$2 WHERE id=$1`, connID, cfgJSON); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := svc.ProvisionGHLWebhooks(ctx, accountID, connID, connPublicID, "GHL ActionSet "+suffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.DeleteGHLWebhooks(ctx, accountID, *ids)
+
+	actionAt := time.Date(2026, 8, 6, 10, 0, 0, 0, time.UTC)
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contactID := "contact-action-set-" + suffix
+	leadID, _, err := repo.InsertLead(ctx, tx, accountID, accountID, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetExternalID(ctx, tx, leadID, contactID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.PlaceInPipeline(ctx, tx, leadID, accountID, pipelineID, sitStageID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetActionAt(ctx, tx, leadID, &actionAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	webhook := Webhook{
+		ID:                      ids.Inbound,
+		AccountID:               accountID,
+		IntegrationConnectionID: &connID,
+		Name:                    "GHL ActionSet",
+	}
+	tryApplyGHLInboundStageSync(ctx, svc, webhook, leadID, map[string]any{
+		"contact_id":      contactID,
+		"pipeline_id":     ghlPipelineID,
+		"pipeline_name":   "Solar Dynamics Leads",
+		"pipleline_stage": "Set",
+	})
+
+	leadAfter, err := repo.GetByID(ctx, pool, leadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leadAfter.StageID == nil || *leadAfter.StageID != setStageID {
+		t.Fatalf("stage_id = %v, want %d (action Set stage should sync from GHL)", leadAfter.StageID, setStageID)
+	}
+	if leadAfter.ActionAt == nil || !leadAfter.ActionAt.Equal(actionAt) {
+		t.Fatalf("action_at = %v, want %v preserved on action stage move", leadAfter.ActionAt, actionAt)
+	}
+}
+
+func TestTryApplyGHLInboundStageSync_disqualificationNoReason(t *testing.T) {
+	ctx := context.Background()
+	pool, err := database.Connect(ctx, "postgres://crm:crm@localhost:5432/crm?sslmode=disable")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer pool.Close()
+
+	repo := leads.NewRepository(pool)
+	pipesSvc := pipelines.NewService(pool, nil)
+	leadSvc := leads.NewService(repo, nil, nil, pipesSvc, nil)
+	svc := NewService(pool, repo, leadSvc, testEncKey(t), nil)
+
+	var accountID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM accounts ORDER BY id LIMIT 1`).Scan(&accountID); err != nil {
+		t.Skip(err)
+	}
+	pipelineID, fromStageID, disqStageID := testAccountPipelineStages(ctx, t, pool, accountID)
+
+	var originalDisqType string
+	if err := pool.QueryRow(ctx, `SELECT stage_type FROM pipeline_stages WHERE id=$1`, disqStageID).Scan(&originalDisqType); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE pipeline_stages SET stage_type='disqualification' WHERE id=$1`, disqStageID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `UPDATE pipeline_stages SET stage_type=$2 WHERE id=$1`, disqStageID, originalDisqType)
+	})
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	connID, connPublicID := testGHLConnection(ctx, t, pool, accountID, "GHL DisqSync "+suffix)
+	ghlPipelineID := "ghl-pipe-disq-" + suffix
+	ghlDisqStageID := "ghl-disq-" + suffix
+	cfg := map[string]any{
+		"location_id":                       "loc-disq",
+		"create_contact":                    true,
+		"inbound_stage_sync_enabled":        true,
+		"inbound_sync_leadrula_pipeline_id": pipelineID,
+		"inbound_sync_ghl_pipeline_id":      ghlPipelineID,
+		"pipeline_stage_map": []any{
+			map[string]any{
+				"leadrula_pipeline_id":  pipelineID,
+				"leadrula_stage_id":     disqStageID,
+				"ghl_pipeline_id":       ghlPipelineID,
+				"ghl_pipeline_stage_id": ghlDisqStageID,
+				"ghl_stage_name":        "Lost",
+			},
+		},
+	}
+	cfgJSON, _ := json.Marshal(cfg)
+	if _, err := pool.Exec(ctx, `UPDATE integration_connections SET config=$2 WHERE id=$1`, connID, cfgJSON); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := svc.ProvisionGHLWebhooks(ctx, accountID, connID, connPublicID, "GHL DisqSync "+suffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.DeleteGHLWebhooks(ctx, accountID, *ids)
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contactID := "contact-disq-" + suffix
+	leadID, _, err := repo.InsertLead(ctx, tx, accountID, accountID, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetExternalID(ctx, tx, leadID, contactID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.PlaceInPipeline(ctx, tx, leadID, accountID, pipelineID, fromStageID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	webhook := Webhook{
+		ID:                      ids.Inbound,
+		AccountID:               accountID,
+		IntegrationConnectionID: &connID,
+		Name:                    "GHL DisqSync",
+	}
+	tryApplyGHLInboundStageSync(ctx, svc, webhook, leadID, map[string]any{
+		"contact_id":        contactID,
+		"pipeline_id":       ghlPipelineID,
+		"pipelineStageId": ghlDisqStageID,
+	})
+
+	leadAfter, err := repo.GetByID(ctx, pool, leadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leadAfter.StageID == nil || *leadAfter.StageID != disqStageID {
+		t.Fatalf("stage_id = %v, want %d (disq stage should sync without reason)", leadAfter.StageID, disqStageID)
+	}
+	if leadAfter.DisqReasonID != nil {
+		t.Fatalf("disqualification_reason_id = %v, want nil when GHL sends no reason", leadAfter.DisqReasonID)
 	}
 }

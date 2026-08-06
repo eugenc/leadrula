@@ -31,6 +31,18 @@ var ghlAppointmentStandardInbound = []ghlStandardInboundSpec{
 	{fieldKey: "meeting_location_type", ghlKeys: []string{"meetingLocationType"}},
 }
 
+var ghlContactStandardInbound = []ghlStandardInboundSpec{
+	{fieldKey: "firstName", ghlKeys: []string{"firstName", "first_name"}},
+	{fieldKey: "lastName", ghlKeys: []string{"lastName", "last_name"}},
+	{fieldKey: "phone", ghlKeys: []string{"phone"}},
+	{fieldKey: "email", ghlKeys: []string{"email"}},
+	{fieldKey: "address1", ghlKeys: []string{"address1", "address"}},
+	{fieldKey: "city", ghlKeys: []string{"city"}},
+	{fieldKey: "state", ghlKeys: []string{"state"}},
+	{fieldKey: "postalCode", ghlKeys: []string{"postalCode", "zip"}},
+	{fieldKey: "source", ghlKeys: []string{"source"}},
+}
+
 // GHLInboundMapsFromConfig inverts outbound field mapping for GHL inbound webhooks.
 func GHLInboundMapsFromConfig(config map[string]any) []GHLInboundMapEntry {
 	if config == nil {
@@ -39,6 +51,7 @@ func GHLInboundMapsFromConfig(config map[string]any) []GHLInboundMapEntry {
 	out := invertOutboundFieldMap(ghlOutboundFieldMapFromConfig(config))
 	out = append(out, invertStandardFields(config["opportunity_standard_fields"], ghlOpportunityStandardInbound)...)
 	out = append(out, invertStandardFields(config["appointment_standard_fields"], ghlAppointmentStandardInbound)...)
+	out = append(out, invertStandardFields(ghlContactStandardFieldsForInbound(config), ghlContactStandardInbound)...)
 	return out
 }
 
@@ -70,6 +83,16 @@ func invertOutboundFieldMap(entries []SunbaseFieldMapEntry) []GHLInboundMapEntry
 		out = append(out, entry)
 	}
 	return out
+}
+
+func ghlContactStandardFieldsForInbound(config map[string]any) any {
+	if config == nil {
+		return defaultGHLContactStandardFieldsMap()
+	}
+	if _, ok := config["contact_standard_fields"]; !ok {
+		return defaultGHLContactStandardFieldsMap()
+	}
+	return config["contact_standard_fields"]
 }
 
 func invertStandardFields(raw any, specs []ghlStandardInboundSpec) []GHLInboundMapEntry {
