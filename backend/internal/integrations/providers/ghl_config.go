@@ -47,6 +47,37 @@ type GHLAppointmentStandardFields struct {
 	MeetingLocationType GHLFieldSource
 }
 
+type GHLContactStandardFields struct {
+	FirstName  GHLFieldSource
+	LastName   GHLFieldSource
+	Phone      GHLFieldSource
+	Email      GHLFieldSource
+	Address1   GHLFieldSource
+	City       GHLFieldSource
+	State      GHLFieldSource
+	PostalCode GHLFieldSource
+	Source     GHLFieldSource
+}
+
+type ghlContactStandardFieldSpec struct {
+	ghlKey         string
+	configKey      string
+	required       bool
+	defaultBuiltin string
+}
+
+var ghlContactStandardFieldSpecs = []ghlContactStandardFieldSpec{
+	{ghlKey: "firstName", configKey: "firstName", required: true, defaultBuiltin: "first_name"},
+	{ghlKey: "lastName", configKey: "lastName", required: true, defaultBuiltin: "last_name"},
+	{ghlKey: "phone", configKey: "phone", required: true, defaultBuiltin: "phone"},
+	{ghlKey: "email", configKey: "email", defaultBuiltin: "email"},
+	{ghlKey: "address1", configKey: "address1", defaultBuiltin: "address"},
+	{ghlKey: "city", configKey: "city", defaultBuiltin: "city"},
+	{ghlKey: "state", configKey: "state", defaultBuiltin: "state"},
+	{ghlKey: "postalCode", configKey: "postalCode", defaultBuiltin: "zip"},
+	{ghlKey: "source", configKey: "source", defaultBuiltin: "source"},
+}
+
 type GHLConfig struct {
 	DeliveryMode                string
 	WebhookURL                  string
@@ -64,9 +95,12 @@ type GHLConfig struct {
 	OutboundFieldMap            []SunbaseFieldMapEntry
 	OpportunityStandardFields   GHLOpportunityStandardFields
 	AppointmentStandardFields   GHLAppointmentStandardFields
-	InboundStageSyncEnabled     bool
+	ContactStandardFields       GHLContactStandardFields
+	ContactStandardFieldsConfigured bool
+	InboundStageSyncEnabled       bool
 	InboundSyncLeadrulaPipelineID int64
-	InboundSyncGHLPipelineID    string
+	InboundSyncGHLPipelineID      string
+	SyncContactUpdatesEnabled     bool
 }
 
 func ParseGHLCredentials(credentials []byte) (token string, err error) {
@@ -127,6 +161,10 @@ func ParseGHLConfig(config map[string]any) (GHLConfig, error) {
 	out.OutboundFieldMap = ghlOutboundFieldMapFromConfig(config)
 	out.OpportunityStandardFields = parseGHLOpportunityStandardFields(config["opportunity_standard_fields"])
 	out.AppointmentStandardFields = parseGHLAppointmentStandardFields(config["appointment_standard_fields"])
+	if _, ok := config["contact_standard_fields"]; ok {
+		out.ContactStandardFieldsConfigured = true
+	}
+	out.ContactStandardFields = parseGHLContactStandardFields(config["contact_standard_fields"])
 	if v, ok := config["inbound_stage_sync_enabled"].(bool); ok {
 		out.InboundStageSyncEnabled = v
 	}
@@ -134,7 +172,13 @@ func ParseGHLConfig(config map[string]any) (GHLConfig, error) {
 	if s, ok := config["inbound_sync_ghl_pipeline_id"].(string); ok {
 		out.InboundSyncGHLPipelineID = strings.TrimSpace(s)
 	}
+	if v, ok := config["sync_contact_updates_enabled"].(bool); ok {
+		out.SyncContactUpdatesEnabled = v
+	}
 	if err := validateInboundStageSync(out); err != nil {
+		return out, err
+	}
+	if err := validateGHLContactStandardFields(out); err != nil {
 		return out, err
 	}
 
@@ -416,6 +460,204 @@ func parseGHLAppointmentStandardFields(raw any) GHLAppointmentStandardFields {
 		out.MeetingLocationType = fs
 	}
 	return out
+}
+
+func parseGHLContactStandardFields(raw any) GHLContactStandardFields {
+	fields := parseGHLStandardFieldsMap(raw)
+	return ghlContactStandardFieldsFromMap(fields)
+}
+
+func ghlContactStandardFieldsFromMap(fields map[string]GHLFieldSource) GHLContactStandardFields {
+	out := GHLContactStandardFields{}
+	for _, spec := range ghlContactStandardFieldSpecs {
+		if fs, ok := fields[spec.configKey]; ok {
+			setGHLContactStandardField(&out, spec.configKey, fs)
+		}
+	}
+	return out
+}
+
+func setGHLContactStandardField(out *GHLContactStandardFields, key string, fs GHLFieldSource) {
+	switch key {
+	case "firstName":
+		out.FirstName = fs
+	case "lastName":
+		out.LastName = fs
+	case "phone":
+		out.Phone = fs
+	case "email":
+		out.Email = fs
+	case "address1":
+		out.Address1 = fs
+	case "city":
+		out.City = fs
+	case "state":
+		out.State = fs
+	case "postalCode":
+		out.PostalCode = fs
+	case "source":
+		out.Source = fs
+	}
+}
+
+func (f GHLContactStandardFields) field(key string) GHLFieldSource {
+	switch key {
+	case "firstName":
+		return f.FirstName
+	case "lastName":
+		return f.LastName
+	case "phone":
+		return f.Phone
+	case "email":
+		return f.Email
+	case "address1":
+		return f.Address1
+	case "city":
+		return f.City
+	case "state":
+		return f.State
+	case "postalCode":
+		return f.PostalCode
+	case "source":
+		return f.Source
+	default:
+		return GHLFieldSource{}
+	}
+}
+
+func defaultGHLContactStandardFields() GHLContactStandardFields {
+	out := GHLContactStandardFields{}
+	for _, spec := range ghlContactStandardFieldSpecs {
+		bf := spec.defaultBuiltin
+		setGHLContactStandardField(&out, spec.configKey, GHLFieldSource{
+			SourceType:   "builtin",
+			BuiltinField: &bf,
+		})
+	}
+	return out
+}
+
+func defaultGHLContactStandardFieldsMap() map[string]any {
+	out := map[string]any{}
+	for _, spec := range ghlContactStandardFieldSpecs {
+		out[spec.configKey] = map[string]any{
+			"source_type":   "builtin",
+			"builtin_field": spec.defaultBuiltin,
+		}
+	}
+	return out
+}
+
+func resolveGHLContactStandardField(cfg GHLConfig, spec ghlContactStandardFieldSpec) (GHLFieldSource, bool) {
+	defaults := defaultGHLContactStandardFields()
+	if !cfg.ContactStandardFieldsConfigured {
+		return defaults.field(spec.configKey), true
+	}
+	fs := cfg.ContactStandardFields.field(spec.configKey)
+	if ghlFieldSourceSet(fs) {
+		return fs, true
+	}
+	if spec.required {
+		return defaults.field(spec.configKey), true
+	}
+	return GHLFieldSource{}, false
+}
+
+func validateGHLContactStandardFields(cfg GHLConfig) error {
+	if !cfg.ContactStandardFieldsConfigured {
+		return nil
+	}
+	for _, spec := range ghlContactStandardFieldSpecs {
+		if !spec.required {
+			continue
+		}
+		if !ghlFieldSourceSet(cfg.ContactStandardFields.field(spec.configKey)) {
+			return fmt.Errorf("contact_standard_fields.%s is required", spec.configKey)
+		}
+	}
+	return nil
+}
+
+func ghlContactFieldSourceTrackedKeys(fs GHLFieldSource, builtins map[string]bool, customIDs map[string]bool) {
+	switch fs.SourceType {
+	case "builtin":
+		if fs.BuiltinField != nil && strings.TrimSpace(*fs.BuiltinField) != "" {
+			builtins[strings.TrimSpace(*fs.BuiltinField)] = true
+		}
+	case "custom":
+		if fs.CustomFieldID != nil && *fs.CustomFieldID > 0 {
+			customIDs[strconv.FormatInt(*fs.CustomFieldID, 10)] = true
+		}
+	}
+}
+
+// GHLContactTrackedPayloadKeys returns lead payload keys that affect GHL contact delivery for a connection.
+func GHLContactTrackedPayloadKeys(cfg GHLConfig) (builtins map[string]bool, customIDs map[string]bool) {
+	builtins = map[string]bool{}
+	customIDs = map[string]bool{}
+	for _, spec := range ghlContactStandardFieldSpecs {
+		fs, include := resolveGHLContactStandardField(cfg, spec)
+		if !include {
+			continue
+		}
+		ghlContactFieldSourceTrackedKeys(fs, builtins, customIDs)
+	}
+	for _, e := range cfg.OutboundFieldMap {
+		if ghlFieldModel(e) != "contact" {
+			continue
+		}
+		ghlContactFieldSourceTrackedKeys(GHLFieldSource{
+			SourceType:    e.SourceType,
+			BuiltinField:  e.BuiltinField,
+			CustomFieldID: e.CustomFieldID,
+			StaticValue:   e.StaticValue,
+		}, builtins, customIDs)
+	}
+	return builtins, customIDs
+}
+
+// GHLContactPayloadSlice extracts contact-relevant delivery payload keys for change detection.
+func GHLContactPayloadSlice(cfg GHLConfig, payload []byte) map[string]any {
+	out := map[string]any{}
+	if len(payload) == 0 {
+		return out
+	}
+	var m map[string]any
+	if json.Unmarshal(payload, &m) != nil {
+		return out
+	}
+	builtins, customIDs := GHLContactTrackedPayloadKeys(cfg)
+	for k := range builtins {
+		if v, ok := m[k]; ok {
+			out[k] = v
+		}
+	}
+	if len(customIDs) == 0 {
+		return out
+	}
+	cf, ok := m["custom_fields"].(map[string]any)
+	if !ok {
+		return out
+	}
+	filtered := map[string]any{}
+	for id, v := range cf {
+		if customIDs[id] {
+			filtered[id] = v
+		}
+	}
+	if len(filtered) > 0 {
+		out["custom_fields"] = filtered
+	}
+	return out
+}
+
+// GHLContactPayloadChanged reports whether contact-relevant delivery fields differ for a connection.
+func GHLContactPayloadChanged(cfg GHLConfig, before, after []byte) bool {
+	a := GHLContactPayloadSlice(cfg, before)
+	b := GHLContactPayloadSlice(cfg, after)
+	ja, _ := json.Marshal(a)
+	jb, _ := json.Marshal(b)
+	return string(ja) != string(jb)
 }
 
 func intFromAny(v any) int {
@@ -718,15 +960,17 @@ func ghlStandardContactFields(cfg GHLConfig, payload DeliveryPayload) map[string
 		"locationId": cfg.LocationID,
 		"tags":       []string{"leadrula"},
 	}
-	setGHLContactField(contact, "firstName", payload.FirstName)
-	setGHLContactField(contact, "lastName", payload.LastName)
-	setGHLContactField(contact, "phone", payload.Phone)
-	setGHLContactField(contact, "email", payload.Email)
-	setGHLContactField(contact, "address1", payload.Address)
-	setGHLContactField(contact, "city", payload.City)
-	setGHLContactField(contact, "state", payload.State)
-	setGHLContactField(contact, "postalCode", payload.Zip)
-	setGHLContactField(contact, "source", payload.Source)
+	for _, spec := range ghlContactStandardFieldSpecs {
+		fs, include := resolveGHLContactStandardField(cfg, spec)
+		if !include {
+			continue
+		}
+		v := resolveGHLFieldSourceValue(fs, payload)
+		if fs.SourceType == "builtin" && fs.BuiltinField != nil && *fs.BuiltinField == "action_at" && v != "" {
+			v = customfields.FormatForSunbaseExportInTimezone("datetime", v, sunbaseAccountTimezone(payload.Config))
+		}
+		setGHLContactField(contact, spec.ghlKey, v)
+	}
 	return contact
 }
 
@@ -768,12 +1012,19 @@ func ghlCustomFieldsPayload(entries []SunbaseFieldMapEntry, payload DeliveryPayl
 }
 
 func resolveGHLFieldValue(e SunbaseFieldMapEntry, payload DeliveryPayload) string {
-	return resolveGHLFieldSourceValue(GHLFieldSource{
+	v := resolveGHLFieldSourceValue(GHLFieldSource{
 		SourceType:    e.SourceType,
 		BuiltinField:  e.BuiltinField,
 		CustomFieldID: e.CustomFieldID,
 		StaticValue:   e.StaticValue,
 	}, payload)
+	if v == "" {
+		return ""
+	}
+	if e.SourceType == "builtin" && e.BuiltinField != nil && *e.BuiltinField == "action_at" {
+		return customfields.FormatForSunbaseExportInTimezone("datetime", v, sunbaseAccountTimezone(payload.Config))
+	}
+	return v
 }
 
 func resolveGHLFieldSourceValue(fs GHLFieldSource, payload DeliveryPayload) string {
@@ -953,8 +1204,10 @@ func DefaultGHLConnectionConfig(locationID string) map[string]any {
 		},
 		"appointment_title_template": "{{first_name}}",
 		"opportunity_title_template": "{{first_name}} {{last_name}}",
-		"pipeline_stage_map":  []any{},
+		"contact_standard_fields":    defaultGHLContactStandardFieldsMap(),
+		"pipeline_stage_map":         []any{},
 		"outbound_field_map":  []any{},
-		"inbound_stage_sync_enabled": false,
+		"inbound_stage_sync_enabled":   false,
+		"sync_contact_updates_enabled": false,
 	}
 }

@@ -1,11 +1,20 @@
 import type { ComponentType } from "react";
 import { Label, Select, Input } from "@/components/ui/input";
-import type {
-  GHLAppointmentStandardFields,
-  GHLFieldSource,
-  GHLOpportunityStandardFields,
+import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
+import {
+  GHL_FIELD_MAP_BUILTINS,
+  GHL_REQUIRED_CONTACT_FIELDS,
+  GHL_STANDARD_CONTACT_FIELDS,
+  DEFAULT_GHL_CONTACT_STANDARD_FIELDS,
+  mergeGhlContactStandardFields,
+  isGhlFieldSourceSet,
+  type GHLAppointmentStandardFields,
+  type GHLContactStandardFields,
+  type GHLFieldSource,
+  type GHLOpportunityStandardFields,
 } from "@/features/integrations/ghlConstants";
 import { GHL_MEETING_LOCATION_TYPES } from "@/features/integrations/ghlConstants";
+import { builtinFieldLabel } from "@/features/leads/csvMapping";
 
 type FieldSourceSelectProps = {
   label: string;
@@ -34,6 +43,147 @@ function selectValueToFieldSource(v: string): GHLFieldSource | undefined {
   }
   const builtin_field = v.startsWith("builtin:") ? v.slice(8) : v;
   return { source_type: "builtin", builtin_field };
+}
+
+function applyContactSourceTypeChange(
+  row: GHLFieldSource | undefined,
+  source_type: GHLFieldSource["source_type"]
+): GHLFieldSource {
+  const base = { source_type };
+  if (source_type === "builtin") {
+    return { ...base, builtin_field: row?.builtin_field ?? "last_name" };
+  }
+  if (source_type === "custom") {
+    return row?.custom_field_id ? { ...base, custom_field_id: row.custom_field_id } : base;
+  }
+  return { ...base, static_value: row?.static_value ?? "" };
+}
+
+export function GhlContactStandardFieldsSection({
+  values,
+  configured,
+  onChange,
+  customFields,
+}: {
+  values?: GHLContactStandardFields;
+  configured?: boolean;
+  onChange: (v: GHLContactStandardFields) => void;
+  customFields: { id: number; name: string }[];
+}) {
+  const merged = mergeGhlContactStandardFields(values, configured);
+
+  function patch(key: keyof GHLContactStandardFields, fs: GHLFieldSource | undefined) {
+    const next = { ...merged };
+    if (fs && isGhlFieldSourceSet(fs)) {
+      next[key] = fs;
+    } else {
+      delete next[key];
+    }
+    onChange(next);
+  }
+
+  function displaySource(row: GHLFieldSource | undefined, required: boolean): string {
+    if (row && isGhlFieldSourceSet(row)) return row.source_type;
+    return required ? "builtin" : "";
+  }
+
+  return (
+    <div className="space-y-2">
+      <Label>Standard contact fields</Label>
+      <Table>
+        <THead>
+          <tr>
+            <TH>GHL field</TH>
+            <TH>Source</TH>
+            <TH>Value</TH>
+          </tr>
+        </THead>
+        <TBody>
+          {GHL_STANDARD_CONTACT_FIELDS.map(({ ghl }) => {
+            const required = GHL_REQUIRED_CONTACT_FIELDS.includes(ghl);
+            const row = merged[ghl];
+            const sourceType = displaySource(row, required);
+            return (
+              <TR key={ghl}>
+                <TD className="font-mono text-xs">{ghl}</TD>
+                <TD>
+                  <Select
+                    className="!h-8 !text-sm"
+                    value={sourceType}
+                    onChange={(ev) => {
+                      const v = ev.target.value;
+                      if (!v) {
+                        patch(ghl, undefined);
+                        return;
+                      }
+                      const source_type = v as GHLFieldSource["source_type"];
+                      patch(ghl, applyContactSourceTypeChange(row, source_type));
+                    }}
+                  >
+                    {!required && <option value="">—</option>}
+                    <option value="builtin">Lead field</option>
+                    <option value="custom">Custom field</option>
+                    <option value="static">Static value</option>
+                  </Select>
+                </TD>
+                <TD>
+                  {sourceType === "builtin" && (
+                    <Select
+                      className="!h-8 w-full !text-sm"
+                      value={row?.builtin_field ?? DEFAULT_GHL_CONTACT_STANDARD_FIELDS[ghl]?.builtin_field ?? "last_name"}
+                      onChange={(ev) =>
+                        patch(ghl, {
+                          source_type: "builtin",
+                          builtin_field: ev.target.value,
+                        })
+                      }
+                      disabled={!sourceType && !required}
+                    >
+                      {GHL_FIELD_MAP_BUILTINS.map((b) => (
+                        <option key={b} value={b}>
+                          {builtinFieldLabel(b)}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                  {sourceType === "custom" && (
+                    <Select
+                      className="!h-8 w-full !text-sm"
+                      value={String(row?.custom_field_id ?? "")}
+                      onChange={(ev) => {
+                        const v = ev.target.value;
+                        if (!v) {
+                          patch(ghl, { source_type: "custom" });
+                          return;
+                        }
+                        patch(ghl, { source_type: "custom", custom_field_id: Number(v) });
+                      }}
+                    >
+                      <option value="">Select field</option>
+                      {customFields.map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.name}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
+                  {sourceType === "static" && (
+                    <Input
+                      value={row?.static_value ?? ""}
+                      onChange={(ev) =>
+                        patch(ghl, { source_type: "static", static_value: ev.target.value })
+                      }
+                      className="!h-8 !text-sm"
+                    />
+                  )}
+                </TD>
+              </TR>
+            );
+          })}
+        </TBody>
+      </Table>
+    </div>
+  );
 }
 
 export function GhlOpportunityStandardFieldsSection({

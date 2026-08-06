@@ -364,6 +364,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, err)
 		return
 	}
+	h.svc.MaybeEnqueueGHLContactUpdate(r.Context(), before, l)
 	// Fire outbound webhook trigger for lead update.
 	h.svc.fireOutbound(r.Context(), p.AccountID, "lead.update", l, PipelineContext{
 		PipelineID: l.PipelineID,

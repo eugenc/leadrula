@@ -2,6 +2,7 @@ package leads
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/echayko/leadrula/backend/internal/accounts"
@@ -33,6 +34,25 @@ func (s *Service) SetWebhookFirer(wf WebhookFirer) { s.webhooks = wf }
 
 func (s *Service) Repo() *Repository { return s.repo }
 
+// MaybeEnqueueGHLContactUpdate enqueues contact-only GHL sync when contact fields change on a delivered lead.
+func (s *Service) MaybeEnqueueGHLContactUpdate(ctx context.Context, before, after *Lead) {
+	if s == nil || s.integrations == nil || before == nil || after == nil {
+		return
+	}
+	if after.ExternalID == nil || strings.TrimSpace(*after.ExternalID) == "" {
+		return
+	}
+	beforePayload, err := BuildDeliveryPayload(before)
+	if err != nil {
+		return
+	}
+	afterPayload, err := BuildDeliveryPayload(after)
+	if err != nil {
+		return
+	}
+	_ = s.integrations.TryEnqueueGHLOnContactUpdate(ctx, after.OwnerAccountID, after.ID, beforePayload, afterPayload)
+}
+
 func (s *Service) LeadHistory(ctx context.Context, p *auth.Principal, leadID int64) ([]LeadHistoryEntry, error) {
 	entries, err := s.repo.LeadHistory(ctx, leadID)
 	if err != nil {
@@ -44,6 +64,10 @@ func (s *Service) LeadHistory(ctx context.Context, p *auth.Principal, leadID int
 // ChangeStage moves a lead to a new stage, enforcing destination prompts and
 // applying any matching return rule. Atomic per DB spec §4.2.
 func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, newStageID int64, actionAt *time.Time, disqReasonID *int64, extraSkipIntegrationConnIDs ...int64) (*Lead, []auth.ImpersonationChange, error) {
+	return s.changeStage(ctx, p, leadID, newStageID, actionAt, disqReasonID, false, extraSkipIntegrationConnIDs...)
+}
+
+func (s *Service) changeStage(ctx context.Context, p *auth.Principal, leadID, newStageID int64, actionAt *time.Time, disqReasonID *int64, skipPromptValidation bool, extraSkipIntegrationConnIDs ...int64) (*Lead, []auth.ImpersonationChange, error) {
 	var pendingEmails []notifications.EmailJob
 	tx, err := s.repo.pool.Begin(ctx)
 	if err != nil {
@@ -76,29 +100,33 @@ func (s *Service) ChangeStage(ctx context.Context, p *auth.Principal, leadID, ne
 		return nil, nil, err
 	}
 
-	switch stage.StageType {
-	case pipelines.StageTypeAction:
-		if actionAt == nil {
-			return nil, nil, httpx.BusinessRule("Action Date & Time is required for this stage")
-		}
-	case pipelines.StageTypeDisqualification:
-		if disqReasonID == nil {
-			return nil, nil, httpx.BusinessRule("a disqualification reason is required for this stage")
-		}
-		hasActive, err := s.pipelines.HasActiveStageReasons(ctx, newStageID)
-		if err != nil {
-			return nil, nil, err
-		}
-		if !hasActive {
-			return nil, nil, httpx.BusinessRule("no disqualification reasons configured for this stage")
+	if !skipPromptValidation {
+		switch stage.StageType {
+		case pipelines.StageTypeAction:
+			if actionAt == nil {
+				return nil, nil, httpx.BusinessRule("Action Date & Time is required for this stage")
+			}
+		case pipelines.StageTypeDisqualification:
+			if disqReasonID == nil {
+				return nil, nil, httpx.BusinessRule("a disqualification reason is required for this stage")
+			}
+			hasActive, err := s.pipelines.HasActiveStageReasons(ctx, newStageID)
+			if err != nil {
+				return nil, nil, err
+			}
+			if !hasActive {
+				return nil, nil, httpx.BusinessRule("no disqualification reasons configured for this stage")
+			}
 		}
 	}
 
 	actor := ActorFromPrincipal(p)
 	switch stage.StageType {
 	case pipelines.StageTypeAction:
-		if err := s.repo.SetActionAt(ctx, tx, leadID, actionAt); err != nil {
-			return nil, nil, err
+		if actionAt != nil || !skipPromptValidation {
+			if err := s.repo.SetActionAt(ctx, tx, leadID, actionAt); err != nil {
+				return nil, nil, err
+			}
 		}
 	case pipelines.StageTypeStandard:
 		if lead.ActionAt != nil {
@@ -345,14 +373,14 @@ func (s *Service) ClearFromPipeline(ctx context.Context, p *auth.Principal, lead
 }
 
 // ChangeStageByWebhook moves a lead without user permission checks (inbound webhook).
-func (s *Service) ChangeStageByWebhook(ctx context.Context, accountID, leadID, newStageID int64, actionAt *time.Time, disqReasonID *int64, webhookName string, skipIntegrationConnIDs ...int64) (*Lead, error) {
+func (s *Service) ChangeStageByWebhook(ctx context.Context, accountID, leadID, newStageID int64, actionAt *time.Time, disqReasonID *int64, webhookName string, skipPromptValidation bool, skipIntegrationConnIDs ...int64) (*Lead, error) {
 	p := &auth.Principal{AccountID: accountID, Role: "admin", UserID: 0, FullAccess: true}
-	lead, err := s.changeStageWithActor(ctx, p, leadID, newStageID, actionAt, disqReasonID, ActorWebhook(webhookName), skipIntegrationConnIDs...)
+	lead, err := s.changeStageWithActor(ctx, p, leadID, newStageID, actionAt, disqReasonID, skipPromptValidation, ActorWebhook(webhookName), skipIntegrationConnIDs...)
 	return lead, err
 }
 
-func (s *Service) changeStageWithActor(ctx context.Context, p *auth.Principal, leadID, newStageID int64, actionAt *time.Time, disqReasonID *int64, actor HistoryActor, skipIntegrationConnIDs ...int64) (*Lead, error) {
-	lead, _, err := s.ChangeStage(ctx, p, leadID, newStageID, actionAt, disqReasonID, skipIntegrationConnIDs...)
+func (s *Service) changeStageWithActor(ctx context.Context, p *auth.Principal, leadID, newStageID int64, actionAt *time.Time, disqReasonID *int64, skipPromptValidation bool, actor HistoryActor, skipIntegrationConnIDs ...int64) (*Lead, error) {
+	lead, _, err := s.changeStage(ctx, p, leadID, newStageID, actionAt, disqReasonID, skipPromptValidation, skipIntegrationConnIDs...)
 	if err != nil {
 		return nil, err
 	}

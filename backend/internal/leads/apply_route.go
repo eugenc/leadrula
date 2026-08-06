@@ -21,6 +21,7 @@ type IntegrationEnqueuer interface {
 	EnqueueParticipationWebhook(ctx context.Context, webhookID, leadID int64, payloadJSON []byte) error
 	TryEnqueueGHLOnStageMove(ctx context.Context, ownerAccountID, pipelineID, stageID, leadID int64, payloadJSON []byte, skipConnIDs []int64) error
 	TryEnqueueGHLWebhookOnStageMove(ctx context.Context, ownerAccountID, pipelineID, stageID, leadID int64, payloadJSON []byte, skipConnIDs []int64) error
+	TryEnqueueGHLOnContactUpdate(ctx context.Context, ownerAccountID, leadID int64, beforePayload, afterPayload []byte) error
 }
 
 // PipelineContext carries the pipeline/stage snapshot that outbound webhook triggers receive.

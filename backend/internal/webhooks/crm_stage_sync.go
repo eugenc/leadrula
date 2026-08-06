@@ -3,10 +3,11 @@ package webhooks
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/echayko/leadrula/backend/internal/integrations/providers"
 	"github.com/echayko/leadrula/backend/internal/leads"
-	"github.com/echayko/leadrula/backend/internal/pipelines"
 )
 
 func tryApplyCRMInboundStageSync(ctx context.Context, s *Service, webhook Webhook, leadID int64, flat map[string]any, providerSlug string) {
@@ -85,20 +86,43 @@ func tryApplyCRMInboundStageSync(ctx context.Context, s *Service, webhook Webhoo
 		return
 	}
 
-	stage, err := s.leads.GetStage(ctx, s.leads.Pool(), diag.TargetStageID)
-	if err != nil {
+	if _, err := s.leads.GetStage(ctx, s.leads.Pool(), diag.TargetStageID); err != nil {
 		_ = s.leads.LogCRMSyncSkipped(ctx, s.leads.Pool(), leadID, lead.OwnerAccountID, actor, "target stage not found")
 		return
 	}
-	if stage.StageType != pipelines.StageTypeStandard {
-		_ = s.leads.LogCRMSyncSkipped(ctx, s.leads.Pool(), leadID, lead.OwnerAccountID, actor,
-			fmt.Sprintf("target stage type %q is not a standard pipeline stage", stage.StageType))
-		return
-	}
 
-	if _, err := s.leadSvc.ChangeStageByWebhook(ctx, webhook.AccountID, leadID, diag.TargetStageID, nil, nil, webhook.Name, connID); err != nil {
+	actionAt, disqReasonID := crmInboundStagePromptFields(ctx, s, webhook, flat, lead)
+	if _, err := s.leadSvc.ChangeStageByWebhook(ctx, webhook.AccountID, leadID, diag.TargetStageID, actionAt, disqReasonID, webhook.Name, true, connID); err != nil {
 		_ = s.leads.LogCRMSyncSkipped(ctx, s.leads.Pool(), leadID, lead.OwnerAccountID, actor, "stage move failed: "+err.Error())
 	}
+}
+
+func crmInboundStagePromptFields(ctx context.Context, s *Service, webhook Webhook, flat map[string]any, lead *leads.Lead) (actionAt *time.Time, disqReasonID *int64) {
+	if s == nil {
+		return nil, nil
+	}
+	var eventID int64
+	if err := s.pool.QueryRow(ctx,
+		`SELECT id FROM webhook_events WHERE webhook_id=$1 AND action='create' ORDER BY id LIMIT 1`,
+		webhook.ID).Scan(&eventID); err == nil {
+		if maps, err := s.ListFieldMap(ctx, eventID); err == nil {
+			builtins, _, _ := applyFieldMaps(flat, maps)
+			if v, ok := builtins["action_at"]; ok && v != "" {
+				if parsed, err := leads.ParseActionAt(v); err == nil {
+					actionAt = parsed
+				}
+			}
+			if v, ok := builtins["disqualification_reason_id"]; ok && v != "" {
+				if id, err := strconv.ParseInt(v, 10, 64); err == nil {
+					disqReasonID = &id
+				}
+			}
+		}
+	}
+	if actionAt == nil && lead != nil && lead.ActionAt != nil {
+		actionAt = lead.ActionAt
+	}
+	return actionAt, disqReasonID
 }
 
 func tryApplyGHLInboundStageSync(ctx context.Context, s *Service, webhook Webhook, leadID int64, flat map[string]any) {

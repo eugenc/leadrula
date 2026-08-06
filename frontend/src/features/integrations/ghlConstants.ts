@@ -6,7 +6,26 @@ export const GHL_FIELD_MAP_BUILTINS = [
   "note",
 ];
 
-export const GHL_STANDARD_CONTACT_FIELDS: { ghl: string; leadrula: string }[] = [
+export type GHLFieldSource = {
+  source_type: "builtin" | "custom" | "static";
+  builtin_field?: string;
+  custom_field_id?: number;
+  static_value?: string;
+};
+
+export type GHLContactStandardFields = {
+  firstName?: GHLFieldSource;
+  lastName?: GHLFieldSource;
+  phone?: GHLFieldSource;
+  email?: GHLFieldSource;
+  address1?: GHLFieldSource;
+  city?: GHLFieldSource;
+  state?: GHLFieldSource;
+  postalCode?: GHLFieldSource;
+  source?: GHLFieldSource;
+};
+
+export const GHL_STANDARD_CONTACT_FIELDS: { ghl: keyof GHLContactStandardFields; leadrula: string }[] = [
   { ghl: "firstName", leadrula: "first_name" },
   { ghl: "lastName", leadrula: "last_name" },
   { ghl: "phone", leadrula: "phone" },
@@ -18,12 +37,33 @@ export const GHL_STANDARD_CONTACT_FIELDS: { ghl: string; leadrula: string }[] = 
   { ghl: "source", leadrula: "source" },
 ];
 
-export type GHLFieldSource = {
-  source_type: "builtin" | "custom" | "static";
-  builtin_field?: string;
-  custom_field_id?: number;
-  static_value?: string;
+export const GHL_REQUIRED_CONTACT_FIELDS: (keyof GHLContactStandardFields)[] = [
+  "firstName",
+  "lastName",
+  "phone",
+];
+
+export const DEFAULT_GHL_CONTACT_STANDARD_FIELDS: GHLContactStandardFields = {
+  firstName: { source_type: "builtin", builtin_field: "first_name" },
+  lastName: { source_type: "builtin", builtin_field: "last_name" },
+  phone: { source_type: "builtin", builtin_field: "phone" },
+  email: { source_type: "builtin", builtin_field: "email" },
+  address1: { source_type: "builtin", builtin_field: "address" },
+  city: { source_type: "builtin", builtin_field: "city" },
+  state: { source_type: "builtin", builtin_field: "state" },
+  postalCode: { source_type: "builtin", builtin_field: "zip" },
+  source: { source_type: "builtin", builtin_field: "source" },
 };
+
+export function mergeGhlContactStandardFields(
+  values?: GHLContactStandardFields,
+  configured?: boolean
+): GHLContactStandardFields {
+  if (!configured) {
+    return { ...DEFAULT_GHL_CONTACT_STANDARD_FIELDS };
+  }
+  return { ...values };
+}
 
 export type GHLPipelineStageMapEntry = {
   leadrula_pipeline_id: number;
@@ -73,10 +113,12 @@ export type GHLConfig = {
   outbound_field_map?: OutboundFieldMapEntry[];
   opportunity_standard_fields?: GHLOpportunityStandardFields;
   appointment_standard_fields?: GHLAppointmentStandardFields;
+  contact_standard_fields?: GHLContactStandardFields;
   inbound_stage_sync_enabled?: boolean;
   inbound_sync_leadrula_pipeline_id?: number;
   inbound_sync_crm_pipeline_id?: string;
   inbound_sync_ghl_pipeline_id?: string;
+  sync_contact_updates_enabled?: boolean;
 };
 
 export function ghlEntryBelongsToSection(e: OutboundFieldMapEntry, section: GHLMapSection): boolean {
@@ -164,6 +206,10 @@ export function normalizeGhlConfig(config: GHLConfig): GHLConfig {
     config.create_appointment && !isGhlFieldSourceSet(config.appointment_datetime)
       ? DEFAULT_APPOINTMENT_DATETIME
       : config.appointment_datetime;
+  const contact_standard_fields = mergeGhlContactStandardFields(
+    config.contact_standard_fields,
+    config.contact_standard_fields != null
+  );
   return {
     ...config,
     appointment_datetime,
@@ -171,6 +217,7 @@ export function normalizeGhlConfig(config: GHLConfig): GHLConfig {
     opportunity_title_template: opportunityTitleTemplateFromConfig(config),
     pipeline_stage_map: config.pipeline_stage_map ?? [],
     outbound_field_map: config.outbound_field_map ?? [],
+    contact_standard_fields,
   };
 }
 
@@ -184,9 +231,11 @@ export const DEFAULT_GHL_CONFIG = (locationId: string): GHLConfig => ({
   appointment_datetime: DEFAULT_APPOINTMENT_DATETIME,
   appointment_title_template: "{{first_name}}",
   opportunity_title_template: "{{first_name}} {{last_name}}",
+  contact_standard_fields: { ...DEFAULT_GHL_CONTACT_STANDARD_FIELDS },
   pipeline_stage_map: [],
   outbound_field_map: [],
   inbound_stage_sync_enabled: false,
+  sync_contact_updates_enabled: false,
 });
 
 export const GHL_TIMEZONES = [

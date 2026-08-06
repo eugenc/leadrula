@@ -54,7 +54,7 @@ func (p *GHLProvider) Deliver(ctx context.Context, credentials []byte, payload D
 		result.Raw = oppResult.Raw
 	}
 
-	if cfg.CreateAppointment {
+	if cfg.CreateAppointment && !ghlSkipOpportunityStage(payload.Config) {
 		apptResult, err := ghlCreateAppointment(ctx, token, cfg, contactID, payload)
 		if err != nil {
 			if apptResult != nil {

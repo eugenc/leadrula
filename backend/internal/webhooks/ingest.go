@@ -552,7 +552,7 @@ func (s *Service) execMoveStage(ctx context.Context, accountID int64, webhookNam
 		disqReasonID = &id
 	}
 
-	updated, err := s.leadSvc.ChangeStageByWebhook(ctx, accountID, lead.ID, *event.TargetStageID, actionAt, disqReasonID, webhookName)
+	updated, err := s.leadSvc.ChangeStageByWebhook(ctx, accountID, lead.ID, *event.TargetStageID, actionAt, disqReasonID, webhookName, false)
 	if err != nil {
 		return nil, &lead.ID, err
 	}

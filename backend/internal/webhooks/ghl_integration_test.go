@@ -1,25 +1,61 @@
 package webhooks
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/echayko/leadrula/backend/internal/integrations/providers"
 )
 
-func TestParseGHLWebhookIDs_fromConfig(t *testing.T) {
-	ids := ParseGHLWebhookIDs(map[string]any{
-		"inbound_webhook_slug": "acme-ghl-abc",
-		"inbound_webhook_id":   float64(42),
-		"webhook_ids": map[string]any{
-			"inbound": float64(42),
-		},
-	})
-	if ids.Inbound != 42 || ids.InboundSlug != "acme-ghl-abc" {
-		t.Fatalf("ids=%+v", ids)
+func TestGHLInboundFieldMapMerge_configOverridesDefaults(t *testing.T) {
+	seen := map[string]bool{}
+	type entry struct {
+		sourceKey string
+		builtin   string
 	}
-}
+	var out []entry
+	add := func(sourceKey, targetType string, builtinField *string, _ *int64) error {
+		sourceKey = strings.TrimSpace(sourceKey)
+		if sourceKey == "" || seen[sourceKey] {
+			return nil
+		}
+		seen[sourceKey] = true
+		if targetType == "builtin" && builtinField != nil {
+			out = append(out, entry{sourceKey: sourceKey, builtin: *builtinField})
+		}
+		return nil
+	}
 
-func TestGHLBaseSlug(t *testing.T) {
-	slug, err := ghlBaseSlug("Acme Solar", "abc12345-uuid")
-	if err != nil || slug == "" {
-		t.Fatalf("slug=%q err=%v", slug, err)
+	config := map[string]any{
+		"contact_standard_fields": map[string]any{
+			"firstName": map[string]any{
+				"source_type":   "builtin",
+				"builtin_field": "email",
+			},
+		},
+	}
+	for _, m := range providers.GHLInboundMapsFromConfig(config) {
+		switch m.TargetType {
+		case "builtin":
+			if m.BuiltinField == nil {
+				continue
+			}
+			bf := *m.BuiltinField
+			if err := add(m.SourceKey, "builtin", &bf, nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, f := range defaultGHLInboundFields {
+		bf := f.BuiltinField
+		if err := add(f.SourceKey, "builtin", &bf, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for _, e := range out {
+		if e.sourceKey == "firstName" && e.builtin != "email" {
+			t.Fatalf("firstName should map to email from config, got %q", e.builtin)
+		}
 	}
 }

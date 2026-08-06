@@ -2,6 +2,8 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -278,6 +280,31 @@ func TestResolveGHLFieldSourceValue_static(t *testing.T) {
 	fs := GHLFieldSource{SourceType: "static", StaticValue: &v}
 	if got := resolveGHLFieldSourceValue(fs, DeliveryPayload{}); got != "Consultation" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestResolveGHLFieldValue_actionAt(t *testing.T) {
+	bf := "action_at"
+	entry := SunbaseFieldMapEntry{
+		DestKey:      "appointment_date_time",
+		SourceType:   "builtin",
+		BuiltinField: &bf,
+	}
+	payload := DeliveryPayload{
+		ActionAt: "2026-06-19T23:00:00Z",
+		Config: map[string]any{
+			"account_timezone": "America/New_York",
+		},
+	}
+	got := resolveGHLFieldValue(entry, payload)
+	want := "2026-06-19T19:00"
+	if got != want {
+		t.Fatalf("resolveGHLFieldValue() = %q, want %q", got, want)
+	}
+
+	fs := GHLFieldSource{SourceType: "builtin", BuiltinField: &bf}
+	if raw := resolveGHLFieldSourceValue(fs, payload); raw != "2026-06-19T23:00:00Z" {
+		t.Fatalf("resolveGHLFieldSourceValue() = %q, want raw RFC3339 for appointments", raw)
 	}
 }
 
@@ -722,5 +749,153 @@ func TestGHLProviderDeliver_webhookUnmappedStageSkipped(t *testing.T) {
 	}
 	if !IsDeliverySkipped(err) {
 		t.Fatalf("expected DeliverySkippedError, got %v", err)
+	}
+}
+
+func TestParseGHLConfig_syncContactUpdatesEnabled(t *testing.T) {
+	cfg, err := ParseGHLConfig(map[string]any{
+		"location_id":                  "loc1",
+		"sync_contact_updates_enabled": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.SyncContactUpdatesEnabled {
+		t.Fatal("expected sync_contact_updates_enabled true")
+	}
+}
+
+func TestGHLProviderDeliver_contactOnlySkipsOpportunityAndAppointment(t *testing.T) {
+	cfg := map[string]any{
+		"skip_opportunity_stage": true,
+	}
+	if !ghlSkipOpportunityStage(cfg) {
+		t.Fatal("expected skip_opportunity_stage to be recognized")
+	}
+}
+
+func TestBuildGHLContactBody_customStandardMapping(t *testing.T) {
+	cfid := int64(77)
+	cfg, err := ParseGHLConfig(map[string]any{
+		"location_id": "loc1",
+		"contact_standard_fields": map[string]any{
+			"firstName": map[string]any{
+				"source_type":     "custom",
+				"custom_field_id": cfid,
+			},
+			"lastName": map[string]any{
+				"source_type":   "builtin",
+				"builtin_field": "last_name",
+			},
+			"phone": map[string]any{
+				"source_type":   "builtin",
+				"builtin_field": "phone",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := buildGHLContactBody(cfg, DeliveryPayload{
+		FirstName:    "ignored",
+		LastName:     "Doe",
+		Phone:        "555",
+		CustomFields: map[string]any{"77": "MappedFirst"},
+	})
+	if body["firstName"] != "MappedFirst" {
+		t.Fatalf("firstName = %v, want MappedFirst", body["firstName"])
+	}
+	if body["lastName"] != "Doe" || body["phone"] != "555" {
+		t.Fatalf("unexpected body: %v", body)
+	}
+}
+
+func TestParseGHLConfig_contactStandardFieldsRequired(t *testing.T) {
+	_, err := ParseGHLConfig(map[string]any{
+		"location_id": "loc1",
+		"contact_standard_fields": map[string]any{
+			"firstName": map[string]any{
+				"source_type":   "builtin",
+				"builtin_field": "first_name",
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "contact_standard_fields.") || !strings.Contains(err.Error(), "is required") {
+		t.Fatalf("expected required contact field error, got %v", err)
+	}
+}
+
+func TestParseGHLConfig_contactStandardFieldsOptionalOmit(t *testing.T) {
+	cfg, err := ParseGHLConfig(map[string]any{
+		"location_id": "loc1",
+		"contact_standard_fields": map[string]any{
+			"firstName": map[string]any{"source_type": "builtin", "builtin_field": "first_name"},
+			"lastName":  map[string]any{"source_type": "builtin", "builtin_field": "last_name"},
+			"phone":     map[string]any{"source_type": "builtin", "builtin_field": "phone"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := buildGHLContactBody(cfg, DeliveryPayload{
+		FirstName: "Jane",
+		LastName:  "Doe",
+		Phone:     "555",
+		Email:     "j@test.com",
+	})
+	if _, ok := body["email"]; ok {
+		t.Fatalf("email should be omitted when not mapped, body: %v", body)
+	}
+}
+
+func TestGHLContactPayloadChanged_remappedFirstName(t *testing.T) {
+	cfid := int64(77)
+	cfg, err := ParseGHLConfig(map[string]any{
+		"location_id": "loc1",
+		"contact_standard_fields": map[string]any{
+			"firstName": map[string]any{"source_type": "custom", "custom_field_id": cfid},
+			"lastName":  map[string]any{"source_type": "builtin", "builtin_field": "last_name"},
+			"phone":     map[string]any{"source_type": "builtin", "builtin_field": "phone"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := json.Marshal(map[string]any{
+		"first_name":     "Jane",
+		"custom_fields": map[string]any{"77": "A"},
+	})
+	afterBuiltin, _ := json.Marshal(map[string]any{
+		"first_name":     "Janet",
+		"custom_fields": map[string]any{"77": "A"},
+	})
+	if GHLContactPayloadChanged(cfg, before, afterBuiltin) {
+		t.Fatal("builtin first_name change should be ignored when firstName maps to custom field")
+	}
+	afterCustom, _ := json.Marshal(map[string]any{
+		"first_name":     "Jane",
+		"custom_fields": map[string]any{"77": "B"},
+	})
+	if !GHLContactPayloadChanged(cfg, before, afterCustom) {
+		t.Fatal("custom mapped firstName change should be detected")
+	}
+}
+
+func TestGHLInboundMapsFromConfig_contactStandardFields(t *testing.T) {
+	cfid := int64(42)
+	maps := GHLInboundMapsFromConfig(map[string]any{
+		"contact_standard_fields": map[string]any{
+			"firstName": map[string]any{"source_type": "custom", "custom_field_id": cfid},
+		},
+	})
+	var found bool
+	for _, m := range maps {
+		if m.SourceKey == "firstName" && m.TargetType == "custom" && m.CustomFieldID != nil && *m.CustomFieldID == cfid {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected firstName inbound map to custom 42, got %+v", maps)
 	}
 }

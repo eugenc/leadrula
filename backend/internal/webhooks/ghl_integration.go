@@ -173,13 +173,6 @@ func (s *Service) SyncGHLInboundFieldMaps(ctx context.Context, inboundWebhookID 
 		return err
 	}
 
-	for _, f := range defaultGHLInboundFields {
-		bf := f.BuiltinField
-		if err := add(f.SourceKey, "builtin", &bf, nil); err != nil {
-			return err
-		}
-	}
-
 	for _, m := range providers.GHLInboundMapsFromConfig(config) {
 		switch m.TargetType {
 		case "builtin":
@@ -198,6 +191,13 @@ func (s *Service) SyncGHLInboundFieldMaps(ctx context.Context, inboundWebhookID 
 			if err := add(m.SourceKey, "custom", nil, &id); err != nil {
 				return err
 			}
+		}
+	}
+
+	for _, f := range defaultGHLInboundFields {
+		bf := f.BuiltinField
+		if err := add(f.SourceKey, "builtin", &bf, nil); err != nil {
+			return err
 		}
 	}
 	return nil
