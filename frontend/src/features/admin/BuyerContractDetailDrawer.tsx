@@ -24,7 +24,7 @@ import { ContractStatusBadge, formatContractStatus } from "@/features/admin/cont
 import { COMPENSATION_KINDS, formatCompTrigger } from "@/features/admin/contractCompensation";
 import { ContractReturnRulesEditor } from "@/features/admin/ContractReturnRulesEditor";
 import { BuyerContractFieldMapSection } from "@/features/admin/BuyerContractFieldMapSection";
-import { BuyerContractCalendarSection } from "@/features/appointments/BuyerContractCalendarSection";
+import { BuyerContractDeliveryCalendarSection } from "@/features/appointments/BuyerContractDeliveryCalendarSection";
 import { BuyerTriggerStageFields } from "@/features/admin/BuyerTriggerStageFields";
 import {
   BuyerParticipationDeliveryFields,
@@ -202,12 +202,6 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
                   <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Contract status</div>
                   <div className="mt-1 text-gray-700">{formatContractStatus(contract.status)}</div>
                 </div>
-                {contract.lead_type === "Appointment" && (
-                  <BuyerContractCalendarSection
-                    contractId={contract.id}
-                    appointmentCalendarId={contract.appointment_calendar_id}
-                  />
-                )}
               </div>
             ),
             compensation: (
@@ -264,6 +258,9 @@ function DrawerContent({ contract, onClose }: { contract: Contract; onClose: () 
                 )}
                 {canEditDelivery && deliverySaveBlock && (
                   <p className="mt-2 text-xs text-gray-500">{deliverySaveBlock}</p>
+                )}
+                {contract.lead_type === "Appointment" && (
+                  <BuyerContractDeliveryCalendarSection contract={contract} />
                 )}
                 {canEditDelivery && deliveryValid && pipelineDelivery && !returnRoutesValid && (
                   <p className="mt-2 text-xs text-amber-700">

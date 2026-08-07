@@ -47,6 +47,17 @@ type BuyerSlot struct {
 	DisabledAt  *time.Time `json:"disabled_at,omitempty"`
 }
 
+type PublisherSlot struct {
+	ID          int64      `json:"id"`
+	AccountID   int64      `json:"account_id"`
+	CalendarID  int64      `json:"calendar_id"`
+	Weekday     int        `json:"weekday"`
+	StartTime   string     `json:"start_time"`
+	DurationMin int        `json:"duration_min"`
+	Capacity    int        `json:"capacity"`
+	DisabledAt  *time.Time `json:"disabled_at,omitempty"`
+}
+
 type ContractSlot struct {
 	BuyerSlotID          int64  `json:"buyer_slot_id"`
 	Weekday              int    `json:"weekday"`
@@ -60,11 +71,12 @@ type ContractSlot struct {
 }
 
 type FreeSlot struct {
-	BuyerSlotID        int64     `json:"buyer_slot_id"`
-	SlotStart          time.Time `json:"slot_start"`
-	DurationMin        int       `json:"duration_min"`
-	Capacity           int       `json:"capacity"`
-	RemainingCapacity  int       `json:"remaining_capacity"`
+	BuyerSlotID       int64     `json:"buyer_slot_id,omitempty"`
+	PublisherSlotID   int64     `json:"publisher_slot_id,omitempty"`
+	SlotStart         time.Time `json:"slot_start"`
+	DurationMin       int       `json:"duration_min"`
+	Capacity          int       `json:"capacity"`
+	RemainingCapacity int       `json:"remaining_capacity"`
 }
 
 type CalendarDayMarker struct {
@@ -88,18 +100,23 @@ type BookingRow struct {
 	DeliveryStatus string     `json:"delivery_status,omitempty"`
 	BuyerName      string     `json:"buyer_name,omitempty"`
 	PublisherName  string     `json:"publisher_name,omitempty"`
-	LeadStatus     string     `json:"lead_status,omitempty"`
-	IsRoute        bool       `json:"-"`
+	CalendarName   string     `json:"calendar_name,omitempty"`
+	LeadStatus       string     `json:"lead_status,omitempty"`
+	ExternalEventID  string     `json:"external_event_id,omitempty"`
+	IsRoute          bool       `json:"-"`
 }
 
 type AppointmentContract struct {
-	ContractID   int64  `json:"contract_id"`
-	ContractName string `json:"contract_name"`
-	BuyerID      int64  `json:"buyer_id"`
-	BuyerName    string `json:"buyer_name"`
-	Timezone     string `json:"timezone"`
-	Location     string `json:"location,omitempty"`
-	Configured   bool   `json:"configured"`
+	ContractID             int64  `json:"contract_id"`
+	ContractName           string `json:"contract_name"`
+	BuyerID                int64  `json:"buyer_id"`
+	BuyerName              string `json:"buyer_name"`
+	Timezone               string `json:"timezone"`
+	Location               string `json:"location,omitempty"`
+	Configured             bool   `json:"configured"`
+	OwnConfigured          bool   `json:"own_configured"`
+	CounterpartyConfigured bool   `json:"counterparty_configured"`
+	CalendarSource         string `json:"calendar_source,omitempty"`
 }
 
 func (s *Service) getAccountTimezone(ctx context.Context, accountID int64) (string, error) {
@@ -158,14 +175,6 @@ func (s *Service) buyerConfigured(ctx context.Context, buyerID int64) (bool, err
 			WHERE c.account_id = $1 AND s.disabled_at IS NULL
 		)`, buyerID).Scan(&ok)
 	return ok, err
-}
-
-func (s *Service) contractCalendarConfigured(ctx context.Context, contractID int64) (bool, error) {
-	calID, err := s.contractCalendarID(ctx, contractID)
-	if err != nil {
-		return false, err
-	}
-	return s.calendarConfigured(ctx, calID)
 }
 
 func effectiveCapacity(slot BuyerSlot, cs *ContractSlot) int {

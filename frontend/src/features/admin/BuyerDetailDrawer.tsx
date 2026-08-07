@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Sheet, DrawerHeader, DrawerBody, DrawerFooter } from "@/components/ui/dialog";
 import { MessageButton } from "@/features/messaging/MessageButton";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/misc";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
+import { pathAfterAccountSwitch } from "@/lib/accountPath";
 import { cn, formatMoney } from "@/lib/utils";
 import { TIMEZONES } from "@/lib/timezones";
 import {
@@ -87,6 +88,7 @@ function DrawerContent({
   const impersonate = useImpersonateBuyer();
   const startImpersonation = useAuthStore((s) => s.startImpersonation);
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [name, setName] = useState("");
   const [website, setWebsite] = useState("");
@@ -142,7 +144,7 @@ function DrawerContent({
         const u = res.user as unknown as CurrentUser & { buyer_account_name?: string };
         startImpersonation(res.access, u, u.buyer_account_name ?? buyer.name);
         onClose();
-        navigate("/b");
+        navigate(pathAfterAccountSwitch(location.pathname, location.search, "buyer"));
       },
       onError: (e) => toast.error(errorMessage(e)),
     });

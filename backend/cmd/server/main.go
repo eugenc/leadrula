@@ -207,6 +207,11 @@ func main() {
 		intakeH.RegisterPublicRoutes(pub)
 		leadsH.RegisterPublicRoutes(pub, apikeysSvc)
 		callsH.RegisterPublicRoutes(pub)
+		apptH.RegisterPublicRoutes(pub, apikeysSvc)
+		cfH.RegisterPublicRoutes(pub, apikeysSvc)
+		if integrationsSvc != nil {
+			integrations.NewHandler(integrationsSvc, webhooksSvc, "publisher", cfg.AppBaseURL, cfg.APIBaseURL).RegisterPublicRoutes(pub, apikeysSvc)
+		}
 	})
 
 	// source ingest (per-source API-key auth)

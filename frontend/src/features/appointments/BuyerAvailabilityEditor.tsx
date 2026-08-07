@@ -26,8 +26,15 @@ import {
   useCalendarSlots,
   useCreateBookingCalendar,
   useCreateCalendarSlot,
+  useCreatePublisherBookingCalendar,
+  useCreatePublisherCalendarSlot,
   usePatchCalendarSlot,
+  usePatchPublisherCalendarSlot,
+  usePublisherBookingCalendar,
+  usePublisherCalendarSlots,
   useSaveBookingCalendar,
+  useSavePublisherBookingCalendar,
+  type CalendarOwner,
   WEEKDAY_KEYS,
   WEEKDAYS,
 } from "@/features/appointments/hooks";
@@ -64,6 +71,9 @@ const SAVE_DEBOUNCE_MS = 500;
 const DEFAULT_SLOT_DURATION_MIN = 30;
 const MIN_SLOT_DURATION_MIN = 15;
 const MAX_SLOT_DURATION_MIN = 180;
+const DEFAULT_SLOT_CAPACITY = 1;
+const MIN_SLOT_CAPACITY = 1;
+const MAX_SLOT_CAPACITY = 20;
 const SLOT_ROW_GRID =
   "grid grid-cols-[4rem_minmax(7.5rem,9rem)_minmax(7.5rem,9rem)_3rem_4.5rem] items-center gap-2";
 // From+To share slot From+To+Cap width (equal columns); actions column aligns with slots.
@@ -122,6 +132,55 @@ function defaultAddSlotStart(
     return candidate;
   }
   return null;
+}
+
+function clampDefaultCapacity(value: number): number {
+  return Math.min(MAX_SLOT_CAPACITY, Math.max(MIN_SLOT_CAPACITY, Math.round(value)));
+}
+
+function generateDaySlotStarts(
+  dayStart: string,
+  dayEnd: string,
+  durationMin: number,
+  bufferMin: number
+): string[] {
+  const starts: string[] = [];
+  let current = firstValidStartInWindow(dayStart, dayEnd, durationMin);
+  while (current && isStartValidForWindow(current, durationMin, dayStart, dayEnd)) {
+    starts.push(current);
+    const nextMin = timeHhmmToMinutes(slotEndTime(current, durationMin)) + bufferMin;
+    current = minutesToTimeHhmm(nextMin);
+  }
+  return starts;
+}
+
+function generateAllSlotStarts(
+  schedule: Schedule,
+  durationMin: number,
+  bufferMin: number
+): { weekday: number; start_time: string }[] {
+  const result: { weekday: number; start_time: string }[] = [];
+  for (const weekday of openWeekdays(schedule)) {
+    const day = schedule[WEEKDAY_KEYS[weekday]]!;
+    for (const start_time of generateDaySlotStarts(day.start, day.end, durationMin, bufferMin)) {
+      result.push({ weekday, start_time });
+    }
+  }
+  return result;
+}
+
+function buildGenerateConfirmMessage(
+  existingCount: number,
+  newCount: number,
+  durationMin: number,
+  bufferMin: number,
+  capacity: number
+): string {
+  const settings = `${durationMin} min, ${bufferMin} min buffer, capacity ${capacity}`;
+  if (existingCount > 0) {
+    return `Replace all ${existingCount} booking slot${existingCount === 1 ? "" : "s"} and generate ${newCount} new slot${newCount === 1 ? "" : "s"} from working hours? (${settings})`;
+  }
+  return `Generate ${newCount} booking slot${newCount === 1 ? "" : "s"} from working hours? (${settings})`;
 }
 
 function slotInsideWindow(start: string, durationMin: number, dayStart: string, dayEnd: string): boolean {
@@ -388,6 +447,7 @@ function BookingSlotsPanel({
   onRemove,
   onCopy,
   onClearAll,
+  onGenerateAll,
   savePending = false,
 }: {
   schedule: Schedule;
@@ -406,14 +466,22 @@ function BookingSlotsPanel({
   onRemove: (id: number | string) => void;
   onCopy: (slot: SlotRow, toWeekdays: number[]) => void;
   onClearAll?: () => void;
+  onGenerateAll?: (defaultCapacity: number) => void;
   savePending?: boolean;
 }) {
   const days = openWeekdays(schedule);
   const [durationDraft, setDurationDraft] = useState(String(globalDurationMin));
+  const [defaultCapacityDraft, setDefaultCapacityDraft] = useState(String(DEFAULT_SLOT_CAPACITY));
 
   useEffect(() => {
     setDurationDraft(String(globalDurationMin));
   }, [globalDurationMin]);
+
+  function defaultCapacity(): number {
+    const parsed = Number(defaultCapacityDraft);
+    if (Number.isNaN(parsed)) return DEFAULT_SLOT_CAPACITY;
+    return clampDefaultCapacity(parsed);
+  }
 
   function addSlot(weekday: number) {
     const dayHours = schedule[WEEKDAY_KEYS[weekday]]!;
@@ -429,7 +497,7 @@ function BookingSlotsPanel({
       toast.error("No slot fits in working hours");
       return;
     }
-    onAdd({ weekday, start_time: from, capacity: 1 }, () => {});
+    onAdd({ weekday, start_time: from, capacity: defaultCapacity() }, () => {});
   }
 
   function handleDurationInput(raw: string) {
@@ -466,6 +534,24 @@ function BookingSlotsPanel({
     }
   }
 
+  function handleDefaultCapacityInput(raw: string) {
+    setDefaultCapacityDraft(raw);
+  }
+
+  function handleDefaultCapacityBlur() {
+    const trimmed = defaultCapacityDraft.trim();
+    if (!trimmed) {
+      setDefaultCapacityDraft(String(DEFAULT_SLOT_CAPACITY));
+      return;
+    }
+    const next = Number(trimmed);
+    if (Number.isNaN(next)) {
+      setDefaultCapacityDraft(String(DEFAULT_SLOT_CAPACITY));
+      return;
+    }
+    setDefaultCapacityDraft(String(clampDefaultCapacity(next)));
+  }
+
   if (!days.length) {
     return (
       <p className="text-sm text-gray-500">Set working hours above to add booking slots.</p>
@@ -474,7 +560,7 @@ function BookingSlotsPanel({
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-3">
         <div>
           <Label>Duration (min)</Label>
           <Input
@@ -488,7 +574,7 @@ function BookingSlotsPanel({
           />
         </div>
         <div>
-          <Label>Buffer after appointments (min)</Label>
+          <Label>Buffer (After)</Label>
           <Input
             type="number"
             min={0}
@@ -499,20 +585,45 @@ function BookingSlotsPanel({
             onBlur={onBufferBlur}
           />
         </div>
+        <div>
+          <Label>Default capacity</Label>
+          <Input
+            type="number"
+            min={MIN_SLOT_CAPACITY}
+            max={MAX_SLOT_CAPACITY}
+            disabled={readOnly}
+            value={defaultCapacityDraft}
+            onChange={(e) => handleDefaultCapacityInput(e.target.value)}
+            onBlur={handleDefaultCapacityBlur}
+          />
+        </div>
       </div>
 
       <div className="space-y-1">
-        {slots.length > 0 && onClearAll && (
-          <div className="flex justify-end">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={savePending}
-              onClick={onClearAll}
-            >
-              Clear all
-            </Button>
+        {(onGenerateAll || (slots.length > 0 && onClearAll)) && (
+          <div className="flex justify-end gap-2">
+            {onGenerateAll && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={savePending}
+                onClick={() => onGenerateAll(defaultCapacity())}
+              >
+                Generate slots
+              </Button>
+            )}
+            {slots.length > 0 && onClearAll && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={savePending}
+                onClick={onClearAll}
+              >
+                Clear all
+              </Button>
+            )}
           </div>
         )}
         {slots.length > 0 && (
@@ -602,33 +713,49 @@ function BookingSlotsPanel({
 export function BuyerAvailabilityEditor({
   calendarId,
   readOnly = false,
+  owner = "buyer",
 }: {
   calendarId: number;
   readOnly?: boolean;
+  owner?: CalendarOwner;
 }) {
-  const { data: calendar, isLoading: calendarLoading } = useBookingCalendar(calendarId);
-  const saveAvail = useSaveBookingCalendar(calendarId);
-  const { data: slotsData } = useCalendarSlots(calendarId);
+  const isPublisher = owner === "publisher";
+  const buyerCal = useBookingCalendar(isPublisher ? null : calendarId);
+  const pubCal = usePublisherBookingCalendar(isPublisher ? calendarId : null);
+  const calendar = isPublisher ? pubCal.data : buyerCal.data;
+  const calendarLoading = isPublisher ? pubCal.isLoading : buyerCal.isLoading;
+  const saveBuyer = useSaveBookingCalendar(calendarId);
+  const savePub = useSavePublisherBookingCalendar(calendarId);
+  const saveAvail = isPublisher ? savePub : saveBuyer;
+  const buyerSlots = useCalendarSlots(isPublisher ? null : calendarId);
+  const pubSlots = usePublisherCalendarSlots(isPublisher ? calendarId : null);
+  const slotsData = isPublisher ? pubSlots.data : buyerSlots.data;
   const emptySlots = useMemo(() => [] as BuyerAppointmentSlot[], []);
   const slots = slotsData ?? emptySlots;
-  const createSlot = useCreateCalendarSlot(calendarId);
-  const patchSlot = usePatchCalendarSlot(calendarId);
+  const createBuyerSlot = useCreateCalendarSlot(calendarId);
+  const createPubSlot = useCreatePublisherCalendarSlot(calendarId);
+  const createSlot = isPublisher ? createPubSlot : createBuyerSlot;
+  const patchBuyerSlot = usePatchCalendarSlot(calendarId);
+  const patchPubSlot = usePatchPublisherCalendarSlot(calendarId);
+  const patchSlot = isPublisher ? patchPubSlot : patchBuyerSlot;
 
+  const [name, setName] = useState("");
   const [schedule, setSchedule] = useState<Schedule>({});
   const [timezone, setTimezone] = useState("America/New_York");
   const [location, setLocation] = useState("");
   const [bufferMin, setBufferMin] = useState(0);
   const [slotDurationMin, setSlotDurationMin] = useState(DEFAULT_SLOT_DURATION_MIN);
+  const [bulkSlotOp, setBulkSlotOp] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const savedSnapshot = useRef<{ schedule: Schedule; timezone: string; location: string; bufferMin: number } | null>(null);
-  const stateRef = useRef({ schedule, timezone, location, bufferMin });
+  const savedSnapshot = useRef<{ name: string; schedule: Schedule; timezone: string; location: string; bufferMin: number } | null>(null);
+  const stateRef = useRef({ name, schedule, timezone, location, bufferMin });
   const slotsInitialized = useRef(false);
   const calendarLoadedRef = useRef(false);
   const lastHydratedKey = useRef<string | null>(null);
 
   useEffect(() => {
-    stateRef.current = { schedule, timezone, location, bufferMin };
-  }, [schedule, timezone, location, bufferMin]);
+    stateRef.current = { name, schedule, timezone, location, bufferMin };
+  }, [name, schedule, timezone, location, bufferMin]);
 
   useEffect(() => {
     lastHydratedKey.current = null;
@@ -646,11 +773,13 @@ export function BuyerAvailabilityEditor({
     lastHydratedKey.current = hydrationKey;
 
     const sched = (calendar.schedule as Schedule) ?? {};
+    setName(calendar.name);
     setSchedule(sched);
     setTimezone(calendar.timezone);
     setLocation(calendar.location ?? "");
     setBufferMin(calendar.buffer_min);
     savedSnapshot.current = {
+      name: calendar.name,
       schedule: sched,
       timezone: calendar.timezone,
       location: calendar.location ?? "",
@@ -670,11 +799,17 @@ export function BuyerAvailabilityEditor({
 
   const persistIfDirty = useCallback(() => {
     if (readOnly || !calendarLoadedRef.current) return;
-    const { schedule: sched, timezone: tz, location: loc, bufferMin: buf } = stateRef.current;
+    const { name: calName, schedule: sched, timezone: tz, location: loc, bufferMin: buf } = stateRef.current;
     if (scheduleHasInvalidHours(sched)) return;
+    const trimmedName = calName.trim();
+    if (!trimmedName) {
+      toast.error("Calendar name is required");
+      return;
+    }
     const snap = savedSnapshot.current;
     if (
       snap &&
+      snap.name === trimmedName &&
       snap.timezone === tz &&
       snap.location === loc &&
       snap.bufferMin === buf &&
@@ -683,11 +818,12 @@ export function BuyerAvailabilityEditor({
       return;
     }
     saveAvail.mutate(
-      { schedule: sched, timezone: tz, location: loc, buffer_min: buf },
+      { name: trimmedName, schedule: sched, timezone: tz, location: loc, buffer_min: buf },
       {
         onSuccess: (saved) => {
           const savedSched = (saved.schedule as Schedule) ?? {};
           savedSnapshot.current = {
+            name: saved.name,
             schedule: savedSched,
             timezone: saved.timezone,
             location: saved.location ?? "",
@@ -874,6 +1010,60 @@ export function BuyerAvailabilityEditor({
     if (cleared === active.length) toast.success("All booking slots cleared");
   }
 
+  async function generateAllSlots(defaultCapacity: number) {
+    const capacity = clampDefaultCapacity(defaultCapacity);
+    const generated = generateAllSlotStarts(schedule, slotDurationMin, bufferMin);
+    if (!generated.length) {
+      toast.error("No slots fit in working hours");
+      return;
+    }
+    const active = slots.filter((s) => !s.disabled_at);
+    const msg = buildGenerateConfirmMessage(
+      active.length,
+      generated.length,
+      slotDurationMin,
+      bufferMin,
+      capacity
+    );
+    if (!window.confirm(msg)) return;
+
+    setBulkSlotOp(true);
+    try {
+      for (const s of active) {
+        try {
+          await patchSlot.mutateAsync({ id: s.id, body: { disabled: true } });
+        } catch (e) {
+          toast.error(`${WEEKDAYS[s.weekday]} ${s.start_time}: ${errorMessage(e)}`);
+        }
+      }
+
+      let created = 0;
+      for (const slot of generated) {
+        try {
+          await createSlot.mutateAsync({
+            weekday: slot.weekday,
+            start_time: slot.start_time,
+            duration_min: slotDurationMin,
+            capacity,
+          });
+          created++;
+        } catch (e) {
+          toast.error(`${WEEKDAYS[slot.weekday]} ${slot.start_time}: ${errorMessage(e)}`);
+        }
+      }
+
+      if (created === generated.length) {
+        toast.success(
+          created === 1 ? "1 booking slot generated" : `${created} booking slots generated`
+        );
+      } else if (created > 0) {
+        toast.success(`${created} of ${generated.length} booking slots generated`);
+      }
+    } finally {
+      setBulkSlotOp(false);
+    }
+  }
+
   const slotRows: SlotRow[] = slots
     .filter((s) => !s.disabled_at)
     .map((s) => ({
@@ -886,6 +1076,17 @@ export function BuyerAvailabilityEditor({
 
   return (
     <div className="w-fit max-w-full space-y-6">
+      <div>
+        <Label>Calendar name</Label>
+        <Input
+          value={name}
+          disabled={readOnly}
+          placeholder="e.g. Sales team"
+          onChange={(e) => setName(e.target.value)}
+          onBlur={handleBlurSave}
+        />
+      </div>
+
       <div>
         <Label>Calendar timezone</Label>
         <Select
@@ -950,7 +1151,8 @@ export function BuyerAvailabilityEditor({
             }
             onCopy={copySlot}
             onClearAll={readOnly ? undefined : clearAllSlots}
-            savePending={createSlot.isPending || patchSlot.isPending}
+            onGenerateAll={readOnly ? undefined : generateAllSlots}
+            savePending={bulkSlotOp || createSlot.isPending || patchSlot.isPending}
           />
         </div>
       </div>
@@ -975,15 +1177,24 @@ export function BuyerSetupWizard({
   open,
   onOpenChange,
   onComplete,
+  owner = "buyer",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onComplete: (calendarId: number) => void;
+  owner?: CalendarOwner;
 }) {
-  const createCalendar = useCreateBookingCalendar();
+  const isPublisher = owner === "publisher";
+  const createBuyerCalendar = useCreateBookingCalendar();
+  const createPubCalendar = useCreatePublisherBookingCalendar();
+  const createCalendar = isPublisher ? createPubCalendar : createBuyerCalendar;
   const [calendarId, setCalendarId] = useState<number | null>(null);
-  const saveAvail = useSaveBookingCalendar(calendarId ?? 0);
-  const createSlot = useCreateCalendarSlot(calendarId ?? 0);
+  const saveBuyer = useSaveBookingCalendar(calendarId ?? 0);
+  const savePub = useSavePublisherBookingCalendar(calendarId ?? 0);
+  const saveAvail = isPublisher ? savePub : saveBuyer;
+  const createBuyerSlot = useCreateCalendarSlot(calendarId ?? 0);
+  const createPubSlot = useCreatePublisherCalendarSlot(calendarId ?? 0);
+  const createSlot = isPublisher ? createPubSlot : createBuyerSlot;
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
   const [timezone, setTimezone] = useState("America/New_York");
@@ -1123,6 +1334,36 @@ export function BuyerSetupWizard({
     toast.success(copied === 1 ? "Slot copied" : "Slots copied");
   }
 
+  function generateAllDrafts(defaultCapacity: number) {
+    const capacity = clampDefaultCapacity(defaultCapacity);
+    const generated = generateAllSlotStarts(schedule, slotDurationMin, bufferMin);
+    if (!generated.length) {
+      toast.error("No slots fit in working hours");
+      return;
+    }
+    const msg = buildGenerateConfirmMessage(
+      slotDrafts.length,
+      generated.length,
+      slotDurationMin,
+      bufferMin,
+      capacity
+    );
+    if (!window.confirm(msg)) return;
+    setSlotDrafts(
+      generated.map((slot) => ({
+        id: draftId(),
+        weekday: slot.weekday,
+        start_time: slot.start_time,
+        capacity,
+      }))
+    );
+    toast.success(
+      generated.length === 1
+        ? "1 booking slot generated"
+        : `${generated.length} booking slots generated`
+    );
+  }
+
   async function finish() {
     if (!calendarId) return;
     if (firstOpenWeekday(schedule) === null) {
@@ -1221,6 +1462,7 @@ export function BuyerSetupWizard({
               onRemove={(id) => setSlotDrafts((prev) => prev.filter((d) => d.id !== id))}
               onCopy={copySingleDraft}
               onClearAll={() => setSlotDrafts([])}
+              onGenerateAll={generateAllDrafts}
             />
           </div>
         )}

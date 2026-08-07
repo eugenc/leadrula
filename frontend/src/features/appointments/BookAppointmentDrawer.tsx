@@ -6,6 +6,7 @@ import { FormDrawer } from "@/components/ui/dialog";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import { useLeads, usePipelines, useStages } from "@/features/leads/hooks";
+import { zonedDateTimeToISO } from "@/features/appointments/appointmentTime";
 import { useBookAppointment, useBuyerBookAppointment } from "@/features/appointments/hooks";
 import type { AppointmentFreeSlot } from "@/types";
 
@@ -14,17 +15,23 @@ export function BookAppointmentDrawer({
   onClose,
   onBooked,
   contractId,
+  calendarId,
   slot,
+  customSchedule,
   mode = "publisher",
 }: {
   open: boolean;
   onClose: () => void;
   onBooked?: () => void;
-  contractId: number;
+  contractId?: number;
+  calendarId?: number;
   slot: AppointmentFreeSlot | null;
+  customSchedule?: { date: string; timezone: string } | null;
   mode?: "publisher" | "buyer";
 }) {
   const isBuyer = mode === "buyer";
+  const isCustom = !!customSchedule;
+  const calendarOnly = !!calendarId && !contractId;
   const publisherBook = useBookAppointment();
   const buyerBook = useBuyerBookAppointment();
   const book = isBuyer ? buyerBook : publisherBook;
@@ -40,6 +47,8 @@ export function BookAppointmentDrawer({
   const [source, setSource] = useState("");
   const [pipelineId, setPipelineId] = useState(0);
   const [stageId, setStageId] = useState(0);
+  const [customTime, setCustomTime] = useState("09:00");
+  const [customDuration, setCustomDuration] = useState(30);
 
   const { data: leadRes } = useLeads({ q: debounced || undefined, limit: 20 });
   const leads = leadRes?.items ?? [];
@@ -53,27 +62,54 @@ export function BookAppointmentDrawer({
 
   useEffect(() => {
     if (!open) {
-      setDeliveryMode(isBuyer ? "contract" : "");
+      setDeliveryMode(isBuyer ? "contract" : calendarOnly ? "publisher_pipeline" : "");
       setLeadId(null);
       setModeLead("existing");
+      setCustomTime("09:00");
+      setCustomDuration(30);
     } else if (isBuyer) {
       setDeliveryMode("contract");
+    } else if (calendarOnly) {
+      setDeliveryMode("publisher_pipeline");
     }
-  }, [open, isBuyer]);
+  }, [open, isBuyer, calendarOnly]);
 
   function submit() {
-    if (!slot) return;
+    if (!slot && !isCustom) return;
     const effectiveDelivery = isBuyer ? "contract" : deliveryMode;
     if (!effectiveDelivery) {
       toast.error("Choose a delivery mode");
       return;
     }
     const body: Record<string, unknown> = {
-      contract_id: contractId,
-      buyer_slot_id: slot.buyer_slot_id,
-      slot_start: slot.slot_start,
       delivery_mode: effectiveDelivery,
+      booking_target: "own",
     };
+    if (isCustom && customSchedule) {
+      if (!customTime) {
+        toast.error("Enter a time");
+        return;
+      }
+      if (customDuration < 15 || customDuration > 240) {
+        toast.error("Duration must be between 15 and 240 minutes");
+        return;
+      }
+      body.custom_time = true;
+      body.slot_start = zonedDateTimeToISO(customSchedule.date, customTime, customSchedule.timezone);
+      body.duration_min = customDuration;
+    } else if (slot) {
+      body.slot_start = slot.slot_start;
+      if (slot.publisher_slot_id) body.publisher_slot_id = slot.publisher_slot_id;
+      else if (slot.buyer_slot_id) body.buyer_slot_id = slot.buyer_slot_id;
+    } else {
+      return;
+    }
+    if (calendarId) body.calendar_id = calendarId;
+    else if (contractId) body.contract_id = contractId;
+    else {
+      toast.error("Missing booking context");
+      return;
+    }
     if (modeLead === "existing") {
       if (!leadId) {
         toast.error("Select a lead");
@@ -105,13 +141,39 @@ export function BookAppointmentDrawer({
     });
   }
 
+  const canSubmit = isCustom ? !!customSchedule : !!slot;
+
   return (
     <FormDrawer open={open} onClose={onClose} title="Book appointment">
-      {slot && (
-        <p className="mb-4 text-sm text-gray-600">
-          {format(new Date(slot.slot_start), "EEEE, MMM d · h:mm a")} · {slot.duration_min} min ·{" "}
-          {slot.remaining_capacity} free
-        </p>
+      {isCustom && customSchedule ? (
+        <div className="mb-4 space-y-3">
+          <p className="text-sm text-gray-600">
+            Custom time on {format(new Date(customSchedule.date + "T12:00:00"), "EEEE, MMM d")} ({customSchedule.timezone})
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label>Time</Label>
+              <Input type="time" value={customTime} onChange={(e) => setCustomTime(e.target.value)} />
+            </div>
+            <div>
+              <Label>Duration (min)</Label>
+              <Input
+                type="number"
+                min={15}
+                max={240}
+                value={customDuration}
+                onChange={(e) => setCustomDuration(Number(e.target.value))}
+              />
+            </div>
+          </div>
+        </div>
+      ) : (
+        slot && (
+          <p className="mb-4 text-sm text-gray-600">
+            {format(new Date(slot.slot_start), "EEEE, MMM d · h:mm a")} · {slot.duration_min} min ·{" "}
+            {slot.remaining_capacity} free
+          </p>
+        )
       )}
 
       <div className="mb-4 flex gap-2">
@@ -179,15 +241,17 @@ export function BookAppointmentDrawer({
         <>
           <div className="mt-4 space-y-2">
             <Label>Delivery</Label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="radio"
-                name="delivery"
-                checked={deliveryMode === "contract"}
-                onChange={() => setDeliveryMode("contract")}
-              />
-              Deliver via contract
-            </label>
+            {!calendarOnly && (
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="delivery"
+                  checked={deliveryMode === "contract"}
+                  onChange={() => setDeliveryMode("contract")}
+                />
+                Deliver via contract
+              </label>
+            )}
             <label className="flex items-center gap-2 text-sm">
               <input
                 type="radio"
@@ -232,7 +296,7 @@ export function BookAppointmentDrawer({
         <Button variant="secondary" onClick={onClose}>
           Cancel
         </Button>
-        <Button onClick={submit} disabled={book.isPending || !slot}>
+        <Button onClick={submit} disabled={book.isPending || !canSubmit}>
           Book
         </Button>
       </div>

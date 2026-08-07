@@ -14,8 +14,8 @@ func (s *Service) ghlAppointmentEventID(ctx context.Context, leadID, connID int6
 	}
 	var eventID string
 	err := s.pool.QueryRow(ctx,
-		`SELECT event_id FROM lead_integration_appointment_events
-		 WHERE lead_id = $1 AND connection_id = $2`,
+		`SELECT external_event_id FROM lead_external_appointment_events
+		 WHERE lead_id = $1 AND connection_id = $2 AND provider_slug = 'ghl'`,
 		leadID, connID).Scan(&eventID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -32,10 +32,10 @@ func (s *Service) setGHLAppointmentEventID(ctx context.Context, leadID, connID i
 		return nil
 	}
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO lead_integration_appointment_events (lead_id, connection_id, event_id, updated_at)
-		 VALUES ($1, $2, $3, now())
+		`INSERT INTO lead_external_appointment_events (lead_id, connection_id, external_event_id, provider_slug, updated_at)
+		 VALUES ($1, $2, $3, 'ghl', now())
 		 ON CONFLICT (lead_id, connection_id) DO UPDATE
-		   SET event_id = EXCLUDED.event_id, updated_at = now()`,
+		   SET external_event_id = EXCLUDED.external_event_id, updated_at = now()`,
 		leadID, connID, eventID)
 	return err
 }

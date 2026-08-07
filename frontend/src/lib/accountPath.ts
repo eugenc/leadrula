@@ -1,4 +1,13 @@
 import { homePath } from "@/lib/homePath";
+import type { AccountType } from "@/types";
+
+function tenantPrefix(accountType: "publisher" | "buyer"): string {
+  return accountType === "publisher" ? "/p" : "/b";
+}
+
+function onTenantPrefix(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
 
 // Suffixes that differ between the publisher (/p) and buyer (/b) route trees.
 const PUBLISHER_TO_BUYER: Record<string, string> = {
@@ -13,7 +22,7 @@ const BUYER_TO_PUBLISHER: Record<string, string> = Object.fromEntries(
 
 // Suffixes that exist only on one side and have no equivalent on the other.
 const PUBLISHER_ONLY = new Set(["sources"]);
-const BUYER_ONLY = new Set(["calendar"]);
+const BUYER_ONLY = new Set<string>();
 
 export function mapAccountPath(
   pathname: string,
@@ -40,4 +49,20 @@ export function mapAccountPath(
   if (map[head]) segments[0] = map[head];
 
   return `${targetPrefix}/${segments.join("/")}${search}`;
+}
+
+export function pathAfterAccountSwitch(
+  pathname: string,
+  search: string,
+  target: AccountType
+): string {
+  if (target === "platform") {
+    if (pathname.startsWith("/platform")) return `${pathname}${search}`;
+    return homePath("platform");
+  }
+
+  const prefix = tenantPrefix(target);
+  if (onTenantPrefix(pathname, prefix)) return `${pathname}${search}`;
+
+  return mapAccountPath(pathname, search, target);
 }

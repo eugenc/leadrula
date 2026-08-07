@@ -52,6 +52,7 @@ export function BookedAppointmentsTable({
           <TH>Lead</TH>
           <TH>Phone</TH>
           <TH>{showBuyer ? "Buyer" : "Publisher"}</TH>
+          <TH>Calendar</TH>
           <TH>Contract</TH>
         </tr>
       </THead>
@@ -65,6 +66,7 @@ export function BookedAppointmentsTable({
             <TD>{row.lead_name || "—"}</TD>
             <TD>{row.phone || row.email || "—"}</TD>
             <TD>{showBuyer ? row.buyer_name : row.publisher_name}</TD>
+            <TD>{row.calendar_name || "—"}</TD>
             <TD>{row.contract_name}</TD>
           </TR>
         ))}

@@ -1,13 +1,15 @@
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/store/authStore";
 import { useEndImpersonation } from "@/features/admin/hooks";
+import { pathAfterAccountSwitch } from "@/lib/accountPath";
 
 export function ImpersonationBanner() {
   const impersonation = useAuthStore((s) => s.impersonation);
   const publisherUser = impersonation?.publisherUser;
   const navigate = useNavigate();
+  const location = useLocation();
   const endImp = useEndImpersonation();
 
   if (!impersonation) return null;
@@ -16,7 +18,7 @@ export function ImpersonationBanner() {
     endImp.mutate(undefined, {
       onSettled: () => {
         useAuthStore.getState().endImpersonation();
-        navigate("/p/buyers");
+        navigate(pathAfterAccountSwitch(location.pathname, location.search, "publisher"));
       },
     });
   }

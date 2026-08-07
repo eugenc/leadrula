@@ -326,6 +326,8 @@ type ListFilters struct {
 	Conditions    []FilterCondition
 	FilterTZ      string
 	Search        string
+	UpdatedSince  *time.Time
+	ExternalID    string
 }
 
 type ListOptions struct {
@@ -492,6 +494,13 @@ func (r *Repository) appendListFilters(p *auth.Principal, f ListFilters, where s
 
 	if f.Search != "" {
 		where, args = appendLeadSearch(where, args, f.Search)
+	}
+	if f.UpdatedSince != nil {
+		args = append(args, *f.UpdatedSince)
+		where += fmt.Sprintf(" AND l.updated_at >= $%d", len(args))
+	}
+	if f.ExternalID != "" {
+		add("l.external_id =", f.ExternalID)
 	}
 	where, args = collaboration.AppendLeadScope(p, where, args)
 	return where, args
@@ -1153,4 +1162,18 @@ func (r *Repository) CustomFieldNames(ctx context.Context, accountID int64, ids 
 		out[fmt.Sprintf("%d", id)] = name
 	}
 	return out, rows.Err()
+}
+
+func (r *Repository) CustomFieldIDByKey(ctx context.Context, accountID int64, fieldKey string) (int64, error) {
+	var id int64
+	err := r.pool.QueryRow(ctx,
+		`SELECT id FROM custom_fields WHERE account_id=$1 AND field_key=$2 AND is_active`,
+		accountID, fieldKey).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, httpx.NotFound("custom field not found")
+		}
+		return 0, err
+	}
+	return id, nil
 }

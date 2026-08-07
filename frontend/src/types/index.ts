@@ -351,6 +351,8 @@ export interface Contract {
   parent_contract_id?: number | null;
   invite_token?: string;
   appointment_calendar_id?: number | null;
+  publisher_appointment_calendar_id?: number | null;
+  appointment_calendar_source?: "buyer" | "publisher" | null;
   participations?: ContractParticipation[];
 }
 
@@ -527,6 +529,9 @@ export interface BuyerBookingCalendar {
   updated_at: string;
 }
 
+export type PublisherBookingCalendar = BuyerBookingCalendar;
+export type PublisherAppointmentSlot = BuyerAppointmentSlot;
+
 export interface BuyerAppointmentSlot {
   id: number;
   account_id: number;
@@ -550,12 +555,42 @@ export interface ContractAppointmentSlot {
   disabled: boolean;
 }
 
+export interface ContractPublisherAppointmentSlot {
+  publisher_slot_id: number;
+  weekday: number;
+  start_time: string;
+  duration_min: number;
+  capacity: number;
+  enabled: boolean;
+  duration_min_override?: number | null;
+  capacity_override?: number | null;
+  disabled: boolean;
+}
+
 export interface AppointmentFreeSlot {
-  buyer_slot_id: number;
+  buyer_slot_id?: number;
+  publisher_slot_id?: number;
   slot_start: string;
   duration_min: number;
   capacity: number;
   remaining_capacity: number;
+}
+
+export interface AppointmentDaySlot {
+  slot_start: string;
+  duration_min: number;
+}
+
+export interface AppointmentDayWorkingHours {
+  start: string;
+  end: string;
+}
+
+export interface AppointmentDaySlotsResult {
+  items: AppointmentFreeSlot[];
+  booked: AppointmentDaySlot[];
+  hours: AppointmentDaySlot[];
+  working_hours?: AppointmentDayWorkingHours | null;
 }
 
 export interface AppointmentBooking {
@@ -573,6 +608,7 @@ export interface AppointmentBooking {
   delivery_status?: string;
   buyer_name?: string;
   publisher_name?: string;
+  calendar_name?: string;
   lead_status?: string;
 }
 
@@ -584,6 +620,9 @@ export interface AppointmentContractOption {
   timezone: string;
   location?: string;
   configured: boolean;
+  own_configured?: boolean;
+  counterparty_configured?: boolean;
+  calendar_source?: "buyer" | "publisher";
 }
 
 export interface BuyerAppointmentContractOption {
@@ -593,6 +632,8 @@ export interface BuyerAppointmentContractOption {
   publisher_name: string;
   timezone: string;
   configured: boolean;
+  own_configured?: boolean;
+  counterparty_configured?: boolean;
 }
 
 export interface AppointmentCalendarMarker {
@@ -1321,6 +1362,14 @@ export interface IntegrationConnection {
   last_used_at?: string | null;
   created_at: string;
   inbound_webhook?: SunbaseInboundWebhook;
+}
+
+export interface VoiceUniConnectionDetail {
+  connection: IntegrationConnection;
+  ingest_endpoint: string;
+  example_curl?: string;
+  source_slug?: string;
+  call_source_slug?: string;
 }
 
 export interface SunbaseConnectionDetail {

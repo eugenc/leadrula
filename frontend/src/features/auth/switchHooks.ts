@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useRef } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { del, get, patch, post, resetSwitchExpiredNotified } from "@/lib/api";
-import { homePath } from "@/lib/homePath";
+import { pathAfterAccountSwitch } from "@/lib/accountPath";
 import { useAuthStore, userFromMe } from "@/store/authStore";
 import type {
   AccountOperationalStatus,
@@ -43,6 +44,9 @@ export function useSwitchable() {
 
 export function useSwitchAccount() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const locationRef = useRef(location);
+  locationRef.current = location;
   const qc = useQueryClient();
   const startSwitch = useAuthStore((s) => s.startSwitch);
 
@@ -50,6 +54,7 @@ export function useSwitchAccount() {
     mutationFn: (accountId: string) =>
       post<SwitchLoginResult>("/auth/switch", { account_id: accountId }),
     onSuccess: async (res, accountId) => {
+      const { pathname, search } = locationRef.current;
       const { accessToken, refreshToken, user: originUser } = useAuthStore.getState();
       if (!accessToken || !refreshToken || !originUser) return;
       const originName = originUser.account_name ?? originUser.full_name ?? "Home";
@@ -72,19 +77,23 @@ export function useSwitchAccount() {
       });
       resetSwitchExpiredNotified();
       qc.clear();
-      navigate(homePath(me.account.type));
+      navigate(pathAfterAccountSwitch(pathname, search, me.account.type));
     },
   });
 }
 
 export function useSwitchBack() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const locationRef = useRef(location);
+  locationRef.current = location;
   const qc = useQueryClient();
   const endSwitch = useAuthStore((s) => s.endSwitch);
 
   return useMutation({
     mutationFn: () => post<SwitchLoginResult>("/auth/switch-back"),
     onSuccess: async (res) => {
+      const { pathname, search } = locationRef.current;
       const refresh =
         useAuthStore.getState().switchSession?.originRefreshToken ??
         useAuthStore.getState().refreshToken;
@@ -94,7 +103,7 @@ export function useSwitchBack() {
       const me = await get<Me>("/auth/me");
       useAuthStore.setState({ user: userFromMe(me) });
       qc.clear();
-      navigate(homePath(me.account.type));
+      navigate(pathAfterAccountSwitch(pathname, search, me.account.type));
     },
   });
 }

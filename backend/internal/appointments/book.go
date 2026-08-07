@@ -15,8 +15,12 @@ import (
 
 type BookParams struct {
 	ContractID          int64
+	CalendarID          int64
 	BuyerSlotID         int64
+	PublisherSlotID     int64
 	SlotStart           time.Time
+	DurationMin         int
+	CustomTime          bool
 	DeliveryMode        string
 	LeadID              int64
 	FirstName           string
@@ -26,18 +30,36 @@ type BookParams struct {
 	Source              string
 	PublisherPipelineID int64
 	PublisherStageID    int64
+	ExternalEventID     string
+	ExternalProvider    string
+	BookingTarget       string
 }
 
 func (s *Service) Book(ctx context.Context, p *auth.Principal, params BookParams) (*BookingRow, error) {
+	if params.CalendarID != 0 && params.ContractID != 0 {
+		return nil, httpx.Validation("provide contract_id or calendar_id, not both")
+	}
+	if params.CalendarID != 0 {
+		return s.bookPublisherCalendar(ctx, p, params)
+	}
 	return s.bookAppointment(ctx, p, params, false)
 }
 
 func (s *Service) BookAsBuyer(ctx context.Context, p *auth.Principal, params BookParams) (*BookingRow, error) {
+	if params.CalendarID != 0 && params.ContractID != 0 {
+		return nil, httpx.Validation("provide contract_id or calendar_id, not both")
+	}
+	if params.CalendarID != 0 {
+		return s.bookBuyerCalendar(ctx, p, params)
+	}
 	params.DeliveryMode = "contract"
 	return s.bookAppointment(ctx, p, params, true)
 }
 
 func (s *Service) bookAppointment(ctx context.Context, p *auth.Principal, params BookParams, asBuyer bool) (*BookingRow, error) {
+	if params.ContractID == 0 {
+		return nil, httpx.Validation("contract_id is required")
+	}
 	if params.DeliveryMode != "contract" && params.DeliveryMode != "publisher_pipeline" {
 		return nil, httpx.Validation("delivery_mode must be contract or publisher_pipeline")
 	}
@@ -45,63 +67,75 @@ func (s *Service) bookAppointment(ctx context.Context, p *auth.Principal, params
 		return nil, httpx.Validation("publisher pipeline and stage required")
 	}
 	var buyerID int64
-	var contractSlots []ContractSlot
 	var err error
 	if asBuyer {
 		if err := s.contractOwnedByBuyer(ctx, p.AccountID, params.ContractID); err != nil {
 			return nil, err
 		}
 		buyerID = p.AccountID
-		contractSlots, err = s.ListContractSlotsForBuyer(ctx, p.AccountID, params.ContractID)
 	} else {
 		buyerID, err = s.contractBuyerID(ctx, p.AccountID, params.ContractID)
 		if err != nil {
 			return nil, err
 		}
-		contractSlots, err = s.ListContractSlots(ctx, p.AccountID, params.ContractID)
 	}
-	if err != nil {
-		return nil, err
-	}
-	ok, err := s.contractCalendarConfigured(ctx, params.ContractID)
+	target := parseBookingTarget(params.BookingTarget)
+	ok, err := s.bookingCalendarConfigured(ctx, params.ContractID, asBuyer, target)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, httpx.Validation("buyer has not configured availability")
+		return nil, httpx.Validation("appointment calendar is not configured")
 	}
-	calID, err := s.contractCalendarID(ctx, params.ContractID)
+	active, err := s.resolveBookingCalendar(ctx, params.ContractID, asBuyer, target)
 	if err != nil {
 		return nil, err
 	}
-	cal, err := s.loadCalendarByID(ctx, calID)
-	if err != nil {
-		return nil, err
+	var calTimezone string
+	switch active.Source {
+	case calendarSourceBuyer:
+		cal, err := s.loadCalendarByID(ctx, active.CalendarID)
+		if err != nil {
+			return nil, err
+		}
+		calTimezone = cal.Timezone
+	case calendarSourcePublisher:
+		cal, err := s.loadPublisherCalendarByID(ctx, active.CalendarID)
+		if err != nil {
+			return nil, err
+		}
+		calTimezone = cal.Timezone
+	default:
+		return nil, httpx.Validation("appointment calendar is not configured")
 	}
-	_ = buyerID
-	loc := loadLocation(cal.Timezone)
+	loc := loadLocation(calTimezone)
 	slotStart := params.SlotStart.In(loc)
 	if !bookingWindowOK(slotStart, time.Now()) {
 		return nil, httpx.Validation("slot is outside booking window")
 	}
-	var match *ContractSlot
-	for i := range contractSlots {
-		cs := &contractSlots[i]
-		if cs.BuyerSlotID == params.BuyerSlotID && cs.Enabled && !cs.Disabled {
-			match = cs
-			break
+
+	var dur int
+	var cap int
+	if params.CustomTime {
+		var err error
+		dur, err = validateCustomDurationMin(params.DurationMin)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		var err error
+		switch active.Source {
+		case calendarSourceBuyer:
+			dur, cap, err = s.validateBuyerBookingSlot(ctx, p, params, asBuyer, slotStart, loc)
+		case calendarSourcePublisher:
+			dur, cap, err = s.validatePublisherBookingSlot(ctx, p, params, asBuyer, slotStart, loc)
+		default:
+			return nil, httpx.Validation("appointment calendar is not configured")
+		}
+		if err != nil {
+			return nil, err
 		}
 	}
-	if match == nil {
-		return nil, httpx.Validation("slot not available for this contract")
-	}
-	expected, err := combineDateAndTime(slotStart, match.StartTime, loc)
-	if err != nil || !expected.Truncate(time.Minute).Equal(slotStart.Truncate(time.Minute)) {
-		return nil, httpx.Validation("slot_start does not match slot template")
-	}
-	buyerSlot := BuyerSlot{DurationMin: match.DurationMin, Capacity: match.Capacity}
-	dur := effectiveDuration(buyerSlot, match)
-	cap := effectiveCapacity(buyerSlot, match)
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -109,12 +143,20 @@ func (s *Service) bookAppointment(ctx context.Context, p *auth.Principal, params
 	}
 	defer tx.Rollback(ctx)
 
-	booked, err := s.countSlotOccupancyTx(ctx, tx, params.BuyerSlotID, slotStart)
-	if err != nil {
-		return nil, err
-	}
-	if booked >= cap {
-		return nil, httpx.Validation("slot is full")
+	if !params.CustomTime {
+		var booked int
+		switch active.Source {
+		case calendarSourceBuyer:
+			booked, err = s.countBuyerSlotOccupancyTx(ctx, tx, params.BuyerSlotID, slotStart)
+		case calendarSourcePublisher:
+			booked, err = s.countPublisherSlotOccupancyTx(ctx, tx, params.ContractID, params.PublisherSlotID, slotStart)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if booked >= cap {
+			return nil, httpx.Validation("slot is full")
+		}
 	}
 
 	var leadID int64
@@ -157,12 +199,49 @@ func (s *Service) bookAppointment(ctx context.Context, p *auth.Principal, params
 		return nil, err
 	}
 
+	extID := strings.TrimSpace(params.ExternalEventID)
+	extProvider := strings.TrimSpace(params.ExternalProvider)
+	if extProvider == "" && extID != "" {
+		extProvider = "voiceuni"
+	}
+	if extID != "" {
+		var existingID int64
+		err = tx.QueryRow(ctx,
+			`SELECT id FROM lead_appointment_bookings
+			 WHERE external_provider_slug=$1 AND external_event_id=$2`,
+			extProvider, extID).Scan(&existingID)
+		if err == nil && existingID > 0 {
+			_, err = tx.Exec(ctx, `DELETE FROM lead_appointment_bookings WHERE lead_id=$1 AND id <> $2`, leadID, existingID)
+		}
+	}
+
 	var bookingID int64
-	err = tx.QueryRow(ctx,
-		`INSERT INTO lead_appointment_bookings(
-		   contract_id, lead_id, buyer_slot_id, slot_start, duration_min, booked_by_user_id, delivery_mode)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-		params.ContractID, leadID, params.BuyerSlotID, slotStart, dur, p.UserID, params.DeliveryMode).Scan(&bookingID)
+	switch active.Source {
+	case calendarSourceBuyer:
+		buyerSlotID := any(params.BuyerSlotID)
+		if params.CustomTime {
+			buyerSlotID = nil
+		}
+		err = tx.QueryRow(ctx,
+			`INSERT INTO lead_appointment_bookings(
+			   contract_id, lead_id, buyer_slot_id, slot_start, duration_min, booked_by_user_id, delivery_mode,
+			   external_event_id, external_provider_slug, custom_time)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+			params.ContractID, leadID, buyerSlotID, slotStart, dur, p.UserID, params.DeliveryMode,
+			nullStr(extID), nullStr(extProvider), params.CustomTime).Scan(&bookingID)
+	case calendarSourcePublisher:
+		publisherSlotID := any(params.PublisherSlotID)
+		if params.CustomTime {
+			publisherSlotID = nil
+		}
+		err = tx.QueryRow(ctx,
+			`INSERT INTO lead_appointment_bookings(
+			   contract_id, lead_id, publisher_slot_id, slot_start, duration_min, booked_by_user_id, delivery_mode,
+			   external_event_id, external_provider_slug, custom_time)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+			params.ContractID, leadID, publisherSlotID, slotStart, dur, p.UserID, params.DeliveryMode,
+			nullStr(extID), nullStr(extProvider), params.CustomTime).Scan(&bookingID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -233,9 +312,96 @@ func (s *Service) bookAppointment(ctx context.Context, p *auth.Principal, params
 	return s.getBookingByID(ctx, bookingID)
 }
 
-func (s *Service) countSlotOccupancyTx(ctx context.Context, tx pgx.Tx, buyerSlotID int64, slotStart time.Time) (int, error) {
+func (s *Service) validateBuyerBookingSlot(ctx context.Context, p *auth.Principal, params BookParams, asBuyer bool, slotStart time.Time, loc *time.Location) (int, int, error) {
+	if params.BuyerSlotID == 0 {
+		return 0, 0, httpx.Validation("buyer_slot_id is required")
+	}
+	target := parseBookingTarget(params.BookingTarget)
+	var contractSlots []ContractSlot
+	var err error
+	switch target {
+	case bookingTargetActive:
+		contractSlots, err = s.listActiveContractBuyerSlots(ctx, params.ContractID)
+	case bookingTargetCross:
+		if asBuyer {
+			return 0, 0, httpx.Validation("buyer cross-booking uses publisher calendar")
+		}
+		contractSlots, err = s.ListContractSlots(ctx, p.AccountID, params.ContractID)
+	default:
+		contractSlots, err = s.listOwnBuyerCalendarSlots(ctx, p.AccountID, params.ContractID, asBuyer)
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	var match *ContractSlot
+	for i := range contractSlots {
+		cs := &contractSlots[i]
+		if cs.BuyerSlotID == params.BuyerSlotID && cs.Enabled && !cs.Disabled {
+			match = cs
+			break
+		}
+	}
+	if match == nil {
+		return 0, 0, httpx.Validation("slot not available for this contract")
+	}
+	expected, err := combineDateAndTime(slotStart, match.StartTime, loc)
+	if err != nil || !expected.Truncate(time.Minute).Equal(slotStart.Truncate(time.Minute)) {
+		return 0, 0, httpx.Validation("slot_start does not match slot template")
+	}
+	buyerSlot := BuyerSlot{DurationMin: match.DurationMin, Capacity: match.Capacity}
+	return effectiveDuration(buyerSlot, match), effectiveCapacity(buyerSlot, match), nil
+}
+
+func (s *Service) validatePublisherBookingSlot(ctx context.Context, p *auth.Principal, params BookParams, asBuyer bool, slotStart time.Time, loc *time.Location) (int, int, error) {
+	if params.PublisherSlotID == 0 {
+		return 0, 0, httpx.Validation("publisher_slot_id is required")
+	}
+	target := parseBookingTarget(params.BookingTarget)
+	var contractSlots []ContractPublisherSlot
+	var err error
+	switch target {
+	case bookingTargetActive:
+		contractSlots, err = s.listActiveContractPublisherSlots(ctx, params.ContractID)
+	case bookingTargetCross:
+		if asBuyer {
+			contractSlots, err = s.ListContractPublisherSlotsForBuyer(ctx, p.AccountID, params.ContractID)
+		} else {
+			return 0, 0, httpx.Validation("publisher cross-booking uses buyer calendar")
+		}
+	default:
+		contractSlots, err = s.listOwnPublisherCalendarSlots(ctx, p.AccountID, params.ContractID, asBuyer)
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	var match *ContractPublisherSlot
+	for i := range contractSlots {
+		cs := &contractSlots[i]
+		if cs.PublisherSlotID == params.PublisherSlotID && cs.Enabled && !cs.Disabled {
+			match = cs
+			break
+		}
+	}
+	if match == nil {
+		return 0, 0, httpx.Validation("slot not available for this contract")
+	}
+	expected, err := combineDateAndTime(slotStart, match.StartTime, loc)
+	if err != nil || !expected.Truncate(time.Minute).Equal(slotStart.Truncate(time.Minute)) {
+		return 0, 0, httpx.Validation("slot_start does not match slot template")
+	}
+	pubSlot := PublisherSlot{DurationMin: match.DurationMin, Capacity: match.Capacity}
+	return effectivePublisherDuration(pubSlot, match), effectivePublisherCapacity(pubSlot, match), nil
+}
+
+func (s *Service) countBuyerSlotOccupancyTx(ctx context.Context, tx pgx.Tx, buyerSlotID int64, slotStart time.Time) (int, error) {
 	var n int
-	err := tx.QueryRow(ctx, slotOccupancySQL, buyerSlotID, slotStart).Scan(&n)
+	err := tx.QueryRow(ctx, buyerSlotOccupancySQL, buyerSlotID, slotStart).Scan(&n)
+	return n, err
+}
+
+func (s *Service) countPublisherSlotOccupancyTx(ctx context.Context, tx pgx.Tx, contractID, publisherSlotID int64, slotStart time.Time) (int, error) {
+	var n int
+	err := tx.QueryRow(ctx, publisherSlotOccupancySQL, contractID, publisherSlotID, slotStart).Scan(&n)
 	return n, err
 }
 
@@ -318,4 +484,18 @@ func (s *Service) getBookingByID(ctx context.Context, id int64) (*BookingRow, er
 		return nil, httpx.NotFound("booking not found")
 	}
 	return &rows[0], nil
+}
+
+func nullStr(s string) any {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	return s
+}
+
+func validateCustomDurationMin(dur int) (int, error) {
+	if dur < 15 || dur > 240 {
+		return 0, httpx.Validation("duration_min must be between 15 and 240")
+	}
+	return dur, nil
 }

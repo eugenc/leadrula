@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { ArrowRightLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownSearch } from "@/components/ui/dropdown";
@@ -8,6 +8,7 @@ import { useImpersonateBuyer } from "@/features/admin/hooks";
 import { useAuthStore } from "@/store/authStore";
 import { useMe } from "@/features/leads/hooks";
 import { errorMessage } from "@/lib/api";
+import { pathAfterAccountSwitch } from "@/lib/accountPath";
 import { toast } from "@/store/toastStore";
 import { Avatar } from "@/components/ui/misc";
 import type { CurrentUser } from "@/types";
@@ -21,6 +22,7 @@ export function AccountSwitcher({ compact = false }: { compact?: boolean }) {
   const switchAccount = useSwitchAccount();
   const impersonate = useImpersonateBuyer();
   const navigate = useNavigate();
+  const location = useLocation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -49,7 +51,7 @@ export function AccountSwitcher({ compact = false }: { compact?: boolean }) {
         onSuccess: (res) => {
           const u = res.user as unknown as CurrentUser & { buyer_account_name?: string };
           startImpersonation(res.access, u, u.buyer_account_name ?? account.name);
-          navigate("/b");
+          navigate(pathAfterAccountSwitch(location.pathname, location.search, "buyer"));
         },
         onError: (e) => toast.error(errorMessage(e)),
       });

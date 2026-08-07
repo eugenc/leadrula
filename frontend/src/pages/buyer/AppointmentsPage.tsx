@@ -18,7 +18,7 @@ import {
   type AppointmentSort,
   type SortDir,
 } from "@/features/appointments/appointmentsUiStorage";
-import { useBuyerAppointmentContracts, useBuyerBookings } from "@/features/appointments/hooks";
+import { useBuyerAppointmentContracts, useBuyerBookings, useBuyerCalendars } from "@/features/appointments/hooks";
 import { useBuyerContracts } from "@/features/admin/hooks";
 import { LeadSearchInput } from "@/features/leads/LeadSearchInput";
 import { get } from "@/lib/api";
@@ -49,6 +49,7 @@ export function BuyerAppointmentsPage() {
 
   const { data: contracts = [] } = useBuyerContracts();
   const { data: bookableContracts = [] } = useBuyerAppointmentContracts();
+  const { data: calendars = [] } = useBuyerCalendars();
   const appointmentContracts = useMemo(
     () => contracts.filter((c) => c.lead_type === "Appointment"),
     [contracts]
@@ -112,9 +113,33 @@ export function BuyerAppointmentsPage() {
     publisherId !== 0 ||
     debouncedSearch !== "";
 
-  const emptyTitle = filtersActive
-    ? "No appointments match your filters."
-    : "No distributed appointments yet.";
+  const datePresetOnly =
+    preset !== "all" && contractId === 0 && publisherId === 0 && debouncedSearch === "";
+
+  const canBook =
+    calendars.some((c) => c.configured) || bookableContracts.some((c) => c.configured);
+  const canBookHint = canBook
+    ? undefined
+    : "Create a calendar under Calendars and add availability slots, or attach a calendar to a contract.";
+
+  const emptyTitle = datePresetOnly
+    ? "No appointments in this date range."
+    : filtersActive
+      ? "No appointments match your filters."
+      : "No distributed appointments yet.";
+
+  const emptySubtitle = datePresetOnly
+    ? "Try All dates, or book a slot for this week."
+    : canBook && !filtersActive
+      ? "Book your first appointment from an available slot."
+      : undefined;
+
+  const handleBooked = useCallback(() => {
+    setPreset("all");
+    setPage(1);
+    setBookOpen(false);
+    persistUi({ preset: "all" });
+  }, [persistUi]);
 
   function clearFilters() {
     const d = defaultAppointmentsUi();
@@ -128,8 +153,6 @@ export function BuyerAppointmentsPage() {
     setPage(1);
     persistUi(d);
   }
-
-  const canBook = bookableContracts.some((c) => c.configured);
 
   return (
     <>
@@ -234,9 +257,7 @@ export function BuyerAppointmentsPage() {
               type="button"
               size="sm"
               disabled={!canBook}
-              title={
-                canBook ? undefined : "Configure a calendar and attach it to an appointment contract first"
-              }
+              title={canBookHint}
               onClick={() => setBookOpen(true)}
             >
               <Plus className="h-4 w-4" />
@@ -250,7 +271,18 @@ export function BuyerAppointmentsPage() {
             <Spinner className="h-6 w-6" />
           </div>
         ) : items.length === 0 ? (
-          <EmptyState title={emptyTitle} />
+          <EmptyState
+            title={emptyTitle}
+            subtitle={emptySubtitle}
+            action={
+              canBook && !filtersActive ? (
+                <Button type="button" size="sm" onClick={() => setBookOpen(true)}>
+                  <Plus className="h-4 w-4" />
+                  Add appointment
+                </Button>
+              ) : undefined
+            }
+          />
         ) : (
           <>
             <div className="space-y-2 sm:hidden">
@@ -308,7 +340,11 @@ export function BuyerAppointmentsPage() {
         )}
       </PageBody>
 
-      <BuyerBookAppointmentSheet open={bookOpen} onClose={() => setBookOpen(false)} />
+      <BuyerBookAppointmentSheet
+        open={bookOpen}
+        onClose={() => setBookOpen(false)}
+        onBooked={handleBooked}
+      />
     </>
   );
 }

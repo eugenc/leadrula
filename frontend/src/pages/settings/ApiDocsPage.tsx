@@ -199,8 +199,11 @@ export function ApiDocsPage() {
           <CodeBlock code={`Authorization: Bearer {prefix}.{secret}`} copyLabel="Header copied" />
           <p className="mt-3 text-sm text-gray-500">
             Scopes: <code className="text-xs">leads:read</code> (list/get leads),{" "}
-            <code className="text-xs">leads:write</code> (ingest and update). Keys with{" "}
-            <code className="text-xs">leads:write</code> may also read leads.
+            <code className="text-xs">leads:write</code> (ingest and update),{" "}
+            <code className="text-xs">appointments:read</code> (list slots and calendars),{" "}
+            <code className="text-xs">appointments:write</code> (book appointments). Keys with{" "}
+            <code className="text-xs">leads:write</code> may also read leads; keys with{" "}
+            <code className="text-xs">appointments:write</code> may also read appointments.
           </p>
           <p className="mt-2 text-sm text-gray-500">
             Generate keys in{" "}

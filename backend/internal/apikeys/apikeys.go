@@ -195,6 +195,30 @@ func (s *Service) RequireLeadsWrite(next http.Handler) http.Handler {
 	})
 }
 
+// RequireAppointmentsRead ensures the API key may read appointments.
+func (s *Service) RequireAppointmentsRead(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		acct := auth.APIKeyAccountFromContext(r.Context())
+		if acct == nil || !acct.CanReadAppointments() {
+			httpx.Err(w, http.StatusForbidden, httpx.CodeForbidden, "missing appointments:read scope")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// RequireAppointmentsWrite ensures the API key may write appointments.
+func (s *Service) RequireAppointmentsWrite(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		acct := auth.APIKeyAccountFromContext(r.Context())
+		if acct == nil || !acct.CanWriteAppointments() {
+			httpx.Err(w, http.StatusForbidden, httpx.CodeForbidden, "missing appointments:write scope")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // RequireAPIKey is middleware that authenticates the public intake API.
 func (s *Service) RequireAPIKey(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -78,6 +78,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Patch("/integrations/connections/{id}", h.patchConnection)
 		r.Get("/integrations/connections/{id}/sunbase", h.getSunbaseDetail)
 		r.Get("/integrations/connections/{id}/ghl", h.getGHLDetail)
+		r.Get("/integrations/connections/{id}/voiceuni", h.getVoiceUniDetail)
 		r.Get("/integrations/connections/{id}/crm", h.getCRMDetail)
 		r.Get("/integrations/connections/{id}/crm/pipelines", h.getCRMPipelines)
 		r.Get("/integrations/connections/{id}/ghl/pipelines", h.getGHLPipelines)
@@ -132,6 +133,10 @@ func (h *Handler) createConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.ProviderSlug == "ghl" {
 		h.createGHLConnection(w, r, p.AccountID, body.Name, body.Credentials, body.Config)
+		return
+	}
+	if body.ProviderSlug == "voiceuni" {
+		h.createVoiceUniConnection(w, r, p.AccountID, body.Name, body.Config)
 		return
 	}
 	conn, err := h.svc.CreateConnection(r.Context(), p.AccountID, body.ProviderSlug, body.Name, body.Credentials, body.Config)
@@ -281,6 +286,15 @@ func (h *Handler) patchConnection(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusOK, h.ghlResponse(conn))
 		return
 	}
+	if existing.ProviderSlug == "voiceuni" {
+		conn, err := h.svc.UpdateVoiceUniConnection(r.Context(), p.AccountID, id, body.Config)
+		if err != nil {
+			httpx.WriteError(w, err)
+			return
+		}
+		httpx.JSON(w, http.StatusOK, h.voiceuniResponse(conn))
+		return
+	}
 	if CRMConnectionConfigurable(existing.ProviderSlug) {
 		conn, err := h.svc.UpdateCRMConnection(r.Context(), p.AccountID, id, body.Config)
 		if err != nil {
@@ -290,7 +304,62 @@ func (h *Handler) patchConnection(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusOK, crmResponse(conn, h.apiBaseURL))
 		return
 	}
-	httpx.WriteError(w, httpx.Validation("patch only supported for sunbase, ghl, and configurable crm connections"))
+	httpx.WriteError(w, httpx.Validation("patch only supported for sunbase, ghl, voiceuni, and configurable crm connections"))
+}
+
+func (h *Handler) createVoiceUniConnection(w http.ResponseWriter, r *http.Request, accountID int64, name string, config map[string]any) {
+	if config == nil {
+		config = map[string]any{}
+	}
+	config = providers.MergeVoiceUniConfigDefaults(config)
+	if name == "" {
+		name = "VoiceUni"
+	}
+	conn, err := h.svc.CreateConnection(r.Context(), accountID, "voiceuni", name, json.RawMessage(`{}`), config)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	sourceSlug, callSourceSlug, sourceID, err := h.svc.provisionVoiceUniSources(r.Context(), accountID, conn.ID, conn.PublicID, conn.Name)
+	if err != nil {
+		_ = h.svc.DeleteConnection(r.Context(), accountID, conn.ID)
+		httpx.WriteError(w, err)
+		return
+	}
+	config["source_slug"] = sourceSlug
+	config["source_id"] = sourceID
+	config["call_source_slug"] = callSourceSlug
+	if err := h.svc.syncVoiceUniSourceFieldMaps(r.Context(), accountID, sourceID, config); err != nil {
+		_ = h.svc.DeleteConnection(r.Context(), accountID, conn.ID)
+		httpx.WriteError(w, err)
+		return
+	}
+	if err := h.svc.FinalizeVoiceUniConnection(r.Context(), conn.ID, config); err != nil {
+		_ = h.svc.DeleteConnection(r.Context(), accountID, conn.ID)
+		httpx.WriteError(w, err)
+		return
+	}
+	conn.Config = config
+	httpx.JSON(w, http.StatusCreated, h.voiceuniResponse(conn))
+}
+
+func (h *Handler) getVoiceUniDetail(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	detail, err := h.svc.VoiceUniConnectionDetail(r.Context(), p.AccountID, id, h.apiBaseURL)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, detail)
+}
+
+func (h *Handler) voiceuniResponse(conn *Connection) VoiceUniConnectionResponse {
+	resp := VoiceUniConnectionResponse{Connection: *conn}
+	cfg := configMap(conn.Config)
+	resp.SourceSlug = providers.VoiceUniSourceSlug(cfg)
+	resp.IngestEndpoint = strings.TrimRight(h.apiBaseURL, "/") + "/api/v1/integrations/voiceuni/ingest"
+	return resp
 }
 
 func (h *Handler) createGHLConnection(w http.ResponseWriter, r *http.Request, accountID int64, name string, credentials json.RawMessage, config map[string]any) {

@@ -1881,8 +1881,11 @@ export function useApiKeys() {
 export function useCreateApiKey() {
   const inv = useInvalidate(["api-keys"]);
   return useMutation({
-    mutationFn: (name: string) =>
-      post<{ key: ApiKey; secret: string }>(`${ns()}/api-keys`, { name: name.trim() }),
+    mutationFn: ({ name, scopes }: { name: string; scopes?: string[] }) =>
+      post<{ key: ApiKey; secret: string }>(`${ns()}/api-keys`, {
+        name: name.trim(),
+        ...(scopes?.length ? { scopes } : {}),
+      }),
     onSuccess: inv,
   });
 }

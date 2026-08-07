@@ -61,6 +61,7 @@ func NewService(pool *pgxpool.Pool, encKey []byte, oauth OAuthConfig) *Service {
 			"zoho_crm":   &providers.ZohoCRMProvider{},
 			"salesforce": &providers.SalesforceProvider{},
 			"sunbase":      &providers.SunbaseProvider{},
+			"voiceuni":     &providers.VoiceUniProvider{},
 			"google_maps":  &providers.GoogleMapsProvider{},
 			"twilio":       &providers.TwilioProvider{},
 		},

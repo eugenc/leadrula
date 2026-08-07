@@ -1,8 +1,10 @@
 package leads
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/echayko/leadrula/backend/internal/apikeys"
 	"github.com/echayko/leadrula/backend/internal/auth"
@@ -14,6 +16,7 @@ import (
 func (h *Handler) RegisterPublicRoutes(r chi.Router, apikeysSvc *apikeys.Service) {
 	r.With(apikeysSvc.RequireLeadsRead).Get("/api/v1/leads", h.publicList)
 	r.With(apikeysSvc.RequireLeadsRead).Get("/api/v1/leads/{public_id}", h.publicGet)
+	r.With(apikeysSvc.RequireLeadsWrite).Patch("/api/v1/leads/{public_id}", h.publicPatch)
 }
 
 func apiKeyPrincipal(r *http.Request) *auth.Principal {
@@ -44,6 +47,10 @@ func (h *Handler) publicList(w http.ResponseWriter, r *http.Request) {
 		h.publicGetByField(w, r, p, "email", email)
 		return
 	}
+	if externalID := strings.TrimSpace(q.Get("external_id")); externalID != "" {
+		h.publicGetByExternalID(w, r, p, externalID)
+		return
+	}
 
 	src := q.Get("source")
 	if src == "" {
@@ -57,6 +64,15 @@ func (h *Handler) publicList(w http.ResponseWriter, r *http.Request) {
 		Assigned:   parseInt(q.Get("assigned")),
 		Tag:        q.Get("tag"),
 		Search:     strings.TrimSpace(q.Get("q")),
+		ExternalID: strings.TrimSpace(q.Get("external_id")),
+	}
+	if updatedSince := strings.TrimSpace(q.Get("updated_since")); updatedSince != "" {
+		t, err := time.Parse(time.RFC3339, updatedSince)
+		if err != nil {
+			httpx.WriteError(w, httpx.Validation("invalid updated_since"))
+			return
+		}
+		f.UpdatedSince = &t
 	}
 	tz := h.svc.AccountTimezone(r.Context(), p.AccountID)
 	f.FilterTZ = tz
@@ -110,24 +126,16 @@ func (h *Handler) publicGetByField(w http.ResponseWriter, r *http.Request, p *au
 		httpx.WriteError(w, err)
 		return
 	}
-	if err := h.svc.repo.attachCustomValues(r.Context(), l); err != nil {
+	h.publicRespondLead(w, r, p, l)
+}
+
+func (h *Handler) publicGetByExternalID(w http.ResponseWriter, r *http.Request, p *auth.Principal, externalID string) {
+	l, err := h.svc.repo.GetByExternalID(r.Context(), h.svc.repo.pool, p.AccountID, externalID)
+	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
-	if err := h.svc.repo.attachLeadNames(r.Context(), l); err != nil {
-		httpx.WriteError(w, err)
-		return
-	}
-	if err := h.svc.repo.EnrichLeadEconomics(r.Context(), p.AccountType, l); err != nil {
-		httpx.WriteError(w, err)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, &ListResult{
-		Items: []Lead{*l},
-		Total: 1,
-		Page:  1,
-		Limit: 1,
-	})
+	h.publicRespondLead(w, r, p, l)
 }
 
 func (h *Handler) publicGet(w http.ResponseWriter, r *http.Request) {
@@ -136,12 +144,85 @@ func (h *Handler) publicGet(w http.ResponseWriter, r *http.Request) {
 		httpx.Err(w, http.StatusUnauthorized, httpx.CodeUnauthorized, "unauthorized")
 		return
 	}
+	if externalID := strings.TrimSpace(r.URL.Query().Get("external_id")); externalID != "" {
+		h.publicGetByExternalID(w, r, p, externalID)
+		return
+	}
 	publicID := chi.URLParam(r, "public_id")
 	l, err := h.svc.repo.GetByPublicID(r.Context(), h.svc.repo.pool, p.AccountID, publicID)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
+	h.publicRespondLead(w, r, p, l)
+}
+
+func (h *Handler) publicPatch(w http.ResponseWriter, r *http.Request) {
+	p := apiKeyPrincipal(r)
+	if p == nil {
+		httpx.Err(w, http.StatusUnauthorized, httpx.CodeUnauthorized, "unauthorized")
+		return
+	}
+	if p.AccountType != "publisher" {
+		httpx.Err(w, http.StatusForbidden, httpx.CodeForbidden, "publisher API key required")
+		return
+	}
+	publicID := chi.URLParam(r, "public_id")
+	externalID := strings.TrimSpace(r.URL.Query().Get("external_id"))
+	if externalID != "" {
+		publicID = ""
+	}
+	leadID, err := h.svc.ResolvePublicLeadID(r.Context(), p, publicID, externalID)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+
+	var body struct {
+		FirstName *string                    `json:"first_name"`
+		LastName  *string                    `json:"last_name"`
+		Phone     *string                    `json:"phone"`
+		Email     *string                    `json:"email"`
+		Address   *string                    `json:"address"`
+		City      *string                    `json:"city"`
+		State     *string                    `json:"state"`
+		Zip       *string                    `json:"zip"`
+		Country   *string                    `json:"country"`
+		Source    *string                    `json:"source"`
+		Tags      *[]string                  `json:"tags"`
+		StageID   *int64                     `json:"stage_id"`
+		Custom    map[string]json.RawMessage `json:"custom"`
+	}
+	if !httpx.DecodeJSON(w, r, &body) {
+		return
+	}
+	l, err := h.svc.PublicPatch(r.Context(), p, leadID, PublicPatchParams{
+		FirstName: body.FirstName,
+		LastName:  body.LastName,
+		Phone:     body.Phone,
+		Email:     body.Email,
+		Address:   body.Address,
+		City:      body.City,
+		State:     body.State,
+		Zip:       body.Zip,
+		Country:   body.Country,
+		Source:    body.Source,
+		Tags:      body.Tags,
+		StageID:   body.StageID,
+		Custom:    body.Custom,
+	})
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	if err := h.svc.repo.attachCustomValues(r.Context(), l); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, l)
+}
+
+func (h *Handler) publicRespondLead(w http.ResponseWriter, r *http.Request, p *auth.Principal, l *Lead) {
 	if err := h.svc.repo.attachCustomValues(r.Context(), l); err != nil {
 		httpx.WriteError(w, err)
 		return

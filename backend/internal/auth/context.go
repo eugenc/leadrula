@@ -132,6 +132,32 @@ func (a *APIKeyAccount) CanWriteLeads() bool {
 	return false
 }
 
+// CanReadAppointments returns true when the key may call appointment read endpoints.
+func (a *APIKeyAccount) CanReadAppointments() bool {
+	if a == nil {
+		return false
+	}
+	for _, s := range a.Scopes {
+		if s == "appointments:read" || s == "appointments:write" {
+			return true
+		}
+	}
+	return false
+}
+
+// CanWriteAppointments returns true when the key may call appointment write endpoints.
+func (a *APIKeyAccount) CanWriteAppointments() bool {
+	if a == nil {
+		return false
+	}
+	for _, s := range a.Scopes {
+		if s == "appointments:write" {
+			return true
+		}
+	}
+	return false
+}
+
 const apiKeyAccountKey ctxKey = 1
 
 func WithAPIKeyAccount(ctx context.Context, a *APIKeyAccount) context.Context {

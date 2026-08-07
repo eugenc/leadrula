@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import { CalendarClock, Phone, Building2, FileText } from "lucide-react";
+import { CalendarClock, Phone, Building2, FileText, CalendarDays } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AppointmentBooking } from "@/types";
 import { formatAppointmentTime } from "./BookedAppointmentsTable";
@@ -58,6 +58,11 @@ export function AppointmentListCard({
         {row.publisher_name && (
           <FieldLine icon={Building2} className="text-sm text-gray-500">
             {row.publisher_name}
+          </FieldLine>
+        )}
+        {row.calendar_name && (
+          <FieldLine icon={CalendarDays} className="text-sm text-gray-500">
+            {row.calendar_name}
           </FieldLine>
         )}
         {row.contract_name && (
