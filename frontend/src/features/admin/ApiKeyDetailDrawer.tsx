@@ -22,15 +22,22 @@ export function ApiKeyDetailDrawer({
   apiKey,
   initialSecret,
   onClose,
+  onSecretCached,
 }: {
   apiKey: ApiKey | null;
   initialSecret?: string | null;
   onClose: () => void;
+  onSecretCached?: (keyId: number, secret: string) => void;
 }) {
   return (
     <Sheet open={!!apiKey} onClose={onClose}>
       {apiKey && (
-        <DrawerContent apiKey={apiKey} initialSecret={initialSecret} onClose={onClose} />
+        <DrawerContent
+          apiKey={apiKey}
+          initialSecret={initialSecret}
+          onClose={onClose}
+          onSecretCached={onSecretCached}
+        />
       )}
     </Sheet>
   );
@@ -40,10 +47,12 @@ function DrawerContent({
   apiKey,
   initialSecret,
   onClose,
+  onSecretCached,
 }: {
   apiKey: ApiKey;
   initialSecret?: string | null;
   onClose: () => void;
+  onSecretCached?: (keyId: number, secret: string) => void;
 }) {
   const update = useUpdateApiKey();
   const rotate = useRotateApiKey();
@@ -87,6 +96,7 @@ function DrawerContent({
         setKeyPrefix(res.key.key_prefix);
         setSecret(res.secret);
         setShowSecret(false);
+        onSecretCached?.(apiKey.id, res.secret);
         copyText(res.secret, "New key copied to clipboard");
       },
       onError: (e) => toast.error(errorMessage(e)),
@@ -118,18 +128,35 @@ function DrawerContent({
             <Input value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div>
-            <Label>Prefix</Label>
-            <div className="flex items-center gap-2 pt-1">
-              <code className="flex-1 rounded-md bg-gray-50 px-3 py-2 font-mono text-xs">
-                {keyPrefix}…
-              </code>
-              <IconButton
-                aria-label="Copy prefix"
-                onClick={() => copyText(keyPrefix, "Prefix copied")}
-              >
-                <Copy className="h-4 w-4" />
-              </IconButton>
-            </div>
+            <Label>API key</Label>
+            {secret ? (
+              <div className="flex items-center gap-2 pt-1">
+                <code className="flex-1 break-all rounded-md bg-gray-50 px-3 py-2 font-mono text-xs">
+                  {showSecret ? secret : "••••••••••••••••••••••••••••••••"}
+                </code>
+                <IconButton
+                  aria-label={showSecret ? "Hide key" : "Show key"}
+                  onClick={() => setShowSecret((v) => !v)}
+                >
+                  {showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </IconButton>
+                <IconButton
+                  aria-label="Copy API key"
+                  onClick={() => copyText(secret, "API key copied")}
+                >
+                  <Copy className="h-4 w-4" />
+                </IconButton>
+              </div>
+            ) : (
+              <div className="space-y-1 pt-1">
+                <code className="block rounded-md bg-gray-50 px-3 py-2 font-mono text-xs text-gray-500">
+                  {keyPrefix}…
+                </code>
+                <p className="text-xs text-gray-500">
+                  Full key is only available after creation or rotation.
+                </p>
+              </div>
+            )}
           </div>
           <div>
             <Label>Status</Label>
@@ -147,28 +174,6 @@ function DrawerContent({
                 : "Never"}
             </p>
           </div>
-          {secret && (
-            <div>
-              <Label>Key</Label>
-              <p className="mb-1 text-xs text-jade-700">
-                Copy now — it will not be shown again after you close this panel.
-              </p>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 break-all rounded-md bg-gray-50 px-3 py-2 font-mono text-xs">
-                  {showSecret ? secret : "••••••••••••••••••••••••••••••••"}
-                </code>
-                <IconButton
-                  aria-label={showSecret ? "Hide key" : "Show key"}
-                  onClick={() => setShowSecret((v) => !v)}
-                >
-                  {showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </IconButton>
-                <IconButton aria-label="Copy key" onClick={() => copyText(secret, "Key copied")}>
-                  <Copy className="h-4 w-4" />
-                </IconButton>
-              </div>
-            </div>
-          )}
         </div>
       </DrawerBody>
 

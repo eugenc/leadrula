@@ -1,4 +1,4 @@
-export type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE";
+export type HttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
 export type DocEndpoint = {
   method: HttpMethod;
@@ -61,6 +61,9 @@ export function publicEndpoints(baseURL: string): DocEndpoint[] {
         { name: "limit", description: "Page size" },
         { name: "sort", description: "Sort column (e.g. created_at, first_name, phone)" },
         { name: "sort_dir", description: "asc or desc" },
+        { name: "updated_since", description: "RFC3339 timestamp — return leads updated at or after this time (incremental sync)" },
+        { name: "external_id", description: "Filter or lookup by VoiceUni/external CRM id" },
+        { name: "all", description: "Set to 1 to return all leads (no pagination cap behavior)" },
       ],
       response: `{
   "data": {
@@ -124,6 +127,156 @@ export function publicEndpoints(baseURL: string): DocEndpoint[] {
   -H "Content-Type: application/json" \\
   -d '{ "action_at": "2026-06-15T14:00:00Z" }'`,
       response: `{ "data": { "ok": true } }`,
+    },
+    {
+      method: "PATCH",
+      path: "/api/v1/leads/{public_id}",
+      auth: "API key (leads:write)",
+      description:
+        "Partially update a lead. Publisher keys only. Lookup by path public_id or query ?external_id= for VoiceUni ids.",
+      request: `curl -s -X PATCH "${baseURL}/api/v1/leads/550e8400-e29b-41d4-a716-446655440000" \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "first_name": "Jane",
+    "tags": ["voiceuni"],
+    "stage_id": 10,
+    "custom": { "utility_provider": "Example Co" }
+  }'`,
+      response: `{ "data": { "public_id": "...", "first_name": "Jane", ... } }`,
+    },
+    {
+      method: "GET",
+      path: "/api/v1/custom-fields",
+      auth: "API key (leads:read or leads:write)",
+      description: "List active custom field definitions for field mapping in CRM integrations.",
+      response: `{ "data": { "items": [{ "id": 1, "field_key": "utility_provider", "name": "Utility Provider", "type": "text" }] } }`,
+      request: `curl -s "${baseURL}/api/v1/custom-fields" \\
+  -H "Authorization: Bearer YOUR_API_KEY"`,
+    },
+    {
+      method: "POST",
+      path: "/api/v1/integrations/voiceuni/ingest",
+      auth: "API key (leads:write)",
+      description:
+        "Upsert a lead from VoiceUni by external_id. Applies the VoiceUni integration field map and routing. Publisher keys only.",
+      request: `curl -s -X POST "${baseURL}/api/v1/integrations/voiceuni/ingest" \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "connection_id": "550e8400-e29b-41d4-a716-446655440000",
+    "external_id": "vu-lead-uuid",
+    "first_name": "Jane",
+    "last_name": "Doe",
+    "phone": "+15551234567",
+    "source": "voiceuni"
+  }'`,
+      response: `{ "data": { "lead_id": "...", "public_id": "...", "status": "distributed", "created": true } }`,
+    },
+    {
+      method: "GET",
+      path: "/api/v1/appointments/contracts",
+      auth: "API key (appointments:read or appointments:write)",
+      description:
+        "List bookable appointment contracts. Publisher keys return buyer-facing contract info; buyer keys return publisher-facing contract info. Requires configured calendar on each contract.",
+      response: `{ "data": { "items": [{ "contract_id": 1, "contract_name": "...", "configured": true, "calendar_source": "buyer" }] } }`,
+      request: `curl -s "${baseURL}/api/v1/appointments/contracts" \\
+  -H "Authorization: Bearer YOUR_API_KEY"`,
+    },
+    {
+      method: "GET",
+      path: "/api/v1/appointments/slots",
+      auth: "API key (appointments:read or appointments:write)",
+      description: "List free appointment slots for a contract on a given date.",
+      queryParams: [
+        { name: "contract_id", description: "Appointment contract id (required)" },
+        { name: "date", description: "Date in YYYY-MM-DD (required, calendar timezone)" },
+      ],
+      response: `{ "data": { "items": [{ "buyer_slot_id": 10, "slot_start": "2026-08-15T14:00:00-04:00", "duration_min": 30, "remaining_capacity": 1 }] } }`,
+      request: `curl -s "${baseURL}/api/v1/appointments/slots?contract_id=1&date=2026-08-15" \\
+  -H "Authorization: Bearer YOUR_API_KEY"`,
+    },
+    {
+      method: "GET",
+      path: "/api/v1/appointments/calendar-markers",
+      auth: "API key (appointments:read or appointments:write)",
+      description: "Day markers for a contract calendar (month view).",
+      queryParams: [
+        { name: "contract_id", description: "Appointment contract id (required)" },
+        { name: "from", description: "Start date YYYY-MM-DD (required)" },
+        { name: "to", description: "End date YYYY-MM-DD (required)" },
+      ],
+      response: `{ "data": { "items": [{ "date": "2026-08-15", "has_bookable": true, "has_bookings": false }] } }`,
+      request: `curl -s "${baseURL}/api/v1/appointments/calendar-markers?contract_id=1&from=2026-08-01&to=2026-08-31" \\
+  -H "Authorization: Bearer YOUR_API_KEY"`,
+    },
+    {
+      method: "POST",
+      path: "/api/v1/appointments/book",
+      auth: "API key (appointments:write)",
+      description:
+        "Book an appointment slot. Use buyer_slot_id or publisher_slot_id from the slots response (based on contract calendar_source). Optional external_event_id for VoiceUni dedup.",
+      request: `curl -s -X POST "${baseURL}/api/v1/appointments/book" \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "contract_id": 1,
+    "publisher_slot_id": 456,
+    "slot_start": "2026-08-15T14:00:00-04:00",
+    "delivery_mode": "contract",
+    "first_name": "Jane",
+    "last_name": "Doe",
+    "phone": "+15551234567",
+    "source": "voiceuni",
+    "external_event_id": "vu-appt-uuid"
+  }'`,
+      response: `{ "data": { "id": 999, "contract_id": 1, "lead_id": 456, "appointment_at": "2026-08-15T14:00:00-04:00", "external_event_id": "vu-appt-uuid" } }`,
+    },
+    {
+      method: "GET",
+      path: "/api/v1/appointments/booked",
+      auth: "API key (appointments:read or appointments:write)",
+      description: "List booked appointments. Supports from/to date window and contract_id filter.",
+      queryParams: [
+        { name: "from", description: "Start of appointment window (YYYY-MM-DD or RFC3339)" },
+        { name: "to", description: "End of appointment window (YYYY-MM-DD or RFC3339)" },
+        { name: "contract_id", description: "Filter by contract" },
+        { name: "limit", description: "Max rows (publisher default 100, max 500)" },
+        { name: "page", description: "Page number (buyer, default 1)" },
+        { name: "publisher_id", description: "Filter by publisher (buyer)" },
+        { name: "appointment_preset", description: "Buyer preset: today, this_week, this_month, all (ignored when from/to set)" },
+        { name: "q", description: "Search lead name/phone/email (buyer)" },
+      ],
+      response: `{ "data": { "items": [{ "id": 999, "lead_name": "Jane Doe", "appointment_at": "..." }] } }`,
+      request: `curl -s "${baseURL}/api/v1/appointments/booked" \\
+  -H "Authorization: Bearer YOUR_API_KEY"`,
+    },
+    {
+      method: "GET",
+      path: "/api/v1/booking-calendars",
+      auth: "API key (appointments:read or appointments:write)",
+      description: "List booking calendars for the API key account (read-only). Includes contract_id when exactly one contract uses the calendar.",
+      response: `{ "data": { "items": [{ "id": 1, "name": "Main", "timezone": "America/New_York", "configured": true, "contract_id": 123, "calendar_source": "publisher" }] } }`,
+      request: `curl -s "${baseURL}/api/v1/booking-calendars" \\
+  -H "Authorization: Bearer YOUR_API_KEY"`,
+    },
+    {
+      method: "GET",
+      path: "/api/v1/booking-calendars/{id}",
+      auth: "API key (appointments:read or appointments:write)",
+      description: "Get a booking calendar by id.",
+      response: `{ "data": { "id": 1, "name": "Main", "schedule": {}, "timezone": "America/New_York" } }`,
+      request: `curl -s "${baseURL}/api/v1/booking-calendars/1" \\
+  -H "Authorization: Bearer YOUR_API_KEY"`,
+    },
+    {
+      method: "GET",
+      path: "/api/v1/booking-calendars/{id}/slots",
+      auth: "API key (appointments:read or appointments:write)",
+      description: "List recurring slot templates on a booking calendar.",
+      response: `{ "data": { "items": [{ "id": 10, "weekday": 1, "start_time": "09:00:00", "duration_min": 30 }] } }`,
+      request: `curl -s "${baseURL}/api/v1/booking-calendars/1/slots" \\
+  -H "Authorization: Bearer YOUR_API_KEY"`,
     },
     {
       method: "POST",
@@ -343,6 +496,18 @@ export function jwtEndpointGroups(ns: "/publisher" | "/buyer"): DocGroup[] {
           { method: "GET", path: nsPath(ns, "/integrations/connections"), auth: "JWT", description: "List connections." },
           { method: "POST", path: nsPath(ns, "/integrations/connections"), auth: "JWT admin", description: "Create connection." },
         ],
+      },
+      {
+        id: "booking-calendars",
+        title: "Booking calendars",
+        publisherOnly: true,
+        endpoints: [
+          { method: "GET", path: nsPath(ns, "/booking-calendars"), auth: "JWT", description: "List publisher booking calendars." },
+          { method: "POST", path: nsPath(ns, "/booking-calendars"), auth: "JWT appointments_manage", description: "Create booking calendar." },
+          { method: "PATCH", path: nsPath(ns, "/contracts/{id}/appointment-calendar"), auth: "JWT appointments_manage", description: "Attach publisher calendar to contract." },
+          { method: "GET", path: nsPath(ns, "/appointments/contracts"), auth: "JWT", description: "List bookable appointment contracts." },
+          { method: "POST", path: nsPath(ns, "/appointments/book"), auth: "JWT", description: "Book an appointment slot." },
+        ],
       }
     );
   } else {
@@ -375,6 +540,18 @@ export function jwtEndpointGroups(ns: "/publisher" | "/buyer"): DocGroup[] {
         endpoints: [
           { method: "GET", path: nsPath(ns, "/calendar/global"), auth: "JWT", description: "All account calendar events." },
           { method: "GET", path: nsPath(ns, "/calendar/me"), auth: "JWT", description: "Current user's calendar events." },
+        ],
+      },
+      {
+        id: "booking-calendars",
+        title: "Booking calendars",
+        buyerOnly: true,
+        endpoints: [
+          { method: "GET", path: nsPath(ns, "/booking-calendars"), auth: "JWT", description: "List buyer booking calendars." },
+          { method: "PATCH", path: nsPath(ns, "/contracts/{id}/appointment-calendar-source"), auth: "JWT appointments_manage", description: "Choose buyer or publisher calendar for contract." },
+          { method: "GET", path: nsPath(ns, "/contracts/{id}/publisher-appointment-slots"), auth: "JWT", description: "Publisher calendar slots for contract." },
+          { method: "PUT", path: nsPath(ns, "/contracts/{id}/publisher-appointment-slots"), auth: "JWT appointments_manage", description: "Toggle publisher slots on contract." },
+          { method: "POST", path: nsPath(ns, "/appointments/book"), auth: "JWT", description: "Book an appointment as buyer." },
         ],
       },
       {

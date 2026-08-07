@@ -1,0 +1,9 @@
+DROP INDEX IF EXISTS lead_appointment_bookings_external_uidx;
+ALTER TABLE lead_appointment_bookings DROP COLUMN IF EXISTS external_provider_slug;
+ALTER TABLE lead_appointment_bookings DROP COLUMN IF EXISTS external_event_id;
+
+ALTER TABLE lead_external_appointment_events DROP COLUMN IF EXISTS provider_slug;
+ALTER TABLE lead_external_appointment_events RENAME COLUMN external_event_id TO event_id;
+ALTER INDEX lead_external_appointment_events_connection_idx
+    RENAME TO lead_integration_appointment_events_connection_idx;
+ALTER TABLE lead_external_appointment_events RENAME TO lead_integration_appointment_events;

@@ -6,6 +6,7 @@ import type {
   IntegrationProvider,
   RouteIntegration,
   SunbaseConnectionDetail,
+  VoiceUniConnectionDetail,
   GhlConnectionDetail,
   CrmConnectionDetail,
   TwilioPhoneNumber,
@@ -99,6 +100,7 @@ export function useUpdateIntegrationConnection() {
       qc.invalidateQueries({ queryKey: ["integration-connections"] });
       qc.invalidateQueries({ queryKey: ["ghl-connection", vars.id] });
       qc.invalidateQueries({ queryKey: ["crm-connection", vars.id] });
+      qc.invalidateQueries({ queryKey: ["voiceuni-connection", vars.id] });
     },
   });
 }
@@ -107,6 +109,14 @@ export function useSunbaseConnectionDetail(id: number | null) {
   return useQuery({
     queryKey: ["sunbase-connection", id],
     queryFn: () => get<SunbaseConnectionDetail>(`${ns()}/integrations/connections/${id}/sunbase`),
+    enabled: id != null,
+  });
+}
+
+export function useVoiceUniConnectionDetail(id: number | null) {
+  return useQuery({
+    queryKey: ["voiceuni-connection", id],
+    queryFn: () => get<VoiceUniConnectionDetail>(`${ns()}/integrations/connections/${id}/voiceuni`),
     enabled: id != null,
   });
 }

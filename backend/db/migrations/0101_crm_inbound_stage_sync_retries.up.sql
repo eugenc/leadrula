@@ -1,4 +1,4 @@
-CREATE TABLE crm_inbound_stage_sync_retries (
+CREATE TABLE IF NOT EXISTS crm_inbound_stage_sync_retries (
     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     account_id      BIGINT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     lead_id         BIGINT NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
@@ -13,6 +13,6 @@ CREATE TABLE crm_inbound_stage_sync_retries (
     UNIQUE (lead_id, connection_id)
 );
 
-CREATE INDEX idx_crm_inbound_sync_retry_due
+CREATE INDEX IF NOT EXISTS idx_crm_inbound_sync_retry_due
     ON crm_inbound_stage_sync_retries (next_attempt_at)
     WHERE attempts < max_attempts;

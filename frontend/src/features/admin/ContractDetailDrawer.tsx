@@ -25,6 +25,7 @@ import { ContractOfferSection } from "@/features/admin/ContractOfferSection";
 import { ContractParticipationsSection } from "@/features/admin/ContractParticipationsSection";
 import { CallSettingsSection } from "@/features/calls/CallSettingsSection";
 import { AppointmentSettingsSection } from "@/features/appointments/AppointmentSettingsSection";
+import { PublisherContractCalendarSection } from "@/features/appointments/PublisherContractCalendarSection";
 import { offerFromContractModes, type ContractOfferDraft } from "@/features/admin/contractOffer";
 import {
   ContractLeadCriteriaSection,
@@ -456,7 +457,15 @@ function DraftDrawerContent({
                 )}
                 {form.lead_type === "Call" && <CallSettingsSection contractId={contract.id} />}
                 {form.lead_type === "Appointment" && (
-                  <AppointmentSettingsSection contractId={contract.id} />
+                  <>
+                    <PublisherContractCalendarSection
+                      contractId={contract.id}
+                      publisherAppointmentCalendarId={contract.publisher_appointment_calendar_id}
+                    />
+                    {contract.status === "active" && (contract.appointment_calendar_id ?? 0) > 0 && (
+                      <AppointmentSettingsSection contractId={contract.id} />
+                    )}
+                  </>
                 )}
               </div>
             ),
@@ -818,7 +827,13 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
                 )}
                 {leadType === "Appointment" && (
                   <div className="mt-4">
-                    <AppointmentSettingsSection contractId={contract.id} />
+                    <PublisherContractCalendarSection
+                      contractId={contract.id}
+                      publisherAppointmentCalendarId={contract.publisher_appointment_calendar_id}
+                    />
+                    {contract.status === "active" && (contract.appointment_calendar_id ?? 0) > 0 && (
+                      <AppointmentSettingsSection contractId={contract.id} />
+                    )}
                   </div>
                 )}
               </>

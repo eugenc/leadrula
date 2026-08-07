@@ -12,16 +12,19 @@ import (
 )
 
 type BookingCalendar struct {
-	ID         int64           `json:"id"`
-	AccountID  int64           `json:"account_id"`
-	Name       string          `json:"name"`
-	Schedule   json.RawMessage `json:"schedule"`
-	Timezone   string          `json:"timezone"`
-	BufferMin  int             `json:"buffer_min"`
-	Location   string          `json:"location,omitempty"`
-	Configured bool            `json:"configured"`
-	SlotCount  int             `json:"slot_count"`
-	UpdatedAt  time.Time       `json:"updated_at"`
+	ID             int64           `json:"id"`
+	AccountID      int64           `json:"account_id"`
+	Name           string          `json:"name"`
+	Schedule       json.RawMessage `json:"schedule"`
+	Timezone       string          `json:"timezone"`
+	BufferMin      int             `json:"buffer_min"`
+	Location       string          `json:"location,omitempty"`
+	Configured     bool            `json:"configured"`
+	SlotCount      int             `json:"slot_count"`
+	UpdatedAt      time.Time       `json:"updated_at"`
+	ContractID     *int64          `json:"contract_id,omitempty"`
+	ContractIDs    []int64         `json:"contract_ids,omitempty"`
+	CalendarSource string          `json:"calendar_source,omitempty"`
 }
 
 type PutCalendarParams struct {
@@ -129,7 +132,7 @@ func (s *Service) PutBookingCalendar(ctx context.Context, buyerID, calendarID in
 		   schedule = $4,
 		   timezone = COALESCE(NULLIF($5, ''), timezone),
 		   buffer_min = $6,
-		   location = NULLIF(TRIM($7), ''),
+		   location = COALESCE(NULLIF(TRIM($7), ''), location),
 		   updated_at = now()
 		 WHERE id = $1 AND account_id = $2`,
 		calendarID, buyerID, name, sched, tz, p.BufferMin, p.Location)
@@ -610,6 +613,11 @@ func (s *Service) calendarDayHasBookings(ctx context.Context, buyerID, calendarI
 	var ok bool
 	err := s.pool.QueryRow(ctx,
 		`SELECT EXISTS(
+			SELECT 1 FROM lead_appointment_bookings b
+			JOIN buyer_appointment_slots sl ON sl.id = b.buyer_slot_id
+			WHERE b.buyer_calendar_id = $2
+			  AND b.slot_start >= $3 AND b.slot_start < $4
+			UNION ALL
 			SELECT 1 FROM lead_appointment_bookings b
 			JOIN buyer_appointment_slots sl ON sl.id = b.buyer_slot_id
 			JOIN contracts c ON c.id = b.contract_id

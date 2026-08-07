@@ -26,6 +26,15 @@ function copyText(text: string, label: string) {
   );
 }
 
+const API_KEY_SCOPES = [
+  { id: "leads:read", label: "Read leads" },
+  { id: "leads:write", label: "Write leads" },
+  { id: "appointments:read", label: "Read appointments & calendars" },
+  { id: "appointments:write", label: "Book appointments" },
+] as const;
+
+const DEFAULT_API_KEY_SCOPES = ["leads:read", "leads:write"];
+
 export function ApiKeysPage() {
   const { pathname } = useLocation();
   const prefix = pathname.startsWith("/p/") ? "/p" : "/b";
@@ -34,14 +43,17 @@ export function ApiKeysPage() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
+  const [createScopes, setCreateScopes] = useState<string[]>([...DEFAULT_API_KEY_SCOPES]);
   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
   const [createdKeyId, setCreatedKeyId] = useState<number | null>(null);
 
   const [selectedKey, setSelectedKey] = useState<ApiKey | null>(null);
   const [detailSecret, setDetailSecret] = useState<string | null>(null);
+  const [secretByKeyId, setSecretByKeyId] = useState<Record<number, string>>({});
 
   function openCreate() {
     setCreateName("");
+    setCreateScopes([...DEFAULT_API_KEY_SCOPES]);
     setCreatedSecret(null);
     setCreatedKeyId(null);
     setCreateOpen(true);
@@ -50,18 +62,27 @@ export function ApiKeysPage() {
   function closeCreate() {
     setCreateOpen(false);
     setCreateName("");
+    setCreateScopes([...DEFAULT_API_KEY_SCOPES]);
     setCreatedSecret(null);
     setCreatedKeyId(null);
   }
 
   function openDetail(key: ApiKey) {
     setSelectedKey(key);
-    setDetailSecret(key.id === createdKeyId ? createdSecret : null);
+    setDetailSecret(
+      secretByKeyId[key.id] ?? (key.id === createdKeyId ? createdSecret : null)
+    );
   }
 
   function closeDetail() {
     setSelectedKey(null);
     setDetailSecret(null);
+  }
+
+  function toggleScope(scope: string) {
+    setCreateScopes((prev) =>
+      prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope]
+    );
   }
 
   function handleGenerate() {
@@ -70,15 +91,23 @@ export function ApiKeysPage() {
       toast.error("Key name is required");
       return;
     }
-    create.mutate(name, {
-      onSuccess: (res) => {
-        setCreatedSecret(res.secret);
-        setCreatedKeyId(res.key.id);
-        setCreateName("");
-        toast.success("API key created");
-      },
-      onError: (e) => toast.error(errorMessage(e)),
-    });
+    if (createScopes.length === 0) {
+      toast.error("Select at least one scope");
+      return;
+    }
+    create.mutate(
+      { name, scopes: createScopes },
+      {
+        onSuccess: (res) => {
+          setCreatedSecret(res.secret);
+          setCreatedKeyId(res.key.id);
+          setSecretByKeyId((prev) => ({ ...prev, [res.key.id]: res.secret }));
+          setCreateName("");
+          toast.success("API key created");
+        },
+        onError: (e) => toast.error(errorMessage(e)),
+      }
+    );
   }
 
   const resolvedSelected =
@@ -111,7 +140,7 @@ export function ApiKeysPage() {
           <THead>
             <tr>
               <TH>Name</TH>
-              <TH>Prefix</TH>
+              <TH>API key</TH>
               <TH>Last used</TH>
               <TH>Status</TH>
             </tr>
@@ -138,6 +167,9 @@ export function ApiKeysPage() {
         apiKey={resolvedSelected}
         initialSecret={detailSecret}
         onClose={closeDetail}
+        onSecretCached={(keyId, secret) =>
+          setSecretByKeyId((prev) => ({ ...prev, [keyId]: secret }))
+        }
       />
 
       <FormDrawer
@@ -182,16 +214,35 @@ export function ApiKeysPage() {
             </p>
           </div>
         ) : (
-          <div>
-            <Label>Key name</Label>
-            <Input
-              value={createName}
-              onChange={(e) => setCreateName(e.target.value)}
-              placeholder="e.g. intake"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleGenerate();
-              }}
-            />
+          <div className="space-y-4">
+            <div>
+              <Label>Key name</Label>
+              <Input
+                value={createName}
+                onChange={(e) => setCreateName(e.target.value)}
+                placeholder="e.g. voiceuni"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleGenerate();
+                }}
+              />
+            </div>
+            <div>
+              <Label>Scopes</Label>
+              <div className="mt-2 space-y-2">
+                {API_KEY_SCOPES.map((scope) => (
+                  <label key={scope.id} className="flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      className="rounded"
+                      checked={createScopes.includes(scope.id)}
+                      onChange={() => toggleScope(scope.id)}
+                    />
+                    <code className="text-xs">{scope.id}</code>
+                    <span className="text-gray-500">— {scope.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </FormDrawer>

@@ -1,11 +1,9 @@
 import { useState } from "react";
-import { format } from "date-fns";
 import { PageBody } from "@/components/layout/PageBody";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
 import { DrawerBody, Sheet } from "@/components/ui/dialog";
 import { EmptyState, Spinner } from "@/components/ui/misc";
-import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { ActionAppointmentsManage, canAction } from "@/lib/permissions";
 import { useAuthStore } from "@/store/authStore";
 import {
@@ -13,6 +11,7 @@ import {
   BuyerAvailabilityEditor,
   BuyerSetupWizard,
 } from "@/features/appointments/BuyerAvailabilityEditor";
+import { BookingCalendarsTable } from "@/features/appointments/BookingCalendarsTable";
 import { useBuyerCalendars } from "@/features/appointments/hooks";
 import type { BuyerBookingCalendar } from "@/types";
 
@@ -32,7 +31,6 @@ export function BuyerCalendarsPage() {
   return (
     <>
       <PageHeader
-        title="Calendars"
         action={
           canManageCalendars ? (
             <Button type="button" onClick={openWizard}>
@@ -47,6 +45,7 @@ export function BuyerCalendarsPage() {
         ) : (
           <CalendarsList
             calendars={calendars}
+            ownerName={user?.account_name ?? ""}
             canManageCalendars={canManageCalendars}
             onOpen={(id) => setDrawerCalendarId(id)}
             onAdd={openWizard}
@@ -64,9 +63,6 @@ export function BuyerCalendarsPage() {
       <Sheet open={drawerCalendarId !== null} onClose={() => setDrawerCalendarId(null)} width={AVAILABILITY_DRAWER_WIDTH}>
         {drawerCalendarId && (
           <DrawerBody>
-            <h2 className="mb-4 text-lg font-bold text-gray-800">
-              {calendars.find((c) => c.id === drawerCalendarId)?.name ?? "Calendar"}
-            </h2>
             <BuyerAvailabilityEditor calendarId={drawerCalendarId} readOnly={!canManageCalendars} />
           </DrawerBody>
         )}
@@ -77,11 +73,13 @@ export function BuyerCalendarsPage() {
 
 function CalendarsList({
   calendars,
+  ownerName,
   canManageCalendars,
   onOpen,
   onAdd,
 }: {
   calendars: BuyerBookingCalendar[];
+  ownerName: string;
   canManageCalendars: boolean;
   onOpen: (id: number) => void;
   onAdd: () => void;
@@ -103,27 +101,11 @@ function CalendarsList({
   }
 
   return (
-    <Table>
-      <THead>
-        <tr>
-          <TH>Name</TH>
-          <TH>Timezone</TH>
-          <TH>Slots</TH>
-          <TH>Status</TH>
-          <TH>Updated</TH>
-        </tr>
-      </THead>
-      <TBody>
-        {calendars.map((c) => (
-          <TR key={c.id} onClick={() => onOpen(c.id)}>
-            <TD className="font-medium text-gray-800">{c.name}</TD>
-            <TD>{c.timezone}</TD>
-            <TD>{c.slot_count}</TD>
-            <TD>{c.configured ? "Ready" : "Setup needed"}</TD>
-            <TD className="text-gray-500">{format(new Date(c.updated_at), "MMM d, yyyy")}</TD>
-          </TR>
-        ))}
-      </TBody>
-    </Table>
+    <BookingCalendarsTable
+      calendars={calendars}
+      ownerName={ownerName}
+      showUpdated
+      onOpen={onOpen}
+    />
   );
 }

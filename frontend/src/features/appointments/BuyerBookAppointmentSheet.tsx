@@ -13,62 +13,118 @@ import {
   startOfWeek,
 } from "date-fns";
 import { cn } from "@/lib/utils";
-import { errorMessage } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { DrawerBody, DrawerHeader, Sheet } from "@/components/ui/dialog";
 import { FilterSelect } from "@/components/ui/input";
 import { EmptyState, Spinner } from "@/components/ui/misc";
+import { BookDaySlotsColumn } from "@/features/appointments/BookDaySlotsColumn";
 import { BookAppointmentDrawer } from "@/features/appointments/BookAppointmentDrawer";
 import {
   useBuyerAppointmentCalendarMarkers,
   useBuyerAppointmentContracts,
+  useBuyerCalendars,
   useBuyerFreeSlots,
+  useCalendarAppointmentFreeSlots,
+  useCalendarAppointmentMarkers,
+  workingHoursForDate,
 } from "@/features/appointments/hooks";
 import type { AppointmentFreeSlot } from "@/types";
+
+type BookTarget =
+  | { kind: "calendar"; id: number }
+  | { kind: "contract"; id: number };
+
+function targetKey(t: BookTarget) {
+  return `${t.kind}:${t.id}`;
+}
+
+function parseTargetKey(key: string): BookTarget | null {
+  const [kind, idStr] = key.split(":");
+  const id = Number(idStr);
+  if (!id || (kind !== "calendar" && kind !== "contract")) return null;
+  return { kind, id } as BookTarget;
+}
 
 export function BuyerBookAppointmentSheet({
   open,
   onClose,
+  onBooked,
 }: {
   open: boolean;
   onClose: () => void;
+  onBooked?: () => void;
 }) {
   const { data: contracts = [], isLoading: loadingContracts } = useBuyerAppointmentContracts();
-  const [selectedContractId, setSelectedContractId] = useState<number | null>(null);
+  const { data: calendars = [], isLoading: loadingCalendars } = useBuyerCalendars();
+  const [selectedTarget, setSelectedTarget] = useState<BookTarget | null>(null);
   const [selectedDate, setSelectedDate] = useState(() => format(new Date(), "yyyy-MM-dd"));
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
   const [bookSlot, setBookSlot] = useState<AppointmentFreeSlot | null>(null);
+  const [customSchedule, setCustomSchedule] = useState<{ date: string; timezone: string } | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  const bookableContracts = useMemo(
-    () => contracts.filter((c) => c.configured),
-    [contracts]
-  );
+  const bookableCalendars = useMemo(() => calendars.filter((c) => c.configured), [calendars]);
+  const bookableContracts = useMemo(() => contracts.filter((c) => c.configured), [contracts]);
+
+  const selectedContractId = selectedTarget?.kind === "contract" ? selectedTarget.id : null;
+  const selectedCalendarId = selectedTarget?.kind === "calendar" ? selectedTarget.id : null;
 
   const selectedContract = useMemo(
     () => bookableContracts.find((c) => c.contract_id === selectedContractId) ?? null,
     [bookableContracts, selectedContractId]
   );
+  const selectedCalendar = useMemo(
+    () => bookableCalendars.find((c) => c.id === selectedCalendarId) ?? null,
+    [bookableCalendars, selectedCalendarId]
+  );
 
   useEffect(() => {
     if (!open) {
       setBookSlot(null);
+      setCustomSchedule(null);
       setDrawerOpen(false);
       return;
     }
-    if (bookableContracts.length === 0) {
-      if (selectedContractId !== null) setSelectedContractId(null);
+    if (bookableCalendars.length === 0 && bookableContracts.length === 0) {
+      if (selectedTarget !== null) setSelectedTarget(null);
       return;
     }
-    if (!bookableContracts.some((c) => c.contract_id === selectedContractId)) {
-      setSelectedContractId(bookableContracts[0].contract_id);
+    if (selectedTarget?.kind === "calendar" && bookableCalendars.some((c) => c.id === selectedTarget.id)) return;
+    if (selectedTarget?.kind === "contract" && bookableContracts.some((c) => c.contract_id === selectedTarget.id)) return;
+    if (bookableCalendars.length > 0) {
+      setSelectedTarget({ kind: "calendar", id: bookableCalendars[0].id });
+    } else {
+      setSelectedTarget({ kind: "contract", id: bookableContracts[0].contract_id });
     }
-  }, [open, bookableContracts, selectedContractId]);
+  }, [open, bookableCalendars, bookableContracts, selectedTarget]);
 
   const monthStart = format(startOfMonth(month), "yyyy-MM-dd");
   const monthEnd = format(endOfMonth(month), "yyyy-MM-dd");
-  const { data: markers = [] } = useBuyerAppointmentCalendarMarkers(selectedContractId, monthStart, monthEnd);
-  const { data: freeSlots = [], isLoading: loadingSlots, isError: slotsError, error: slotsErr } = useBuyerFreeSlots(selectedContractId, selectedDate);
+  const { data: contractMarkers = [] } = useBuyerAppointmentCalendarMarkers(selectedContractId, monthStart, monthEnd);
+  const { data: calendarMarkers = [] } = useCalendarAppointmentMarkers(
+    selectedCalendarId,
+    monthStart,
+    monthEnd,
+    "buyer"
+  );
+  const { data: contractDaySlots, isLoading: loadingContractSlots, isError: contractSlotsError, error: contractSlotsErr } =
+    useBuyerFreeSlots(selectedContractId, selectedDate);
+  const { data: calendarDaySlots, isLoading: loadingCalendarSlots, isError: calendarSlotsError, error: calendarSlotsErr } =
+    useCalendarAppointmentFreeSlots(selectedCalendarId, selectedDate, "buyer");
+
+  const daySlots = selectedCalendarId ? calendarDaySlots : contractDaySlots;
+  const freeSlots = daySlots?.items ?? [];
+  const bookedSlots = daySlots?.booked ?? [];
+  const loadingSlots = selectedCalendarId ? loadingCalendarSlots : loadingContractSlots;
+  const slotsError = selectedCalendarId ? calendarSlotsError : contractSlotsError;
+  const slotsErr = selectedCalendarId ? calendarSlotsErr : contractSlotsErr;
+  const markers = selectedCalendarId ? calendarMarkers : contractMarkers;
+  const timezone = selectedCalendar?.timezone ?? selectedContract?.timezone ?? "UTC";
+
+  const workingHours = useMemo(
+    () => workingHoursForDate(daySlots?.working_hours, selectedCalendar?.schedule, selectedDate),
+    [daySlots?.working_hours, selectedCalendar?.schedule, selectedDate]
+  );
 
   const calendarDays = useMemo(() => {
     const start = startOfWeek(startOfMonth(month));
@@ -81,48 +137,83 @@ export function BuyerBookAppointmentSheet({
   const today = startOfDay(new Date());
 
   function openBook(slot: AppointmentFreeSlot) {
+    setCustomSchedule(null);
     setBookSlot(slot);
+    setDrawerOpen(true);
+  }
+
+  function openCustomTime() {
+    setBookSlot(null);
+    setCustomSchedule({ date: selectedDate, timezone });
     setDrawerOpen(true);
   }
 
   function closeAll() {
     setDrawerOpen(false);
     setBookSlot(null);
+    setCustomSchedule(null);
     onClose();
   }
+
+  function handleBooked() {
+    setDrawerOpen(false);
+    setBookSlot(null);
+    setCustomSchedule(null);
+    if (onBooked) {
+      onBooked();
+    } else {
+      onClose();
+    }
+  }
+
+  const hasBookable = bookableCalendars.length > 0 || bookableContracts.length > 0;
 
   return (
     <>
       <Sheet open={open} onClose={closeAll} width={640}>
         <DrawerHeader title="Add appointment" onClose={closeAll} />
         <DrawerBody>
-          {loadingContracts ? (
+          {loadingContracts || loadingCalendars ? (
             <Spinner className="h-6 w-6" />
-          ) : !bookableContracts.length ? (
-            <EmptyState title="No bookable appointment contracts." subtitle="Configure a calendar and attach it to an appointment contract first." />
+          ) : !hasBookable ? (
+            <EmptyState
+              title="No bookable calendars yet."
+              subtitle="Create a calendar under Calendars and add availability slots, or attach one to an appointment contract."
+            />
           ) : (
             <div className="space-y-4">
-              <div>
-                <FilterSelect
-                  value={selectedContractId ?? ""}
-                  onChange={(e) => setSelectedContractId(Number(e.target.value))}
-                  className="w-full"
-                >
-                  {bookableContracts.map((c) => (
-                    <option key={c.contract_id} value={c.contract_id}>
-                      {c.contract_name} · {c.publisher_name}
-                    </option>
-                  ))}
-                </FilterSelect>
-              </div>
+              <FilterSelect
+                value={selectedTarget ? targetKey(selectedTarget) : ""}
+                onChange={(e) => setSelectedTarget(parseTargetKey(e.target.value))}
+                className="w-full"
+              >
+                {bookableCalendars.length > 0 && (
+                  <optgroup label="My calendars">
+                    {bookableCalendars.map((c) => (
+                      <option key={c.id} value={targetKey({ kind: "calendar", id: c.id })}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {bookableContracts.length > 0 && (
+                  <optgroup label="Contracts">
+                    {bookableContracts.map((c) => (
+                      <option key={c.contract_id} value={targetKey({ kind: "contract", id: c.contract_id })}>
+                        {c.contract_name} · {c.publisher_name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </FilterSelect>
 
-              {selectedContract && (
+              {selectedTarget && (
                 <div className="flex gap-4">
                   <div className="min-w-0 flex-1">
                     <div className="mb-2 flex items-center justify-between">
                       <div>
                         <div className="font-semibold text-gray-800">{format(month, "MMMM yyyy")}</div>
-                        <div className="text-xs text-gray-400">Times shown in {selectedContract.timezone}</div>
+                        <div className="text-xs text-gray-400">Times shown in {timezone}</div>
                       </div>
                       <div className="flex gap-1">
                         <Button variant="secondary" className="h-8" onClick={() => setMonth(addMonths(month, -1))}>
@@ -186,32 +277,16 @@ export function BuyerBookAppointmentSheet({
                     </div>
                   </div>
 
-                  <div className="w-44 shrink-0 border-l border-gray-100 pl-3">
-                    <div className="mb-2 text-sm font-bold text-gray-800">
-                      {format(new Date(selectedDate + "T12:00:00"), "EEE, MMM d")}
-                    </div>
-                    {loadingSlots ? (
-                      <Spinner className="h-5 w-5" />
-                    ) : slotsError ? (
-                      <p className="text-sm text-red-600">{errorMessage(slotsErr)}</p>
-                    ) : !freeSlots.length ? (
-                      <p className="text-sm text-gray-400">No free slots.</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {freeSlots.map((s) => (
-                          <button
-                            key={s.slot_start}
-                            type="button"
-                            onClick={() => openBook(s)}
-                            className="flex w-full items-center justify-between rounded border border-gray-100 px-2 py-2 text-left text-sm hover:bg-jade-50"
-                          >
-                            <span>{format(new Date(s.slot_start), "h:mm a")}</span>
-                            <span className="text-xs font-semibold text-jade-700">{s.remaining_capacity} free</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  <BookDaySlotsColumn
+                    selectedDate={selectedDate}
+                    loading={loadingSlots}
+                    error={slotsError ? slotsErr : null}
+                    freeSlots={freeSlots}
+                    booked={bookedSlots}
+                    workingHours={workingHours}
+                    onBookSlot={openBook}
+                    onCustomTime={openCustomTime}
+                  />
                 </div>
               )}
             </div>
@@ -225,10 +300,13 @@ export function BuyerBookAppointmentSheet({
         onClose={() => {
           setDrawerOpen(false);
           setBookSlot(null);
+          setCustomSchedule(null);
         }}
-        onBooked={closeAll}
-        contractId={selectedContractId ?? 0}
+        onBooked={handleBooked}
+        contractId={selectedContractId ?? undefined}
+        calendarId={selectedCalendarId ?? undefined}
         slot={bookSlot}
+        customSchedule={customSchedule}
       />
     </>
   );

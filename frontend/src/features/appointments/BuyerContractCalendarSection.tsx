@@ -48,7 +48,7 @@ export function BuyerContractCalendarSection({
     <div className="mt-4 space-y-3 border-t border-gray-100 pt-4">
       <SectionLabel>Booking calendar</SectionLabel>
       <p className="text-xs text-gray-400">
-        Publishers book appointments from slots on this calendar only.
+        Your calendar — you can book immediately once this contract is active.
       </p>
       <div className="flex flex-wrap items-end gap-2">
         <div className="min-w-[12rem] flex-1">

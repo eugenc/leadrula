@@ -23,6 +23,7 @@ func TestBook_setsLeadActionAt(t *testing.T) {
 		 FROM contracts c
 		 JOIN buyer_booking_calendars bc ON bc.id = c.appointment_calendar_id
 		 WHERE c.lead_type = 'Appointment' AND c.status = 'active' AND c.deleted_at IS NULL
+		   AND c.appointment_calendar_source = 'buyer'
 		   AND c.appointment_calendar_id IS NOT NULL
 		   AND bc.schedule::text NOT IN ('{}', 'null')
 		   AND EXISTS(
@@ -93,7 +94,7 @@ func TestBook_setsLeadActionAt(t *testing.T) {
 	}
 	date := now.AddDate(0, 0, diff).Format("2006-01-02")
 
-	freeSlots, err := svc.ListFreeSlots(ctx, publisherID, contractID, date)
+	freeSlots, err := svc.ListFreeSlots(ctx, publisherID, contractID, date, bookingTargetActive)
 	if err != nil {
 		t.Fatalf("ListFreeSlots: %v", err)
 	}
@@ -109,11 +110,12 @@ func TestBook_setsLeadActionAt(t *testing.T) {
 		Role:        "admin",
 	}
 	_, err = svc.Book(ctx, p, BookParams{
-		ContractID:   contractID,
-		BuyerSlotID:  slot.BuyerSlotID,
-		SlotStart:    slot.SlotStart,
-		DeliveryMode: "contract",
-		LeadID:       leadID,
+		ContractID:    contractID,
+		BuyerSlotID:   slot.BuyerSlotID,
+		SlotStart:     slot.SlotStart,
+		DeliveryMode:  "contract",
+		LeadID:        leadID,
+		BookingTarget: bookingTargetActive,
 	})
 	if err != nil {
 		t.Fatalf("Book: %v", err)

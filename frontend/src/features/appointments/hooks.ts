@@ -6,11 +6,16 @@ import type {
   AppointmentBooking,
   AppointmentCalendarMarker,
   AppointmentContractOption,
+  AppointmentDaySlotsResult,
+  AppointmentDayWorkingHours,
   BuyerAppointmentContractOption,
   AppointmentFreeSlot,
   BuyerAppointmentSlot,
   BuyerBookingCalendar,
   ContractAppointmentSlot,
+  ContractPublisherAppointmentSlot,
+  PublisherAppointmentSlot,
+  PublisherBookingCalendar,
 } from "@/types";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
@@ -146,6 +151,187 @@ export function useSetContractAppointmentCalendar() {
   });
 }
 
+export function useSetContractAppointmentCalendarSource() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      contractId,
+      source,
+      appointment_calendar_id,
+    }: {
+      contractId: number;
+      source: "buyer" | "publisher";
+      appointment_calendar_id?: number;
+    }) =>
+      patch(`/buyer/contracts/${contractId}/appointment-calendar-source`, {
+        source,
+        appointment_calendar_id,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["buyer-contracts"] });
+      qc.invalidateQueries({ queryKey: ["contract"] });
+      qc.invalidateQueries({ queryKey: ["contract-appointment-slots"] });
+      qc.invalidateQueries({ queryKey: ["contract-publisher-appointment-slots"] });
+      qc.invalidateQueries({ queryKey: ["publisher-appointment-contracts"] });
+    },
+  });
+}
+
+export function useContractPublisherAppointmentSlots(contractId: number | null) {
+  return useQuery({
+    queryKey: ["contract-publisher-appointment-slots", contractId],
+    queryFn: async () => {
+      const res = await get<{ items: ContractPublisherAppointmentSlot[] }>(
+        `/buyer/contracts/${contractId}/publisher-appointment-slots`
+      );
+      return res.items ?? [];
+    },
+    enabled: !!contractId,
+  });
+}
+
+export function useSaveContractPublisherAppointmentSlots() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      contractId,
+      slots,
+    }: {
+      contractId: number;
+      slots: {
+        publisher_slot_id: number;
+        enabled: boolean;
+        duration_min_override?: number | null;
+        capacity_override?: number | null;
+      }[];
+    }) =>
+      put<{ items: ContractPublisherAppointmentSlot[] }>(
+        `/buyer/contracts/${contractId}/publisher-appointment-slots`,
+        { slots }
+      ),
+    onSuccess: (_d, { contractId }) => {
+      qc.invalidateQueries({ queryKey: ["contract-publisher-appointment-slots", contractId] });
+    },
+  });
+}
+
+export type CalendarOwner = "buyer" | "publisher";
+
+export function usePublisherCalendars() {
+  return useQuery({
+    queryKey: ["publisher-booking-calendars"],
+    queryFn: async () => {
+      const res = await get<{ items: PublisherBookingCalendar[] }>("/publisher/booking-calendars");
+      return res.items ?? [];
+    },
+  });
+}
+
+export function usePublisherBookingCalendar(calendarId: number | null) {
+  return useQuery({
+    queryKey: ["publisher-booking-calendar", calendarId],
+    queryFn: () => get<PublisherBookingCalendar>(`/publisher/booking-calendars/${calendarId}`),
+    enabled: !!calendarId,
+  });
+}
+
+export function useCreatePublisherBookingCalendar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; timezone: string }) =>
+      post<PublisherBookingCalendar>("/publisher/booking-calendars", body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["publisher-booking-calendars"] }),
+  });
+}
+
+export function useSavePublisherBookingCalendar(calendarId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Partial<PublisherBookingCalendar>) =>
+      put<PublisherBookingCalendar>(`/publisher/booking-calendars/${calendarId}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["publisher-booking-calendar", calendarId] });
+      qc.invalidateQueries({ queryKey: ["publisher-booking-calendars"] });
+      qc.invalidateQueries({ queryKey: ["publisher-calendar-slots", calendarId] });
+    },
+  });
+}
+
+export function usePublisherCalendarSlots(calendarId: number | null) {
+  return useQuery({
+    queryKey: ["publisher-calendar-slots", calendarId],
+    queryFn: async () => {
+      const res = await get<{ items: PublisherAppointmentSlot[] }>(
+        `/publisher/booking-calendars/${calendarId}/slots`
+      );
+      return res.items ?? [];
+    },
+    enabled: !!calendarId,
+  });
+}
+
+export function useCreatePublisherCalendarSlot(calendarId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { weekday: number; start_time: string; duration_min: number; capacity: number }) =>
+      post<PublisherAppointmentSlot>(`/publisher/booking-calendars/${calendarId}/slots`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["publisher-calendar-slots", calendarId] });
+      qc.invalidateQueries({ queryKey: ["publisher-booking-calendars"] });
+      qc.invalidateQueries({ queryKey: ["publisher-booking-calendar", calendarId] });
+    },
+  });
+}
+
+export function usePatchPublisherCalendarSlot(calendarId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: number;
+      body: { start_time?: string; duration_min?: number; capacity?: number; disabled?: boolean };
+    }) => patch<PublisherAppointmentSlot>(`/publisher/booking-calendars/${calendarId}/slots/${id}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["publisher-calendar-slots", calendarId] });
+      qc.invalidateQueries({ queryKey: ["publisher-booking-calendars"] });
+    },
+  });
+}
+
+export function useCopyPublisherCalendarSlots(calendarId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { from_weekday: number; to_weekdays: number[] }) =>
+      post<{ items: PublisherAppointmentSlot[] }>(
+        `/publisher/booking-calendars/${calendarId}/slots/copy`,
+        body
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["publisher-calendar-slots", calendarId] }),
+  });
+}
+
+export function useSetContractPublisherAppointmentCalendar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      contractId,
+      publisher_appointment_calendar_id,
+    }: {
+      contractId: number;
+      publisher_appointment_calendar_id: number;
+    }) =>
+      patch(`/publisher/contracts/${contractId}/appointment-calendar`, {
+        publisher_appointment_calendar_id,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["contracts"] });
+      qc.invalidateQueries({ queryKey: ["contract"] });
+    },
+  });
+}
+
 export interface BuyerBookingsParams {
   page?: number;
   limit?: number;
@@ -226,25 +412,72 @@ export function useSaveContractAppointmentSlots() {
   });
 }
 
-export function useFreeSlots(contractId: number | null, date: string) {
+export function useCalendarAppointmentFreeSlots(
+  calendarId: number | null,
+  date: string,
+  owner: "publisher" | "buyer"
+) {
+  const base = owner === "publisher" ? "/publisher" : "/buyer";
   return useQuery({
-    queryKey: ["appointment-free-slots", contractId, date],
+    queryKey: ["calendar-appointment-free-slots", owner, calendarId, date],
     queryFn: async () => {
-      const res = await get<{ items: AppointmentFreeSlot[] }>(
-        `/publisher/appointments/slots?contract_id=${contractId}&date=${date}`
+      const res = await get<AppointmentDaySlotsResult>(
+        `${base}/appointments/slots?calendar_id=${calendarId}&date=${date}`
+      );
+      return {
+        items: res.items ?? [],
+        booked: res.booked ?? [],
+        hours: res.hours ?? [],
+        working_hours: res.working_hours ?? null,
+      };
+    },
+    enabled: !!calendarId && !!date,
+  });
+}
+
+export function useCalendarAppointmentMarkers(
+  calendarId: number | null,
+  from: string,
+  to: string,
+  owner: "publisher" | "buyer"
+) {
+  const base = owner === "publisher" ? "/publisher" : "/buyer";
+  return useQuery({
+    queryKey: ["calendar-appointment-markers", owner, calendarId, from, to],
+    queryFn: async () => {
+      const res = await get<{ items: AppointmentCalendarMarker[] }>(
+        `${base}/appointments/calendar-markers?calendar_id=${calendarId}&from=${from}&to=${to}`
       );
       return res.items ?? [];
+    },
+    enabled: !!calendarId && !!from && !!to,
+  });
+}
+
+export function useFreeSlots(contractId: number | null, date: string, bookingTarget = "own") {
+  return useQuery({
+    queryKey: ["appointment-free-slots", contractId, date, bookingTarget],
+    queryFn: async () => {
+      const res = await get<AppointmentDaySlotsResult>(
+        `/publisher/appointments/slots?contract_id=${contractId}&date=${date}&booking_target=${bookingTarget}`
+      );
+      return {
+        items: res.items ?? [],
+        booked: res.booked ?? [],
+        hours: res.hours ?? [],
+        working_hours: res.working_hours ?? null,
+      };
     },
     enabled: !!contractId && !!date,
   });
 }
 
-export function useCalendarMarkers(contractId: number | null, from: string, to: string) {
+export function useCalendarMarkers(contractId: number | null, from: string, to: string, bookingTarget = "own") {
   return useQuery({
-    queryKey: ["appointment-calendar-markers", contractId, from, to],
+    queryKey: ["appointment-calendar-markers", contractId, from, to, bookingTarget],
     queryFn: async () => {
       const res = await get<{ items: AppointmentCalendarMarker[] }>(
-        `/publisher/appointments/calendar-markers?contract_id=${contractId}&from=${from}&to=${to}`
+        `/publisher/appointments/calendar-markers?contract_id=${contractId}&from=${from}&to=${to}&booking_target=${bookingTarget}`
       );
       return res.items ?? [];
     },
@@ -268,7 +501,9 @@ export function useBookAppointment() {
     mutationFn: (body: Record<string, unknown>) => post<AppointmentBooking>("/publisher/appointments/book", body),
     onSuccess: (_data, body) => {
       qc.invalidateQueries({ queryKey: ["appointment-free-slots"] });
+      qc.invalidateQueries({ queryKey: ["calendar-appointment-free-slots"] });
       qc.invalidateQueries({ queryKey: ["appointment-calendar-markers"] });
+      qc.invalidateQueries({ queryKey: ["calendar-appointment-markers"] });
       qc.invalidateQueries({ queryKey: ["publisher-appointments"] });
       qc.invalidateQueries({ queryKey: ["buyer-appointments"] });
       qc.invalidateQueries({ queryKey: ["leads"] });
@@ -292,25 +527,35 @@ export function useBuyerAppointmentContracts() {
   });
 }
 
-export function useBuyerFreeSlots(contractId: number | null, date: string) {
+export function useBuyerFreeSlots(contractId: number | null, date: string, bookingTarget = "own") {
   return useQuery({
-    queryKey: ["buyer-appointment-free-slots", contractId, date],
+    queryKey: ["buyer-appointment-free-slots", contractId, date, bookingTarget],
     queryFn: async () => {
-      const res = await get<{ items: AppointmentFreeSlot[] }>(
-        `/buyer/appointments/slots?contract_id=${contractId}&date=${date}`
+      const res = await get<AppointmentDaySlotsResult>(
+        `/buyer/appointments/slots?contract_id=${contractId}&date=${date}&booking_target=${bookingTarget}`
       );
-      return res.items ?? [];
+      return {
+        items: res.items ?? [],
+        booked: res.booked ?? [],
+        hours: res.hours ?? [],
+        working_hours: res.working_hours ?? null,
+      };
     },
     enabled: !!contractId && !!date,
   });
 }
 
-export function useBuyerAppointmentCalendarMarkers(contractId: number | null, from: string, to: string) {
+export function useBuyerAppointmentCalendarMarkers(
+  contractId: number | null,
+  from: string,
+  to: string,
+  bookingTarget = "own"
+) {
   return useQuery({
-    queryKey: ["buyer-appointment-calendar-markers", contractId, from, to],
+    queryKey: ["buyer-appointment-calendar-markers", contractId, from, to, bookingTarget],
     queryFn: async () => {
       const res = await get<{ items: AppointmentCalendarMarker[] }>(
-        `/buyer/appointments/calendar-markers?contract_id=${contractId}&from=${from}&to=${to}`
+        `/buyer/appointments/calendar-markers?contract_id=${contractId}&from=${from}&to=${to}&booking_target=${bookingTarget}`
       );
       return res.items ?? [];
     },
@@ -324,7 +569,9 @@ export function useBuyerBookAppointment() {
     mutationFn: (body: Record<string, unknown>) => post<AppointmentBooking>("/buyer/appointments/book", body),
     onSuccess: (_data, body) => {
       qc.invalidateQueries({ queryKey: ["buyer-appointment-free-slots"] });
+      qc.invalidateQueries({ queryKey: ["calendar-appointment-free-slots"] });
       qc.invalidateQueries({ queryKey: ["buyer-appointment-calendar-markers"] });
+      qc.invalidateQueries({ queryKey: ["calendar-appointment-markers"] });
       qc.invalidateQueries({ queryKey: ["buyer-appointments"] });
       qc.invalidateQueries({ queryKey: ["leads"] });
       qc.invalidateQueries({ queryKey: ["lead"] });
@@ -414,3 +661,16 @@ export const DEFAULT_WEEKLY_HOURS: Record<string, { start: string; end: string }
 };
 
 export const WEEKDAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+
+export function workingHoursForDate(
+  apiHours: AppointmentDayWorkingHours | null | undefined,
+  schedule: Record<string, { start: string; end: string }> | undefined,
+  date: string
+): AppointmentDayWorkingHours | null {
+  if (apiHours?.start && apiHours?.end) return apiHours;
+  if (!schedule) return null;
+  const weekday = new Date(date + "T12:00:00").getDay();
+  const day = schedule[WEEKDAY_KEYS[weekday]];
+  if (!day?.start || !day?.end || day.start >= day.end) return null;
+  return { start: day.start, end: day.end };
+}

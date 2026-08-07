@@ -18,6 +18,8 @@ type BuyerListParams struct {
 	ContractID        int64
 	PublisherID       int64
 	AppointmentPreset string
+	From              *time.Time
+	To                *time.Time
 }
 
 type BuyerListResult struct {
@@ -68,6 +70,11 @@ func (s *Service) ListBuyerBookingsForCalendar(ctx context.Context, buyerID, cal
 
 func (s *Service) listBuyerAppointments(ctx context.Context, p BuyerListParams, tz string) (*BuyerListResult, error) {
 	from, to, excludeNullAppt := appointmentPresetBounds(p.AppointmentPreset, tz, time.Now())
+	if p.From != nil || p.To != nil {
+		from = p.From
+		to = p.To
+		excludeNullAppt = true
+	}
 	baseSQL, args := buyerAppointmentsBaseSQL(p)
 
 	where := ""
@@ -128,7 +135,7 @@ func (s *Service) listBuyerAppointments(ctx context.Context, p BuyerListParams, 
 	listSQL := fmt.Sprintf(`
 		SELECT id, contract_id, contract_name, lead_id, lead_name, phone, email,
 		       booked_at, appointment_at, duration_min, delivery_mode,
-		       buyer_name, publisher_name, lead_status, is_route
+		       buyer_name, publisher_name, calendar_name, lead_status, is_route
 		FROM (%s) sub
 		WHERE 1=1%s
 		ORDER BY %s %s %s, id DESC
@@ -149,7 +156,7 @@ func (s *Service) listBuyerAppointments(ctx context.Context, p BuyerListParams, 
 		var isRoute bool
 		if err := rows.Scan(&r.ID, &r.ContractID, &r.ContractName, &r.LeadID, &r.LeadName,
 			&phone, &email, &r.BookedAt, &r.AppointmentAt, &r.DurationMin, &r.DeliveryMode,
-			&r.BuyerName, &r.PublisherName, &r.LeadStatus, &isRoute); err != nil {
+			&r.BuyerName, &r.PublisherName, &r.CalendarName, &r.LeadStatus, &isRoute); err != nil {
 			return nil, err
 		}
 		if phone != nil {
@@ -184,7 +191,7 @@ func buyerAppointmentsBaseSQL(p BuyerListParams) (string, []any) {
 
 	bookingSQL := fmt.Sprintf(`
 		SELECT b.id AS id,
-		       b.contract_id,
+		       COALESCE(b.contract_id, 0) AS contract_id,
 		       COALESCE(c.name, '') AS contract_name,
 		       b.lead_id,
 		       TRIM(COALESCE(l.first_name, '') || ' ' || COALESCE(l.last_name, '')) AS lead_name,
@@ -196,16 +203,22 @@ func buyerAppointmentsBaseSQL(p BuyerListParams) (string, []any) {
 		       b.delivery_mode,
 		       COALESCE(buyer.name, '') AS buyer_name,
 		       COALESCE(pub.name, '') AS publisher_name,
+		       COALESCE(bbc.name, pbc_direct.name, bbc_slot.name, pbc_slot.name, '') AS calendar_name,
 		       COALESCE(l.status::text, '') AS lead_status,
 		       false AS is_route,
-		       c.publisher_id,
-		       sl.calendar_id
+		       COALESCE(c.publisher_id, 0) AS publisher_id,
+		       COALESCE(b.buyer_calendar_id, bsl.calendar_id, psl.calendar_id) AS calendar_id
 		FROM lead_appointment_bookings b
-		JOIN contracts c ON c.id = b.contract_id
+		LEFT JOIN contracts c ON c.id = b.contract_id
 		JOIN leads l ON l.id = b.lead_id
-		JOIN buyer_appointment_slots sl ON sl.id = b.buyer_slot_id
-		JOIN accounts buyer ON buyer.id = c.buyer_id
-		JOIN accounts pub ON pub.id = c.publisher_id
+		LEFT JOIN buyer_appointment_slots bsl ON bsl.id = b.buyer_slot_id
+		LEFT JOIN publisher_appointment_slots psl ON psl.id = b.publisher_slot_id
+		LEFT JOIN buyer_booking_calendars bbc ON bbc.id = b.buyer_calendar_id
+		LEFT JOIN publisher_booking_calendars pbc_direct ON pbc_direct.id = b.publisher_calendar_id
+		LEFT JOIN buyer_booking_calendars bbc_slot ON bbc_slot.id = bsl.calendar_id
+		LEFT JOIN publisher_booking_calendars pbc_slot ON pbc_slot.id = psl.calendar_id
+		LEFT JOIN accounts buyer ON buyer.id = COALESCE(c.buyer_id, bbc.account_id)
+		LEFT JOIN accounts pub ON pub.id = c.publisher_id
 		WHERE l.deleted_at IS NULL
 		  AND l.owner_account_id = $%d
 		  AND l.status IN ('distributed', 'closed', 'review')`, buyerArg)
@@ -224,6 +237,7 @@ func buyerAppointmentsBaseSQL(p BuyerListParams) (string, []any) {
 		       'contract' AS delivery_mode,
 		       COALESCE(buyer.name, '') AS buyer_name,
 		       COALESCE(pub.name, '') AS publisher_name,
+		       COALESCE(route_cal.name, '') AS calendar_name,
 		       COALESCE(l.status::text, '') AS lead_status,
 		       true AS is_route,
 		       c.publisher_id,
@@ -232,6 +246,7 @@ func buyerAppointmentsBaseSQL(p BuyerListParams) (string, []any) {
 		JOIN contracts c ON c.id = l.contract_id AND c.lead_type = 'Appointment'
 		JOIN accounts buyer ON buyer.id = c.buyer_id
 		JOIN accounts pub ON pub.id = c.publisher_id
+		LEFT JOIN buyer_booking_calendars route_cal ON route_cal.id = c.appointment_calendar_id
 		LEFT JOIN LATERAL (
 			SELECT re.created_at
 			FROM route_executions re

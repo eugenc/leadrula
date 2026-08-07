@@ -46,7 +46,9 @@ type Contract struct {
 	DistributionStrategy      string    `json:"distribution_strategy,omitempty"`
 	ParentContractID       *int64    `json:"parent_contract_id,omitempty"`
 	InviteToken            string    `json:"invite_token,omitempty"`
-	AppointmentCalendarID  *int64    `json:"appointment_calendar_id,omitempty"`
+	AppointmentCalendarID           *int64  `json:"appointment_calendar_id,omitempty"`
+	PublisherAppointmentCalendarID  *int64  `json:"publisher_appointment_calendar_id,omitempty"`
+	AppointmentCalendarSource       *string `json:"appointment_calendar_source,omitempty"`
 	Participations         []Participation `json:"participations,omitempty"`
 	CreatedAt              time.Time `json:"created_at"`
 }
@@ -200,6 +202,10 @@ func (s *Service) Get(ctx context.Context, publisherID, id int64) (*Contract, er
 		return nil, err
 	}
 	c.Participations = parts
+	_ = s.pool.QueryRow(ctx,
+		`SELECT appointment_calendar_id, publisher_appointment_calendar_id, appointment_calendar_source
+		 FROM contracts WHERE id = $1`, id).Scan(
+		&c.AppointmentCalendarID, &c.PublisherAppointmentCalendarID, &c.AppointmentCalendarSource)
 	return c, nil
 }
 
@@ -219,7 +225,7 @@ func scanBuyerContract(row pgx.Row, withPublisher bool) (*Contract, error) {
 		&c.SourcePipelineID, &c.SourceStageID, &c.BuyerPipelineID, &c.ReturnStageID,
 		&c.RatePerLead, &c.Status, &c.CapPeriod, &c.CapTotal, &c.CapMaxDaily,
 		&c.CreatedAt, &c.ContractType, &c.MirrorContractID, &c.AllowedDeliveryModes,
-		&delivery, &c.BuyerTargetStageID, &c.AppointmentCalendarID, &c.IntegrationConnectionID,
+		&delivery, &c.BuyerTargetStageID, &c.AppointmentCalendarID, &c.PublisherAppointmentCalendarID, &c.AppointmentCalendarSource, &c.IntegrationConnectionID,
 	}
 	if withPublisher {
 		scan = append(scan, &c.PublisherName, &c.LeadCount)
@@ -242,6 +248,7 @@ func (s *Service) ListForBuyer(ctx context.Context, buyerID int64) ([]Contract, 
 		        c.rate_per_lead::float8, c.status, c.cap_period, c.cap_total, c.cap_max_daily,
 		        c.created_at, c.contract_type, c.mirror_contract_id, c.allowed_delivery_modes,
 		        COALESCE(cc.delivery, ''), cc.counterparty_stage_id, c.appointment_calendar_id,
+		        c.publisher_appointment_calendar_id, c.appointment_calendar_source,
 		        c.integration_connection_id, a.name, `+contractLeadCountSubquery+`
 		 FROM contracts c
 		 JOIN accounts a ON a.id = c.publisher_id
@@ -271,6 +278,7 @@ func (s *Service) GetForBuyerContract(ctx context.Context, buyerID, contractID i
 		        c.rate_per_lead::float8, c.status, c.cap_period, c.cap_total, c.cap_max_daily,
 		        c.created_at, c.contract_type, c.mirror_contract_id, c.allowed_delivery_modes,
 		        COALESCE(cc.delivery, ''), cc.counterparty_stage_id, c.appointment_calendar_id,
+		        c.publisher_appointment_calendar_id, c.appointment_calendar_source,
 		        c.integration_connection_id
 		 FROM contracts c
 		 `+buyerContractCompLateral+`

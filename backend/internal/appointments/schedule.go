@@ -22,6 +22,20 @@ type DaySchedule struct {
 	End   string `json:"end"`
 }
 
+// DayWorkingHours is the configured working-hours window for one day.
+type DayWorkingHours struct {
+	Start string `json:"start"`
+	End   string `json:"end"`
+}
+
+func workingHoursForDate(sched WeeklySchedule, date time.Time) *DayWorkingHours {
+	w, ok := sched.dayWindow(date.Weekday())
+	if !ok {
+		return nil
+	}
+	return &DayWorkingHours{Start: w.Start, End: w.End}
+}
+
 // WeeklySchedule is working hours per weekday key (mon..sun) plus optional tz in JSON.
 type WeeklySchedule map[string]json.RawMessage
 

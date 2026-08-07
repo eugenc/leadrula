@@ -3,6 +3,7 @@ package appointments
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/echayko/leadrula/backend/internal/config"
 	"github.com/echayko/leadrula/backend/internal/database"
@@ -99,5 +100,72 @@ func TestListBuyerBookings_presetExcludesNullAppointment(t *testing.T) {
 	}
 	if weekRes.Total > allRes.Total {
 		t.Fatalf("week total %d > all total %d", weekRes.Total, allRes.Total)
+	}
+}
+
+func TestListBuyerBookings_calendarOnlyBookingPresetFilter(t *testing.T) {
+	pool := connectAppointmentsTestDB(t)
+	ensureTestMigrations(t, pool)
+	ctx := context.Background()
+
+	var bookingID, buyerID int64
+	var slotStart time.Time
+	err := pool.QueryRow(ctx,
+		`SELECT b.id, bbc.account_id, b.slot_start
+		 FROM lead_appointment_bookings b
+		 JOIN buyer_booking_calendars bbc ON bbc.id = b.buyer_calendar_id
+		 WHERE b.buyer_calendar_id IS NOT NULL
+		   AND b.contract_id IS NULL
+		   AND b.slot_start IS NOT NULL
+		 LIMIT 1`).Scan(&bookingID, &buyerID, &slotStart)
+	if err != nil {
+		t.Skip("no buyer calendar-only booking fixture in database")
+	}
+
+	svc := NewService(pool, nil, nil, nil)
+	allRes, err := svc.ListBuyerBookings(ctx, BuyerListParams{
+		BuyerID:           buyerID,
+		Page:              1,
+		Limit:             500,
+		AppointmentPreset: "all",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundInAll := false
+	for _, row := range allRes.Items {
+		if row.ID == bookingID {
+			foundInAll = true
+			break
+		}
+	}
+	if !foundInAll {
+		t.Fatalf("calendar-only booking %d not visible with preset all", bookingID)
+	}
+
+	tz, err := svc.getAccountTimezone(ctx, buyerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from, to, _ := appointmentPresetBounds("this_week", tz, time.Now())
+	if from == nil || to == nil {
+		t.Fatal("expected this_week bounds")
+	}
+	appt := slotStart
+	if appt.Before(*from) || !appt.Before(*to) {
+		weekRes, err := svc.ListBuyerBookings(ctx, BuyerListParams{
+			BuyerID:           buyerID,
+			Page:              1,
+			Limit:             500,
+			AppointmentPreset: "this_week",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range weekRes.Items {
+			if row.ID == bookingID {
+				t.Fatalf("calendar-only booking %d outside this week should be hidden by preset", bookingID)
+			}
+		}
 	}
 }

@@ -14,7 +14,7 @@ func TestDebugListFreeSlots(t *testing.T) {
 	pool, err := database.Connect(ctx, "postgres://crm:crm@localhost:5432/crm?sslmode=disable")
 	if err != nil { t.Fatal(err) }
 	svc := appointments.NewService(pool, nil, nil, nil)
-	slots, err := svc.ListFreeSlots(ctx, 1, 5, "2026-07-01")
+	slots, err := svc.ListFreeSlots(ctx, 1, 5, "2026-07-01", "own")
 	if err != nil {
 		t.Fatalf("ERROR: %T %v", err, err)
 	}

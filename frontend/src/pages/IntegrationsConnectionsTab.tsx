@@ -12,6 +12,11 @@ import {
   isHiddenIntegrationSlug,
 } from "@/features/integrations/constants";
 import { SunbaseFieldMapSection } from "@/features/integrations/SunbaseFieldMapSection";
+import { VoiceUniConnectionSettings } from "@/features/integrations/VoiceUniConnectionSettings";
+import {
+  DEFAULT_VOICEUNI_FIELD_MAP,
+  voiceuniFieldMapFromConfig,
+} from "@/features/integrations/voiceuniConstants";
 import { SunbaseInboundEndpointSection } from "@/features/integrations/SunbaseInboundEndpointSection";
 import { GhlInboundEndpointSection } from "@/features/integrations/GhlInboundEndpointSection";
 import { GhlConnectionSettings } from "@/features/integrations/GhlConnectionSettings";
@@ -53,6 +58,7 @@ import {
   useTestStoredIntegrationConnection,
   useUpdateIntegrationConnection,
   useSunbaseConnectionDetail,
+  useVoiceUniConnectionDetail,
   useGhlConnectionDetail,
   useCrmConnectionDetail,
   useCrmPipelines,
@@ -167,6 +173,8 @@ function AddConnectionDrawer({
   const [schemaName, setSchemaName] = useState("");
   const [fieldMap, setFieldMap] = useState<OutboundFieldMapEntry[]>(sunbaseFieldMap(""));
   const [sunbaseActive, setSunbaseActive] = useState(false);
+  const [voiceuniActive, setVoiceuniActive] = useState(false);
+  const [voiceuniFieldMap, setVoiceuniFieldMap] = useState<OutboundFieldMapEntry[]>(DEFAULT_VOICEUNI_FIELD_MAP);
   const [ghlActive, setGhlActive] = useState(false);
   const [crmActive, setCrmActive] = useState(false);
   const [twilioActive, setTwilioActive] = useState(false);
@@ -189,20 +197,24 @@ function AddConnectionDrawer({
   const selected = providers.find((p) => p.slug === effectiveSlug);
   const existingForSlug = connections.filter((c) => c.provider_slug === effectiveSlug);
   const isSunbase = effectiveSlug === "sunbase";
+  const isVoiceUni = effectiveSlug === "voiceuni";
   const isGhl = effectiveSlug === "ghl";
   const isGoogleMaps = effectiveSlug === "google_maps";
   const isTwilio = effectiveSlug === "twilio";
   const isManage = existingForSlug.length > 0;
   const showSunbaseActive = isSunbase && sunbaseActive && activeConnection != null;
+  const showVoiceUniActive = isVoiceUni && voiceuniActive && activeConnection != null;
   const showGhlActive = isGhl && ghlActive && activeConnection != null;
   const showCrmActive =
     isConfigurableCrm(effectiveSlug) && crmActive && activeConnection != null;
   const showTwilioActive = isTwilio && twilioActive && activeConnection != null;
 
   const detailId = showSunbaseActive ? activeConnection.id : null;
+  const voiceuniDetailId = showVoiceUniActive ? activeConnection.id : null;
   const ghlDetailId = showGhlActive ? activeConnection.id : null;
   const crmDetailId = showCrmActive ? activeConnection.id : null;
   const { data: sunbaseDetail } = useSunbaseConnectionDetail(detailId);
+  const { data: voiceuniDetail } = useVoiceUniConnectionDetail(voiceuniDetailId);
   const { data: ghlDetail } = useGhlConnectionDetail(ghlDetailId);
   const { data: crmDetail } = useCrmConnectionDetail(crmDetailId);
   const { data: ghlPipelinesData, isLoading: ghlPipelinesLoading } = useGhlPipelines(ghlDetailId);
@@ -230,6 +242,8 @@ function AddConnectionDrawer({
 
   const drawerTitle = showSunbaseActive
     ? "SunBase connected"
+    : showVoiceUniActive
+      ? "VoiceUni connected"
     : showGhlActive
       ? "GoHighLevel connected"
       : showCrmActive && selected
@@ -273,6 +287,12 @@ function AddConnectionDrawer({
         const existing = connections.find((c) => c.provider_slug === "sunbase");
         if (existing) {
           loadSunbaseConnection(existing);
+        }
+      }
+      if (initialSlug === "voiceuni") {
+        const existing = connections.find((c) => c.provider_slug === "voiceuni");
+        if (existing) {
+          loadVoiceUniConnection(existing);
         }
       }
       if (initialSlug === "ghl") {
@@ -328,6 +348,12 @@ function AddConnectionDrawer({
     }
   }, [crmDetail]);
 
+  useEffect(() => {
+    if (voiceuniDetail?.connection) {
+      setVoiceuniFieldMap(voiceuniFieldMapFromConfig(voiceuniDetail.connection.config as Record<string, unknown>));
+    }
+  }, [voiceuniDetail]);
+
   function loadSunbaseConnection(conn: IntegrationConnection) {
     setActiveConnection(conn);
     setSunbaseActive(true);
@@ -346,6 +372,17 @@ function AddConnectionDrawer({
       if (schemaEntry?.static_value) setSchemaName(schemaEntry.static_value);
     }
     if (conn.inbound_webhook) setInboundWebhook(conn.inbound_webhook);
+  }
+
+  function loadVoiceUniConnection(conn: IntegrationConnection) {
+    setActiveConnection(conn);
+    setVoiceuniActive(true);
+    setSunbaseActive(false);
+    setGhlActive(false);
+    setCrmActive(false);
+    setTwilioActive(false);
+    setName(conn.name);
+    setVoiceuniFieldMap(voiceuniFieldMapFromConfig(conn.config as Record<string, unknown>));
   }
 
   function loadGhlConnection(conn: IntegrationConnection) {
@@ -518,7 +555,7 @@ function AddConnectionDrawer({
 
   function submit() {
     if (!slug) return;
-    if (!isSunbase && !name) return;
+    if (!isSunbase && !isVoiceUni && !name) return;
     if (selected?.auth_type === "oauth2") {
       oauth.mutate(
         { provider: slug, name, config: slug === "zoho_crm" ? { api_domain: apiDomain } : {} },
@@ -549,6 +586,26 @@ function AddConnectionDrawer({
             setSunbaseActive(true);
             if (conn.inbound_webhook) setInboundWebhook(conn.inbound_webhook);
             toast.success("SunBase connected");
+          },
+          onError: (e) => toast.error(errorMessage(e)),
+        }
+      );
+      return;
+    }
+    if (slug === "voiceuni") {
+      create.mutate(
+        {
+          provider_slug: "voiceuni",
+          name: name.trim() || "VoiceUni",
+          credentials: {},
+          config: { outbound_field_map: voiceuniFieldMap },
+        },
+        {
+          onSuccess: (conn) => {
+            setActiveConnection(conn);
+            setVoiceuniActive(true);
+            setVoiceuniFieldMap(voiceuniFieldMapFromConfig(conn.config as Record<string, unknown>));
+            toast.success("VoiceUni connected");
           },
           onError: (e) => toast.error(errorMessage(e)),
         }
@@ -863,6 +920,35 @@ function AddConnectionDrawer({
           <SunbaseInboundEndpointSection inbound={inboundWebhook} />
         )}
 
+        {showVoiceUniActive && voiceuniDetail && activeConnection && (
+          <VoiceUniConnectionSettings
+            ingestEndpoint={voiceuniDetail.ingest_endpoint}
+            exampleCurl={voiceuniDetail.example_curl}
+            connectionPublicId={activeConnection.public_id}
+            sourceSlug={voiceuniDetail.source_slug}
+            callSourceSlug={voiceuniDetail.call_source_slug}
+            fieldMap={voiceuniFieldMap}
+            onFieldMapChange={setVoiceuniFieldMap}
+            saving={update.isPending}
+            onSave={() => {
+              if (!activeConnection) return;
+              update.mutate(
+                {
+                  id: activeConnection.id,
+                  config: {
+                    ...(activeConnection.config as Record<string, unknown>),
+                    outbound_field_map: voiceuniFieldMap,
+                  },
+                },
+                {
+                  onSuccess: () => toast.success("VoiceUni settings saved"),
+                  onError: (e) => toast.error(errorMessage(e)),
+                }
+              );
+            }}
+          />
+        )}
+
         {showGhlActive && inboundWebhook && (
           <GhlInboundEndpointSection
             inbound={inboundWebhook}
@@ -893,7 +979,7 @@ function AddConnectionDrawer({
           <TwilioPhoneNumbersSection connectionId={activeConnection.id} />
         )}
 
-        {isManage && !showSunbaseActive && !showGhlActive && !showCrmActive && !showTwilioActive && (
+        {isManage && !showSunbaseActive && !showVoiceUniActive && !showGhlActive && !showCrmActive && !showTwilioActive && (
           <div className="space-y-2 border-b border-gray-100 pb-4">
             <p className="text-sm font-semibold text-gray-800">Connected</p>
             {existingForSlug.map((c) => (
@@ -903,6 +989,7 @@ function AddConnectionDrawer({
                   className="text-left text-sm text-indigo-600 hover:underline"
                   onClick={() => {
                     if (c.provider_slug === "sunbase") loadSunbaseConnection(c);
+                    if (c.provider_slug === "voiceuni") loadVoiceUniConnection(c);
                     if (c.provider_slug === "ghl") loadGhlConnection(c);
                     if (isConfigurableCrm(c.provider_slug)) loadCrmConnection(c);
                     if (c.provider_slug === "twilio") loadTwilioConnection(c);
@@ -924,7 +1011,7 @@ function AddConnectionDrawer({
         )}
 
         <>
-            {!showSunbaseActive && !showGhlActive && !showCrmActive && !showTwilioActive && !(isGoogleMaps && isManage) && (
+            {!showSunbaseActive && !showVoiceUniActive && !showGhlActive && !showCrmActive && !showTwilioActive && !(isGoogleMaps && isManage) && (
               <>
                 <div>
                   <Label>Provider</Label>
