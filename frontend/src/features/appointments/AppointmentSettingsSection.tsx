@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { cn } from "@/lib/utils";
@@ -12,6 +11,7 @@ import {
 } from "@/features/appointments/hooks";
 import { CONTRACT_SLOT_ROW_GRID, SLOT_CHECKBOX_CLASS, slotEndTime } from "@/features/appointments/slotGrid";
 import { TimeFieldInput } from "@/features/appointments/TimeFieldInput";
+import type { BookingSectionSave } from "@/features/appointments/PublisherContractCalendarSection";
 import type { ContractAppointmentSlot } from "@/types";
 
 function groupSlotsByWeekday(slots: ContractAppointmentSlot[]) {
@@ -27,14 +27,75 @@ function groupSlotsByWeekday(slots: ContractAppointmentSlot[]) {
   return [...byDay.entries()].sort(([a], [b]) => a - b);
 }
 
-export function AppointmentSettingsSection({ contractId }: { contractId: number }) {
+function slotsDirty(
+  current: ContractAppointmentSlot[],
+  saved: ContractAppointmentSlot[] | undefined
+): boolean {
+  if (!saved?.length) return false;
+  if (current.length !== saved.length) return true;
+  const savedById = new Map(saved.map((s) => [s.buyer_slot_id, s]));
+  return current.some((s) => {
+    const orig = savedById.get(s.buyer_slot_id);
+    if (!orig) return true;
+    return (
+      s.enabled !== orig.enabled ||
+      (s.duration_min_override ?? null) !== (orig.duration_min_override ?? null) ||
+      (s.capacity_override ?? null) !== (orig.capacity_override ?? null)
+    );
+  });
+}
+
+export function AppointmentSettingsSection({
+  contractId,
+  registerSave,
+  onDirtyChange,
+}: {
+  contractId: number;
+  registerSave?: (api: BookingSectionSave | null) => void;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
   const { data, isLoading } = useContractAppointmentSlots(contractId);
   const save = useSaveContractAppointmentSlots();
   const [slots, setSlots] = useState<ContractAppointmentSlot[]>([]);
 
+  const slotsRef = useRef(slots);
+  slotsRef.current = slots;
+  const dataRef = useRef(data);
+  dataRef.current = data;
+
   useEffect(() => {
     if (data) setSlots(data);
   }, [data]);
+
+  const isDirty = useCallback(() => slotsDirty(slotsRef.current, dataRef.current), []);
+
+  const flush = useCallback(async (): Promise<boolean> => {
+    if (!isDirty()) return true;
+    try {
+      await save.mutateAsync({
+        contractId,
+        slots: slotsRef.current.map((s) => ({
+          buyer_slot_id: s.buyer_slot_id,
+          enabled: s.enabled,
+          duration_min_override: s.duration_min_override ?? null,
+          capacity_override: s.capacity_override ?? null,
+        })),
+      });
+      return true;
+    } catch (e) {
+      toast.error(errorMessage(e));
+      return false;
+    }
+  }, [contractId, isDirty, save]);
+
+  useLayoutEffect(() => {
+    registerSave?.({ isDirty, flush });
+    return () => registerSave?.(null);
+  }, [registerSave, isDirty, flush]);
+
+  useEffect(() => {
+    onDirtyChange?.(slotsDirty(slots, data));
+  }, [slots, data, onDirtyChange]);
 
   if (isLoading) return <p className="text-sm text-gray-400">Loading appointment slots…</p>;
   if (!data?.length) {
@@ -68,24 +129,6 @@ export function AppointmentSettingsSection({ contractId }: { contractId: number 
 
   function setAllEnabled(enabled: boolean) {
     setSlots((prev) => prev.map((s) => (s.disabled ? s : { ...s, enabled })));
-  }
-
-  function submit() {
-    save.mutate(
-      {
-        contractId,
-        slots: slots.map((s) => ({
-          buyer_slot_id: s.buyer_slot_id,
-          enabled: s.enabled,
-          duration_min_override: s.duration_min_override ?? null,
-          capacity_override: s.capacity_override ?? null,
-        })),
-      },
-      {
-        onSuccess: () => toast.success("Appointment slots saved"),
-        onError: (e) => toast.error(errorMessage(e)),
-      }
-    );
   }
 
   const active = slots.filter((s) => !s.disabled);
@@ -171,9 +214,6 @@ export function AppointmentSettingsSection({ contractId }: { contractId: number 
           </div>
         ))}
       </div>
-      <Button type="button" onClick={submit} disabled={save.isPending}>
-        Save appointment slots
-      </Button>
     </div>
   );
 }
