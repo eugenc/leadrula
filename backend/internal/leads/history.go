@@ -888,6 +888,20 @@ func FilterLeadHistory(p *auth.Principal, entries []LeadHistoryEntry) []LeadHist
 	return out
 }
 
+func annotateHistoryLogViewability(p *auth.Principal, entries []LeadHistoryEntry) []LeadHistoryEntry {
+	if p == nil {
+		return entries
+	}
+	for i := range entries {
+		switch entries[i].Kind {
+		case "webhook", "outbound_webhook":
+			viewable := entries[i].ownerAccountID == p.AccountID
+			entries[i].LogViewable = &viewable
+		}
+	}
+	return entries
+}
+
 func includeHistoryForBuyer(buyerID int64, e LeadHistoryEntry) bool {
 	switch e.Kind {
 	case "stage_change", "field_change", "assignee_change", "tag_change", "calendar_event",

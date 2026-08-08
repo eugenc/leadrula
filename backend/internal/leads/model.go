@@ -119,6 +119,7 @@ type LeadHistoryEntry struct {
 	StageName    *string `json:"stage_name,omitempty"`
 	RouteName    *string `json:"route_name,omitempty"`
 	WebhookID    *int64  `json:"webhook_id,omitempty"`
+	LogViewable  *bool   `json:"log_viewable,omitempty"`
 
 	ownerAccountID int64 `json:"-"`
 	fromAccountID  int64 `json:"-"`

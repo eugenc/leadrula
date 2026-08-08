@@ -58,7 +58,7 @@ func (s *Service) LeadHistory(ctx context.Context, p *auth.Principal, leadID int
 	if err != nil {
 		return nil, err
 	}
-	return FilterLeadHistory(p, entries), nil
+	return annotateHistoryLogViewability(p, FilterLeadHistory(p, entries)), nil
 }
 
 // ChangeStage moves a lead to a new stage, enforcing destination prompts and
