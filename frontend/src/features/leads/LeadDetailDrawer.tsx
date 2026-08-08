@@ -1428,7 +1428,7 @@ function ActivityTab({ leadId }: { leadId: number }) {
               </div>
             ) : (
               <div className={cn("font-medium", h.kind === "note_added" && "whitespace-pre-wrap")}>
-                {isWebhookHistoryEntry(h.kind) && accountType ? (
+                {isWebhookHistoryEntry(h.kind) && (accountType === "publisher" || accountType === "buyer") ? (
                   (() => {
                     const logUrl = buildWebhookActivityLogUrl(accountType, h, leadId);
                     const headline = historyHeadline(h);
