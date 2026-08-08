@@ -117,6 +117,7 @@ type AppointmentContract struct {
 	OwnConfigured          bool   `json:"own_configured"`
 	CounterpartyConfigured bool   `json:"counterparty_configured"`
 	CalendarSource         string `json:"calendar_source,omitempty"`
+	LeadDelivery           string `json:"lead_delivery,omitempty"`
 }
 
 func (s *Service) getAccountTimezone(ctx context.Context, accountID int64) (string, error) {

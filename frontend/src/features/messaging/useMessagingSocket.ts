@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { create } from "zustand";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { apiBaseURL, homeAccessToken, homeAccountType } from "@/lib/api";
+import { apiBaseURL, messagingAccessToken, messagingAccountType } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import type { WSEvent } from "./types";
 
@@ -29,7 +29,7 @@ const useTypingStore = create<TypingState>((set) => ({
 const typingTimers: Record<string, ReturnType<typeof setTimeout>> = {};
 
 function handleEvent(evt: WSEvent, qc: QueryClient) {
-  const home = homeAccountType();
+  const home = messagingAccountType();
   switch (evt.type) {
     case "new_message":
     case "message_edited":
@@ -72,7 +72,7 @@ function wsURL(token: string): string {
 }
 
 function connect(qc: QueryClient) {
-  const token = homeAccessToken();
+  const token = messagingAccessToken();
   if (!token || socket) return;
   const ws = new WebSocket(wsURL(token));
   socket = ws;

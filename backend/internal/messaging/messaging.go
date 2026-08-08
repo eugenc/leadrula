@@ -145,6 +145,9 @@ func (s *Service) homePrincipal(ctx context.Context, p *auth.Principal) (*auth.P
 			p.SwitchedFrom).Scan(&originID, &originType, &originPub); err != nil {
 			return nil, httpx.Forbidden("origin account not found")
 		}
+		if originType == "platform" {
+			return p, nil
+		}
 		var role string
 		if err := s.pool.QueryRow(ctx,
 			`SELECT role::text FROM users WHERE id=$1 AND account_id=$2 AND is_active`,

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/layout/IconButton";
@@ -18,9 +19,13 @@ import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import {
   DEFAULT_WEEKLY_HOURS,
+  buildOptimisticSlot,
   firstValidStartInWindow,
+  invalidateCalendarSlots,
+  isOptimisticSlotId,
   isStartValidForWindow,
   minutesToTimeHhmm,
+  setCalendarSlotsCache,
   timeHhmmToMinutes,
   useBookingCalendar,
   useCalendarSlots,
@@ -28,6 +33,8 @@ import {
   useCreateCalendarSlot,
   useCreatePublisherBookingCalendar,
   useCreatePublisherCalendarSlot,
+  useCopyCalendarSlots,
+  useCopyPublisherCalendarSlots,
   usePatchCalendarSlot,
   usePatchPublisherCalendarSlot,
   usePublisherBookingCalendar,
@@ -35,6 +42,7 @@ import {
   useSaveBookingCalendar,
   useSavePublisherBookingCalendar,
   type CalendarOwner,
+  type SlotMutationMeta,
   WEEKDAY_KEYS,
   WEEKDAYS,
 } from "@/features/appointments/hooks";
@@ -80,6 +88,7 @@ const SLOT_ROW_GRID =
 const WORKING_HOURS_GRID =
   "grid grid-cols-[4rem_minmax(9.25rem,10.75rem)_minmax(9.25rem,10.75rem)_4.5rem] items-center gap-2";
 export const AVAILABILITY_DRAWER_WIDTH = 520;
+const SLOT_SKIP_OPTIMISTIC = { meta: { skipOptimistic: true } satisfies SlotMutationMeta };
 
 function scheduleHasInvalidHours(schedule: Schedule): boolean {
   return WEEKDAY_KEYS.some((key) => {
@@ -381,13 +390,16 @@ function SlotEditableRow({
     onBlurSave({ start_time: from, capacity }, revert);
   }
 
+  const pending = isOptimisticSlotId(slot.id);
+  const rowDisabled = readOnly || pending;
+
   return (
     <div className={SLOT_ROW_GRID}>
       <span className="text-sm font-medium text-gray-700">{dayLabel ?? ""}</span>
       <div className="min-w-0 w-full">
         <TimeFieldInput
           value={from}
-          disabled={readOnly}
+          disabled={rowDisabled}
           minTime={dayHours.start}
           maxTime={maxFrom}
           onBlur={commit}
@@ -414,7 +426,7 @@ function SlotEditableRow({
           type="number"
           min={1}
           max={20}
-          disabled={readOnly}
+          disabled={rowDisabled}
           value={capacity}
           className="px-2 text-center"
           onBlur={commit}
@@ -424,7 +436,12 @@ function SlotEditableRow({
       {!readOnly && (
         <div className="flex items-center gap-0.5">
           {copyButton}
-          <IconButton variant="danger" aria-label="Remove slot" onClick={onRemove}>
+          <IconButton
+            variant="danger"
+            aria-label="Remove slot"
+            disabled={pending}
+            onClick={onRemove}
+          >
             <Trash2 className="h-4 w-4" />
           </IconButton>
         </div>
@@ -719,6 +736,7 @@ export function BuyerAvailabilityEditor({
   readOnly?: boolean;
   owner?: CalendarOwner;
 }) {
+  const qc = useQueryClient();
   const isPublisher = owner === "publisher";
   const buyerCal = useBookingCalendar(isPublisher ? null : calendarId);
   const pubCal = usePublisherBookingCalendar(isPublisher ? calendarId : null);
@@ -738,6 +756,9 @@ export function BuyerAvailabilityEditor({
   const patchBuyerSlot = usePatchCalendarSlot(calendarId);
   const patchPubSlot = usePatchPublisherCalendarSlot(calendarId);
   const patchSlot = isPublisher ? patchPubSlot : patchBuyerSlot;
+  const copyBuyerSlots = useCopyCalendarSlots(calendarId);
+  const copyPubSlots = useCopyPublisherCalendarSlots(calendarId);
+  const copySlots = isPublisher ? copyPubSlots : copyBuyerSlots;
 
   const [name, setName] = useState("");
   const [schedule, setSchedule] = useState<Schedule>({});
@@ -897,6 +918,10 @@ export function BuyerAvailabilityEditor({
   }
 
   function editSlot(id: number | string, params: SlotParams, onDone: (ok: boolean) => void) {
+    if (isOptimisticSlotId(id)) {
+      onDone(false);
+      return;
+    }
     const slot = slots.find((s) => s.id === id && !s.disabled_at);
     if (!slot) {
       onDone(false);
@@ -962,52 +987,76 @@ export function BuyerAvailabilityEditor({
       toast.error(`Cannot copy to closed days: ${closed.map((d) => WEEKDAYS[d]).join(", ")}`);
       return;
     }
-    let copied = 0;
-    for (const target of toWeekdays) {
-      if (target === slot.weekday) continue;
-      const err = validateSlotChange(
-        schedule,
-        target,
-        slot.start_time,
-        slotDurationMin,
-        slot.capacity,
-        slots
-          .filter((s) => !s.disabled_at && s.weekday === target)
-          .map((s) => ({ id: s.id, start_time: s.start_time, duration_min: slotDurationMin }))
-      );
-      if (err) {
-        toast.error(`${WEEKDAYS[target]}: ${err}`);
-        continue;
-      }
-      try {
-        await createSlot.mutateAsync({
+    const targets = toWeekdays.filter((target) => target !== slot.weekday);
+    if (!targets.length) return;
+
+    const sourceSlots = slots.filter((s) => !s.disabled_at && s.weekday === slot.weekday);
+    if (!sourceSlots.length) return;
+
+    const optimisticAdds = targets.flatMap((target) =>
+      sourceSlots.map((s) =>
+        buildOptimisticSlot(calendarId, calendar.account_id, {
           weekday: target,
-          start_time: slot.start_time,
+          start_time: s.start_time,
           duration_min: slotDurationMin,
-          capacity: slot.capacity,
-        });
-        copied++;
-      } catch (e) {
-        toast.error(`${WEEKDAYS[target]}: ${errorMessage(e)}`);
-      }
+          capacity: s.capacity,
+        })
+      )
+    );
+    setCalendarSlotsCache(qc, isPublisher ? "publisher" : "buyer", calendarId, [
+      ...slots,
+      ...optimisticAdds,
+    ]);
+
+    setBulkSlotOp(true);
+    try {
+      await copySlots.mutateAsync({ from_weekday: slot.weekday, to_weekdays: targets });
+      toast.success(
+        targets.length === 1
+          ? `${WEEKDAYS[slot.weekday]} copied to ${WEEKDAYS[targets[0]!]}`
+          : `${WEEKDAYS[slot.weekday]} copied to ${targets.length} days`
+      );
+    } catch (e) {
+      toast.error(errorMessage(e));
+      invalidateCalendarSlots(qc, isPublisher ? "publisher" : "buyer", calendarId);
+    } finally {
+      setBulkSlotOp(false);
     }
-    if (copied) toast.success(copied === 1 ? "Slot copied" : "Slots copied");
   }
 
   async function clearAllSlots() {
     const active = slots.filter((s) => !s.disabled_at);
     if (!active.length) return;
     if (!window.confirm(`Remove all ${active.length} booking slots?`)) return;
+
+    const now = new Date().toISOString();
+    setCalendarSlotsCache(
+      qc,
+      isPublisher ? "publisher" : "buyer",
+      calendarId,
+      slots.map((s) => (!s.disabled_at ? { ...s, disabled_at: now } : s))
+    );
+
+    setBulkSlotOp(true);
     let cleared = 0;
-    for (const s of active) {
-      try {
-        await patchSlot.mutateAsync({ id: s.id, body: { disabled: true } });
-        cleared++;
-      } catch (e) {
-        toast.error(`${WEEKDAYS[s.weekday]} ${s.start_time}: ${errorMessage(e)}`);
+    try {
+      for (const s of active) {
+        if (isOptimisticSlotId(s.id)) {
+          cleared++;
+          continue;
+        }
+        try {
+          await patchSlot.mutateAsync({ id: s.id, body: { disabled: true } }, SLOT_SKIP_OPTIMISTIC);
+          cleared++;
+        } catch (e) {
+          toast.error(`${WEEKDAYS[s.weekday]} ${s.start_time}: ${errorMessage(e)}`);
+        }
       }
+      if (cleared === active.length) toast.success("All booking slots cleared");
+    } finally {
+      invalidateCalendarSlots(qc, isPublisher ? "publisher" : "buyer", calendarId);
+      setBulkSlotOp(false);
     }
-    if (cleared === active.length) toast.success("All booking slots cleared");
   }
 
   async function generateAllSlots(defaultCapacity: number) {
@@ -1027,11 +1076,26 @@ export function BuyerAvailabilityEditor({
     );
     if (!window.confirm(msg)) return;
 
+    const now = new Date().toISOString();
+    const optimisticNew = generated.map((slot) =>
+      buildOptimisticSlot(calendarId, calendar.account_id, {
+        weekday: slot.weekday,
+        start_time: slot.start_time,
+        duration_min: slotDurationMin,
+        capacity,
+      })
+    );
+    setCalendarSlotsCache(qc, isPublisher ? "publisher" : "buyer", calendarId, [
+      ...slots.map((s) => (!s.disabled_at ? { ...s, disabled_at: now } : s)),
+      ...optimisticNew,
+    ]);
+
     setBulkSlotOp(true);
     try {
       for (const s of active) {
+        if (isOptimisticSlotId(s.id)) continue;
         try {
-          await patchSlot.mutateAsync({ id: s.id, body: { disabled: true } });
+          await patchSlot.mutateAsync({ id: s.id, body: { disabled: true } }, SLOT_SKIP_OPTIMISTIC);
         } catch (e) {
           toast.error(`${WEEKDAYS[s.weekday]} ${s.start_time}: ${errorMessage(e)}`);
         }
@@ -1040,12 +1104,15 @@ export function BuyerAvailabilityEditor({
       let created = 0;
       for (const slot of generated) {
         try {
-          await createSlot.mutateAsync({
-            weekday: slot.weekday,
-            start_time: slot.start_time,
-            duration_min: slotDurationMin,
-            capacity,
-          });
+          await createSlot.mutateAsync(
+            {
+              weekday: slot.weekday,
+              start_time: slot.start_time,
+              duration_min: slotDurationMin,
+              capacity,
+            },
+            SLOT_SKIP_OPTIMISTIC
+          );
           created++;
         } catch (e) {
           toast.error(`${WEEKDAYS[slot.weekday]} ${slot.start_time}: ${errorMessage(e)}`);
@@ -1060,6 +1127,7 @@ export function BuyerAvailabilityEditor({
         toast.success(`${created} of ${generated.length} booking slots generated`);
       }
     } finally {
+      invalidateCalendarSlots(qc, isPublisher ? "publisher" : "buyer", calendarId);
       setBulkSlotOp(false);
     }
   }
@@ -1141,18 +1209,19 @@ export function BuyerAvailabilityEditor({
             readOnly={readOnly}
             onAdd={addSlot}
             onEdit={editSlot}
-            onRemove={(id) =>
+            onRemove={(id) => {
+              if (isOptimisticSlotId(id)) return;
               patchSlot.mutate(
                 { id: id as number, body: { disabled: true } },
                 {
                   onError: (e) => toast.error(errorMessage(e)),
                 }
-              )
-            }
+              );
+            }}
             onCopy={copySlot}
             onClearAll={readOnly ? undefined : clearAllSlots}
             onGenerateAll={readOnly ? undefined : generateAllSlots}
-            savePending={bulkSlotOp || createSlot.isPending || patchSlot.isPending}
+            savePending={bulkSlotOp}
           />
         </div>
       </div>

@@ -139,6 +139,45 @@ func (s *Service) Revoke(ctx context.Context, accountID, keyID int64) error {
 	return nil
 }
 
+func (s *Service) Delete(ctx context.Context, accountID, keyID int64) error {
+	ct, err := s.pool.Exec(ctx,
+		`DELETE FROM api_keys WHERE id = $1 AND account_id = $2`,
+		keyID, accountID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return httpx.NotFound("api key not found")
+	}
+	return nil
+}
+
+func (s *Service) Renew(ctx context.Context, accountID, keyID int64) (*APIKey, string, error) {
+	secret := randString(32)
+	prefix := randString(8)
+	full := prefix + "." + secret
+
+	hash, err := auth.HashPassword(full)
+	if err != nil {
+		return nil, "", err
+	}
+
+	k := &APIKey{}
+	err = s.pool.QueryRow(ctx,
+		`UPDATE api_keys SET revoked_at = NULL, key_prefix = $3, key_hash = $4
+		 WHERE id = $1 AND account_id = $2 AND revoked_at IS NOT NULL
+		 RETURNING id, name, key_prefix, scopes, last_used_at, revoked_at, created_at`,
+		keyID, accountID, prefix, hash).Scan(
+		&k.ID, &k.Name, &k.KeyPrefix, &k.Scopes, &k.LastUsedAt, &k.RevokedAt, &k.CreatedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, "", httpx.NotFound("api key not found")
+		}
+		return nil, "", err
+	}
+	return k, full, nil
+}
+
 // Verify resolves a plaintext key to its account, updating last_used_at.
 func (s *Service) Verify(ctx context.Context, full string) (*auth.APIKeyAccount, error) {
 	prefix, _, ok := splitKey(full)
@@ -247,7 +286,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Post("/api-keys", h.create)
 	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Patch("/api-keys/{id}", h.update)
 	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Post("/api-keys/{id}/rotate", h.rotate)
-	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Delete("/api-keys/{id}", h.revoke)
+	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Post("/api-keys/{id}/revoke", h.revoke)
+	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Post("/api-keys/{id}/renew", h.renew)
+	r.With(auth.RequirePermission(permissions.ActionSettingsAdmin)).Delete("/api-keys/{id}", h.delete)
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
@@ -328,6 +369,33 @@ func (h *Handler) revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.svc.Revoke(r.Context(), p.AccountID, id); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h *Handler) renew(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	id, err := parseKeyID(w, r)
+	if err != nil {
+		return
+	}
+	k, full, err := h.svc.Renew(r.Context(), p.AccountID, id)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"key": k, "secret": full})
+}
+
+func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	id, err := parseKeyID(w, r)
+	if err != nil {
+		return
+	}
+	if err := h.svc.Delete(r.Context(), p.AccountID, id); err != nil {
 		httpx.WriteError(w, err)
 		return
 	}

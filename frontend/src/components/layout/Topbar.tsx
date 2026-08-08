@@ -92,6 +92,11 @@ function notifLabel(n: NotificationItem) {
     if (buyer) return `${buyer} submitted a counter-offer`;
     return "Buyer submitted a counter-offer";
   }
+  if (n.type === "new_appointment") {
+    const name = n.payload.lead_name as string | undefined;
+    if (name?.trim()) return `New Appointment Booked — ${name.trim()}`;
+    return "New Appointment Booked";
+  }
   return labels[n.type] ?? n.type;
 }
 
@@ -100,6 +105,7 @@ function notifPath(n: NotificationItem, accountType: string | undefined) {
   if (n.type === "new_lead" || n.type === "lead_returned") {
     if (prefix && typeof n.payload.lead_id === "number") return `${prefix}/leads`;
   }
+  if (n.type === "new_appointment" && prefix) return `${prefix}/appointments`;
   if (n.type === "dispute_update" || n.type === "new_invoice") {
     if (accountType === "buyer") return "/b/billing";
   }
@@ -188,7 +194,9 @@ export function Topbar({ title }: { title: string }) {
                   markRead.mutate(n.id);
                   const path = notifPath(n, user?.account_type);
                   const leadId =
-                    typeof n.payload.lead_id === "number" ? n.payload.lead_id : null;
+                    n.type !== "new_appointment" && typeof n.payload.lead_id === "number"
+                      ? n.payload.lead_id
+                      : null;
                   if (path || leadId != null) setOpen(false);
                   if (path) navigate(path);
                   if (leadId != null) useUIStore.getState().openDetail(leadId);

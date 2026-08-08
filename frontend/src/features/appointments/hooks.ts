@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { format, parse } from "date-fns";
 import { get, patch, post, put } from "@/lib/api";
 import { QUARTER_MINUTES } from "@/features/leads/customFieldDate";
@@ -20,6 +25,217 @@ import type {
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 export { WEEKDAYS };
+
+export type SlotMutationMeta = {
+  skipOptimistic?: boolean;
+};
+
+type CalendarOwnerKind = "buyer" | "publisher";
+
+type SlotMutationContext = {
+  prev: BuyerAppointmentSlot[];
+  tempId?: number;
+  slotsKey: readonly [string, number];
+};
+
+function optimisticTempId(): number {
+  return -(Date.now() + Math.floor(Math.random() * 1000));
+}
+
+export function isOptimisticSlotId(id: number | string): boolean {
+  return typeof id === "number" && id < 0;
+}
+
+export function buildOptimisticSlot(
+  calendarId: number,
+  accountId: number,
+  body: { weekday: number; start_time: string; duration_min: number; capacity: number }
+): BuyerAppointmentSlot {
+  return {
+    id: optimisticTempId(),
+    account_id: accountId,
+    calendar_id: calendarId,
+    weekday: body.weekday,
+    start_time: body.start_time,
+    duration_min: body.duration_min,
+    capacity: body.capacity,
+    disabled_at: null,
+  };
+}
+
+function countActiveSlots(slots: BuyerAppointmentSlot[]): number {
+  return slots.filter((s) => !s.disabled_at).length;
+}
+
+function slotsQueryKey(owner: CalendarOwnerKind, calendarId: number) {
+  return owner === "buyer"
+    ? (["buyer-calendar-slots", calendarId] as const)
+    : (["publisher-calendar-slots", calendarId] as const);
+}
+
+function calendarsListQueryKey(owner: CalendarOwnerKind) {
+  return owner === "buyer" ? (["buyer-booking-calendars"] as const) : (["publisher-booking-calendars"] as const);
+}
+
+function calendarQueryKey(owner: CalendarOwnerKind, calendarId: number) {
+  return owner === "buyer"
+    ? (["buyer-booking-calendar", calendarId] as const)
+    : (["publisher-booking-calendar", calendarId] as const);
+}
+
+function syncCalendarSlotMeta(
+  qc: QueryClient,
+  owner: CalendarOwnerKind,
+  calendarId: number,
+  slots: BuyerAppointmentSlot[]
+) {
+  const activeCount = countActiveSlots(slots);
+  const listKey = calendarsListQueryKey(owner);
+  qc.setQueryData<BuyerBookingCalendar[]>(listKey, (old) => {
+    if (!old) return old;
+    return old.map((c) =>
+      c.id === calendarId ? { ...c, slot_count: activeCount, configured: activeCount > 0 } : c
+    );
+  });
+  qc.setQueryData<BuyerBookingCalendar>(calendarQueryKey(owner, calendarId), (old) => {
+    if (!old) return old;
+    return { ...old, slot_count: activeCount, configured: activeCount > 0 };
+  });
+}
+
+export function setCalendarSlotsCache(
+  qc: QueryClient,
+  owner: CalendarOwnerKind,
+  calendarId: number,
+  slots: BuyerAppointmentSlot[]
+) {
+  qc.setQueryData(slotsQueryKey(owner, calendarId), slots);
+  syncCalendarSlotMeta(qc, owner, calendarId, slots);
+}
+
+export function invalidateCalendarSlots(
+  qc: QueryClient,
+  owner: CalendarOwnerKind,
+  calendarId: number
+) {
+  qc.invalidateQueries({ queryKey: slotsQueryKey(owner, calendarId) });
+  qc.invalidateQueries({ queryKey: calendarsListQueryKey(owner) });
+  qc.invalidateQueries({ queryKey: calendarQueryKey(owner, calendarId) });
+}
+
+function createCalendarSlotMutations(
+  qc: QueryClient,
+  owner: CalendarOwnerKind,
+  calendarId: number,
+  postFn: (body: {
+    weekday: number;
+    start_time: string;
+    duration_min: number;
+    capacity: number;
+  }) => Promise<BuyerAppointmentSlot>
+) {
+  const slotsKey = slotsQueryKey(owner, calendarId);
+  return {
+    mutationFn: postFn,
+    onMutate: async (
+      body: { weekday: number; start_time: string; duration_min: number; capacity: number },
+      { meta }: { meta?: SlotMutationMeta }
+    ) => {
+      if (meta?.skipOptimistic) return undefined;
+      await qc.cancelQueries({ queryKey: slotsKey });
+      const prev = qc.getQueryData<BuyerAppointmentSlot[]>(slotsKey) ?? [];
+      const tempId = optimisticTempId();
+      const optimistic: BuyerAppointmentSlot = {
+        id: tempId,
+        account_id: prev[0]?.account_id ?? 0,
+        calendar_id: calendarId,
+        weekday: body.weekday,
+        start_time: body.start_time,
+        duration_min: body.duration_min,
+        capacity: body.capacity,
+        disabled_at: null,
+      };
+      const next = [...prev, optimistic];
+      qc.setQueryData(slotsKey, next);
+      syncCalendarSlotMeta(qc, owner, calendarId, next);
+      return { prev, tempId, slotsKey } satisfies SlotMutationContext;
+    },
+    onError: (_err: unknown, _vars: unknown, context: SlotMutationContext | undefined) => {
+      if (!context) return;
+      qc.setQueryData(context.slotsKey, context.prev);
+      syncCalendarSlotMeta(qc, owner, calendarId, context.prev);
+    },
+    onSuccess: (serverSlot: BuyerAppointmentSlot, _vars: unknown, context: SlotMutationContext | undefined) => {
+      if (!context?.tempId) return;
+      qc.setQueryData(context.slotsKey, (old: BuyerAppointmentSlot[] | undefined) => {
+        if (!old) return [serverSlot];
+        return old.map((s) => (s.id === context.tempId ? serverSlot : s));
+      });
+    },
+  };
+}
+
+function patchCalendarSlotMutations(
+  qc: QueryClient,
+  owner: CalendarOwnerKind,
+  calendarId: number,
+  patchFn: (args: {
+    id: number;
+    body: { start_time?: string; duration_min?: number; capacity?: number; disabled?: boolean };
+  }) => Promise<BuyerAppointmentSlot>
+) {
+  const slotsKey = slotsQueryKey(owner, calendarId);
+  return {
+    mutationFn: patchFn,
+    onMutate: async (
+      {
+        id,
+        body,
+      }: {
+        id: number;
+        body: { start_time?: string; duration_min?: number; capacity?: number; disabled?: boolean };
+      },
+      { meta }: { meta?: SlotMutationMeta }
+    ) => {
+      if (meta?.skipOptimistic) return undefined;
+      await qc.cancelQueries({ queryKey: slotsKey });
+      const prev = qc.getQueryData<BuyerAppointmentSlot[]>(slotsKey) ?? [];
+      const now = new Date().toISOString();
+      const next = prev.map((s) => {
+        if (s.id !== id) return s;
+        if (body.disabled) return { ...s, disabled_at: now };
+        return {
+          ...s,
+          ...(body.start_time != null ? { start_time: body.start_time } : {}),
+          ...(body.duration_min != null ? { duration_min: body.duration_min } : {}),
+          ...(body.capacity != null ? { capacity: body.capacity } : {}),
+        };
+      });
+      qc.setQueryData(slotsKey, next);
+      syncCalendarSlotMeta(qc, owner, calendarId, next);
+      return { prev, slotsKey } satisfies SlotMutationContext;
+    },
+    onError: (_err: unknown, _vars: unknown, context: SlotMutationContext | undefined) => {
+      if (!context) return;
+      qc.setQueryData(context.slotsKey, context.prev);
+      syncCalendarSlotMeta(qc, owner, calendarId, context.prev);
+    },
+    onSuccess: (
+      serverSlot: BuyerAppointmentSlot,
+      { id }: { id: number },
+      context: SlotMutationContext | undefined
+    ) => {
+      if (!context) return;
+      const next = qc.getQueryData<BuyerAppointmentSlot[]>(context.slotsKey)?.map((s) =>
+        s.id === id ? serverSlot : s
+      );
+      if (next) {
+        qc.setQueryData(context.slotsKey, next);
+        syncCalendarSlotMeta(qc, owner, calendarId, next);
+      }
+    },
+  };
+}
 
 export function useBuyerCalendars() {
   return useQuery({
@@ -76,32 +292,20 @@ export function useCalendarSlots(calendarId: number | null) {
 
 export function useCreateCalendarSlot(calendarId: number) {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: { weekday: number; start_time: string; duration_min: number; capacity: number }) =>
-      post<BuyerAppointmentSlot>(`/buyer/booking-calendars/${calendarId}/slots`, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["buyer-calendar-slots", calendarId] });
-      qc.invalidateQueries({ queryKey: ["buyer-booking-calendars"] });
-      qc.invalidateQueries({ queryKey: ["buyer-booking-calendar", calendarId] });
-    },
-  });
+  return useMutation(
+    createCalendarSlotMutations(qc, "buyer", calendarId, (body) =>
+      post<BuyerAppointmentSlot>(`/buyer/booking-calendars/${calendarId}/slots`, body)
+    )
+  );
 }
 
 export function usePatchCalendarSlot(calendarId: number) {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      id,
-      body,
-    }: {
-      id: number;
-      body: { start_time?: string; duration_min?: number; capacity?: number; disabled?: boolean };
-    }) => patch<BuyerAppointmentSlot>(`/buyer/booking-calendars/${calendarId}/slots/${id}`, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["buyer-calendar-slots", calendarId] });
-      qc.invalidateQueries({ queryKey: ["buyer-booking-calendars"] });
-    },
-  });
+  return useMutation(
+    patchCalendarSlotMutations(qc, "buyer", calendarId, ({ id, body }) =>
+      patch<BuyerAppointmentSlot>(`/buyer/booking-calendars/${calendarId}/slots/${id}`, body)
+    )
+  );
 }
 
 export function useCopyCalendarSlots(calendarId: number) {
@@ -109,7 +313,9 @@ export function useCopyCalendarSlots(calendarId: number) {
   return useMutation({
     mutationFn: (body: { from_weekday: number; to_weekdays: number[] }) =>
       post<{ items: BuyerAppointmentSlot[] }>(`/buyer/booking-calendars/${calendarId}/slots/copy`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["buyer-calendar-slots", calendarId] }),
+    onSuccess: (res) => {
+      setCalendarSlotsCache(qc, "buyer", calendarId, res.items ?? []);
+    },
   });
 }
 
@@ -272,32 +478,20 @@ export function usePublisherCalendarSlots(calendarId: number | null) {
 
 export function useCreatePublisherCalendarSlot(calendarId: number) {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: { weekday: number; start_time: string; duration_min: number; capacity: number }) =>
-      post<PublisherAppointmentSlot>(`/publisher/booking-calendars/${calendarId}/slots`, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["publisher-calendar-slots", calendarId] });
-      qc.invalidateQueries({ queryKey: ["publisher-booking-calendars"] });
-      qc.invalidateQueries({ queryKey: ["publisher-booking-calendar", calendarId] });
-    },
-  });
+  return useMutation(
+    createCalendarSlotMutations(qc, "publisher", calendarId, (body) =>
+      post<PublisherAppointmentSlot>(`/publisher/booking-calendars/${calendarId}/slots`, body)
+    )
+  );
 }
 
 export function usePatchPublisherCalendarSlot(calendarId: number) {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      id,
-      body,
-    }: {
-      id: number;
-      body: { start_time?: string; duration_min?: number; capacity?: number; disabled?: boolean };
-    }) => patch<PublisherAppointmentSlot>(`/publisher/booking-calendars/${calendarId}/slots/${id}`, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["publisher-calendar-slots", calendarId] });
-      qc.invalidateQueries({ queryKey: ["publisher-booking-calendars"] });
-    },
-  });
+  return useMutation(
+    patchCalendarSlotMutations(qc, "publisher", calendarId, ({ id, body }) =>
+      patch<PublisherAppointmentSlot>(`/publisher/booking-calendars/${calendarId}/slots/${id}`, body)
+    )
+  );
 }
 
 export function useCopyPublisherCalendarSlots(calendarId: number) {
@@ -308,7 +502,9 @@ export function useCopyPublisherCalendarSlots(calendarId: number) {
         `/publisher/booking-calendars/${calendarId}/slots/copy`,
         body
       ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["publisher-calendar-slots", calendarId] }),
+    onSuccess: (res) => {
+      setCalendarSlotsCache(qc, "publisher", calendarId, res.items ?? []);
+    },
   });
 }
 

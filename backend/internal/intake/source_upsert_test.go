@@ -53,7 +53,7 @@ func TestIngestFromSource_upsertByPhone(t *testing.T) {
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	slug := "upsert-test-" + suffix
-	src, err := routeSvc.CreateSource(ctx, publisherID, "Upsert test "+suffix, slug, "webhook", nil, nil)
+	src, err := routeSvc.CreateSource(ctx, publisherID, "Upsert test "+suffix, slug, "webhook", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSource: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestIngestFromSource_upsertByPhone_afterBuyerTransfer(t *testing.T) {
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	slug := "upsert-buyer-" + suffix
-	src, err := routeSvc.CreateSource(ctx, publisherID, "Upsert buyer "+suffix, slug, "webhook", nil, nil)
+	src, err := routeSvc.CreateSource(ctx, publisherID, "Upsert buyer "+suffix, slug, "webhook", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSource: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestIngestFromSource_upsertByFallbackPhoneKey(t *testing.T) {
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	slug := "upsert-fallback-" + suffix
-	src, err := routeSvc.CreateSource(ctx, publisherID, "Upsert fallback "+suffix, slug, "webhook", nil, nil)
+	src, err := routeSvc.CreateSource(ctx, publisherID, "Upsert fallback "+suffix, slug, "webhook", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSource: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestIngestFromSource_upsertMappedPhoneThenDifferentKey(t *testing.T) {
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	slug := "upsert-mapped-" + suffix
-	src, err := routeSvc.CreateSource(ctx, publisherID, "Upsert mapped "+suffix, slug, "webhook", nil, nil)
+	src, err := routeSvc.CreateSource(ctx, publisherID, "Upsert mapped "+suffix, slug, "webhook", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSource: %v", err)
 	}
@@ -391,7 +391,7 @@ func TestIngestFromSource_upsertExistingViaMappedContactPhone(t *testing.T) {
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	slug := "upsert-mapped-existing-" + suffix
-	src, err := routeSvc.CreateSource(ctx, publisherID, "Upsert mapped existing "+suffix, slug, "webhook", nil, nil)
+	src, err := routeSvc.CreateSource(ctx, publisherID, "Upsert mapped existing "+suffix, slug, "webhook", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSource: %v", err)
 	}
@@ -464,7 +464,7 @@ func TestIngestFromSource_repeatInboundNo409(t *testing.T) {
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	slug := "upsert-no409-" + suffix
-	src, err := routeSvc.CreateSource(ctx, publisherID, "Upsert no409 "+suffix, slug, "webhook", nil, nil)
+	src, err := routeSvc.CreateSource(ctx, publisherID, "Upsert no409 "+suffix, slug, "webhook", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSource: %v", err)
 	}
@@ -523,7 +523,7 @@ func TestIngestFromSource_createWhenPhoneUnknown(t *testing.T) {
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	slug := "upsert-create-" + suffix
-	src, err := routeSvc.CreateSource(ctx, publisherID, "Upsert create "+suffix, slug, "webhook", nil, nil)
+	src, err := routeSvc.CreateSource(ctx, publisherID, "Upsert create "+suffix, slug, "webhook", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSource: %v", err)
 	}
@@ -572,7 +572,7 @@ func TestIngestFromSource_noteMapping(t *testing.T) {
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	sourceName := "Note map test " + suffix
 	slug := "note-map-" + suffix
-	src, err := routeSvc.CreateSource(ctx, publisherID, sourceName, slug, "webhook", nil, nil)
+	src, err := routeSvc.CreateSource(ctx, publisherID, sourceName, slug, "webhook", nil, nil, nil)
 	if err != nil {
 		t.Fatalf("CreateSource: %v", err)
 	}

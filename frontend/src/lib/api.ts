@@ -186,11 +186,19 @@ function accountPrefix(type: AccountType): string {
   return "/buyer";
 }
 
-// messagingNs routes chat API calls to the home account namespace while switched/impersonating.
+export function isPlatformOriginSwitch(): boolean {
+  return useAuthStore.getState().switchSession?.originUser?.account_type === "platform";
+}
+
+// messagingNs routes chat API calls to the home account namespace while switched/impersonating,
+// except platform-origin switches (platform admin auditing a tenant account).
 export function messagingNs(): string {
   const { user, impersonation, switchSession } = useAuthStore.getState();
   if (impersonation?.publisherUser) return accountPrefix(impersonation.publisherUser.account_type);
-  if (switchSession?.originUser) return accountPrefix(switchSession.originUser.account_type);
+  if (switchSession?.originUser) {
+    if (switchSession.originUser.account_type === "platform") return ns();
+    return accountPrefix(switchSession.originUser.account_type);
+  }
   return ns();
 }
 
@@ -201,6 +209,12 @@ export function homeAccountType(): AccountType | undefined {
   return user?.account_type;
 }
 
+// messagingAccountType is the account type used for chat query keys and UI routing.
+export function messagingAccountType(): AccountType | undefined {
+  if (isPlatformOriginSwitch()) return useAuthStore.getState().user?.account_type;
+  return homeAccountType();
+}
+
 export function homeAccessToken(): string | null {
   const { accessToken, impersonation, switchSession } = useAuthStore.getState();
   if (impersonation?.publisherAccessToken) return impersonation.publisherAccessToken;
@@ -208,8 +222,14 @@ export function homeAccessToken(): string | null {
   return accessToken;
 }
 
+// messagingAccessToken is the token used for the chat WebSocket connection.
+export function messagingAccessToken(): string | null {
+  if (isPlatformOriginSwitch()) return useAuthStore.getState().accessToken;
+  return homeAccessToken();
+}
+
 function isHomeNamespacePath(path: string): boolean {
-  const home = homeAccountType();
+  const home = messagingAccountType();
   if (!home) return false;
   return path.startsWith(`${accountPrefix(home)}/messages`);
 }
@@ -217,7 +237,7 @@ function isHomeNamespacePath(path: string): boolean {
 // requestAuthToken picks the access token for an API path (exported for tests).
 export function requestAuthToken(path: string): string | null {
   if (isHomeNamespacePath(path)) {
-    return homeAccessToken();
+    return messagingAccessToken();
   }
   return useAuthStore.getState().accessToken;
 }

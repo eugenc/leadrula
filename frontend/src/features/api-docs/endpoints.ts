@@ -98,16 +98,18 @@ export function publicEndpoints(baseURL: string): DocEndpoint[] {
       method: "POST",
       path: "/api/v1/leads",
       auth: "API key (leads:write)",
-      description: "Ingest a lead into the intake queue. Publisher accounts only.",
+      description:
+        "Ingest a lead. Publisher keys only. API key is required; source slug is optional. Without a matching configured source, the lead lands in the intake queue (status review). With a matching source slug, applies field maps and routing (same as POST /api/v1/sources/{slug}). Upserts by external_id when provided, then by phone on source ingest. connection_id is not used — that field is VoiceUni-only.",
       request: `curl -s -X POST "${baseURL}/api/v1/leads" \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "source": "web_form",
+    "external_id": "app-lead-123",
     "first_name": "Jane",
     "last_name": "Doe",
     "phone": "+15551234567",
     "email": "jane@example.com",
+    "source": "my-external-app",
     "custom": { "utility_provider": "Example Co" }
   }'`,
       response: `{
@@ -279,15 +281,25 @@ export function publicEndpoints(baseURL: string): DocEndpoint[] {
   -H "Authorization: Bearer YOUR_API_KEY"`,
     },
     {
+      method: "GET",
+      path: "/api/v1/sources",
+      auth: "API key (leads:read or leads:write)",
+      description:
+        "List active ingest-eligible sources for the API key account (publisher only). Optional discovery when using source slugs for routed ingest. Call sources are excluded.",
+      response: `{ "data": { "items": [{ "slug": "my-external-app", "name": "My App", "type": "webhook", "ingest_url": "${baseURL}/api/v1/sources/my-external-app", "api_key_required": true }] } }`,
+      request: `curl -s "${baseURL}/api/v1/sources" \\
+  -H "Authorization: Bearer YOUR_API_KEY"`,
+    },
+    {
       method: "POST",
       path: "/api/v1/sources/{slug}",
       auth: "API key if source requires it",
-      description: "Ingest a lead via a configured source slug. Publisher accounts only.",
+      description: "Ingest via a configured source slug. Data Leads sources create/route leads; Appointments sources create a lead, book on the contract calendar, and deliver per source config. Call sources reject this endpoint.",
       request: `curl -s -X POST "${baseURL}/api/v1/sources/my-source" \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
-  -d '{ "first_name": "Jane", "phone": "+15551234567" }'`,
-      response: `{ "data": { "lead_id": "...", "status": "review" } }`,
+  -d '{ "first_name": "Jane", "last_name": "Doe", "phone": "+15551234567", "slot_start": "2026-08-15T14:00:00Z" }'`,
+      response: `{ "data": { "lead_id": "...", "status": "distributed", "booking_id": 42 } }`,
     },
     {
       method: "POST",
@@ -416,7 +428,9 @@ export function jwtEndpointGroups(ns: "/publisher" | "/buyer"): DocGroup[] {
         { method: "POST", path: nsPath(ns, "/api-keys"), auth: "JWT admin", description: "Create API key. Returns secret once." },
         { method: "PATCH", path: nsPath(ns, "/api-keys/{id}"), auth: "JWT admin", description: "Rename API key." },
         { method: "POST", path: nsPath(ns, "/api-keys/{id}/rotate"), auth: "JWT admin", description: "Rotate API key." },
-        { method: "DELETE", path: nsPath(ns, "/api-keys/{id}"), auth: "JWT admin", description: "Revoke API key." },
+        { method: "POST", path: nsPath(ns, "/api-keys/{id}/revoke"), auth: "JWT admin", description: "Revoke API key." },
+        { method: "POST", path: nsPath(ns, "/api-keys/{id}/renew"), auth: "JWT admin", description: "Renew revoked API key. Returns new secret once." },
+        { method: "DELETE", path: nsPath(ns, "/api-keys/{id}"), auth: "JWT admin", description: "Permanently delete API key." },
       ],
     },
     {
@@ -457,7 +471,7 @@ export function jwtEndpointGroups(ns: "/publisher" | "/buyer"): DocGroup[] {
         publisherOnly: true,
         endpoints: [
           { method: "GET", path: nsPath(ns, "/sources"), auth: "JWT", description: "List intake sources." },
-          { method: "POST", path: nsPath(ns, "/sources"), auth: "JWT admin", description: "Create source." },
+          { method: "POST", path: nsPath(ns, "/sources"), auth: "JWT admin", description: "Create source (type: webhook | call | appointment). Appointment body includes appointment: { delivery_mode: publisher | publisher_pipeline | contract, calendar_id?, contract_id?, publisher_pipeline_id?, publisher_stage_id?, phone_match_mode }." },
           { method: "GET", path: nsPath(ns, "/routes"), auth: "JWT", description: "List routing rules." },
           { method: "POST", path: nsPath(ns, "/routes"), auth: "JWT admin", description: "Create routing rule." },
           { method: "GET", path: nsPath(ns, "/intake-queue"), auth: "JWT", description: "Pending intake queue." },

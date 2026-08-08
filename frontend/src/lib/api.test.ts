@@ -23,7 +23,7 @@ vi.mock("@/store/toastStore", () => ({
   toast: { error: vi.fn() },
 }));
 
-import { requestAuthToken } from "./api";
+import { requestAuthToken, messagingNs, messagingAccountType, messagingAccessToken } from "./api";
 
 describe("requestAuthToken", () => {
   beforeEach(() => {
@@ -33,15 +33,42 @@ describe("requestAuthToken", () => {
     authState.user = { account_type: "publisher" };
   });
 
-  it("uses origin token for home-namespace messaging while switched", () => {
+  it("uses switched token for active-namespace messaging when platform admin switches", () => {
     authState.switchSession = {
       originAccessToken: "platform-token",
       originUser: { account_type: "platform" },
     };
     authState.user = { account_type: "publisher" };
 
-    expect(requestAuthToken("/platform/messages/threads")).toBe("platform-token");
+    expect(messagingNs()).toBe("/publisher");
+    expect(messagingAccountType()).toBe("publisher");
+    expect(messagingAccessToken()).toBe("switched-token");
+    expect(requestAuthToken("/publisher/messages/threads")).toBe("switched-token");
     expect(requestAuthToken("/publisher/leads")).toBe("switched-token");
+  });
+
+  it("uses origin token for home-namespace messaging while publisher-origin switch", () => {
+    authState.switchSession = {
+      originAccessToken: "publisher-token",
+      originUser: { account_type: "publisher" },
+    };
+    authState.user = { account_type: "buyer" };
+
+    expect(messagingNs()).toBe("/publisher");
+    expect(messagingAccountType()).toBe("publisher");
+    expect(messagingAccessToken()).toBe("publisher-token");
+    expect(requestAuthToken("/publisher/messages/threads")).toBe("publisher-token");
+    expect(requestAuthToken("/buyer/leads")).toBe("switched-token");
+  });
+
+  it("does not treat platform namespace as home when platform admin switches to tenant", () => {
+    authState.switchSession = {
+      originAccessToken: "platform-token",
+      originUser: { account_type: "platform" },
+    };
+    authState.user = { account_type: "publisher" };
+
+    expect(requestAuthToken("/platform/messages/threads")).toBe("switched-token");
   });
 
   it("uses publisher token for home-namespace messaging while impersonating", () => {

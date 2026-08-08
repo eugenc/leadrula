@@ -66,16 +66,17 @@ func (h *Handler) listSources(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) createSource(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
-		Name           string            `json:"name"`
-		Slug           string            `json:"slug"`
-		Type           string            `json:"type"`
-		APIKeyRequired *bool             `json:"api_key_required"`
-		Call           *CallSourceParams `json:"call"`
+		Name           string                     `json:"name"`
+		Slug           string                     `json:"slug"`
+		Type           string                     `json:"type"`
+		APIKeyRequired *bool                      `json:"api_key_required"`
+		Call           *CallSourceParams          `json:"call"`
+		Appointment    *AppointmentSourceParams   `json:"appointment"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	src, err := h.svc.CreateSource(r.Context(), p.AccountID, body.Name, body.Slug, body.Type, body.APIKeyRequired, body.Call)
+	src, err := h.svc.CreateSource(r.Context(), p.AccountID, body.Name, body.Slug, body.Type, body.APIKeyRequired, body.Call, body.Appointment)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -86,16 +87,17 @@ func (h *Handler) createSource(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) updateSource(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
-		Name           *string           `json:"name"`
-		Slug           *string           `json:"slug"`
-		IsActive       *bool             `json:"is_active"`
-		APIKeyRequired *bool             `json:"api_key_required"`
-		Call           *CallSourceParams `json:"call"`
+		Name           *string                    `json:"name"`
+		Slug           *string                    `json:"slug"`
+		IsActive       *bool                      `json:"is_active"`
+		APIKeyRequired *bool                      `json:"api_key_required"`
+		Call           *CallSourceParams          `json:"call"`
+		Appointment    *AppointmentSourceParams   `json:"appointment"`
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	src, err := h.svc.UpdateSource(r.Context(), p.AccountID, idp(r, "id"), body.Name, body.Slug, body.IsActive, body.APIKeyRequired, body.Call)
+	src, err := h.svc.UpdateSource(r.Context(), p.AccountID, idp(r, "id"), body.Name, body.Slug, body.IsActive, body.APIKeyRequired, body.Call, body.Appointment)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return

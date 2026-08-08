@@ -8,7 +8,6 @@ import (
 
 	"github.com/echayko/leadrula/backend/internal/auth"
 	"github.com/echayko/leadrula/backend/internal/leads"
-	"github.com/echayko/leadrula/backend/internal/notifications"
 	"github.com/echayko/leadrula/backend/pkg/httpx"
 	"github.com/jackc/pgx/v5"
 )
@@ -57,84 +56,9 @@ func (s *Service) BookAsBuyer(ctx context.Context, p *auth.Principal, params Boo
 }
 
 func (s *Service) bookAppointment(ctx context.Context, p *auth.Principal, params BookParams, asBuyer bool) (*BookingRow, error) {
-	if params.ContractID == 0 {
-		return nil, httpx.Validation("contract_id is required")
-	}
-	if params.DeliveryMode != "contract" && params.DeliveryMode != "publisher_pipeline" {
-		return nil, httpx.Validation("delivery_mode must be contract or publisher_pipeline")
-	}
-	if params.DeliveryMode == "publisher_pipeline" && (params.PublisherPipelineID == 0 || params.PublisherStageID == 0) {
-		return nil, httpx.Validation("publisher pipeline and stage required")
-	}
-	var buyerID int64
-	var err error
-	if asBuyer {
-		if err := s.contractOwnedByBuyer(ctx, p.AccountID, params.ContractID); err != nil {
-			return nil, err
-		}
-		buyerID = p.AccountID
-	} else {
-		buyerID, err = s.contractBuyerID(ctx, p.AccountID, params.ContractID)
-		if err != nil {
-			return nil, err
-		}
-	}
-	target := parseBookingTarget(params.BookingTarget)
-	ok, err := s.bookingCalendarConfigured(ctx, params.ContractID, asBuyer, target)
+	prep, err := s.prepareContractBooking(ctx, p, params, asBuyer)
 	if err != nil {
 		return nil, err
-	}
-	if !ok {
-		return nil, httpx.Validation("appointment calendar is not configured")
-	}
-	active, err := s.resolveBookingCalendar(ctx, params.ContractID, asBuyer, target)
-	if err != nil {
-		return nil, err
-	}
-	var calTimezone string
-	switch active.Source {
-	case calendarSourceBuyer:
-		cal, err := s.loadCalendarByID(ctx, active.CalendarID)
-		if err != nil {
-			return nil, err
-		}
-		calTimezone = cal.Timezone
-	case calendarSourcePublisher:
-		cal, err := s.loadPublisherCalendarByID(ctx, active.CalendarID)
-		if err != nil {
-			return nil, err
-		}
-		calTimezone = cal.Timezone
-	default:
-		return nil, httpx.Validation("appointment calendar is not configured")
-	}
-	loc := loadLocation(calTimezone)
-	slotStart := params.SlotStart.In(loc)
-	if !bookingWindowOK(slotStart, time.Now()) {
-		return nil, httpx.Validation("slot is outside booking window")
-	}
-
-	var dur int
-	var cap int
-	if params.CustomTime {
-		var err error
-		dur, err = validateCustomDurationMin(params.DurationMin)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		var err error
-		switch active.Source {
-		case calendarSourceBuyer:
-			dur, cap, err = s.validateBuyerBookingSlot(ctx, p, params, asBuyer, slotStart, loc)
-		case calendarSourcePublisher:
-			dur, cap, err = s.validatePublisherBookingSlot(ctx, p, params, asBuyer, slotStart, loc)
-		default:
-			return nil, httpx.Validation("appointment calendar is not configured")
-		}
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -143,173 +67,16 @@ func (s *Service) bookAppointment(ctx context.Context, p *auth.Principal, params
 	}
 	defer tx.Rollback(ctx)
 
-	if !params.CustomTime {
-		var booked int
-		switch active.Source {
-		case calendarSourceBuyer:
-			booked, err = s.countBuyerSlotOccupancyTx(ctx, tx, params.BuyerSlotID, slotStart)
-		case calendarSourcePublisher:
-			booked, err = s.countPublisherSlotOccupancyTx(ctx, tx, params.ContractID, params.PublisherSlotID, slotStart)
-		}
-		if err != nil {
-			return nil, err
-		}
-		if booked >= cap {
-			return nil, httpx.Validation("slot is full")
-		}
-	}
-
-	var leadID int64
-	var lead *leads.Lead
-	if params.LeadID != 0 {
-		leadID = params.LeadID
-		lead, err = s.leads.GetByID(ctx, tx, leadID)
-		if err != nil {
-			return nil, err
-		}
-		if asBuyer {
-			if lead.OwnerAccountID != p.AccountID {
-				return nil, httpx.NotFound("lead not found")
-			}
-		} else if lead.PublisherID != p.AccountID && lead.OwnerAccountID != p.AccountID {
-			return nil, httpx.NotFound("lead not found")
-		}
-	} else {
-		if strings.TrimSpace(params.FirstName) == "" || strings.TrimSpace(params.LastName) == "" {
-			return nil, httpx.Validation("first_name and last_name are required")
-		}
-		if strings.TrimSpace(params.Phone) == "" && strings.TrimSpace(params.Email) == "" {
-			return nil, httpx.Validation("phone or email is required")
-		}
-		if asBuyer {
-			leadID, err = s.createLeadForBuyerBooking(ctx, tx, p, params.ContractID, params)
-		} else {
-			leadID, err = s.createLeadForBooking(ctx, tx, p, params)
-		}
-		if err != nil {
-			return nil, err
-		}
-		lead, err = s.leads.GetByID(ctx, tx, leadID)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if _, err := tx.Exec(ctx, `DELETE FROM lead_appointment_bookings WHERE lead_id=$1`, leadID); err != nil {
-		return nil, err
-	}
-
-	extID := strings.TrimSpace(params.ExternalEventID)
-	extProvider := strings.TrimSpace(params.ExternalProvider)
-	if extProvider == "" && extID != "" {
-		extProvider = "voiceuni"
-	}
-	if extID != "" {
-		var existingID int64
-		err = tx.QueryRow(ctx,
-			`SELECT id FROM lead_appointment_bookings
-			 WHERE external_provider_slug=$1 AND external_event_id=$2`,
-			extProvider, extID).Scan(&existingID)
-		if err == nil && existingID > 0 {
-			_, err = tx.Exec(ctx, `DELETE FROM lead_appointment_bookings WHERE lead_id=$1 AND id <> $2`, leadID, existingID)
-		}
-	}
-
-	var bookingID int64
-	switch active.Source {
-	case calendarSourceBuyer:
-		buyerSlotID := any(params.BuyerSlotID)
-		if params.CustomTime {
-			buyerSlotID = nil
-		}
-		err = tx.QueryRow(ctx,
-			`INSERT INTO lead_appointment_bookings(
-			   contract_id, lead_id, buyer_slot_id, slot_start, duration_min, booked_by_user_id, delivery_mode,
-			   external_event_id, external_provider_slug, custom_time)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-			params.ContractID, leadID, buyerSlotID, slotStart, dur, p.UserID, params.DeliveryMode,
-			nullStr(extID), nullStr(extProvider), params.CustomTime).Scan(&bookingID)
-	case calendarSourcePublisher:
-		publisherSlotID := any(params.PublisherSlotID)
-		if params.CustomTime {
-			publisherSlotID = nil
-		}
-		err = tx.QueryRow(ctx,
-			`INSERT INTO lead_appointment_bookings(
-			   contract_id, lead_id, publisher_slot_id, slot_start, duration_min, booked_by_user_id, delivery_mode,
-			   external_event_id, external_provider_slug, custom_time)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-			params.ContractID, leadID, publisherSlotID, slotStart, dur, p.UserID, params.DeliveryMode,
-			nullStr(extID), nullStr(extProvider), params.CustomTime).Scan(&bookingID)
-	}
+	result, err := s.executeBookAppointmentTx(ctx, tx, p, params, asBuyer, prep, params.LeadID)
 	if err != nil {
 		return nil, err
 	}
-
-	deps := leads.RouteApplyDeps{Repo: s.leads, Accounts: s.accounts, Notif: s.notif}
-	var emails []notifications.EmailJob
-
-	if params.DeliveryMode == "contract" && lead.Status != "distributed" && lead.Status != "closed" {
-		delivery := ""
-		_ = tx.QueryRow(ctx,
-			`SELECT COALESCE(cc.delivery,'') FROM contract_compensations cc
-			 WHERE cc.contract_id=$1 AND cc.trigger='per_lead' ORDER BY cc.position, cc.id LIMIT 1`,
-			params.ContractID).Scan(&delivery)
-		em, err := leads.DistributeToContract(ctx, tx, deps, params.ContractID, delivery, leadID, "appointment booked")
-		if err != nil {
-			return nil, err
-		}
-		emails = append(emails, em...)
-	} else if !asBuyer && params.DeliveryMode == "publisher_pipeline" && lead.Status == "review" && lead.OwnerAccountID == p.AccountID {
-		if err := s.leads.PlaceInPipeline(ctx, tx, leadID, p.AccountID, params.PublisherPipelineID, params.PublisherStageID, nil); err != nil {
-			return nil, err
-		}
-		if err := s.leads.LogPipelinePlacement(ctx, tx, leadID, leads.ActorFromPrincipal(p), params.PublisherPipelineID, params.PublisherStageID); err != nil {
-			return nil, err
-		}
-		if err := s.leads.SetPreassignedBuyer(ctx, p.AccountID, leadID, &buyerID); err != nil {
-			return nil, err
-		}
-	}
-
-	updatedLead, err := s.leads.GetByID(ctx, tx, leadID)
-	if err != nil {
-		return nil, err
-	}
-	priorActionAt := updatedLead.ActionAt
-	if err := s.leads.SetActionAt(ctx, tx, leadID, &slotStart); err != nil {
-		return nil, err
-	}
-	if err := leads.LogActionAtChange(ctx, tx, s.leads, leadID, updatedLead.OwnerAccountID, leads.ActorFromPrincipal(p), priorActionAt, &slotStart); err != nil {
-		return nil, err
-	}
-
-	leadName := strings.TrimSpace(lead.FirstName + " " + lead.LastName)
-	adminIDs, err := s.accounts.AdminUserIDs(ctx, tx, buyerID)
-	if err != nil {
-		return nil, err
-	}
-	notifyEmails, err := s.notif.Deliver(ctx, tx, notifications.DeliverParams{
-		AccountID: buyerID,
-		UserIDs:   adminIDs,
-		EventType: "new_appointment",
-		Payload: map[string]any{
-			"lead_id":     leadID,
-			"contract_id": params.ContractID,
-			"slot_start":  slotStart.Format(time.RFC3339),
-			"lead_name":   leadName,
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-	emails = append(emails, notifyEmails...)
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	s.notif.SendEmails(emails)
-	return s.getBookingByID(ctx, bookingID)
+	s.notif.SendEmails(result.Emails)
+	return s.getBookingByID(ctx, result.BookingID)
 }
 
 func (s *Service) validateBuyerBookingSlot(ctx context.Context, p *auth.Principal, params BookParams, asBuyer bool, slotStart time.Time, loc *time.Location) (int, int, error) {

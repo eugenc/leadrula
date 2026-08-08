@@ -8,7 +8,7 @@ import { Copy, Eye, EyeOff, KeyRound } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
-import { useUpdateApiKey, useRotateApiKey, useRevokeApiKey } from "@/features/admin/hooks";
+import { useUpdateApiKey, useRotateApiKey, useRevokeApiKey, useDeleteApiKey, useRenewApiKey } from "@/features/admin/hooks";
 import type { ApiKey } from "@/types";
 
 function copyText(text: string, label: string) {
@@ -57,21 +57,25 @@ function DrawerContent({
   const update = useUpdateApiKey();
   const rotate = useRotateApiKey();
   const revoke = useRevokeApiKey();
+  const del = useDeleteApiKey();
+  const renew = useRenewApiKey();
 
   const [name, setName] = useState(apiKey.name);
   const [keyPrefix, setKeyPrefix] = useState(apiKey.key_prefix);
   const [secret, setSecret] = useState<string | null>(initialSecret ?? null);
   const [showSecret, setShowSecret] = useState(false);
+  const [revokedAt, setRevokedAt] = useState(apiKey.revoked_at);
 
   useEffect(() => {
     setName(apiKey.name);
     setKeyPrefix(apiKey.key_prefix);
     setSecret(initialSecret ?? null);
     setShowSecret(false);
+    setRevokedAt(apiKey.revoked_at);
   }, [apiKey, initialSecret]);
 
   const trimmedName = name.trim();
-  const active = !apiKey.revoked_at;
+  const active = !revokedAt;
   const unchanged = trimmedName === apiKey.name;
   const invalid = !trimmedName;
   const saving = update.isPending;
@@ -107,6 +111,32 @@ function DrawerContent({
     revoke.mutate(apiKey.id, {
       onSuccess: () => {
         toast.success("API key revoked");
+        onClose();
+      },
+      onError: (e) => toast.error(errorMessage(e)),
+    });
+  }
+
+  function handleRenew() {
+    renew.mutate(apiKey.id, {
+      onSuccess: (res) => {
+        setKeyPrefix(res.key.key_prefix);
+        setSecret(res.secret);
+        setRevokedAt(null);
+        setShowSecret(false);
+        onSecretCached?.(apiKey.id, res.secret);
+        copyText(res.secret, "New key copied to clipboard");
+        toast.success("API key renewed");
+      },
+      onError: (e) => toast.error(errorMessage(e)),
+    });
+  }
+
+  function handleDelete() {
+    if (!window.confirm("Permanently delete this API key? This cannot be undone.")) return;
+    del.mutate(apiKey.id, {
+      onSuccess: () => {
+        toast.success("API key deleted");
         onClose();
       },
       onError: (e) => toast.error(errorMessage(e)),
@@ -187,11 +217,20 @@ function DrawerContent({
             Rotate key
           </Button>
         )}
+        {!active && (
+          <Button variant="secondary" disabled={renew.isPending} onClick={handleRenew}>
+            <KeyRound className="mr-2 h-4 w-4" />
+            Renew key
+          </Button>
+        )}
         {active && (
           <Button variant="danger" disabled={revoke.isPending} onClick={handleRevoke}>
             Revoke key
           </Button>
         )}
+        <Button variant="danger" disabled={del.isPending} onClick={handleDelete}>
+          Delete key
+        </Button>
       </DrawerFooter>
     </div>
   );

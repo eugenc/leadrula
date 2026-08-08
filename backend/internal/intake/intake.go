@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/echayko/leadrula/backend/internal/accounts"
+	"github.com/echayko/leadrula/backend/internal/appointments"
 	"github.com/echayko/leadrula/backend/internal/billing"
 	"github.com/echayko/leadrula/backend/internal/contracts"
 	"github.com/echayko/leadrula/backend/internal/database"
@@ -29,15 +31,55 @@ type Service struct {
 	notif        *notifications.Service
 	accounts     *accounts.Repository
 	integrations leads.IntegrationEnqueuer
+	appointments *appointments.Service
 }
 
-func NewService(pool *pgxpool.Pool, leadRepo *leads.Repository, notif *notifications.Service, acc *accounts.Repository, integrations leads.IntegrationEnqueuer) *Service {
-	return &Service{pool: pool, leads: leadRepo, notif: notif, accounts: acc, integrations: integrations}
+func NewService(pool *pgxpool.Pool, leadRepo *leads.Repository, notif *notifications.Service, acc *accounts.Repository, integrations leads.IntegrationEnqueuer, appt *appointments.Service) *Service {
+	return &Service{pool: pool, leads: leadRepo, notif: notif, accounts: acc, integrations: integrations, appointments: appt}
 }
 
 // ResolveSourceBySlug finds an active source by globally unique slug.
 func (s *Service) ResolveSourceBySlug(ctx context.Context, slug string) (*routing.Source, error) {
 	return routing.ResolveSourceBySlug(ctx, s.pool, slug)
+}
+
+// MatchSourceBySlug finds an active ingest-eligible source for a publisher.
+func (s *Service) MatchSourceBySlug(ctx context.Context, publisherID int64, slug string) (*routing.Source, error) {
+	return routing.MatchSourceBySlug(ctx, s.pool, publisherID, slug)
+}
+
+// PublicSourceItem is returned by GET /api/v1/sources.
+type PublicSourceItem struct {
+	Slug           string `json:"slug"`
+	Name           string `json:"name"`
+	Type           string `json:"type"`
+	IngestURL      string `json:"ingest_url"`
+	APIKeyRequired bool   `json:"api_key_required"`
+}
+
+// ListPublicSources returns active, ingest-eligible sources for a publisher API key.
+func (s *Service) ListPublicSources(ctx context.Context, publisherID int64, apiBaseURL string) ([]PublicSourceItem, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT name, slug, type, api_key_required
+		 FROM routing_sources
+		 WHERE publisher_id = $1 AND is_active AND type <> 'call'
+		 ORDER BY name`, publisherID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	base := strings.TrimRight(apiBaseURL, "/")
+	var out []PublicSourceItem
+	for rows.Next() {
+		var item PublicSourceItem
+		if err := rows.Scan(&item.Name, &item.Slug, &item.Type, &item.APIKeyRequired); err != nil {
+			return nil, err
+		}
+		item.IngestURL = base + "/api/v1/sources/" + item.Slug
+		out = append(out, item)
+	}
+	return out, rows.Err()
 }
 
 func (s *Service) routeDeps() leads.RouteApplyDeps {
@@ -46,8 +88,9 @@ func (s *Service) routeDeps() leads.RouteApplyDeps {
 
 // IngestResult is returned to the API caller.
 type IngestResult struct {
-	LeadID string `json:"lead_id"`
-	Status string `json:"status"`
+	LeadID    string `json:"lead_id"`
+	Status    string `json:"status"`
+	BookingID *int64 `json:"booking_id,omitempty"`
 }
 
 var builtinKeys = []string{"first_name", "last_name", "phone", "email", "address", "city", "state", "zip", "country"}
@@ -140,6 +183,32 @@ func (s *Service) updateExistingLeadByPhone(ctx context.Context, tx database.Que
 	return existing, true, nil
 }
 
+func extractExternalID(flat map[string]any) string {
+	if v, ok := flat["external_id"]; ok {
+		return toText(v)
+	}
+	return ""
+}
+
+// updateExistingLeadByExternalID applies payload mappings to a publisher lead matched by external_id.
+func (s *Service) updateExistingLeadByExternalID(ctx context.Context, tx database.Querier, publisherID int64, externalID, authorName string, flat map[string]any, maps []routing.SourceFieldMapEntry) (*leads.Lead, bool, error) {
+	if externalID == "" {
+		return nil, false, nil
+	}
+	existing, lookupErr := s.leads.GetByExternalID(ctx, tx, publisherID, externalID)
+	if lookupErr != nil {
+		var appErr *httpx.AppError
+		if errors.As(lookupErr, &appErr) && appErr.Code == httpx.CodeNotFound {
+			return nil, false, nil
+		}
+		return nil, false, lookupErr
+	}
+	if err := applyPayloadMappings(ctx, tx, s.leads, publisherID, existing.ID, authorName, flat, maps); err != nil {
+		return nil, false, err
+	}
+	return existing, true, nil
+}
+
 func sourceAuthorName(name, slug string) string {
 	if name != "" {
 		return name
@@ -186,6 +255,11 @@ func applyPayloadMappings(ctx context.Context, tx database.Querier, repo *leads.
 func (s *Service) Ingest(ctx context.Context, publisherID int64, raw map[string]any) (*IngestResult, error) {
 	source := resolveIngestSource(raw)
 	rawJSON, _ := json.Marshal(raw)
+	sources := flattenPayload(raw)
+	authorName := sourceAuthorName("", source)
+	if authorName == "" {
+		authorName = "API"
+	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -193,11 +267,21 @@ func (s *Service) Ingest(ctx context.Context, publisherID int64, raw map[string]
 	}
 	defer tx.Rollback(ctx)
 
+	if extID := extractExternalID(sources); extID != "" {
+		if existing, updated, err := s.updateExistingLeadByExternalID(ctx, tx, publisherID, extID, authorName, sources, nil); err != nil {
+			return nil, err
+		} else if updated {
+			if err := tx.Commit(ctx); err != nil {
+				return nil, err
+			}
+			return &IngestResult{LeadID: existing.PublicID, Status: "updated"}, nil
+		}
+	}
+
 	leadID, publicID, err := s.leads.InsertLead(ctx, tx, publisherID, publisherID, source, rawJSON)
 	if err != nil {
 		return nil, err
 	}
-	sources := flattenPayload(raw)
 	for _, k := range builtinKeys {
 		if v, ok := sources[k]; ok {
 			if str := toText(v); str != "" {
@@ -205,6 +289,11 @@ func (s *Service) Ingest(ctx context.Context, publisherID int64, raw map[string]
 					return nil, err
 				}
 			}
+		}
+	}
+	if extID := extractExternalID(sources); extID != "" {
+		if err := s.leads.SetBuiltinField(ctx, tx, leadID, "external_id", extID); err != nil {
+			return nil, err
 		}
 	}
 	lead, err := s.leads.GetByID(ctx, tx, leadID)
@@ -243,13 +332,31 @@ func (s *Service) IngestFromSource(ctx context.Context, publisherID int64, slug 
 	if src == nil {
 		return nil, httpx.NotFound("source not found")
 	}
+	if src.Type == "call" {
+		return nil, httpx.Validation("call sources use twilio inbound, not source ingest")
+	}
 
 	maps, err := routing.SourceFieldMap(ctx, tx, src.ID)
 	if err != nil {
 		return nil, err
 	}
 
+	if src.Type == "appointment" {
+		return s.ingestAppointmentFromSource(ctx, tx, publisherID, src, slug, raw, maps)
+	}
+
 	authorName := sourceAuthorName(src.Name, slug)
+
+	if extID := extractExternalID(sources); extID != "" {
+		if existing, updated, err := s.updateExistingLeadByExternalID(ctx, tx, publisherID, extID, authorName, sources, maps); err != nil {
+			return nil, err
+		} else if updated {
+			if err := tx.Commit(ctx); err != nil {
+				return nil, err
+			}
+			return &IngestResult{LeadID: existing.PublicID, Status: "updated"}, nil
+		}
+	}
 
 	if phone := extractPhoneFromPayload(sources, maps); phone != "" {
 		if existing, updated, err := s.updateExistingLeadByPhone(ctx, tx, publisherID, phone, 0, authorName, sources, maps); err != nil {
@@ -268,6 +375,11 @@ func (s *Service) IngestFromSource(ctx context.Context, publisherID int64, slug 
 	}
 	if err := applyPayloadMappings(ctx, tx, s.leads, publisherID, leadID, authorName, sources, maps); err != nil {
 		return nil, err
+	}
+	if extID := extractExternalID(sources); extID != "" {
+		if err := s.leads.SetBuiltinField(ctx, tx, leadID, "external_id", extID); err != nil {
+			return nil, err
+		}
 	}
 	lead, err := s.leads.GetByID(ctx, tx, leadID)
 	if err != nil {

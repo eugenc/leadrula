@@ -1907,7 +1907,22 @@ export function useRotateApiKey() {
 }
 export function useRevokeApiKey() {
   const inv = useInvalidate(["api-keys"]);
+  return useMutation({
+    mutationFn: (id: number) => post<{ ok: boolean }>(`${ns()}/api-keys/${id}/revoke`),
+    onSuccess: inv,
+  });
+}
+export function useDeleteApiKey() {
+  const inv = useInvalidate(["api-keys"]);
   return useMutation({ mutationFn: (id: number) => del(`${ns()}/api-keys/${id}`), onSuccess: inv });
+}
+export function useRenewApiKey() {
+  const inv = useInvalidate(["api-keys"]);
+  return useMutation({
+    mutationFn: (id: number) =>
+      post<{ key: ApiKey; secret: string }>(`${ns()}/api-keys/${id}/renew`),
+    onSuccess: inv,
+  });
 }
 
 // ── Calendar ──────────────────────────────────────────────────────

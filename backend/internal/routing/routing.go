@@ -23,12 +23,19 @@ type Source struct {
 	IsActive       bool      `json:"is_active"`
 	APIKeyRequired bool      `json:"api_key_required"`
 	// Call sources only.
-	IntegrationConnectionID *int64    `json:"integration_connection_id,omitempty"`
-	TrackingNumber          *string   `json:"tracking_number,omitempty"`
-	TwilioSID               *string   `json:"twilio_sid,omitempty"`
-	PayloadEnabled          bool      `json:"payload_enabled"`
-	RequirePreload          bool      `json:"require_preload"`
-	CreatedAt               time.Time `json:"created_at"`
+	IntegrationConnectionID *int64  `json:"integration_connection_id,omitempty"`
+	TrackingNumber          *string `json:"tracking_number,omitempty"`
+	TwilioSID               *string `json:"twilio_sid,omitempty"`
+	PayloadEnabled          bool    `json:"payload_enabled"`
+	RequirePreload          bool    `json:"require_preload"`
+	// Appointment sources only.
+	ContractID          *int64  `json:"contract_id,omitempty"`
+	CalendarID          *int64  `json:"calendar_id,omitempty"`
+	DeliveryMode        string  `json:"delivery_mode,omitempty"`
+	PublisherPipelineID *int64  `json:"publisher_pipeline_id,omitempty"`
+	PublisherStageID    *int64  `json:"publisher_stage_id,omitempty"`
+	PhoneMatchMode      string  `json:"phone_match_mode,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
 }
 
 type SourceFieldMapEntry struct {
@@ -205,7 +212,8 @@ func scanRoute(row pgx.Row) (*Route, error) {
 }
 
 const sourceCols = `id, publisher_id, name, slug, type, is_active, api_key_required,
-	integration_connection_id, tracking_number, twilio_sid, payload_enabled, require_preload, created_at`
+	integration_connection_id, tracking_number, twilio_sid, payload_enabled, require_preload,
+	contract_id, calendar_id, delivery_mode, publisher_pipeline_id, publisher_stage_id, phone_match_mode, created_at`
 
 func scanSource(row pgx.Row) (*Source, error) {
 	s := &Source{}
@@ -220,7 +228,8 @@ func scanSource(row pgx.Row) (*Source, error) {
 
 func scanSourceInto(row pgx.Row, s *Source) error {
 	return row.Scan(&s.ID, &s.PublisherID, &s.Name, &s.Slug, &s.Type, &s.IsActive, &s.APIKeyRequired,
-		&s.IntegrationConnectionID, &s.TrackingNumber, &s.TwilioSID, &s.PayloadEnabled, &s.RequirePreload, &s.CreatedAt)
+		&s.IntegrationConnectionID, &s.TrackingNumber, &s.TwilioSID, &s.PayloadEnabled, &s.RequirePreload,
+		&s.ContractID, &s.CalendarID, &s.DeliveryMode, &s.PublisherPipelineID, &s.PublisherStageID, &s.PhoneMatchMode, &s.CreatedAt)
 }
 
 // MatchSourceBySlug finds an active source by slug. nil means no match.
@@ -509,12 +518,22 @@ type CallSourceParams struct {
 	RequirePreload          *bool   `json:"require_preload"`
 }
 
-func (s *Service) CreateSource(ctx context.Context, publisherID int64, name, slug, sourceType string, apiKeyRequired *bool, call *CallSourceParams) (*Source, error) {
+// AppointmentSourceParams carries appointment source configuration.
+type AppointmentSourceParams struct {
+	ContractID          *int64  `json:"contract_id"`
+	CalendarID          *int64  `json:"calendar_id"`
+	DeliveryMode        *string `json:"delivery_mode"`
+	PublisherPipelineID *int64  `json:"publisher_pipeline_id"`
+	PublisherStageID    *int64  `json:"publisher_stage_id"`
+	PhoneMatchMode      *string `json:"phone_match_mode"`
+}
+
+func (s *Service) CreateSource(ctx context.Context, publisherID int64, name, slug, sourceType string, apiKeyRequired *bool, call *CallSourceParams, appointment *AppointmentSourceParams) (*Source, error) {
 	if sourceType == "" {
 		return nil, httpx.Validation("type is required")
 	}
-	if sourceType != "webhook" && sourceType != "call" {
-		return nil, httpx.Validation("type must be webhook or call")
+	if sourceType != "webhook" && sourceType != "call" && sourceType != "appointment" {
+		return nil, httpx.Validation("type must be webhook, call, or appointment")
 	}
 	required := true
 	if apiKeyRequired != nil {
@@ -522,6 +541,9 @@ func (s *Service) CreateSource(ctx context.Context, publisherID int64, name, slu
 	}
 	if call == nil {
 		call = &CallSourceParams{}
+	}
+	if appointment == nil {
+		appointment = &AppointmentSourceParams{}
 	}
 	if sourceType == "call" {
 		if err := s.validateCallSourceParams(ctx, publisherID, call); err != nil {
@@ -531,15 +553,21 @@ func (s *Service) CreateSource(ctx context.Context, publisherID int64, name, slu
 			return nil, err
 		}
 	}
+	apptCols, err := s.resolveAppointmentColumns(ctx, publisherID, sourceType, appointment)
+	if err != nil {
+		return nil, err
+	}
 	payloadEnabled := call.PayloadEnabled != nil && *call.PayloadEnabled
 	requirePreload := call.RequirePreload != nil && *call.RequirePreload
 	src, err := scanSource(s.pool.QueryRow(ctx,
 		`INSERT INTO routing_sources(publisher_id, name, slug, type, api_key_required,
-		   integration_connection_id, tracking_number, twilio_sid, payload_enabled, require_preload)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		   integration_connection_id, tracking_number, twilio_sid, payload_enabled, require_preload,
+		   contract_id, calendar_id, delivery_mode, publisher_pipeline_id, publisher_stage_id, phone_match_mode)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
 		 RETURNING `+sourceCols,
 		publisherID, name, slug, sourceType, required,
-		call.IntegrationConnectionID, call.TrackingNumber, call.TwilioSID, payloadEnabled, requirePreload))
+		call.IntegrationConnectionID, call.TrackingNumber, call.TwilioSID, payloadEnabled, requirePreload,
+		apptCols.contractID, apptCols.calendarID, apptCols.deliveryMode, apptCols.publisherPipelineID, apptCols.publisherStageID, apptCols.phoneMatchMode))
 	if err != nil && database.IsUniqueViolation(err) {
 		return nil, httpx.Conflict("a source with this slug or tracking number already exists")
 	}
@@ -557,9 +585,12 @@ func SourceByTrackingNumber(ctx context.Context, q database.Querier, trackingNum
 		trackingNumber))
 }
 
-func (s *Service) UpdateSource(ctx context.Context, publisherID, id int64, name, slug *string, isActive, apiKeyRequired *bool, call *CallSourceParams) (*Source, error) {
+func (s *Service) UpdateSource(ctx context.Context, publisherID, id int64, name, slug *string, isActive, apiKeyRequired *bool, call *CallSourceParams, appointment *AppointmentSourceParams) (*Source, error) {
 	if call == nil {
 		call = &CallSourceParams{}
+	}
+	if appointment == nil {
+		appointment = &AppointmentSourceParams{}
 	}
 	old, err := s.GetSource(ctx, publisherID, id)
 	if err != nil {
@@ -570,21 +601,55 @@ func (s *Service) UpdateSource(ctx context.Context, publisherID, id int64, name,
 			return nil, err
 		}
 	}
-	src, err := scanSource(s.pool.QueryRow(ctx,
-		`UPDATE routing_sources SET
-		   name = COALESCE($3, name),
-		   slug = COALESCE($4, slug),
-		   is_active = COALESCE($5, is_active),
-		   api_key_required = COALESCE($6, api_key_required),
-		   integration_connection_id = COALESCE($7, integration_connection_id),
-		   tracking_number = COALESCE($8, tracking_number),
-		   twilio_sid = COALESCE($9, twilio_sid),
-		   payload_enabled = COALESCE($10, payload_enabled),
-		   require_preload = COALESCE($11, require_preload)
-		 WHERE id=$1 AND publisher_id=$2
-		 RETURNING `+sourceCols,
-		id, publisherID, name, slug, isActive, apiKeyRequired,
-		call.IntegrationConnectionID, call.TrackingNumber, call.TwilioSID, call.PayloadEnabled, call.RequirePreload))
+	var apptCols appointmentColumns
+	updateAppointment := old.Type == "appointment" && appointment != nil
+	if updateAppointment {
+		apptCols, err = s.resolveAppointmentUpdate(ctx, publisherID, old, appointment)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var src *Source
+	if updateAppointment {
+		src, err = scanSource(s.pool.QueryRow(ctx,
+			`UPDATE routing_sources SET
+			   name = COALESCE($3, name),
+			   slug = COALESCE($4, slug),
+			   is_active = COALESCE($5, is_active),
+			   api_key_required = COALESCE($6, api_key_required),
+			   integration_connection_id = COALESCE($7, integration_connection_id),
+			   tracking_number = COALESCE($8, tracking_number),
+			   twilio_sid = COALESCE($9, twilio_sid),
+			   payload_enabled = COALESCE($10, payload_enabled),
+			   require_preload = COALESCE($11, require_preload),
+			   contract_id = $12,
+			   calendar_id = $13,
+			   delivery_mode = $14,
+			   publisher_pipeline_id = $15,
+			   publisher_stage_id = $16,
+			   phone_match_mode = $17
+			 WHERE id=$1 AND publisher_id=$2
+			 RETURNING `+sourceCols,
+			id, publisherID, name, slug, isActive, apiKeyRequired,
+			call.IntegrationConnectionID, call.TrackingNumber, call.TwilioSID, call.PayloadEnabled, call.RequirePreload,
+			apptCols.contractID, apptCols.calendarID, apptCols.deliveryMode, apptCols.publisherPipelineID, apptCols.publisherStageID, apptCols.phoneMatchMode))
+	} else {
+		src, err = scanSource(s.pool.QueryRow(ctx,
+			`UPDATE routing_sources SET
+			   name = COALESCE($3, name),
+			   slug = COALESCE($4, slug),
+			   is_active = COALESCE($5, is_active),
+			   api_key_required = COALESCE($6, api_key_required),
+			   integration_connection_id = COALESCE($7, integration_connection_id),
+			   tracking_number = COALESCE($8, tracking_number),
+			   twilio_sid = COALESCE($9, twilio_sid),
+			   payload_enabled = COALESCE($10, payload_enabled),
+			   require_preload = COALESCE($11, require_preload)
+			 WHERE id=$1 AND publisher_id=$2
+			 RETURNING `+sourceCols,
+			id, publisherID, name, slug, isActive, apiKeyRequired,
+			call.IntegrationConnectionID, call.TrackingNumber, call.TwilioSID, call.PayloadEnabled, call.RequirePreload))
+	}
 	if err == nil && src == nil {
 		return nil, httpx.NotFound("source not found")
 	}
