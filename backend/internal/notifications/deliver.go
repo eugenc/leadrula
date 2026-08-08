@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/echayko/leadrula/backend/internal/database"
 	"github.com/jackc/pgx/v5"
@@ -168,7 +169,10 @@ func eventLabel(eventType string, payload map[string]any) string {
 	case "new_lead":
 		return "New lead received"
 	case "new_appointment":
-		return "New appointment booked"
+		if name, ok := payload["lead_name"].(string); ok && strings.TrimSpace(name) != "" {
+			return "New Appointment Booked — " + strings.TrimSpace(name)
+		}
+		return "New Appointment Booked"
 	case "lead_returned":
 		return "A lead was returned"
 	case "lead_disputed":

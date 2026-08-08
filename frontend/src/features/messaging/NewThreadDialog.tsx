@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { get, homeAccountType } from "@/lib/api";
+import { get, messagingAccountType } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { errorMessage } from "@/lib/api";
 import { toast } from "@/store/toastStore";
@@ -195,7 +195,7 @@ function TeamGroupForm({ onCreated, onCancel }: { onCreated: (id: string) => voi
 }
 
 function ExternalForm({ onCreated, onCancel }: { onCreated: (id: string) => void; onCancel: () => void }) {
-  const accountType = homeAccountType();
+  const accountType = messagingAccountType();
 
   if (accountType === "platform") {
     return <PlatformExternalForm onCreated={onCreated} onCancel={onCancel} />;

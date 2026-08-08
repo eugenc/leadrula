@@ -207,10 +207,10 @@ func (s *Service) countBuyerCalendarSlotOccupancyTx(ctx context.Context, tx pgx.
 }
 
 func (s *Service) bookPublisherCalendar(ctx context.Context, p *auth.Principal, params BookParams) (*BookingRow, error) {
-	if params.DeliveryMode != "publisher_pipeline" {
-		return nil, httpx.Validation("calendar-only booking requires delivery_mode publisher_pipeline")
+	if params.DeliveryMode != "publisher" && params.DeliveryMode != "publisher_pipeline" {
+		return nil, httpx.Validation("calendar-only booking requires delivery_mode publisher or publisher_pipeline")
 	}
-	if params.PublisherPipelineID == 0 || params.PublisherStageID == 0 {
+	if params.DeliveryMode == "publisher_pipeline" && (params.PublisherPipelineID == 0 || params.PublisherStageID == 0) {
 		return nil, httpx.Validation("publisher pipeline and stage required")
 	}
 	cal, err := s.loadPublisherCalendar(ctx, p.AccountID, params.CalendarID)
@@ -287,7 +287,7 @@ func (s *Service) bookPublisherCalendar(ctx context.Context, p *auth.Principal, 
 	}
 
 	var emails []notifications.EmailJob
-	if lead.Status == "review" && lead.OwnerAccountID == p.AccountID {
+	if params.DeliveryMode == "publisher_pipeline" && lead.Status == "review" && lead.OwnerAccountID == p.AccountID {
 		if err := s.leads.PlaceInPipeline(ctx, tx, leadID, p.AccountID, params.PublisherPipelineID, params.PublisherStageID, nil); err != nil {
 			return nil, err
 		}

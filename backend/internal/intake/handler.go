@@ -13,12 +13,13 @@ import (
 )
 
 type Handler struct {
-	svc     *Service
-	apikeys *apikeys.Service
+	svc        *Service
+	apikeys    *apikeys.Service
+	apiBaseURL string
 }
 
-func NewHandler(svc *Service, apikeysSvc *apikeys.Service) *Handler {
-	return &Handler{svc: svc, apikeys: apikeysSvc}
+func NewHandler(svc *Service, apikeysSvc *apikeys.Service, apiBaseURL string) *Handler {
+	return &Handler{svc: svc, apikeys: apikeysSvc, apiBaseURL: apiBaseURL}
 }
 
 func resolvePublisherID(r *http.Request) (int64, bool) {
@@ -33,6 +34,7 @@ func resolvePublisherID(r *http.Request) (int64, bool) {
 
 // RegisterPublicRoutes mounts the API-key-authenticated ingest endpoints.
 func (h *Handler) RegisterPublicRoutes(r chi.Router) {
+	r.With(h.apikeys.RequireLeadsRead).Get("/api/v1/sources", h.listSources)
 	r.With(h.apikeys.RequireLeadsWrite).Post("/api/v1/leads", h.ingest)
 	r.With(h.apikeys.RequireLeadsWrite).Post("/api/v1/leads/{id}/action", h.action)
 }
@@ -110,12 +112,47 @@ func (h *Handler) ingest(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &raw) {
 		return
 	}
-	res, err := h.svc.Ingest(r.Context(), publisherID, raw)
+	var (
+		res *IngestResult
+		err error
+	)
+	if slug := resolveIngestSource(raw); slug != "" {
+		src, matchErr := h.svc.MatchSourceBySlug(r.Context(), publisherID, slug)
+		if matchErr != nil {
+			httpx.WriteError(w, matchErr)
+			return
+		}
+		if src != nil {
+			res, err = h.svc.IngestFromSource(r.Context(), publisherID, slug, raw)
+		} else {
+			res, err = h.svc.Ingest(r.Context(), publisherID, raw)
+		}
+	} else {
+		res, err = h.svc.Ingest(r.Context(), publisherID, raw)
+	}
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusAccepted, res)
+	status := http.StatusAccepted
+	if res.Status == "updated" {
+		status = http.StatusOK
+	}
+	httpx.JSON(w, status, res)
+}
+
+func (h *Handler) listSources(w http.ResponseWriter, r *http.Request) {
+	publisherID, ok := resolvePublisherID(r)
+	if !ok {
+		httpx.Err(w, http.StatusForbidden, httpx.CodeForbidden, "publisher account required")
+		return
+	}
+	items, err := h.svc.ListPublicSources(r.Context(), publisherID, h.apiBaseURL)
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func (h *Handler) ingestSource(w http.ResponseWriter, r *http.Request) {

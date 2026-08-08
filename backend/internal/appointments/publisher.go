@@ -25,7 +25,12 @@ func (s *Service) ListPublisherContracts(ctx context.Context, publisherID int64)
 		        (c.status = 'active' AND c.buyer_id IS NOT NULL
 		         AND bc.id IS NOT NULL AND bc.schedule::text NOT IN ('{}', 'null')
 		         AND EXISTS(SELECT 1 FROM buyer_appointment_slots sl
-		                    WHERE sl.calendar_id = bc.id AND sl.disabled_at IS NULL))
+		                    WHERE sl.calendar_id = bc.id AND sl.disabled_at IS NULL)),
+		        COALESCE((
+		          SELECT cc.delivery FROM contract_compensations cc
+		          WHERE cc.contract_id = c.id AND cc.trigger = 'per_lead'
+		          ORDER BY cc.position, cc.id LIMIT 1
+		        ), '')
 		 FROM contracts c
 		 JOIN accounts b ON b.id = c.buyer_id
 		 JOIN accounts p ON p.id = c.publisher_id
@@ -43,7 +48,7 @@ func (s *Service) ListPublisherContracts(ctx context.Context, publisherID int64)
 	for rows.Next() {
 		var c AppointmentContract
 		if err := rows.Scan(&c.ContractID, &c.ContractName, &c.BuyerID, &c.BuyerName,
-			&c.Timezone, &c.Location, &c.CalendarSource, &c.OwnConfigured, &c.CounterpartyConfigured); err != nil {
+			&c.Timezone, &c.Location, &c.CalendarSource, &c.OwnConfigured, &c.CounterpartyConfigured, &c.LeadDelivery); err != nil {
 			return nil, err
 		}
 		c.Configured = c.OwnConfigured || c.CounterpartyConfigured

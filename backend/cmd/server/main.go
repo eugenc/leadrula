@@ -164,8 +164,8 @@ func main() {
 	apptSvc := appointments.NewService(pool, leadsRepo, accountsRepo, notifSvc)
 	apptH := appointments.NewHandler(apptSvc)
 
-	intakeSvc := intake.NewService(pool, leadsRepo, notifSvc, accountsRepo, integrationsEnq)
-	intakeH := intake.NewHandler(intakeSvc, apikeysSvc)
+	intakeSvc := intake.NewService(pool, leadsRepo, notifSvc, accountsRepo, integrationsEnq, apptSvc)
+	intakeH := intake.NewHandler(intakeSvc, apikeysSvc, cfg.APIBaseURL)
 
 	webhooksSvc := webhooks.NewService(pool, leadsRepo, leadsSvc, encKey, integrationsSvc)
 	if err := webhooksSvc.SyncAllSunbaseInboundWebhooks(ctx); err != nil {

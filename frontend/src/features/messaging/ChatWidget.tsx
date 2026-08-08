@@ -11,7 +11,7 @@ import { IncomingList, SentList } from "./ConnectRequests";
 import { NewThreadDialog } from "./NewThreadDialog";
 import { BroadcastComposer } from "./BroadcastComposer";
 import { toast } from "@/store/toastStore";
-import { errorMessage, homeAccountType } from "@/lib/api";
+import { errorMessage, isPlatformOriginSwitch, messagingAccountType } from "@/lib/api";
 
 export function ChatWidget() {
   const user = useAuthStore((s) => s.user);
@@ -31,7 +31,7 @@ function ChatWidgetInner() {
   const createDirect = useCreateDirect();
   const openSupport = useOpenSupportThread();
 
-  const unread = (threads ?? []).reduce((n, t) => n + t.unread_count, 0);
+  const unread = (threads ?? []).reduce((n, t) => n + (t.unread_count ?? 0), 0);
   const pendingCount = (incoming?.length ?? 0) + (invites?.length ?? 0);
   const badge = unread + pendingCount;
 
@@ -57,9 +57,10 @@ function ChatWidgetInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingOpen]);
 
-  const isPublisher = homeAccountType() === "publisher";
-  const isPlatform = homeAccountType() === "platform";
-  const homeInbox = !!user?.is_switched || !!user?.impersonating;
+  const accountType = messagingAccountType();
+  const isPublisher = accountType === "publisher";
+  const isPlatform = accountType === "platform";
+  const homeInbox = (!!user?.is_switched || !!user?.impersonating) && !isPlatformOriginSwitch();
 
   function contactSupport() {
     openSupport.mutate(undefined, {
@@ -79,7 +80,7 @@ function ChatWidgetInner() {
         >
           <MessageSquare className="h-6 w-6" />
           {badge > 0 && (
-            <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1 text-xs font-bold text-white">
+            <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1 text-xs font-bold text-white ring-2 ring-white">
               {badge > 99 ? "99+" : badge}
             </span>
           )}

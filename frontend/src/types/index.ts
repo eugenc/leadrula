@@ -476,7 +476,11 @@ export interface ParticipationReturnRule extends ReturnRule {
   buyer_stage_name: string;
 }
 
-export type SourceType = "webhook" | "call";
+export type SourceType = "webhook" | "call" | "appointment";
+
+export type SourceDeliveryMode = "contract" | "publisher_pipeline" | "publisher";
+
+export type SourcePhoneMatchMode = "update_and_book" | "book_existing" | "reject_duplicate";
 
 export interface Source {
   id: number;
@@ -491,6 +495,13 @@ export interface Source {
   twilio_sid?: string | null;
   payload_enabled?: boolean;
   require_preload?: boolean;
+  // Appointment sources only.
+  contract_id?: number | null;
+  calendar_id?: number | null;
+  delivery_mode?: SourceDeliveryMode;
+  publisher_pipeline_id?: number | null;
+  publisher_stage_id?: number | null;
+  phone_match_mode?: SourcePhoneMatchMode;
 }
 
 export interface CallSettings {
@@ -623,6 +634,7 @@ export interface AppointmentContractOption {
   own_configured?: boolean;
   counterparty_configured?: boolean;
   calendar_source?: "buyer" | "publisher";
+  lead_delivery?: string;
 }
 
 export interface BuyerAppointmentContractOption {

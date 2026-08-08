@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { del, get, homeAccountType, messagingNs, patch, post, postForm } from "@/lib/api";
+import { del, get, messagingAccountType, messagingNs, patch, post, postForm } from "@/lib/api";
 import type { BroadcastJob, BroadcastRecipient, ConnectRequest, Message, Thread } from "./types";
 
 const base = () => `${messagingNs()}/messages`;
-const home = () => homeAccountType();
+const home = () => messagingAccountType();
 
 export function useThreads(archived = false, q = "") {
   return useQuery({
