@@ -3,6 +3,10 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { IconButton } from "@/components/layout/IconButton";
 import { BuiltinCustomFieldSelect } from "@/features/admin/BuiltinCustomFieldSelect";
+import {
+  fieldsSectionCopy,
+  filtersSectionCopy,
+} from "@/features/admin/contractLeadCriteriaLabels";
 import { useCustomFields } from "@/features/leads/hooks";
 import { Trash2 } from "lucide-react";
 import type { ContractLeadCriteria } from "@/types";
@@ -15,18 +19,6 @@ const FILTER_OPS = [
   { value: "gt", label: "More than" },
   { value: "lt", label: "Less than" },
 ];
-
-function fieldsSectionLabels(contractType: string) {
-  const sell = contractType === "sell";
-  return {
-    section: sell ? "Available fields" : "Required fields",
-    addButton: sell ? "Add available field" : "Add required field",
-    removeAria: sell ? "Remove available field" : "Remove required field",
-    intro: sell
-      ? "Available fields, mapping, and intake filters for leads on this contract."
-      : "Required fields, mapping, and intake filters for leads on this contract.",
-  };
-}
 
 function parseFieldKey(key: string): { field_type: string; builtin_field?: string; custom_field_id?: number } {
   if (key.startsWith("cf:")) {
@@ -44,28 +36,31 @@ export function emptyLeadCriteria(): ContractLeadCriteria {
   return { required_fields: [], field_map: [], filter_rules: [], quality_rules: [] };
 }
 
-export function ContractLeadCriteriaSection({
-  value,
-  onChange,
-  contractType = "sell",
-}: {
+type LeadCriteriaSectionProps = {
   buyerId?: number;
   buyerPipelineId?: number;
   value: ContractLeadCriteria;
   onChange: (v: ContractLeadCriteria) => void;
   contractType?: string;
-}) {
+  leadType?: string;
+};
+
+export function ContractLeadFieldsSection({
+  value,
+  onChange,
+  contractType = "sell",
+  leadType = "",
+}: LeadCriteriaSectionProps) {
   const { data: customFields } = useCustomFields();
   const fields = customFields ?? [];
-  const labels = fieldsSectionLabels(contractType);
+  const labels = fieldsSectionCopy(leadType, contractType);
 
   return (
     <div className="flex flex-col gap-4">
-      <SectionLabel>Lead data & criteria</SectionLabel>
+      <SectionLabel>{labels.title}</SectionLabel>
       <p className="text-xs text-gray-400">{labels.intro}</p>
 
       <div>
-        <div className="mb-2 text-sm font-semibold text-gray-700">{labels.section}</div>
         {(value.required_fields ?? []).map((r, i) => (
           <div key={i} className="mb-2 flex gap-2">
             <div className="flex-1">
@@ -110,15 +105,30 @@ export function ContractLeadCriteriaSection({
           {labels.addButton}
         </Button>
       </div>
+    </div>
+  );
+}
+
+export function ContractLeadFilterRulesSection({
+  value,
+  onChange,
+}: Pick<LeadCriteriaSectionProps, "value" | "onChange">) {
+  const { data: customFields } = useCustomFields();
+  const fields = customFields ?? [];
+  const labels = filtersSectionCopy();
+
+  return (
+    <div className="flex flex-col gap-4">
+      <SectionLabel>{labels.title}</SectionLabel>
+      <p className="text-xs text-gray-400">{labels.intro}</p>
 
       <div>
-        <div className="mb-2 text-sm font-semibold text-gray-700">Filter rules</div>
         {(value.filter_rules ?? []).map((r, i) => (
           <div key={i} className="relative mb-2 rounded border border-gray-100 p-2 pr-10">
             <IconButton
               variant="danger"
               className="absolute right-1 top-1"
-              aria-label="Remove filter rule"
+              aria-label={labels.removeAria}
               onClick={() => onChange({ ...value, filter_rules: (value.filter_rules ?? []).filter((_, j) => j !== i) })}
             >
               <Trash2 className="h-4 w-4" />
@@ -177,9 +187,25 @@ export function ContractLeadCriteriaSection({
             })
           }
         >
-          Add filter rule
+          {labels.addButton}
         </Button>
       </div>
     </div>
+  );
+}
+
+export function ContractLeadCriteriaSaveButton({
+  disabled,
+  pending,
+  onClick,
+}: {
+  disabled: boolean;
+  pending: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Button className="mt-3" variant="secondary" disabled={disabled || pending} onClick={onClick}>
+      Save lead criteria
+    </Button>
   );
 }

@@ -369,6 +369,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 			SourceStageID:    sourceStageID,
 			BuyerPipelineID:  buyerPipelineID,
 			ReturnStageID:    returnStageID,
+			ScheduleTimezone: body.ScheduleTimezone,
 		})
 		if err != nil {
 			httpx.WriteError(w, err)
@@ -596,16 +597,19 @@ func (h *Handler) listParticipationReturnRoutes(w http.ResponseWriter, r *http.R
 func (h *Handler) updateParticipationReturnRouteDestination(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
-		ReturnStageID int64 `json:"return_stage_id"`
+		ReturnStageID int64   `json:"return_stage_id"`
+		Label         *string `json:"label"`
+		returnScheduleBody
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	if body.ReturnStageID == 0 {
-		httpx.WriteError(w, httpx.Validation("return_stage_id is required"))
+	if body.ReturnStageID == 0 && body.Label == nil {
+		httpx.WriteError(w, httpx.Validation("return_stage_id or label is required"))
 		return
 	}
-	rr, err := h.svc.UpdateParticipationReturnRuleDestination(r.Context(), p.AccountID, idp(r, "ruleId"), body.ReturnStageID)
+	schedule, hasSchedule := body.patch()
+	rr, err := h.svc.UpdateParticipationReturnRuleDestination(r.Context(), p.AccountID, idp(r, "ruleId"), body.ReturnStageID, body.Label, schedule, hasSchedule)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -616,16 +620,19 @@ func (h *Handler) updateParticipationReturnRouteDestination(w http.ResponseWrite
 func (h *Handler) updateContractReturnRouteDestination(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	var body struct {
-		ReturnStageID int64 `json:"return_stage_id"`
+		ReturnStageID int64   `json:"return_stage_id"`
+		Label         *string `json:"label"`
+		returnScheduleBody
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
 	}
-	if body.ReturnStageID == 0 {
-		httpx.WriteError(w, httpx.Validation("return_stage_id is required"))
+	if body.ReturnStageID == 0 && body.Label == nil {
+		httpx.WriteError(w, httpx.Validation("return_stage_id or label is required"))
 		return
 	}
-	rr, err := h.svc.UpdateContractReturnRuleDestination(r.Context(), p.AccountID, idp(r, "ruleId"), body.ReturnStageID)
+	schedule, hasSchedule := body.patch()
+	rr, err := h.svc.UpdateContractReturnRuleDestination(r.Context(), p.AccountID, idp(r, "ruleId"), body.ReturnStageID, body.Label, schedule, hasSchedule)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -732,8 +739,10 @@ func (h *Handler) buyerAddRule(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	cid := idp(r, "id")
 	var body struct {
-		BuyerStageID    int64 `json:"buyer_stage_id"`
-		BuyerPipelineID int64 `json:"buyer_pipeline_id"`
+		BuyerStageID    int64   `json:"buyer_stage_id"`
+		BuyerPipelineID int64   `json:"buyer_pipeline_id"`
+		Label           *string `json:"label"`
+		returnScheduleBody
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
@@ -742,7 +751,8 @@ func (h *Handler) buyerAddRule(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, httpx.Validation("buyer_stage_id is required"))
 		return
 	}
-	rr, err := h.svc.AddBuyerContractReturnRule(r.Context(), p.AccountID, cid, body.BuyerStageID, body.BuyerPipelineID)
+	schedule, hasSchedule := body.patch()
+	rr, err := h.svc.AddBuyerContractReturnRule(r.Context(), p.AccountID, cid, body.BuyerStageID, body.BuyerPipelineID, schedule, hasSchedule, body.Label)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -755,8 +765,10 @@ func (h *Handler) buyerUpdateRule(w http.ResponseWriter, r *http.Request) {
 	cid := idp(r, "id")
 	ruleID := idp(r, "ruleId")
 	var body struct {
-		BuyerStageID    int64 `json:"buyer_stage_id"`
-		BuyerPipelineID int64 `json:"buyer_pipeline_id"`
+		BuyerStageID    int64   `json:"buyer_stage_id"`
+		BuyerPipelineID int64   `json:"buyer_pipeline_id"`
+		Label           *string `json:"label"`
+		returnScheduleBody
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
@@ -765,7 +777,8 @@ func (h *Handler) buyerUpdateRule(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, httpx.Validation("buyer_stage_id is required"))
 		return
 	}
-	rr, err := h.svc.UpdateBuyerContractReturnRule(r.Context(), p.AccountID, cid, ruleID, body.BuyerStageID, body.BuyerPipelineID)
+	schedule, hasSchedule := body.patch()
+	rr, err := h.svc.UpdateBuyerContractReturnRule(r.Context(), p.AccountID, cid, ruleID, body.BuyerStageID, body.BuyerPipelineID, schedule, hasSchedule, body.Label)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -918,6 +931,7 @@ type contractPatchBody struct {
 	SourceStageID      *int64               `json:"source_stage_id"`
 	BuyerPipelineID    *int64               `json:"buyer_pipeline_id"`
 	ReturnStageID      *int64               `json:"return_stage_id"`
+	ScheduleTimezone   *string              `json:"schedule_timezone"`
 	Compensations      []CompensationParams `json:"compensations"`
 	LeadCriteria          *LeadCriteria        `json:"lead_criteria"`
 	AllowedDeliveryModes  []string             `json:"allowed_delivery_modes"`
@@ -929,7 +943,7 @@ func (b contractPatchBody) isDraftSave() bool {
 		b.Description != nil || b.Delivery != nil || b.Compensations != nil || b.LeadCriteria != nil ||
 		b.SourcePipelineID != nil || b.SourceStageID != nil || b.BuyerPipelineID != nil || b.ReturnStageID != nil ||
 		b.RatePerLead != nil || b.CapPeriod != nil || b.CapTotal != nil || b.CapMaxDaily != nil ||
-		len(b.AllowedDeliveryModes) > 0 || b.DistributionStrategy != nil
+		len(b.AllowedDeliveryModes) > 0 || b.DistributionStrategy != nil || b.ScheduleTimezone != nil
 }
 
 func createParamsFromCreateBody(body contractCreateBody, contractType string) CreateParams {

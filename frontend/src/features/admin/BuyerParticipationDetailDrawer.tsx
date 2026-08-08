@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Sheet, DrawerHeader, DrawerBody, DrawerFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { SectionLabel } from "@/components/layout/SectionLabel";
@@ -32,18 +32,39 @@ import {
   participationDeliveryValid,
   deliverySaveBlockReason,
 } from "@/features/admin/BuyerParticipationDeliveryFields";
+import {
+  buyerDeliveryBody,
+  buyerDeliveryDirty,
+  buyerDeliveryDraftFrom,
+  type BuyerDeliveryDraft,
+} from "@/features/admin/buyerDeliveryDirty";
 import type { ContractParticipation } from "@/types";
 
 export function BuyerParticipationDetailDrawer({
   participation,
   onClose,
+  registerFlushHandler,
 }: {
   participation: ContractParticipation | null;
   onClose: () => void;
+  registerFlushHandler?: (fn: (() => Promise<boolean>) | null) => void;
 }) {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
   return (
-    <Sheet open={!!participation} onClose={onClose} width={640}>
-      {participation && <DrawerContent key={participation.id} participation={participation} onClose={onClose} />}
+    <Sheet open={!!participation} onClose={() => closeRef.current()} width={640}>
+      {participation && (
+        <DrawerContent
+          key={participation.id}
+          participation={participation}
+          onClose={onClose}
+          registerClose={(fn) => {
+            closeRef.current = fn ?? onClose;
+          }}
+          registerFlushHandler={registerFlushHandler}
+        />
+      )}
     </Sheet>
   );
 }
@@ -51,28 +72,63 @@ export function BuyerParticipationDetailDrawer({
 function DrawerContent({
   participation,
   onClose,
+  registerClose,
+  registerFlushHandler,
 }: {
   participation: ContractParticipation;
   onClose: () => void;
+  registerClose: (fn: (() => void) | null) => void;
+  registerFlushHandler?: (fn: (() => Promise<boolean>) | null) => void;
 }) {
   const allowed = useMemo(
     () => participation.allowed_delivery_modes ?? ["leads", "leads_pipeline"],
     [participation.allowed_delivery_modes]
   );
-  const [delivery, setDelivery] = useState(participation.delivery || allowed[0] || "leads");
-  const [pipelineId, setPipelineId] = useState(participation.buyer_pipeline_id ?? 0);
-  const [stageId, setStageId] = useState(participation.buyer_target_stage_id ?? 0);
-  const [webhookId, setWebhookId] = useState(participation.outbound_webhook_id ?? 0);
-  const [integrationId, setIntegrationId] = useState(participation.integration_connection_id ?? 0);
-  const [status, setStatus] = useState(participation.status);
+  const touchedRef = useRef(false);
+  const closingRef = useRef(false);
+
+  const [delivery, setDeliveryState] = useState(
+    () => buyerDeliveryDraftFrom(participation, allowed).delivery
+  );
+  const [pipelineId, setPipelineIdState] = useState(participation.buyer_pipeline_id ?? 0);
+  const [stageId, setStageIdState] = useState(participation.buyer_target_stage_id ?? 0);
+  const [webhookId, setWebhookIdState] = useState(participation.outbound_webhook_id ?? 0);
+  const [integrationId, setIntegrationIdState] = useState(participation.integration_connection_id ?? 0);
+  const [status, setStatusState] = useState(participation.status);
+
+  function touch() {
+    touchedRef.current = true;
+  }
+  const setDelivery = (v: string) => {
+    touch();
+    setDeliveryState(v);
+  };
+  const setPipelineId = (v: number) => {
+    touch();
+    setPipelineIdState(v);
+  };
+  const setStageId = (v: number) => {
+    touch();
+    setStageIdState(v);
+  };
+  const setWebhookId = (v: number) => {
+    touch();
+    setWebhookIdState(v);
+  };
+  const setIntegrationId = (v: number) => {
+    touch();
+    setIntegrationIdState(v);
+  };
 
   useEffect(() => {
-    setDelivery(participation.delivery || allowed[0] || "leads");
-    setPipelineId(participation.buyer_pipeline_id ?? 0);
-    setStageId(participation.buyer_target_stage_id ?? 0);
-    setWebhookId(participation.outbound_webhook_id ?? 0);
-    setIntegrationId(participation.integration_connection_id ?? 0);
-    setStatus(participation.status);
+    touchedRef.current = false;
+    const draft = buyerDeliveryDraftFrom(participation, allowed);
+    setDeliveryState(draft.delivery);
+    setPipelineIdState(draft.pipelineId);
+    setStageIdState(draft.stageId);
+    setWebhookIdState(draft.webhookId);
+    setIntegrationIdState(draft.integrationId);
+    setStatusState(participation.status);
   }, [
     participation.id,
     participation.delivery,
@@ -83,6 +139,14 @@ function DrawerContent({
     participation.status,
     allowed,
   ]);
+
+  const localDraft: BuyerDeliveryDraft = {
+    delivery,
+    pipelineId,
+    stageId,
+    webhookId,
+    integrationId,
+  };
 
   const pipelineDelivery = delivery === "leads_pipeline";
   const editable = status === "active" || status === "paused";
@@ -108,6 +172,74 @@ function DrawerContent({
   const returnRoutesValid = !pipelineDelivery || (returnRoutes?.length ?? 0) > 0;
   const deliverySaveBlock = deliverySaveBlockReason(delivery, pipelineId, stageId, webhookId);
 
+  const flushRef = useRef({
+    participation,
+    allowed,
+    localDraft,
+    canEditDelivery: false,
+  });
+  flushRef.current = {
+    participation,
+    allowed,
+    localDraft,
+    canEditDelivery,
+  };
+
+  const flushDelivery = useCallback(async (): Promise<boolean> => {
+    const { participation: p, allowed: modes, localDraft: draft, canEditDelivery: editable } =
+      flushRef.current;
+    if (!editable || !buyerDeliveryDirty(draft, p, modes)) return true;
+    if (!participationDeliveryValid(draft.delivery, draft.pipelineId, draft.stageId, draft.webhookId)) {
+      toast.error("Complete distribution settings before saving.");
+      return false;
+    }
+    const block = deliverySaveBlockReason(
+      draft.delivery,
+      draft.pipelineId,
+      draft.stageId,
+      draft.webhookId
+    );
+    if (block) {
+      toast.error(block);
+      return false;
+    }
+
+    const toastId = toast.progress("Saving…");
+    try {
+      await saveDelivery.mutateAsync({ id: p.id, body: buyerDeliveryBody(draft) });
+      toast.update(toastId, "Saved");
+      setTimeout(() => toast.dismiss(toastId), 1500);
+      touchedRef.current = false;
+      return true;
+    } catch (e) {
+      toast.dismiss(toastId);
+      toast.error(errorMessage(e));
+      return false;
+    }
+  }, [saveDelivery]);
+
+  const handleClose = useCallback(async () => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    try {
+      const ok = await flushDelivery();
+      if (ok) onClose();
+    } finally {
+      closingRef.current = false;
+    }
+  }, [flushDelivery, onClose]);
+
+  useLayoutEffect(() => {
+    registerClose(() => {
+      void handleClose();
+    });
+    registerFlushHandler?.(flushDelivery);
+    return () => {
+      registerClose(null);
+      registerFlushHandler?.(null);
+    };
+  }, [handleClose, flushDelivery, registerClose, registerFlushHandler]);
+
   const primaryRate =
     participation.rate_per_lead ??
     compensations?.find((c) => c.kind === "flat_rate")?.flat_amount ??
@@ -120,22 +252,14 @@ function DrawerContent({
 
   const isCall = participation.lead_type === "Call";
 
-  function buildDeliveryBody() {
-    const body: Record<string, unknown> = { delivery };
-    if (pipelineDelivery) {
-      body.buyer_pipeline_id = pipelineId;
-      body.buyer_target_stage_id = stageId;
-    }
-    if (delivery === "webhook" && webhookId) body.outbound_webhook_id = webhookId;
-    if (integrationId) body.integration_connection_id = integrationId;
-    return body;
-  }
-
   function saveDeliverySettings() {
     saveDelivery.mutate(
-      { id: participation.id, body: buildDeliveryBody() },
+      { id: participation.id, body: buyerDeliveryBody(localDraft) },
       {
-        onSuccess: () => toast.success("Delivery saved"),
+        onSuccess: () => {
+          toast.success("Distribution saved");
+          touchedRef.current = false;
+        },
         onError: (e) => toast.error(errorMessage(e)),
       }
     );
@@ -146,7 +270,7 @@ function DrawerContent({
       { id: participation.id, status: next },
       {
         onSuccess: () => {
-          setStatus(next);
+          setStatusState(next);
           toast.success(successMessage);
           if (next === "withdrawn") onClose();
         },
@@ -169,7 +293,7 @@ function DrawerContent({
       <DrawerHeader
         title={participation.contract_name ?? "Contract"}
         subtitle={`${participation.publisher_name ?? "Publisher"} · ${formatParticipationStatus(status)} · ${formatMoney(primaryRate)}/lead · ${participation.lead_count ?? 0} received`}
-        onClose={onClose}
+        onClose={() => void handleClose()}
       />
 
       <DrawerBody>
@@ -195,7 +319,7 @@ function DrawerContent({
 
         {participation.contract_status && participation.contract_status !== "active" && (
           <p className="mb-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            Publisher contract is {formatContractStatus(participation.contract_status)}. Delivery changes are disabled until the publisher
+            Publisher contract is {formatContractStatus(participation.contract_status)}. Distribution changes are disabled until the publisher
             resumes the offer.
           </p>
         )}
@@ -280,6 +404,63 @@ function DrawerContent({
                   onIntegrationIdChange={setIntegrationId}
                   showIntegration
                 />
+                <div className="mt-4 border-t border-gray-100 pt-4">
+                  <SectionLabel>Return Routes</SectionLabel>
+                  {pipelineDelivery ? (
+                    <div className="space-y-3">
+                      {!returnRoutesLoading && !buyerPipelineSelected && (
+                        <p className="text-sm text-gray-500">Select Distribute to Pipeline and Distribute to Stage under Distribution first.</p>
+                      )}
+                      {!returnRoutesLoading && buyerPipelineSelected && !publisherPipelineConfigured && (
+                        <p className="text-sm text-gray-500">
+                          The publisher must finish pipeline delivery setup before you can add return routes.
+                        </p>
+                      )}
+                      {(returnRoutesLoading || (buyerPipelineSelected && publisherPipelineConfigured)) && (
+                        <ContractReturnRulesEditor
+                          side="buyer"
+                          buyerStages={buyerStages ?? []}
+                          publisherStages={[]}
+                          rules={returnRoutes ?? []}
+                          loading={returnRoutesLoading}
+                          onAdd={(buyerStageId, _returnStageId, schedule, label) =>
+                            addRoute.mutate(
+                              {
+                                participationId: participation.id,
+                                buyerStageId,
+                                buyerPipelineId: pipelineId || undefined,
+                                schedule,
+                                label,
+                              },
+                              { onError: (e) => toast.error(errorMessage(e)) }
+                            )
+                          }
+                          onUpdate={(ruleId, buyerStageId, _returnStageId, schedule, label) =>
+                            updateRoute.mutate(
+                              {
+                                participationId: participation.id,
+                                ruleId,
+                                buyerStageId,
+                                buyerPipelineId: pipelineId || undefined,
+                                schedule,
+                                label,
+                              },
+                              { onError: (e) => toast.error(errorMessage(e)) }
+                            )
+                          }
+                          onDelete={(ruleId) =>
+                            removeRoute.mutate(
+                              { participationId: participation.id, ruleId },
+                              { onError: (e) => toast.error(errorMessage(e)) }
+                            )
+                          }
+                        />
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">Return routes apply when delivery mode is Pipeline.</p>
+                  )}
+                </div>
                 {canEditDelivery && (
                   <Button
                     className="mt-3"
@@ -292,7 +473,7 @@ function DrawerContent({
                     }
                     onClick={saveDeliverySettings}
                   >
-                    {saveDelivery.isPending ? "Saving…" : "Save delivery"}
+                    {saveDelivery.isPending ? "Saving…" : "Save distribution"}
                   </Button>
                 )}
                 {canEditDelivery && deliverySaveBlock && (
@@ -300,61 +481,10 @@ function DrawerContent({
                 )}
                 {canEditDelivery && deliveryValid && pipelineDelivery && !returnRoutesValid && (
                   <p className="mt-2 text-xs text-amber-700">
-                    Add return routes on the Return routes tab so leads can be returned to the publisher.
+                    Add return routes below so leads can be returned to the publisher.
                   </p>
                 )}
               </>
-            ),
-            returns: pipelineDelivery ? (
-              <div className="space-y-3">
-                <SectionLabel>Return routes</SectionLabel>
-                {!returnRoutesLoading && !buyerPipelineSelected && (
-                  <p className="text-sm text-gray-500">Select your destination pipeline under Delivery first.</p>
-                )}
-                {!returnRoutesLoading && buyerPipelineSelected && !publisherPipelineConfigured && (
-                  <p className="text-sm text-gray-500">
-                    The publisher must finish pipeline delivery setup before you can add return routes.
-                  </p>
-                )}
-                {(returnRoutesLoading || (buyerPipelineSelected && publisherPipelineConfigured)) && (
-                  <ContractReturnRulesEditor
-                    side="buyer"
-                    buyerStages={buyerStages ?? []}
-                    publisherStages={[]}
-                    rules={returnRoutes ?? []}
-                    loading={returnRoutesLoading}
-                    onAdd={(buyerStageId) =>
-                      addRoute.mutate(
-                        {
-                          participationId: participation.id,
-                          buyerStageId,
-                          buyerPipelineId: pipelineId || undefined,
-                        },
-                        { onError: (e) => toast.error(errorMessage(e)) }
-                      )
-                    }
-                    onUpdate={(ruleId, buyerStageId) =>
-                      updateRoute.mutate(
-                        {
-                          participationId: participation.id,
-                          ruleId,
-                          buyerStageId,
-                          buyerPipelineId: pipelineId || undefined,
-                        },
-                        { onError: (e) => toast.error(errorMessage(e)) }
-                      )
-                    }
-                    onDelete={(ruleId) =>
-                      removeRoute.mutate(
-                        { participationId: participation.id, ruleId },
-                        { onError: (e) => toast.error(errorMessage(e)) }
-                      )
-                    }
-                  />
-                )}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-500">Return routes apply when delivery mode is Pipeline.</p>
             ),
             fieldmap: <BuyerContractFieldMapSection participationId={participation.id} />,
             ...(isCall ? { calltarget: <BuyerCallTargetSection participationId={participation.id} /> } : {}),
@@ -370,9 +500,9 @@ function DrawerContent({
               : {}),
           }}
           extraTabs={[
-            { id: "fieldmap", label: "Field mapping" },
-            ...(isCall ? [{ id: "calltarget" as const, label: "Call target" }] : []),
-            ...(hasTriggerComps ? [{ id: "triggers" as const, label: "Rev / profit share" }] : []),
+            { id: "fieldmap", label: "Field Mapping" },
+            ...(isCall ? [{ id: "calltarget" as const, label: "Call Target" }] : []),
+            ...(hasTriggerComps ? [{ id: "triggers" as const, label: "Rev / Profit Share" }] : []),
           ]}
         />
       </DrawerBody>

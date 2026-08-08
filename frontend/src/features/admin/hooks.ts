@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { get, getBlob, ns, post, postForm, patch, del } from "@/lib/api";
+import type { ReturnScheduleDraft } from "@/features/admin/returnSchedule";
+import { scheduleToBody } from "@/features/admin/returnSchedule";
 import { useAuthStore } from "@/store/authStore";
 import type {
   ApiKey,
@@ -810,22 +812,27 @@ export function useAddReturnRule(buyer = false) {
       buyerStageId,
       returnStageId,
       buyerPipelineId,
+      schedule,
+      label,
     }: {
       contractId: number;
       buyerStageId: number;
       returnStageId?: number;
       buyerPipelineId?: number;
+      schedule?: ReturnScheduleDraft;
+      label?: string;
     }) =>
       post(
         buyer
           ? `/buyer/contracts/${contractId}/return-rules`
           : `/publisher/contracts/${contractId}/return-rules`,
-        buyer
-          ? {
-              buyer_stage_id: buyerStageId,
-              ...(buyerPipelineId ? { buyer_pipeline_id: buyerPipelineId } : {}),
-            }
-          : { buyer_stage_id: buyerStageId, return_stage_id: returnStageId }
+        {
+          buyer_stage_id: buyerStageId,
+          ...(buyerPipelineId ? { buyer_pipeline_id: buyerPipelineId } : {}),
+          ...(returnStageId ? { return_stage_id: returnStageId } : {}),
+          ...(schedule ? scheduleToBody(schedule) : {}),
+          ...(label !== undefined ? { label } : {}),
+        }
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["return-rules"] }),
   });
@@ -839,23 +846,28 @@ export function useUpdateReturnRule(buyer = false) {
       buyerStageId,
       returnStageId,
       buyerPipelineId,
+      schedule,
+      label,
     }: {
       contractId: number;
       ruleId: number;
       buyerStageId: number;
       returnStageId?: number;
       buyerPipelineId?: number;
+      schedule?: ReturnScheduleDraft;
+      label?: string;
     }) =>
       patch(
         buyer
           ? `/buyer/contracts/${contractId}/return-rules/${ruleId}`
           : `/publisher/return-rules/${ruleId}`,
-        buyer
-          ? {
-              buyer_stage_id: buyerStageId,
-              ...(buyerPipelineId ? { buyer_pipeline_id: buyerPipelineId } : {}),
-            }
-          : { buyer_stage_id: buyerStageId, return_stage_id: returnStageId }
+        {
+          buyer_stage_id: buyerStageId,
+          ...(buyerPipelineId ? { buyer_pipeline_id: buyerPipelineId } : {}),
+          ...(returnStageId ? { return_stage_id: returnStageId } : {}),
+          ...(schedule ? scheduleToBody(schedule) : {}),
+          ...(label !== undefined ? { label } : {}),
+        }
       ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["return-rules"] }),
   });
@@ -885,8 +897,22 @@ export function useContractParticipationReturnRoutes(contractId: number | null) 
 export function useUpdateParticipationReturnRuleDestination() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ ruleId, returnStageId }: { ruleId: number; returnStageId: number }) =>
-      patch(`/publisher/participation-return-routes/${ruleId}`, { return_stage_id: returnStageId }),
+    mutationFn: ({
+      ruleId,
+      returnStageId,
+      schedule,
+      label,
+    }: {
+      ruleId: number;
+      returnStageId?: number;
+      schedule?: ReturnScheduleDraft;
+      label?: string;
+    }) =>
+      patch(`/publisher/participation-return-routes/${ruleId}`, {
+        ...(returnStageId ? { return_stage_id: returnStageId } : {}),
+        ...(label !== undefined ? { label } : {}),
+        ...(schedule ? scheduleToBody(schedule) : {}),
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["participation-return-routes"] }),
   });
 }
@@ -894,8 +920,22 @@ export function useUpdateParticipationReturnRuleDestination() {
 export function useUpdateContractReturnRuleDestination() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ ruleId, returnStageId }: { ruleId: number; returnStageId: number }) =>
-      patch(`/publisher/contract-return-routes/${ruleId}`, { return_stage_id: returnStageId }),
+    mutationFn: ({
+      ruleId,
+      returnStageId,
+      schedule,
+      label,
+    }: {
+      ruleId: number;
+      returnStageId?: number;
+      schedule?: ReturnScheduleDraft;
+      label?: string;
+    }) =>
+      patch(`/publisher/contract-return-routes/${ruleId}`, {
+        ...(returnStageId ? { return_stage_id: returnStageId } : {}),
+        ...(label !== undefined ? { label } : {}),
+        ...(schedule ? scheduleToBody(schedule) : {}),
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["return-rules"] }),
   });
 }
@@ -923,14 +963,20 @@ export function useAddParticipationReturnRoute() {
       participationId,
       buyerStageId,
       buyerPipelineId,
+      schedule,
+      label,
     }: {
       participationId: number;
       buyerStageId: number;
       buyerPipelineId?: number;
+      schedule?: ReturnScheduleDraft;
+      label?: string;
     }) =>
       post(`/buyer/participations/${participationId}/return-routes`, {
         buyer_stage_id: buyerStageId,
         ...(buyerPipelineId ? { buyer_pipeline_id: buyerPipelineId } : {}),
+        ...(schedule ? scheduleToBody(schedule) : {}),
+        ...(label !== undefined ? { label } : {}),
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["participation-return-routes"] }),
   });
@@ -944,15 +990,21 @@ export function useUpdateParticipationReturnRoute() {
       ruleId,
       buyerStageId,
       buyerPipelineId,
+      schedule,
+      label,
     }: {
       participationId: number;
       ruleId: number;
       buyerStageId: number;
       buyerPipelineId?: number;
+      schedule?: ReturnScheduleDraft;
+      label?: string;
     }) =>
       patch(`/buyer/participations/${participationId}/return-routes/${ruleId}`, {
         buyer_stage_id: buyerStageId,
         ...(buyerPipelineId ? { buyer_pipeline_id: buyerPipelineId } : {}),
+        ...(schedule ? scheduleToBody(schedule) : {}),
+        ...(label !== undefined ? { label } : {}),
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["participation-return-routes"] }),
   });

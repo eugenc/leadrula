@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   useContracts,
   useCreateContract,
@@ -30,7 +30,8 @@ import {
   type CompensationDraft,
 } from "@/features/admin/CreateContractCompensationList";
 import {
-  ContractLeadCriteriaSection,
+  ContractLeadFieldsSection,
+  ContractLeadFilterRulesSection,
   emptyLeadCriteria,
 } from "@/features/admin/ContractLeadCriteriaSection";
 import type { ContractLeadCriteria } from "@/types";
@@ -69,6 +70,23 @@ export function ContractsPage() {
   const [createSession, setCreateSession] = useState(0);
   const [selected, setSelected] = useState<Contract | null>(null);
   const [contractToDelete, setContractToDelete] = useState<Contract | null>(null);
+  const [pendingContract, setPendingContract] = useState<Contract | null>(null);
+  const flushRef = useRef<(() => Promise<boolean>) | null>(null);
+
+  function requestSelect(c: Contract) {
+    if (selected?.id === c.id) return;
+    if (selected) setPendingContract(c);
+    else setSelected(c);
+  }
+
+  useEffect(() => {
+    if (!pendingContract) return;
+    void (async () => {
+      const ok = (await flushRef.current?.()) ?? true;
+      if (ok) setSelected(pendingContract);
+      setPendingContract(null);
+    })();
+  }, [pendingContract]);
 
   return (
     <>
@@ -108,7 +126,7 @@ export function ContractsPage() {
           </THead>
           <TBody>
             {(contracts ?? []).map((c) => (
-              <TR key={c.id} onClick={() => setSelected(c)}>
+              <TR key={c.id} onClick={() => requestSelect(c)}>
                 <TD>{formatContractType(c.contract_type) || "Sell"}</TD>
                 <TD className="font-semibold">
                   {formatBuyerWithType(c.buyer_name, c.buyer_account_type) ||
@@ -150,7 +168,13 @@ export function ContractsPage() {
           setSelected(c);
         }}
       />
-      <ContractDetailDrawer contract={selected} onClose={() => setSelected(null)} />
+      <ContractDetailDrawer
+        contract={selected}
+        onClose={() => setSelected(null)}
+        registerFlushHandler={(fn) => {
+          flushRef.current = fn;
+        }}
+      />
       <DeleteContractConfirmDialog
         open={contractToDelete != null}
         onClose={() => setContractToDelete(null)}
@@ -423,23 +447,33 @@ function CreateContractDrawer({
               {openOfferPipelineRequired(offerDraft.allowed_delivery_modes) && (
                 <ContractPublisherPipelineSection value={deliveryDraft} onChange={setDeliveryDraft} />
               )}
+              <p className="text-sm text-gray-500">
+                Save as draft first, then add return routes in the contract drawer before activating pipeline delivery.
+              </p>
             </div>
           ) : (
-            <ContractDeliverySection value={deliveryDraft} onChange={setDeliveryDraft} />
+            <div className="space-y-4">
+              <ContractDeliverySection value={deliveryDraft} onChange={setDeliveryDraft} />
+              <p className="text-sm text-gray-500">
+                Save as draft first, then add return routes in the contract drawer before activating pipeline delivery.
+              </p>
+            </div>
           ),
-          criteria: (
-            <ContractLeadCriteriaSection
+          fields: (
+            <ContractLeadFieldsSection
               buyerId={form.buyer_id}
               buyerPipelineId={deliveryDraft.counterparty_pipeline_id}
               contractType={form.contract_type}
+              leadType={form.lead_type}
               value={leadCriteria}
               onChange={setLeadCriteria}
             />
           ),
-          returns: (
-            <p className="text-sm text-gray-500">
-              Save as draft first, then add return routes in the contract drawer before activating pipeline delivery.
-            </p>
+          filters: (
+            <ContractLeadFilterRulesSection
+              value={leadCriteria}
+              onChange={setLeadCriteria}
+            />
           ),
         }}
       />

@@ -19,9 +19,10 @@ type ReturnDeps struct {
 
 // ReturnOutcome is the result of TryReturnLead.
 type ReturnOutcome struct {
-	Lead     *Lead
-	Emails   []notifications.EmailJob
-	Returned bool
+	Lead      *Lead
+	Emails    []notifications.EmailJob
+	Returned  bool
+	Scheduled bool
 }
 
 // resolveLeadContractID returns the lead's contract_id, or the contract from its latest distribute debit.
@@ -51,13 +52,12 @@ func backfillSoldLeadContract(ctx context.Context, q database.Querier, leadID, c
 }
 
 // TryReturnLead checks whether the lead's current stage triggers a contract return
-// and moves it back to the publisher when matched.
+// and moves it back to the publisher when matched (or schedules a delayed return).
 func TryReturnLead(ctx context.Context, q database.Querier, deps ReturnDeps, leadID int64) (*ReturnOutcome, error) {
 	lead, err := deps.Repo.GetByID(ctx, q, leadID)
 	if err != nil {
 		return nil, err
 	}
-	// Frozen leads under dispute never auto-return.
 	if lead.Status == "disputed" {
 		log.Printf("TryReturnLead lead=%d: skip disputed", leadID)
 		return &ReturnOutcome{Lead: lead}, nil
@@ -81,63 +81,26 @@ func TryReturnLead(ctx context.Context, q database.Querier, deps ReturnDeps, lea
 		lead.ContractID = contractID
 	}
 
-	returnInfo, err := contracts.FindReturnRule(ctx, q, *lead.ContractID, lead.OwnerAccountID, *lead.StageID)
+	match, err := contracts.FindReturnMatch(ctx, q, *lead.ContractID, lead.OwnerAccountID, *lead.StageID)
 	if err != nil {
 		return nil, err
 	}
-	if returnInfo == nil {
+	if match == nil {
 		log.Printf("TryReturnLead lead=%d contract=%d stage=%d: no matching return rule", leadID, *lead.ContractID, *lead.StageID)
 		return &ReturnOutcome{Lead: lead}, nil
 	}
 
-	if err := contracts.ValidateReturnDestination(ctx, q, returnInfo.SourcePipelineID, returnInfo.ReturnStageID); err != nil {
-		return nil, err
+	mode := match.ReturnScheduleMode
+	if mode == "" {
+		mode = contracts.ReturnScheduleImmediate
 	}
-	refunded, err := billing.ReturnCreditExists(ctx, q, lead.OwnerAccountID, leadID, *lead.ContractID)
-	if err != nil {
-		return nil, fmt.Errorf("return rule check refund: %w", err)
-	}
-	if !refunded {
-		amt, err := billing.DistributeDebitAmount(ctx, q, lead.OwnerAccountID, leadID, *lead.ContractID)
-		if err != nil {
-			return nil, fmt.Errorf("return rule lookup debit: %w", err)
+	if mode != contracts.ReturnScheduleImmediate {
+		if err := ScheduleReturn(ctx, q, deps.Repo, leadID, *contractID, *lead.StageID, match); err != nil {
+			return nil, fmt.Errorf("schedule return: %w", err)
 		}
-		if amt > 0 {
-			if err := billing.Credit(ctx, q, lead.OwnerAccountID, amt, leadID, *lead.ContractID, "lead returned"); err != nil {
-				return nil, fmt.Errorf("return rule refund buyer: %w", err)
-			}
-		}
+		log.Printf("TryReturnLead lead=%d contract=%d: scheduled return mode=%s", leadID, *contractID, mode)
+		return &ReturnOutcome{Lead: lead, Scheduled: true}, nil
 	}
-	if err := contracts.RecordEarningReturn(ctx, q, leadID, lead.ContractID); err != nil {
-		return nil, fmt.Errorf("return rule record earning: %w", err)
-	}
-	if err := deps.Repo.MoveToPublisher(ctx, q, leadID, returnInfo.PublisherID, returnInfo.SourcePipelineID, returnInfo.ReturnStageID); err != nil {
-		return nil, fmt.Errorf("return rule move to publisher: %w", err)
-	}
-	buyerID := lead.OwnerAccountID
-	pubID := returnInfo.PublisherID
-	if err := RecordRouteExecution(ctx, q, RecordRouteExecutionParams{
-		RouteName:       "Lead returned",
-		LeadID:          leadID,
-		OwnerAccountID:  buyerID,
-		TargetAccountID: &pubID,
-		Destination:     "return",
-		TriggerType:     "return",
-	}); err != nil {
-		return nil, fmt.Errorf("return rule record execution: %w", err)
-	}
-	returned, err := deps.Repo.GetByID(ctx, q, leadID)
-	if err != nil {
-		return nil, fmt.Errorf("return rule reload lead: %w", err)
-	}
-	emails, err := deps.Notif.Deliver(ctx, q, notifications.DeliverParams{
-		AccountID: returnInfo.PublisherID,
-		UserIDs:   notifications.AssigneeIDs(returned.AssignedUserID),
-		EventType: "lead_returned",
-		Payload:   map[string]any{"lead_id": leadID},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("return rule notify: %w", err)
-	}
-	return &ReturnOutcome{Lead: returned, Emails: emails, Returned: true}, nil
+
+	return executeReturnMove(ctx, q, deps, leadID, &match.ReturnInfo, *contractID, lead)
 }

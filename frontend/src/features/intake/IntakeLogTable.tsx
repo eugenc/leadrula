@@ -44,6 +44,9 @@ interface IntakeLogTableProps {
   emptyTitle?: string;
   sourceSlug?: string;
   initialLogType?: LogTypeFilter;
+  initialLeadId?: number;
+  initialWebhookId?: number;
+  initialExpandedKey?: string | null;
 }
 
 /** Compact source-only log for SourcesPage drawer — unchanged. */
@@ -233,6 +236,9 @@ export function IntakeLogTable({
   emptyTitle = source === "buyer" ? "No contract leads yet." : "No intake history yet.",
   sourceSlug,
   initialLogType = "all",
+  initialLeadId,
+  initialWebhookId,
+  initialExpandedKey,
 }: IntakeLogTableProps) {
   const user = useAuthStore((s) => s.user);
   const canReplayWebhooks = canAction(user, ActionPipelinesRouting);
@@ -242,12 +248,12 @@ export function IntakeLogTable({
   );
   const [logFilter, setLogFilter] = useState<LogFilter>("all");
   const [webhookStatus, setWebhookStatus] = useState<WebhookDeliveryStatusFilter>("");
-  const [webhookId, setWebhookId] = useState<number | "">("");
+  const [webhookId, setWebhookId] = useState<number | "">(initialWebhookId ?? "");
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [selectedLeadId, setSelectedLeadId] = useState<number | null>(null);
+  const [selectedLeadId, setSelectedLeadId] = useState<number | null>(initialLeadId ?? null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -556,6 +562,7 @@ export function IntakeLogTable({
         mappingSource={source}
         canReplayWebhooks={canReplayWebhooks}
         integrationLogMode={logType === "integrations"}
+        initialExpandedKey={initialExpandedKey}
         onPageChange={setPage}
         onLimitChange={setLimit}
         onWebhookReplayed={refetchWebhooks}

@@ -147,6 +147,7 @@ func main() {
 	leadsRepo := leads.NewRepository(pool)
 	leadsSvc := leads.NewService(leadsRepo, notifSvc, accountsRepo, pipelinesSvc, integrationsEnq)
 	leadsH := leads.NewHandler(leadsSvc)
+	go leadsSvc.RunReturnWorker(ctx)
 	if integrationsSvc != nil {
 		integrationsSvc.SetLeadService(leadsSvc)
 		go integrationsSvc.RunWorker(ctx)

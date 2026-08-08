@@ -23,10 +23,10 @@ export function ContractDeliverySection({
 
   return (
     <div className="flex flex-col gap-2.5">
-      <SectionLabel>Delivery</SectionLabel>
+      <SectionLabel>Distribution</SectionLabel>
       <p className="text-xs text-gray-400">Default for this contract. Routes can override Lead vs Pipeline.</p>
       <div>
-        <Label>Delivery mode</Label>
+        <Label>Distribution Type</Label>
         <Select
           value={value.delivery}
           onChange={(e) => onChange(pipelineDraftWithoutLeads({ ...value, delivery: e.target.value }))}
@@ -41,7 +41,7 @@ export function ContractDeliverySection({
       {value.delivery === "leads_pipeline" && (
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <Label>Source pipeline</Label>
+            <Label>Distribute from Pipeline</Label>
             <Select value={value.source_pipeline_id} onChange={(e) => set("source_pipeline_id", Number(e.target.value))}>
               <option value={0}>Select…</option>
               {(pubPipelines ?? []).map((p) => (
@@ -52,7 +52,7 @@ export function ContractDeliverySection({
             </Select>
           </div>
           <div>
-            <Label>Source stage</Label>
+            <Label>Distribute from Stage</Label>
             <Select value={value.source_stage_id} onChange={(e) => set("source_stage_id", Number(e.target.value))}>
               <option value={0}>Select…</option>
               {(sourceStages ?? []).map((s) => (

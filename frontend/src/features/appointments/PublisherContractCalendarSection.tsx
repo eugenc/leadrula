@@ -12,9 +12,11 @@ import {
 export function PublisherContractCalendarSection({
   contractId,
   publisherAppointmentCalendarId,
+  standalone = false,
 }: {
   contractId: number;
   publisherAppointmentCalendarId?: number | null;
+  standalone?: boolean;
 }) {
   const { data: calendars = [], isLoading } = usePublisherCalendars();
   const save = useSetContractPublisherAppointmentCalendar();
@@ -48,8 +50,8 @@ export function PublisherContractCalendarSection({
   }
 
   return (
-    <div className="mt-4 space-y-3 border-t border-gray-100 pt-4">
-      <SectionLabel>Publisher booking calendar</SectionLabel>
+    <div className={standalone ? "space-y-3" : "mt-4 space-y-3 border-t border-gray-100 pt-4"}>
+      <SectionLabel>Booking Calendar</SectionLabel>
       <p className="text-xs text-gray-400">
         Your calendar — you can book immediately; the buyer sees it after they accept the contract.
       </p>

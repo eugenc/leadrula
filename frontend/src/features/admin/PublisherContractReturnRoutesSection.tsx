@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import {
@@ -8,7 +9,9 @@ import {
 } from "@/features/admin/hooks";
 import { useStages } from "@/features/leads/hooks";
 import type { ContractDeliveryDraft } from "@/features/admin/contractCompensation";
-import { Select } from "@/components/ui/input";
+import { ReturnScheduleFields } from "@/features/admin/ReturnScheduleFields";
+import { scheduleFromRule, type ReturnScheduleDraft } from "@/features/admin/returnSchedule";
+import { Input, Select } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/misc";
 import type { ParticipationReturnRule, ReturnRule } from "@/types";
 
@@ -18,6 +21,12 @@ type Props = {
   openOffer?: boolean;
 };
 
+type ReturnRouteUpdate = {
+  returnStageId?: number;
+  schedule?: ReturnScheduleDraft;
+  label?: string;
+};
+
 function ReturnRouteRow({
   rule,
   sortedPublisher,
@@ -25,56 +34,88 @@ function ReturnRouteRow({
 }: {
   rule: {
     id: number;
-    buyer_stage_id: number;
-    buyer_stage_name?: string;
-    buyer_pipeline_name?: string;
     stale?: boolean;
     return_stage_id?: number | null;
-  };
+  } & ReturnRule;
   sortedPublisher: { id: number; name: string }[];
-  onUpdate: (ruleId: number, returnStageId: number) => void;
+  onUpdate: (ruleId: number, patch: ReturnRouteUpdate) => void;
 }) {
   const pending = !rule.return_stage_id;
+  const [schedule, setSchedule] = useState(() => scheduleFromRule(rule));
+  const [label, setLabel] = useState(rule.label ?? "");
+
+  useEffect(() => {
+    setSchedule(scheduleFromRule(rule));
+    setLabel(rule.label ?? "");
+  }, [rule]);
+
+  function save(patch: ReturnRouteUpdate) {
+    onUpdate(rule.id, {
+      returnStageId: rule.return_stage_id ?? undefined,
+      label,
+      ...patch,
+    });
+  }
+
+  function saveDestination(returnStageId: number) {
+    save({ returnStageId });
+  }
+
+  function saveSchedule(next: ReturnScheduleDraft) {
+    setSchedule(next);
+    if (rule.return_stage_id) {
+      save({ schedule: next });
+    }
+  }
+
+  function saveLabel(next: string) {
+    setLabel(next);
+    save({ label: next });
+  }
+
   return (
-    <div className="flex flex-wrap items-end gap-2 rounded-md border border-gray-100 px-3 py-2">
-      <div className="min-w-[120px] flex-1">
-        <div className="mb-1 text-xs font-semibold text-gray-500">Return start</div>
-        <div className="rounded border border-gray-100 bg-gray-50 px-2 py-1.5 text-sm text-gray-700">
-          {rule.buyer_stage_name || `#${rule.buyer_stage_id}`}
-          {rule.buyer_pipeline_name ? (
-            <span className="block text-xs text-gray-400">{rule.buyer_pipeline_name}</span>
-          ) : null}
+    <div className="space-y-2 rounded-md border border-gray-100 px-3 py-2">
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="min-w-[120px] flex-1">
+          <div className="mb-1 text-xs font-semibold text-gray-500">Return destination</div>
+          {pending ? (
+            <Select value={0} onChange={(e) => saveDestination(Number(e.target.value))}>
+              <option value={0}>Pending — select stage…</option>
+              {sortedPublisher.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            <Select
+              value={rule.return_stage_id ?? 0}
+              onChange={(e) => saveDestination(Number(e.target.value))}
+            >
+              {sortedPublisher.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </Select>
+          )}
         </div>
-        {rule.stale && (
-          <p className="mt-1 text-xs text-amber-700">
-            Stage is from an old buyer pipeline — buyer must re-add this return route.
-          </p>
-        )}
+        <div className="min-w-[120px] flex-1">
+          <div className="mb-1 text-xs font-semibold text-gray-500">Label</div>
+          <Input
+            value={label}
+            placeholder="Optional label"
+            onChange={(e) => setLabel(e.target.value)}
+            onBlur={(e) => saveLabel(e.target.value)}
+          />
+          {rule.stale && (
+            <p className="mt-1 text-xs text-amber-700">
+              This return route is stale — buyer must re-add it before returns will trigger.
+            </p>
+          )}
+        </div>
       </div>
-      <div className="min-w-[120px] flex-1">
-        <div className="mb-1 text-xs font-semibold text-gray-500">Return destination</div>
-        {pending ? (
-          <Select value={0} onChange={(e) => onUpdate(rule.id, Number(e.target.value))}>
-            <option value={0}>Pending — select stage…</option>
-            {sortedPublisher.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </Select>
-        ) : (
-          <Select
-            value={rule.return_stage_id ?? 0}
-            onChange={(e) => onUpdate(rule.id, Number(e.target.value))}
-          >
-            {sortedPublisher.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </Select>
-        )}
-      </div>
+      {!pending && <ReturnScheduleFields compact value={schedule} onChange={saveSchedule} />}
     </div>
   );
 }
@@ -109,7 +150,7 @@ function OpenOfferReturnRoutes({
   if (!delivery.source_pipeline_id) {
     return (
       <p className="text-sm text-gray-500">
-        Configure source pipeline under Delivery before mapping buyer return routes.
+        Select Distribute from Pipeline under Distribution before mapping buyer return routes.
       </p>
     );
   }
@@ -125,8 +166,7 @@ function OpenOfferReturnRoutes({
   return (
     <div>
       <p className="mb-3 text-xs text-gray-400">
-        Buyers pick return start stages when they accept. Map each buyer return start stage to a stage on your
-        pipeline.
+        Buyers configure return routes when they accept. Map each route to a stage on your pipeline.
       </p>
       {groups.length === 0 ? (
         <p className="text-sm text-gray-500">No buyer return routes yet. Routes appear after buyers accept.</p>
@@ -141,9 +181,9 @@ function OpenOfferReturnRoutes({
                     key={rule.id}
                     rule={rule}
                     sortedPublisher={sortedPublisher}
-                    onUpdate={(ruleId, returnStageId) =>
+                    onUpdate={(ruleId, patch) =>
                       updateDestination.mutate(
-                        { ruleId, returnStageId },
+                        { ruleId, ...patch },
                         { onError: (err) => toast.error(errorMessage(err)) }
                       )
                     }
@@ -174,7 +214,7 @@ function DirectContractReturnRoutes({
   if (!delivery.source_pipeline_id) {
     return (
       <p className="text-sm text-gray-500">
-        Configure source pipeline under Delivery before mapping buyer return routes.
+        Select Distribute from Pipeline under Distribution before mapping buyer return routes.
       </p>
     );
   }
@@ -191,17 +231,15 @@ function DirectContractReturnRoutes({
   return (
     <div>
       <p className="mb-3 text-xs text-gray-400">
-        The buyer configures trigger stages on their contract. Map each buyer return start stage to a stage on your
-        pipeline.
+        The buyer configures return routes on their contract. Map each route to a stage on your pipeline.
       </p>
       {hasStaleReturnRoutes && (
         <p className="mb-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          Some return routes point at stages from an old buyer pipeline and will not trigger returns until the buyer
-          re-adds them.
+          Some return routes are stale and will not trigger returns until the buyer re-adds them.
         </p>
       )}
       {routeList.length === 0 ? (
-        <p className="text-sm text-gray-500">No return routes yet. The buyer configures trigger stages on their contract.</p>
+        <p className="text-sm text-gray-500">No return routes yet. The buyer configures return routes on their contract.</p>
       ) : (
         <div className="space-y-2">
           {routeList.map((rule) => (
@@ -209,9 +247,9 @@ function DirectContractReturnRoutes({
               key={rule.id}
               rule={rule}
               sortedPublisher={sortedPublisher}
-              onUpdate={(ruleId, returnStageId) =>
+              onUpdate={(ruleId, patch) =>
                 updateDestination.mutate(
-                  { ruleId, returnStageId },
+                  { ruleId, ...patch },
                   { onError: (err) => toast.error(errorMessage(err)) }
                 )
               }

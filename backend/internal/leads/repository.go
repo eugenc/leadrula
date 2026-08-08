@@ -239,6 +239,9 @@ func (r *Repository) GetByRef(ctx context.Context, p *auth.Principal, ref string
 	if err := r.EnrichLeadEconomics(ctx, p.AccountType, l); err != nil {
 		return nil, err
 	}
+	if err := r.EnrichPendingReturn(ctx, l); err != nil {
+		return nil, err
+	}
 	return l, nil
 }
 
@@ -650,6 +653,9 @@ func (r *Repository) List(ctx context.Context, p *auth.Principal, o ListOptions)
 	}
 	if items == nil {
 		items = []Lead{}
+	}
+	if err := r.EnrichPendingReturnsBatch(ctx, items); err != nil {
+		return nil, err
 	}
 	if o.IncludeEconomics {
 		if err := r.EnrichLeadEconomicsBatch(ctx, p.AccountType, items); err != nil {

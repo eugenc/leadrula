@@ -44,7 +44,7 @@ func tryApplyCRMInboundStageSync(ctx context.Context, s *Service, webhook Webhoo
 
 	actor := leads.ActorWebhook(webhook.Name)
 	if lead.PipelineID != nil && *lead.PipelineID != syncCfg.LeadrulaPipelineID {
-		_ = s.leads.LogCRMSyncSkipped(ctx, s.leads.Pool(), leadID, lead.OwnerAccountID, actor, "lead not in inbound sync pipeline")
+		_ = s.leads.LogCRMSyncSkipped(ctx, s.leads.Pool(), leadID, lead.OwnerAccountID, actor, providers.InboundStageSyncPipelineSkipReason)
 		return
 	}
 

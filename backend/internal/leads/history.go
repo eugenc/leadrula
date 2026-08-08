@@ -495,7 +495,7 @@ func (r *Repository) disputeMessageHistoryEntries(ctx context.Context, leadID in
 
 func (r *Repository) webhookHistoryEntries(ctx context.Context, leadID int64) ([]LeadHistoryEntry, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT d.id, d.created_at, d.status::text, w.name, w.account_id, d.error_message
+		`SELECT d.id, d.created_at, d.status::text, w.name, w.id, w.account_id, d.error_message
 		 FROM webhook_deliveries d
 		 JOIN webhooks w ON w.id = d.webhook_id
 		 WHERE d.lead_id = $1
@@ -508,10 +508,12 @@ func (r *Repository) webhookHistoryEntries(ctx context.Context, leadID int64) ([
 	for rows.Next() {
 		var e LeadHistoryEntry
 		var webhookName string
+		var webhookID int64
 		var errMsg *string
-		if err := rows.Scan(&e.ID, &e.CreatedAt, &e.Status, &webhookName, &e.ownerAccountID, &errMsg); err != nil {
+		if err := rows.Scan(&e.ID, &e.CreatedAt, &e.Status, &webhookName, &webhookID, &e.ownerAccountID, &errMsg); err != nil {
 			return nil, err
 		}
+		e.WebhookID = &webhookID
 		e.Kind = "webhook"
 		e.ActorType = "webhook"
 		e.ActorName = webhookName
@@ -661,6 +663,10 @@ func changeLogKind(changeKind string) string {
 		return "lead_created"
 	case "crm_sync_skipped":
 		return "integration"
+	case "return_scheduled":
+		return "return_scheduled"
+	case "return_cancelled":
+		return "return_cancelled"
 	case "preassigned_buyer":
 		return "field_change"
 	default:
@@ -705,9 +711,19 @@ func changeLogSummary(changeKind string, fieldName, fromVal, toVal *string) stri
 		return "Created"
 	case "crm_sync_skipped":
 		if toVal != nil && *toVal != "" {
-			return fmt.Sprintf("CRM sync · %s", *toVal)
+			return fmt.Sprintf("Stage sync skipped · %s", *toVal)
 		}
-		return "CRM sync skipped"
+		return "Stage sync skipped"
+	case "return_scheduled":
+		if toVal != nil && *toVal != "" {
+			return fmt.Sprintf("Return scheduled · %s", *toVal)
+		}
+		return "Return scheduled"
+	case "return_cancelled":
+		if toVal != nil && *toVal != "" {
+			return fmt.Sprintf("Return cancelled · was %s", *toVal)
+		}
+		return "Return cancelled"
 	default:
 		return fmt.Sprintf("%s · %s → %s", field, from, to)
 	}

@@ -204,6 +204,8 @@ export interface Lead {
   gross_profit?: number | null;
   net_profit?: number | null;
   purchase_price?: number | null;
+  pending_return_at?: string | null;
+  pending_return_timezone?: string | null;
 }
 
 export interface LeadListResponse {
@@ -257,7 +259,9 @@ export type LeadHistoryKind =
   | "lead_deleted"
   | "pipeline_cleared"
   | "imported"
-  | "note_added";
+  | "note_added"
+  | "return_scheduled"
+  | "return_cancelled";
 
 export interface LeadHistoryEntry {
   id: number;
@@ -286,6 +290,7 @@ export interface LeadHistoryEntry {
   pipeline_name?: string | null;
   stage_name?: string | null;
   route_name?: string | null;
+  webhook_id?: number | null;
 }
 
 export interface CustomField {
@@ -353,6 +358,7 @@ export interface Contract {
   appointment_calendar_id?: number | null;
   publisher_appointment_calendar_id?: number | null;
   appointment_calendar_source?: "buyer" | "publisher" | null;
+  schedule_timezone?: string;
   participations?: ContractParticipation[];
 }
 
@@ -460,15 +466,24 @@ export interface ContractCompensation {
   payout_month_day?: number | null;
 }
 
+export type ReturnScheduleMode = "immediate" | "delay" | "daily" | "weekly";
+
 export interface ReturnRule {
   id: number;
   contract_id: number;
   participation_id?: number;
   buyer_stage_id: number;
   return_stage_id?: number | null;
+  label?: string;
   buyer_stage_name?: string;
   buyer_pipeline_name?: string;
   stale?: boolean;
+  return_schedule_mode?: ReturnScheduleMode;
+  return_delay_seconds?: number;
+  return_delay_value?: number;
+  return_delay_unit?: "minutes" | "hours" | "days";
+  return_time?: string;
+  return_weekdays?: number[];
 }
 
 export interface ParticipationReturnRule extends ReturnRule {

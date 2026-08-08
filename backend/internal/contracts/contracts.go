@@ -50,19 +50,27 @@ type Contract struct {
 	PublisherAppointmentCalendarID  *int64  `json:"publisher_appointment_calendar_id,omitempty"`
 	AppointmentCalendarSource       *string `json:"appointment_calendar_source,omitempty"`
 	Participations         []Participation `json:"participations,omitempty"`
-	CreatedAt              time.Time `json:"created_at"`
+	ScheduleTimezone       string          `json:"schedule_timezone,omitempty"`
+	CreatedAt              time.Time       `json:"created_at"`
 }
 
 type ReturnRule struct {
-	ID                int64     `json:"id"`
-	ContractID        int64     `json:"contract_id"`
-	ParticipationID   *int64    `json:"participation_id,omitempty"`
-	BuyerStageID      int64     `json:"buyer_stage_id"`
-	ReturnStageID     *int64    `json:"return_stage_id,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
-	BuyerStageName    string    `json:"buyer_stage_name,omitempty"`
-	BuyerPipelineName string    `json:"buyer_pipeline_name,omitempty"`
-	Stale             bool      `json:"stale,omitempty"`
+	ID                 int64     `json:"id"`
+	ContractID         int64     `json:"contract_id"`
+	ParticipationID    *int64    `json:"participation_id,omitempty"`
+	BuyerStageID       int64     `json:"buyer_stage_id"`
+	ReturnStageID      *int64    `json:"return_stage_id,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	Label              string    `json:"label,omitempty"`
+	BuyerStageName     string    `json:"buyer_stage_name,omitempty"`
+	BuyerPipelineName  string    `json:"buyer_pipeline_name,omitempty"`
+	Stale              bool      `json:"stale,omitempty"`
+	ReturnScheduleMode string    `json:"return_schedule_mode,omitempty"`
+	ReturnDelaySeconds *int      `json:"return_delay_seconds,omitempty"`
+	ReturnDelayValue   *int      `json:"return_delay_value,omitempty"`
+	ReturnDelayUnit    *string   `json:"return_delay_unit,omitempty"`
+	ReturnTime         *string   `json:"return_time,omitempty"`
+	ReturnWeekdays     []int     `json:"return_weekdays,omitempty"`
 }
 
 // ParticipationReturnRule is a buyer participation return route exposed to the publisher.
@@ -133,7 +141,7 @@ const contractCols = `id, public_id, handler_id, publisher_id, buyer_id, name,
 	COALESCE(description, '') AS description, COALESCE(lead_type, '') AS lead_type,
 	source_pipeline_id, source_stage_id, buyer_pipeline_id, return_stage_id,
 	rate_per_lead::float8, status, cap_period, cap_total, cap_max_daily, created_at,
-	contract_type, mirror_contract_id`
+	contract_type, mirror_contract_id, schedule_timezone`
 
 const contractLeadCountSubquery = `(SELECT COUNT(DISTINCT t.lead_id) FROM transactions t
  WHERE t.contract_id = c.id AND t.type = 'debit' AND t.lead_id IS NOT NULL
@@ -147,7 +155,7 @@ func scanContract(row pgx.Row) (*Contract, error) {
 		&c.Description, &c.LeadType,
 		&c.SourcePipelineID, &c.SourceStageID, &c.BuyerPipelineID, &c.ReturnStageID,
 		&c.RatePerLead, &c.Status, &c.CapPeriod, &c.CapTotal, &c.CapMaxDaily, &c.CreatedAt,
-		&c.ContractType, &c.MirrorContractID)
+		&c.ContractType, &c.MirrorContractID, &c.ScheduleTimezone)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, httpx.NotFound("contract not found")
@@ -352,11 +360,12 @@ type UpdateParams struct {
 }
 
 type DeliveryUpdateParams struct {
-	Delivery         string
-	SourcePipelineID int64
-	SourceStageID    int64
-	BuyerPipelineID  int64
-	ReturnStageID    int64
+	Delivery           string
+	SourcePipelineID   int64
+	SourceStageID      int64
+	BuyerPipelineID    int64
+	ReturnStageID      int64
+	ScheduleTimezone   *string
 }
 
 func (s *Service) UpdateDelivery(ctx context.Context, publisherID, contractID int64, p DeliveryUpdateParams) (*Contract, error) {
@@ -395,15 +404,20 @@ func (s *Service) UpdateDelivery(ctx context.Context, publisherID, contractID in
 	}
 	defer tx.Rollback(ctx)
 
+	scheduleTZ := c.ScheduleTimezone
+	if p.ScheduleTimezone != nil && strings.TrimSpace(*p.ScheduleTimezone) != "" {
+		scheduleTZ = strings.TrimSpace(*p.ScheduleTimezone)
+	}
 	c, err = scanContract(tx.QueryRow(ctx,
 		`UPDATE contracts SET
 		   source_pipeline_id = $3,
 		   source_stage_id = $4,
-		   return_stage_id = $5
+		   return_stage_id = $5,
+		   schedule_timezone = $6
 		 WHERE id = $1 AND publisher_id = $2 AND deleted_at IS NULL
 		 RETURNING `+contractCols,
 		contractID, publisherID,
-		nullableID(sourcePipelineID), nullableID(sourceStageID), nullableID(returnStageID)))
+		nullableID(sourcePipelineID), nullableID(sourceStageID), nullableID(returnStageID), scheduleTZ))
 	if err != nil {
 		return nil, err
 	}
@@ -496,20 +510,20 @@ func (s *Service) Delete(ctx context.Context, publisherID, id int64) error {
 
 func (s *Service) ListReturnRules(ctx context.Context, contractID int64) ([]ReturnRule, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT rr.id, rr.contract_id, rr.participation_id, rr.buyer_stage_id, rr.return_stage_id, rr.created_at,
-		        COALESCE(bs.name, ''), COALESCE(bp.name, ''),
-		        (c.buyer_pipeline_id IS NOT NULL AND bs.pipeline_id IS DISTINCT FROM c.buyer_pipeline_id)
+		`SELECT rr.id, rr.contract_id, rr.participation_id, rr.buyer_stage_id, rr.return_stage_id, rr.created_at, rr.label,
+		        COALESCE(bs.name, ''),
+		        (c.buyer_pipeline_id IS NOT NULL AND bs.pipeline_id IS DISTINCT FROM c.buyer_pipeline_id),
+		        rr.return_schedule_mode, rr.return_delay_seconds, rr.return_time, rr.return_weekdays
 		 FROM contract_return_rules rr
 		 JOIN contracts c ON c.id = rr.contract_id
 		 LEFT JOIN pipeline_stages bs ON bs.id = rr.buyer_stage_id
-		 LEFT JOIN pipelines bp ON bp.id = bs.pipeline_id
 		 WHERE rr.contract_id = $1 AND rr.participation_id IS NULL
 		 ORDER BY rr.id`, contractID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	return scanEnrichedReturnRules(rows)
+	return scanEnrichedReturnRulesWithSchedule(rows)
 }
 
 func (s *Service) ListReturnRulesForPublisher(ctx context.Context, publisherID, contractID int64) ([]PublisherReturnRule, error) {
@@ -517,13 +531,12 @@ func (s *Service) ListReturnRulesForPublisher(ctx context.Context, publisherID, 
 		return nil, err
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT rr.id, rr.contract_id, rr.participation_id, rr.buyer_stage_id, rr.return_stage_id, rr.created_at,
-		        COALESCE(bs.name, ''), COALESCE(bp.name, ''),
-		        (c.buyer_pipeline_id IS NOT NULL AND bs.pipeline_id IS DISTINCT FROM c.buyer_pipeline_id)
+		`SELECT rr.id, rr.contract_id, rr.participation_id, rr.buyer_stage_id, rr.return_stage_id, rr.created_at, rr.label,
+		        (c.buyer_pipeline_id IS NOT NULL AND bs.pipeline_id IS DISTINCT FROM c.buyer_pipeline_id),
+		        rr.return_schedule_mode, rr.return_delay_seconds, rr.return_time, rr.return_weekdays
 		 FROM contract_return_rules rr
 		 JOIN contracts c ON c.id = rr.contract_id
 		 LEFT JOIN pipeline_stages bs ON bs.id = rr.buyer_stage_id
-		 LEFT JOIN pipelines bp ON bp.id = bs.pipeline_id
 		 WHERE rr.contract_id = $1 AND rr.participation_id IS NULL AND c.publisher_id = $2
 		 ORDER BY rr.id`, contractID, publisherID)
 	if err != nil {
@@ -533,12 +546,20 @@ func (s *Service) ListReturnRulesForPublisher(ctx context.Context, publisherID, 
 	var out []PublisherReturnRule
 	for rows.Next() {
 		var rr PublisherReturnRule
+		var clock *string
+		var weekdays []int16
+		var label *string
 		if err := rows.Scan(
-			&rr.ID, &rr.ContractID, &rr.ParticipationID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt,
-			&rr.BuyerStageName, &rr.BuyerPipelineName, &rr.Stale,
+			&rr.ID, &rr.ContractID, &rr.ParticipationID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt, &label,
+			&rr.Stale,
+			&rr.ReturnScheduleMode, &rr.ReturnDelaySeconds, &clock, &weekdays,
 		); err != nil {
 			return nil, err
 		}
+		rr.Label = derefString(label)
+		rr.ReturnTime = clock
+		rr.ReturnWeekdays = weekdaysFromDB(weekdays)
+		enrichReturnRuleSchedule(&rr.ReturnRule)
 		out = append(out, rr)
 	}
 	return out, rows.Err()
@@ -546,7 +567,7 @@ func (s *Service) ListReturnRulesForPublisher(ctx context.Context, publisherID, 
 
 func (s *Service) ListParticipationReturnRules(ctx context.Context, participationID int64) ([]ReturnRule, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, contract_id, participation_id, buyer_stage_id, return_stage_id, created_at
+		`SELECT `+returnRuleAllCols+`
 		 FROM contract_return_rules
 		 WHERE participation_id = $1
 		 ORDER BY id`, participationID)
@@ -554,7 +575,7 @@ func (s *Service) ListParticipationReturnRules(ctx context.Context, participatio
 		return nil, err
 	}
 	defer rows.Close()
-	return scanReturnRules(rows)
+	return scanReturnRulesWithSchedule(rows)
 }
 
 func (s *Service) ListContractParticipationReturnRules(ctx context.Context, publisherID, contractID int64) ([]ParticipationReturnRule, error) {
@@ -562,13 +583,13 @@ func (s *Service) ListContractParticipationReturnRules(ctx context.Context, publ
 		return nil, err
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT rr.id, rr.contract_id, rr.participation_id, rr.buyer_stage_id, rr.return_stage_id, rr.created_at,
-		        COALESCE(a.name, ''), COALESCE(bs.name, '')
+		`SELECT rr.id, rr.contract_id, rr.participation_id, rr.buyer_stage_id, rr.return_stage_id, rr.created_at, rr.label,
+		        COALESCE(a.name, ''),
+		        rr.return_schedule_mode, rr.return_delay_seconds, rr.return_time, rr.return_weekdays
 		 FROM contract_return_rules rr
 		 JOIN contract_participations p ON p.id = rr.participation_id
 		 JOIN contracts c ON c.id = rr.contract_id
 		 LEFT JOIN accounts a ON a.id = p.buyer_id
-		 LEFT JOIN pipeline_stages bs ON bs.id = rr.buyer_stage_id
 		 WHERE rr.contract_id = $1 AND rr.participation_id IS NOT NULL AND c.publisher_id = $2
 		 ORDER BY a.name, rr.id`, contractID, publisherID)
 	if err != nil {
@@ -578,12 +599,20 @@ func (s *Service) ListContractParticipationReturnRules(ctx context.Context, publ
 	var out []ParticipationReturnRule
 	for rows.Next() {
 		var rr ParticipationReturnRule
+		var clock *string
+		var weekdays []int16
+		var label *string
 		if err := rows.Scan(
-			&rr.ID, &rr.ContractID, &rr.ParticipationID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt,
-			&rr.BuyerName, &rr.BuyerStageName,
+			&rr.ID, &rr.ContractID, &rr.ParticipationID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt, &label,
+			&rr.BuyerName,
+			&rr.ReturnScheduleMode, &rr.ReturnDelaySeconds, &clock, &weekdays,
 		); err != nil {
 			return nil, err
 		}
+		rr.Label = derefString(label)
+		rr.ReturnTime = clock
+		rr.ReturnWeekdays = weekdaysFromDB(weekdays)
+		enrichReturnRuleSchedule(&rr.ReturnRule)
 		out = append(out, rr)
 	}
 	return out, rows.Err()
@@ -806,7 +835,7 @@ func (s *Service) AddReturnRule(ctx context.Context, contractID, buyerStageID, r
 	return rr, nil
 }
 
-func (s *Service) AddParticipationReturnRule(ctx context.Context, participationID, buyerStageID, buyerPipelineOverride int64) (*ReturnRule, error) {
+func (s *Service) AddParticipationReturnRule(ctx context.Context, participationID, buyerStageID, buyerPipelineOverride int64, schedule ReturnSchedulePatch, hasSchedule bool, label *string) (*ReturnRule, error) {
 	var status string
 	if err := s.pool.QueryRow(ctx,
 		`SELECT status::text FROM contract_participations WHERE id = $1`, participationID).Scan(&status); err != nil {
@@ -822,15 +851,31 @@ func (s *Service) AddParticipationReturnRule(ctx context.Context, participationI
 	if err != nil {
 		return nil, err
 	}
-	rr := &ReturnRule{}
-	err = s.pool.QueryRow(ctx,
-		`INSERT INTO contract_return_rules(contract_id, participation_id, buyer_stage_id, return_stage_id)
-		 VALUES ($1,$2,$3,NULL)
+	resolvedSchedule, err := resolveNewReturnSchedule(schedule, hasSchedule)
+	if err != nil {
+		return nil, err
+	}
+	mode, delay, clock, weekdays := scheduleSQLValues(resolvedSchedule)
+	labelVal, _, err := returnRuleLabelArg(label)
+	if err != nil {
+		return nil, err
+	}
+	if label == nil {
+		labelVal = nil
+	}
+	rr, err := scanReturnRule(s.pool.QueryRow(ctx,
+		`INSERT INTO contract_return_rules(contract_id, participation_id, buyer_stage_id, return_stage_id, label,
+		   return_schedule_mode, return_delay_seconds, return_time, return_weekdays)
+		 VALUES ($1,$2,$3,NULL,$4,$5,$6,$7,$8)
 		 ON CONFLICT (participation_id, buyer_stage_id) WHERE participation_id IS NOT NULL
-		 DO UPDATE SET buyer_stage_id = EXCLUDED.buyer_stage_id
-		 RETURNING id, contract_id, participation_id, buyer_stage_id, return_stage_id, created_at`,
-		contractID, participationID, buyerStageID).Scan(
-		&rr.ID, &rr.ContractID, &rr.ParticipationID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt)
+		 DO UPDATE SET buyer_stage_id = EXCLUDED.buyer_stage_id,
+		   label = COALESCE(EXCLUDED.label, contract_return_rules.label),
+		   return_schedule_mode = EXCLUDED.return_schedule_mode,
+		   return_delay_seconds = EXCLUDED.return_delay_seconds,
+		   return_time = EXCLUDED.return_time,
+		   return_weekdays = EXCLUDED.return_weekdays
+		 RETURNING `+returnRuleAllCols,
+		contractID, participationID, buyerStageID, labelVal, mode, delay, clock, weekdays))
 	if err != nil {
 		if database.IsUniqueViolation(err) {
 			return nil, httpx.Conflict("return route already exists for this buyer stage")
@@ -904,18 +949,124 @@ func (s *Service) validateParticipationReturnRuleDestination(ctx context.Context
 	return contractID, buyerStageID, nil
 }
 
-func (s *Service) UpdateParticipationReturnRuleDestination(ctx context.Context, publisherID, ruleID, returnStageID int64) (*ReturnRule, error) {
-	contractID, buyerStageID, err := s.validateParticipationReturnRuleDestination(ctx, publisherID, ruleID, returnStageID)
+func (s *Service) validatePublisherParticipationReturnRule(ctx context.Context, publisherID, ruleID int64) (int64, int64, error) {
+	var contractID int64
+	var buyerStageID int64
+	var participationID *int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT rr.contract_id, rr.buyer_stage_id, rr.participation_id
+		 FROM contract_return_rules rr
+		 JOIN contracts c ON c.id = rr.contract_id
+		 WHERE rr.id = $1 AND c.publisher_id = $2 AND c.deleted_at IS NULL`,
+		ruleID, publisherID).Scan(&contractID, &buyerStageID, &participationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, 0, httpx.NotFound("return route not found")
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	if participationID == nil {
+		return 0, 0, httpx.NotFound("return route not found")
+	}
+	return contractID, buyerStageID, nil
+}
+
+func (s *Service) validatePublisherContractReturnRule(ctx context.Context, publisherID, ruleID int64) (int64, int64, error) {
+	var contractID int64
+	var buyerStageID int64
+	var participationID *int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT rr.contract_id, rr.buyer_stage_id, rr.participation_id
+		 FROM contract_return_rules rr
+		 JOIN contracts c ON c.id = rr.contract_id
+		 WHERE rr.id = $1 AND c.publisher_id = $2 AND c.deleted_at IS NULL`,
+		ruleID, publisherID).Scan(&contractID, &buyerStageID, &participationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, 0, httpx.NotFound("return route not found")
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	if participationID != nil {
+		return 0, 0, httpx.NotFound("return route not found")
+	}
+	return contractID, buyerStageID, nil
+}
+
+func (s *Service) UpdateParticipationReturnRuleDestination(ctx context.Context, publisherID, ruleID, returnStageID int64, label *string, schedule ReturnSchedulePatch, hasSchedule bool) (*ReturnRule, error) {
+	var contractID int64
+	var buyerStageID int64
+	var err error
+	if returnStageID > 0 {
+		contractID, buyerStageID, err = s.validateParticipationReturnRuleDestination(ctx, publisherID, ruleID, returnStageID)
+	} else {
+		contractID, buyerStageID, err = s.validatePublisherParticipationReturnRule(ctx, publisherID, ruleID)
+	}
 	if err != nil {
 		return nil, err
 	}
-	rr := &ReturnRule{}
+	labelVal, hasLabel, err := returnRuleLabelArg(label)
+	if err != nil {
+		return nil, err
+	}
+	if returnStageID == 0 && !hasLabel && !hasSchedule {
+		return nil, httpx.Validation("return_stage_id or label is required")
+	}
+	var existing ReturnRule
+	var existingWeekdays []int16
 	err = s.pool.QueryRow(ctx,
-		`UPDATE contract_return_rules SET return_stage_id = $2
-		 WHERE id = $1 AND participation_id IS NOT NULL
-		 RETURNING id, contract_id, participation_id, buyer_stage_id, return_stage_id, created_at`,
-		ruleID, returnStageID).Scan(
-		&rr.ID, &rr.ContractID, &rr.ParticipationID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt)
+		`SELECT return_schedule_mode, return_delay_seconds, return_time, return_weekdays
+		 FROM contract_return_rules WHERE id = $1`, ruleID).
+		Scan(&existing.ReturnScheduleMode, &existing.ReturnDelaySeconds, &existing.ReturnTime, &existingWeekdays)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	existing.ReturnWeekdays = weekdaysFromDB(existingWeekdays)
+	resolvedSchedule := ReturnScheduleInput{Mode: ReturnScheduleImmediate}
+	if hasSchedule {
+		resolvedSchedule, err = schedule.Resolved(existing)
+		if err != nil {
+			return nil, err
+		}
+	} else if existing.ReturnScheduleMode != "" {
+		resolvedSchedule = ReturnScheduleInput{
+			Mode:         existing.ReturnScheduleMode,
+			DelaySeconds: existing.ReturnDelaySeconds,
+			ReturnTime:   existing.ReturnTime,
+			Weekdays:     existing.ReturnWeekdays,
+		}
+	}
+	mode, delay, clock, weekdays := scheduleSQLValues(resolvedSchedule)
+	var rr *ReturnRule
+	if returnStageID > 0 && hasLabel {
+		rr, err = scanReturnRule(s.pool.QueryRow(ctx,
+			`UPDATE contract_return_rules SET return_stage_id = $2, label = $3,
+			   return_schedule_mode = $4, return_delay_seconds = $5, return_time = $6, return_weekdays = $7
+			 WHERE id = $1 AND participation_id IS NOT NULL
+			 RETURNING `+returnRuleAllCols,
+			ruleID, returnStageID, labelVal, mode, delay, clock, weekdays))
+	} else if returnStageID > 0 {
+		rr, err = scanReturnRule(s.pool.QueryRow(ctx,
+			`UPDATE contract_return_rules SET return_stage_id = $2,
+			   return_schedule_mode = $3, return_delay_seconds = $4, return_time = $5, return_weekdays = $6
+			 WHERE id = $1 AND participation_id IS NOT NULL
+			 RETURNING `+returnRuleAllCols,
+			ruleID, returnStageID, mode, delay, clock, weekdays))
+	} else if hasLabel {
+		rr, err = scanReturnRule(s.pool.QueryRow(ctx,
+			`UPDATE contract_return_rules SET label = $2,
+			   return_schedule_mode = $3, return_delay_seconds = $4, return_time = $5, return_weekdays = $6
+			 WHERE id = $1 AND participation_id IS NOT NULL
+			 RETURNING `+returnRuleAllCols,
+			ruleID, labelVal, mode, delay, clock, weekdays))
+	} else {
+		rr, err = scanReturnRule(s.pool.QueryRow(ctx,
+			`UPDATE contract_return_rules SET
+			   return_schedule_mode = $2, return_delay_seconds = $3, return_time = $4, return_weekdays = $5
+			 WHERE id = $1 AND participation_id IS NOT NULL
+			 RETURNING `+returnRuleAllCols,
+			ruleID, mode, delay, clock, weekdays))
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("return route not found")
 	}
@@ -963,18 +1114,80 @@ func (s *Service) validateContractReturnRuleDestination(ctx context.Context, pub
 	return contractID, buyerStageID, nil
 }
 
-func (s *Service) UpdateContractReturnRuleDestination(ctx context.Context, publisherID, ruleID, returnStageID int64) (*ReturnRule, error) {
-	contractID, buyerStageID, err := s.validateContractReturnRuleDestination(ctx, publisherID, ruleID, returnStageID)
+func (s *Service) UpdateContractReturnRuleDestination(ctx context.Context, publisherID, ruleID, returnStageID int64, label *string, schedule ReturnSchedulePatch, hasSchedule bool) (*ReturnRule, error) {
+	var contractID int64
+	var buyerStageID int64
+	var err error
+	if returnStageID > 0 {
+		contractID, buyerStageID, err = s.validateContractReturnRuleDestination(ctx, publisherID, ruleID, returnStageID)
+	} else {
+		contractID, buyerStageID, err = s.validatePublisherContractReturnRule(ctx, publisherID, ruleID)
+	}
 	if err != nil {
 		return nil, err
 	}
-	rr := &ReturnRule{}
+	labelVal, hasLabel, err := returnRuleLabelArg(label)
+	if err != nil {
+		return nil, err
+	}
+	if returnStageID == 0 && !hasLabel && !hasSchedule {
+		return nil, httpx.Validation("return_stage_id or label is required")
+	}
+	var existing ReturnRule
+	var existingWeekdays []int16
 	err = s.pool.QueryRow(ctx,
-		`UPDATE contract_return_rules SET return_stage_id = $2
-		 WHERE id = $1 AND participation_id IS NULL
-		 RETURNING id, contract_id, participation_id, buyer_stage_id, return_stage_id, created_at`,
-		ruleID, returnStageID).Scan(
-		&rr.ID, &rr.ContractID, &rr.ParticipationID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt)
+		`SELECT return_schedule_mode, return_delay_seconds, return_time, return_weekdays
+		 FROM contract_return_rules WHERE id = $1`, ruleID).
+		Scan(&existing.ReturnScheduleMode, &existing.ReturnDelaySeconds, &existing.ReturnTime, &existingWeekdays)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	existing.ReturnWeekdays = weekdaysFromDB(existingWeekdays)
+	resolvedSchedule := ReturnScheduleInput{Mode: ReturnScheduleImmediate}
+	if hasSchedule {
+		resolvedSchedule, err = schedule.Resolved(existing)
+		if err != nil {
+			return nil, err
+		}
+	} else if existing.ReturnScheduleMode != "" {
+		resolvedSchedule = ReturnScheduleInput{
+			Mode:         existing.ReturnScheduleMode,
+			DelaySeconds: existing.ReturnDelaySeconds,
+			ReturnTime:   existing.ReturnTime,
+			Weekdays:     existing.ReturnWeekdays,
+		}
+	}
+	mode, delay, clock, weekdays := scheduleSQLValues(resolvedSchedule)
+	var rr *ReturnRule
+	if returnStageID > 0 && hasLabel {
+		rr, err = scanReturnRule(s.pool.QueryRow(ctx,
+			`UPDATE contract_return_rules SET return_stage_id = $2, label = $3,
+			   return_schedule_mode = $4, return_delay_seconds = $5, return_time = $6, return_weekdays = $7
+			 WHERE id = $1 AND participation_id IS NULL
+			 RETURNING `+returnRuleAllCols,
+			ruleID, returnStageID, labelVal, mode, delay, clock, weekdays))
+	} else if returnStageID > 0 {
+		rr, err = scanReturnRule(s.pool.QueryRow(ctx,
+			`UPDATE contract_return_rules SET return_stage_id = $2,
+			   return_schedule_mode = $3, return_delay_seconds = $4, return_time = $5, return_weekdays = $6
+			 WHERE id = $1 AND participation_id IS NULL
+			 RETURNING `+returnRuleAllCols,
+			ruleID, returnStageID, mode, delay, clock, weekdays))
+	} else if hasLabel {
+		rr, err = scanReturnRule(s.pool.QueryRow(ctx,
+			`UPDATE contract_return_rules SET label = $2,
+			   return_schedule_mode = $3, return_delay_seconds = $4, return_time = $5, return_weekdays = $6
+			 WHERE id = $1 AND participation_id IS NULL
+			 RETURNING `+returnRuleAllCols,
+			ruleID, labelVal, mode, delay, clock, weekdays))
+	} else {
+		rr, err = scanReturnRule(s.pool.QueryRow(ctx,
+			`UPDATE contract_return_rules SET
+			   return_schedule_mode = $2, return_delay_seconds = $3, return_time = $4, return_weekdays = $5
+			 WHERE id = $1 AND participation_id IS NULL
+			 RETURNING `+returnRuleAllCols,
+			ruleID, mode, delay, clock, weekdays))
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("return route not found")
 	}
@@ -987,7 +1200,7 @@ func (s *Service) UpdateContractReturnRuleDestination(ctx context.Context, publi
 	return rr, nil
 }
 
-func (s *Service) UpdateParticipationReturnRule(ctx context.Context, participationID, ruleID, buyerStageID, buyerPipelineOverride int64) (*ReturnRule, error) {
+func (s *Service) UpdateParticipationReturnRule(ctx context.Context, participationID, ruleID, buyerStageID, buyerPipelineOverride int64, schedule ReturnSchedulePatch, hasSchedule bool, label *string) (*ReturnRule, error) {
 	var status string
 	if err := s.pool.QueryRow(ctx,
 		`SELECT status::text FROM contract_participations WHERE id = $1`, participationID).Scan(&status); err != nil {
@@ -1015,13 +1228,51 @@ func (s *Service) UpdateParticipationReturnRule(ctx context.Context, participati
 	if err != nil {
 		return nil, err
 	}
-	rr := &ReturnRule{}
+	var existing ReturnRule
+	var existingWeekdays []int16
 	err = s.pool.QueryRow(ctx,
-		`UPDATE contract_return_rules SET buyer_stage_id = $2, contract_id = $3
-		 WHERE id = $1
-		 RETURNING id, contract_id, participation_id, buyer_stage_id, return_stage_id, created_at`,
-		ruleID, buyerStageID, contractID).Scan(
-		&rr.ID, &rr.ContractID, &rr.ParticipationID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt)
+		`SELECT return_schedule_mode, return_delay_seconds, return_time, return_weekdays
+		 FROM contract_return_rules WHERE id = $1`, ruleID).
+		Scan(&existing.ReturnScheduleMode, &existing.ReturnDelaySeconds, &existing.ReturnTime, &existingWeekdays)
+	if err != nil {
+		return nil, err
+	}
+	existing.ReturnWeekdays = weekdaysFromDB(existingWeekdays)
+	resolvedSchedule := ReturnScheduleInput{Mode: ReturnScheduleImmediate}
+	if hasSchedule {
+		resolvedSchedule, err = schedule.Resolved(existing)
+		if err != nil {
+			return nil, err
+		}
+	} else if existing.ReturnScheduleMode != "" {
+		resolvedSchedule = ReturnScheduleInput{
+			Mode:         existing.ReturnScheduleMode,
+			DelaySeconds: existing.ReturnDelaySeconds,
+			ReturnTime:   existing.ReturnTime,
+			Weekdays:     existing.ReturnWeekdays,
+		}
+	}
+	mode, delay, clock, weekdays := scheduleSQLValues(resolvedSchedule)
+	labelVal, hasLabel, err := returnRuleLabelArg(label)
+	if err != nil {
+		return nil, err
+	}
+	var rr *ReturnRule
+	if hasLabel {
+		rr, err = scanReturnRule(s.pool.QueryRow(ctx,
+			`UPDATE contract_return_rules SET buyer_stage_id = $2, contract_id = $3, label = $4,
+			   return_schedule_mode = $5, return_delay_seconds = $6, return_time = $7, return_weekdays = $8
+			 WHERE id = $1
+			 RETURNING `+returnRuleAllCols,
+			ruleID, buyerStageID, contractID, labelVal, mode, delay, clock, weekdays))
+	} else {
+		rr, err = scanReturnRule(s.pool.QueryRow(ctx,
+			`UPDATE contract_return_rules SET buyer_stage_id = $2, contract_id = $3,
+			   return_schedule_mode = $4, return_delay_seconds = $5, return_time = $6, return_weekdays = $7
+			 WHERE id = $1
+			 RETURNING `+returnRuleAllCols,
+			ruleID, buyerStageID, contractID, mode, delay, clock, weekdays))
+	}
 	if err != nil {
 		if database.IsUniqueViolation(err) {
 			return nil, httpx.Conflict("return route already exists for this buyer stage")
@@ -1061,21 +1312,38 @@ func (s *Service) DeleteReturnRule(ctx context.Context, ruleID int64) error {
 	return err
 }
 
-func (s *Service) AddBuyerContractReturnRule(ctx context.Context, buyerID, contractID, buyerStageID, buyerPipelineOverride int64) (*ReturnRule, error) {
+func (s *Service) AddBuyerContractReturnRule(ctx context.Context, buyerID, contractID, buyerStageID, buyerPipelineOverride int64, schedule ReturnSchedulePatch, hasSchedule bool, label *string) (*ReturnRule, error) {
 	if _, err := s.GetForBuyerContract(ctx, buyerID, contractID); err != nil {
 		return nil, err
 	}
 	if err := s.validateReturnRuleBuyerStage(ctx, contractID, buyerStageID, buyerPipelineOverride); err != nil {
 		return nil, err
 	}
-	rr := &ReturnRule{}
-	err := s.pool.QueryRow(ctx,
-		`INSERT INTO contract_return_rules(contract_id, buyer_stage_id, return_stage_id) VALUES ($1,$2,NULL)
+	resolvedSchedule, err := resolveNewReturnSchedule(schedule, hasSchedule)
+	if err != nil {
+		return nil, err
+	}
+	mode, delay, clock, weekdays := scheduleSQLValues(resolvedSchedule)
+	labelVal, _, err := returnRuleLabelArg(label)
+	if err != nil {
+		return nil, err
+	}
+	if label == nil {
+		labelVal = nil
+	}
+	rr, err := scanReturnRule(s.pool.QueryRow(ctx,
+		`INSERT INTO contract_return_rules(contract_id, buyer_stage_id, return_stage_id, label,
+		   return_schedule_mode, return_delay_seconds, return_time, return_weekdays)
+		 VALUES ($1,$2,NULL,$3,$4,$5,$6,$7)
 		 ON CONFLICT (contract_id, buyer_stage_id) WHERE participation_id IS NULL
-		 DO UPDATE SET buyer_stage_id = EXCLUDED.buyer_stage_id
-		 RETURNING id, contract_id, participation_id, buyer_stage_id, return_stage_id, created_at`,
-		contractID, buyerStageID).Scan(
-		&rr.ID, &rr.ContractID, &rr.ParticipationID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt)
+		 DO UPDATE SET buyer_stage_id = EXCLUDED.buyer_stage_id,
+		   label = COALESCE(EXCLUDED.label, contract_return_rules.label),
+		   return_schedule_mode = EXCLUDED.return_schedule_mode,
+		   return_delay_seconds = EXCLUDED.return_delay_seconds,
+		   return_time = EXCLUDED.return_time,
+		   return_weekdays = EXCLUDED.return_weekdays
+		 RETURNING `+returnRuleAllCols,
+		contractID, buyerStageID, labelVal, mode, delay, clock, weekdays))
 	if err != nil {
 		if database.IsUniqueViolation(err) {
 			return nil, httpx.Conflict("return route already exists for this buyer stage")
@@ -1085,7 +1353,7 @@ func (s *Service) AddBuyerContractReturnRule(ctx context.Context, buyerID, contr
 	return rr, nil
 }
 
-func (s *Service) UpdateBuyerContractReturnRule(ctx context.Context, buyerID, contractID, ruleID, buyerStageID, buyerPipelineOverride int64) (*ReturnRule, error) {
+func (s *Service) UpdateBuyerContractReturnRule(ctx context.Context, buyerID, contractID, ruleID, buyerStageID, buyerPipelineOverride int64, schedule ReturnSchedulePatch, hasSchedule bool, label *string) (*ReturnRule, error) {
 	if _, err := s.GetForBuyerContract(ctx, buyerID, contractID); err != nil {
 		return nil, err
 	}
@@ -1105,13 +1373,51 @@ func (s *Service) UpdateBuyerContractReturnRule(ctx context.Context, buyerID, co
 	if err := s.validateReturnRuleBuyerStage(ctx, contractID, buyerStageID, buyerPipelineOverride); err != nil {
 		return nil, err
 	}
-	rr := &ReturnRule{}
+	var existing ReturnRule
+	var existingWeekdays []int16
 	err = s.pool.QueryRow(ctx,
-		`UPDATE contract_return_rules SET buyer_stage_id = $2
-		 WHERE id = $1 AND participation_id IS NULL
-		 RETURNING id, contract_id, participation_id, buyer_stage_id, return_stage_id, created_at`,
-		ruleID, buyerStageID).Scan(
-		&rr.ID, &rr.ContractID, &rr.ParticipationID, &rr.BuyerStageID, &rr.ReturnStageID, &rr.CreatedAt)
+		`SELECT return_schedule_mode, return_delay_seconds, return_time, return_weekdays
+		 FROM contract_return_rules WHERE id = $1`, ruleID).
+		Scan(&existing.ReturnScheduleMode, &existing.ReturnDelaySeconds, &existing.ReturnTime, &existingWeekdays)
+	if err != nil {
+		return nil, err
+	}
+	existing.ReturnWeekdays = weekdaysFromDB(existingWeekdays)
+	resolvedSchedule := ReturnScheduleInput{Mode: ReturnScheduleImmediate}
+	if hasSchedule {
+		resolvedSchedule, err = schedule.Resolved(existing)
+		if err != nil {
+			return nil, err
+		}
+	} else if existing.ReturnScheduleMode != "" {
+		resolvedSchedule = ReturnScheduleInput{
+			Mode:         existing.ReturnScheduleMode,
+			DelaySeconds: existing.ReturnDelaySeconds,
+			ReturnTime:   existing.ReturnTime,
+			Weekdays:     existing.ReturnWeekdays,
+		}
+	}
+	mode, delay, clock, weekdays := scheduleSQLValues(resolvedSchedule)
+	labelVal, hasLabel, err := returnRuleLabelArg(label)
+	if err != nil {
+		return nil, err
+	}
+	var rr *ReturnRule
+	if hasLabel {
+		rr, err = scanReturnRule(s.pool.QueryRow(ctx,
+			`UPDATE contract_return_rules SET buyer_stage_id = $2, label = $3,
+			   return_schedule_mode = $4, return_delay_seconds = $5, return_time = $6, return_weekdays = $7
+			 WHERE id = $1 AND participation_id IS NULL
+			 RETURNING `+returnRuleAllCols,
+			ruleID, buyerStageID, labelVal, mode, delay, clock, weekdays))
+	} else {
+		rr, err = scanReturnRule(s.pool.QueryRow(ctx,
+			`UPDATE contract_return_rules SET buyer_stage_id = $2,
+			   return_schedule_mode = $3, return_delay_seconds = $4, return_time = $5, return_weekdays = $6
+			 WHERE id = $1 AND participation_id IS NULL
+			 RETURNING `+returnRuleAllCols,
+			ruleID, buyerStageID, mode, delay, clock, weekdays))
+	}
 	if err != nil {
 		if database.IsUniqueViolation(err) {
 			return nil, httpx.Conflict("return route already exists for this buyer stage")
@@ -1371,14 +1677,45 @@ type ReturnInfo struct {
 	PublisherID      int64
 }
 
+// ReturnMatch is a matched return rule with schedule metadata.
+type ReturnMatch struct {
+	ReturnInfo
+	RuleID             int64
+	ReturnScheduleMode string
+	ReturnDelaySeconds *int
+	ReturnTime         *string
+	ReturnWeekdays     []int
+	ScheduleTimezone   string
+}
+
 // FindReturnRule checks whether entering newStageID triggers a return for the lead's contract.
 func FindReturnRule(ctx context.Context, q database.Querier, contractID, buyerAccountID, newStageID int64) (*ReturnInfo, error) {
+	match, err := FindReturnMatch(ctx, q, contractID, buyerAccountID, newStageID)
+	if err != nil || match == nil {
+		return nil, err
+	}
+	return &match.ReturnInfo, nil
+}
+
+// FindReturnMatch loads the matched return rule including schedule configuration.
+func FindReturnMatch(ctx context.Context, q database.Querier, contractID, buyerAccountID, newStageID int64) (*ReturnMatch, error) {
 	var sourcePipelineID *int64
-	var returnStageID, publisherID int64
+	var returnStageID, publisherID, ruleID int64
+	var scheduleMode string
+	var delaySeconds *int
+	var returnTime *string
+	var weekdays []int16
+	var scheduleTimezone string
 	err := q.QueryRow(ctx,
 		`SELECT COALESCE(p.source_pipeline_id, c.source_pipeline_id),
 		        rr.return_stage_id,
-		        c.publisher_id
+		        c.publisher_id,
+		        rr.id,
+		        rr.return_schedule_mode,
+		        rr.return_delay_seconds,
+		        rr.return_time,
+		        rr.return_weekdays,
+		        c.schedule_timezone
 		 FROM contract_return_rules rr
 		 JOIN contracts c ON c.id = rr.contract_id
 		 LEFT JOIN contract_participations p ON p.id = rr.participation_id
@@ -1392,7 +1729,9 @@ func FindReturnRule(ctx context.Context, q database.Querier, contractID, buyerAc
 		   )
 		 ORDER BY CASE WHEN rr.participation_id IS NULL THEN 1 ELSE 0 END, rr.id
 		 LIMIT 1`,
-		contractID, buyerAccountID, newStageID).Scan(&sourcePipelineID, &returnStageID, &publisherID)
+		contractID, buyerAccountID, newStageID).Scan(
+		&sourcePipelineID, &returnStageID, &publisherID, &ruleID,
+		&scheduleMode, &delaySeconds, &returnTime, &weekdays, &scheduleTimezone)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -1405,10 +1744,21 @@ func FindReturnRule(ctx context.Context, q database.Querier, contractID, buyerAc
 	if returnStageID == 0 {
 		return nil, httpx.BusinessRule("return destination is misconfigured for this stage")
 	}
-	return &ReturnInfo{
-		SourcePipelineID: *sourcePipelineID,
-		ReturnStageID:    returnStageID,
-		PublisherID:      publisherID,
+	if scheduleMode == "" {
+		scheduleMode = ReturnScheduleImmediate
+	}
+	return &ReturnMatch{
+		ReturnInfo: ReturnInfo{
+			SourcePipelineID: *sourcePipelineID,
+			ReturnStageID:    returnStageID,
+			PublisherID:      publisherID,
+		},
+		RuleID:             ruleID,
+		ReturnScheduleMode: scheduleMode,
+		ReturnDelaySeconds: delaySeconds,
+		ReturnTime:         returnTime,
+		ReturnWeekdays:     weekdaysFromDB(weekdays),
+		ScheduleTimezone:   scheduleTimezone,
 	}, nil
 }
 

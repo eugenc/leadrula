@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/echayko/leadrula/backend/internal/accounts"
 	"github.com/echayko/leadrula/backend/internal/auth"
@@ -487,5 +488,108 @@ func TestTryReturnLead_resolvesContractFromDebit(t *testing.T) {
 	}
 	if out.Lead.StageID == nil || *out.Lead.StageID != f.returnStageID {
 		t.Fatalf("stage_id = %v, want return stage %d", out.Lead.StageID, f.returnStageID)
+	}
+}
+
+func TestTryReturnLead_schedulesDelayedReturn(t *testing.T) {
+	pool := connectLeadsTestDB(t)
+	ctx := context.Background()
+	repo := NewRepository(pool)
+	acc := accounts.NewRepository(pool)
+	notif := notifications.NewService(pool, acc, nil, "http://localhost")
+
+	f, err := loadDisqMoveFixture(ctx, pool)
+	if err != nil {
+		t.Skip("no buyer contract lead with disqualification stage in database")
+	}
+
+	var buyerPipelineID int64
+	if err := pool.QueryRow(ctx, `SELECT pipeline_id FROM leads WHERE id = $1`, f.leadID).Scan(&buyerPipelineID); err != nil {
+		t.Fatal(err)
+	}
+
+	const delaySeconds = 7200
+	var ruleID int64
+	err = pool.QueryRow(ctx,
+		`INSERT INTO contract_return_rules(contract_id, buyer_stage_id, return_stage_id,
+		   return_schedule_mode, return_delay_seconds)
+		 VALUES ($1,$2,$3,'delay',$4)
+		 ON CONFLICT (contract_id, buyer_stage_id) WHERE participation_id IS NULL
+		 DO UPDATE SET return_stage_id = EXCLUDED.return_stage_id,
+		   return_schedule_mode = EXCLUDED.return_schedule_mode,
+		   return_delay_seconds = EXCLUDED.return_delay_seconds
+		 RETURNING id`,
+		f.contractID, f.disqStageID, f.returnStageID, delaySeconds).Scan(&ruleID)
+	if err != nil {
+		t.Skipf("return schedule columns unavailable (migration 0111?): %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM scheduled_lead_returns WHERE lead_id = $1`, f.leadID)
+		_, _ = pool.Exec(ctx, `DELETE FROM contract_return_rules WHERE id = $1`, ruleID)
+	})
+
+	var origOwner, origStage int64
+	var origContractID *int64
+	var origStatus string
+	var origPipelineID *int64
+	if err := pool.QueryRow(ctx,
+		`SELECT owner_account_id, stage_id, contract_id, status::text, pipeline_id FROM leads WHERE id = $1`,
+		f.leadID).Scan(&origOwner, &origStage, &origContractID, &origStatus, &origPipelineID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx,
+			`UPDATE leads SET owner_account_id=$2, stage_id=$3, contract_id=$4, status=$5::lead_status, pipeline_id=$6 WHERE id=$1`,
+			f.leadID, origOwner, origStage, origContractID, origStatus, origPipelineID)
+	})
+
+	setupTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := setupTx.Exec(ctx,
+		`UPDATE leads SET stage_id=$2, pipeline_id=$3, contract_id=$4, status='distributed'::lead_status WHERE id=$1`,
+		f.leadID, f.disqStageID, buyerPipelineID, f.contractID); err != nil {
+		t.Fatal(err)
+	}
+	if err := setupTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+
+	out, err := TryReturnLead(ctx, tx, ReturnDeps{Repo: repo, Notif: notif}, f.leadID)
+	if err != nil {
+		t.Fatalf("TryReturnLead: %v", err)
+	}
+	if out.Returned {
+		t.Fatal("expected delayed return to schedule, not return immediately")
+	}
+	if !out.Scheduled {
+		t.Fatal("expected Scheduled=true")
+	}
+	if out.Lead.OwnerAccountID != f.ownerAccountID {
+		t.Fatalf("owner_account_id = %d, want buyer %d", out.Lead.OwnerAccountID, f.ownerAccountID)
+	}
+	if out.Lead.StageID == nil || *out.Lead.StageID != f.disqStageID {
+		t.Fatalf("stage_id = %v, want return start stage %d", out.Lead.StageID, f.disqStageID)
+	}
+
+	var scheduledID int64
+	var executeAt time.Time
+	var status string
+	err = tx.QueryRow(ctx,
+		`SELECT id, execute_at, status FROM scheduled_lead_returns
+		 WHERE lead_id = $1 AND status = 'pending' ORDER BY created_at DESC LIMIT 1`,
+		f.leadID).Scan(&scheduledID, &executeAt, &status)
+	if err != nil {
+		t.Fatalf("expected pending scheduled_lead_returns row: %v", err)
+	}
+	if !executeAt.After(time.Now().UTC().Add(time.Duration(delaySeconds-60) * time.Second)) {
+		t.Fatalf("execute_at = %v, expected ~%d seconds in the future", executeAt, delaySeconds)
 	}
 }

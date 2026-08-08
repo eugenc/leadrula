@@ -3,6 +3,7 @@ import { Sheet, DrawerHeader, DrawerBody, DrawerFooter } from "@/components/ui/d
 import { ContractMessageButton } from "@/features/messaging/MessageButton";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { SectionLabel } from "@/components/layout/SectionLabel";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import { formatMoney } from "@/lib/utils";
@@ -28,7 +29,9 @@ import { AppointmentSettingsSection } from "@/features/appointments/AppointmentS
 import { PublisherContractCalendarSection } from "@/features/appointments/PublisherContractCalendarSection";
 import { offerFromContractModes, type ContractOfferDraft } from "@/features/admin/contractOffer";
 import {
-  ContractLeadCriteriaSection,
+  ContractLeadFieldsSection,
+  ContractLeadFilterRulesSection,
+  ContractLeadCriteriaSaveButton,
   emptyLeadCriteria,
 } from "@/features/admin/ContractLeadCriteriaSection";
 import { CONTRACT_STATUSES, ContractStatusBadge } from "@/features/admin/contractStatus";
@@ -80,9 +83,11 @@ function leadCriteriaEqual(a: ContractLeadCriteria, b: ContractLeadCriteria) {
 export function ContractDetailDrawer({
   contract,
   onClose,
+  registerFlushHandler,
 }: {
   contract: Contract | null;
   onClose: () => void;
+  registerFlushHandler?: (fn: (() => Promise<boolean>) | null) => void;
 }) {
   const { data: detail } = useContractDetail(contract?.id ?? null);
   const resolved = detail ?? contract;
@@ -96,8 +101,9 @@ export function ContractDetailDrawer({
           contract={resolved}
           onClose={onClose}
           registerClose={(fn) => {
-            closeRef.current = fn;
+            closeRef.current = fn ?? onClose;
           }}
+          registerFlushHandler={registerFlushHandler}
         />
       )}
     </Sheet>
@@ -108,33 +114,43 @@ function DrawerContent({
   contract,
   onClose,
   registerClose,
+  registerFlushHandler,
 }: {
   contract: Contract;
   onClose: () => void;
-  registerClose: (fn: () => void) => void;
+  registerClose: (fn: (() => void) | null) => void;
+  registerFlushHandler?: (fn: (() => Promise<boolean>) | null) => void;
 }) {
-  useEffect(() => {
-    if (contract.status !== "draft") {
-      registerClose(onClose);
-    }
-  }, [contract.status, contract.id, onClose, registerClose]);
-
   if (contract.status === "draft") {
     return (
-      <DraftDrawerContent contract={contract} onClose={onClose} registerClose={registerClose} />
+      <DraftDrawerContent
+        contract={contract}
+        onClose={onClose}
+        registerClose={registerClose}
+        registerFlushHandler={registerFlushHandler}
+      />
     );
   }
-  return <ActiveDrawerContent contract={contract} onClose={onClose} />;
+  return (
+    <ActiveDrawerContent
+      contract={contract}
+      onClose={onClose}
+      registerClose={registerClose}
+      registerFlushHandler={registerFlushHandler}
+    />
+  );
 }
 
 function DraftDrawerContent({
   contract,
   onClose,
   registerClose,
+  registerFlushHandler,
 }: {
   contract: Contract;
   onClose: () => void;
-  registerClose: (fn: () => void) => void;
+  registerClose: (fn: (() => void) | null) => void;
+  registerFlushHandler?: (fn: (() => Promise<boolean>) | null) => void;
 }) {
   const { data: buyers } = useBuyers();
   const { data: partnerPublishers } = usePartnerPublishers();
@@ -277,22 +293,38 @@ function DraftDrawerContent({
     return lastSavedSnapshot.current !== null && draftSnapshot() !== lastSavedSnapshot.current;
   }
 
-  const handleClose = useCallback(async () => {
+  const flushDraft = useCallback(async (): Promise<boolean> => {
     if (canSaveDraft && isDirty()) {
+      const toastId = toast.progress("Saving…");
       try {
         await saveDraft.mutateAsync({ contractId: contract.id, body: payload("draft") });
         lastSavedSnapshot.current = draftSnapshot();
+        toast.update(toastId, "Saved");
+        setTimeout(() => toast.dismiss(toastId), 1500);
       } catch (e) {
+        toast.dismiss(toastId);
         toast.error(errorMessage(e));
-        return;
+        return false;
       }
     }
-    onClose();
-  }, [canSaveDraft, contract.id, form, compDrafts, deliveryDraft, leadCriteria, offerDraft, onClose, saveDraft]);
+    return true;
+  }, [canSaveDraft, contract.id, form, compDrafts, deliveryDraft, leadCriteria, offerDraft, saveDraft]);
+
+  const handleClose = useCallback(async () => {
+    const ok = await flushDraft();
+    if (ok) onClose();
+  }, [flushDraft, onClose]);
 
   useLayoutEffect(() => {
-    registerClose(handleClose);
-  }, [handleClose, registerClose]);
+    registerClose(() => {
+      void handleClose();
+    });
+    registerFlushHandler?.(flushDraft);
+    return () => {
+      registerClose(null);
+      registerFlushHandler?.(null);
+    };
+  }, [handleClose, flushDraft, registerClose, registerFlushHandler]);
 
   function runSave(status: "draft" | "active", onSuccess: () => void) {
     const body = payload(status);
@@ -455,34 +487,47 @@ function DraftDrawerContent({
                     onChange={setDeliveryDraft}
                   />
                 )}
+                <div className="border-t border-gray-100 pt-4">
+                  <SectionLabel>Return Routes</SectionLabel>
+                  <PublisherContractReturnRoutesSection
+                    contractId={contract.id}
+                    delivery={deliveryDraft}
+                    openOffer={openOffer}
+                  />
+                </div>
                 {form.lead_type === "Call" && <CallSettingsSection contractId={contract.id} />}
-                {form.lead_type === "Appointment" && (
-                  <>
-                    <PublisherContractCalendarSection
-                      contractId={contract.id}
-                      publisherAppointmentCalendarId={contract.publisher_appointment_calendar_id}
-                    />
-                    {contract.status === "active" && (contract.appointment_calendar_id ?? 0) > 0 && (
-                      <AppointmentSettingsSection contractId={contract.id} />
-                    )}
-                  </>
-                )}
               </div>
             ),
-            criteria: (
-              <ContractLeadCriteriaSection
+            ...(form.lead_type === "Appointment"
+              ? {
+                  booking: (
+                    <>
+                      <PublisherContractCalendarSection
+                        standalone
+                        contractId={contract.id}
+                        publisherAppointmentCalendarId={contract.publisher_appointment_calendar_id}
+                      />
+                      {contract.status === "active" && (contract.appointment_calendar_id ?? 0) > 0 && (
+                        <AppointmentSettingsSection contractId={contract.id} />
+                      )}
+                    </>
+                  ),
+                }
+              : {}),
+            fields: (
+              <ContractLeadFieldsSection
                 buyerId={form.buyer_id}
                 buyerPipelineId={contract.buyer_pipeline_id ?? 0}
                 contractType={form.contract_type}
+                leadType={form.lead_type}
                 value={leadCriteria}
                 onChange={setLeadCriteria}
               />
             ),
-            returns: (
-              <PublisherContractReturnRoutesSection
-                contractId={contract.id}
-                delivery={deliveryDraft}
-                openOffer={openOffer}
+            filters: (
+              <ContractLeadFilterRulesSection
+                value={leadCriteria}
+                onChange={setLeadCriteria}
               />
             ),
           }}
@@ -510,7 +555,17 @@ function DraftDrawerContent({
   );
 }
 
-function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClose: () => void }) {
+function ActiveDrawerContent({
+  contract,
+  onClose,
+  registerClose,
+  registerFlushHandler,
+}: {
+  contract: Contract;
+  onClose: () => void;
+  registerClose: (fn: (() => void) | null) => void;
+  registerFlushHandler?: (fn: (() => Promise<boolean>) | null) => void;
+}) {
   const isOpenOffer = !contract.buyer_id && (contract.contract_type ?? "sell") === "sell";
   const update = useUpdateContract();
   const saveDelivery = useSaveContractDelivery();
@@ -518,31 +573,80 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
   const { data: compensations, isLoading: compsLoading } = useContractCompensations(contract.id);
   const { data: returnRules } = useReturnRules(isOpenOffer ? null : contract.id, false);
   const returnRulesCount = isOpenOffer ? undefined : (returnRules?.length ?? 0);
+  const touchedRef = useRef(false);
+  const closingRef = useRef(false);
 
-  const [name, setName] = useState(contract.name);
-  const [leadType, setLeadType] = useState(contract.lead_type ?? "");
-  const [description, setDescription] = useState(contract.description ?? "");
-  const [status, setStatus] = useState(contract.status);
-  const [deliveryDraft, setDeliveryDraft] = useState<ContractDeliveryDraft>(() =>
+  const [name, setNameState] = useState(contract.name);
+  const [leadType, setLeadTypeState] = useState(contract.lead_type ?? "");
+  const [description, setDescriptionState] = useState(contract.description ?? "");
+  const [status, setStatusState] = useState(contract.status);
+  const [deliveryDraft, setDeliveryDraftState] = useState<ContractDeliveryDraft>(() =>
     deliveryDraftFromContract(contract)
   );
   const { data: leadCriteriaData } = useContractLeadCriteria(contract.id);
   const saveCriteria = useSaveContractLeadCriteria();
-  const [leadCriteria, setLeadCriteria] = useState(emptyLeadCriteria());
-  const [offerDraft, setOfferDraft] = useState<ContractOfferDraft>(() =>
+  const [leadCriteria, setLeadCriteriaState] = useState(emptyLeadCriteria());
+  const [offerDraft, setOfferDraftState] = useState<ContractOfferDraft>(() =>
     offerFromContractModes(contract.allowed_delivery_modes, contract.distribution_strategy)
   );
 
+  function touch() {
+    touchedRef.current = true;
+  }
+  const setName = (v: string) => {
+    touch();
+    setNameState(v);
+  };
+  const setLeadType = (v: string) => {
+    touch();
+    setLeadTypeState(v);
+  };
+  const setDescription = (v: string) => {
+    touch();
+    setDescriptionState(v);
+  };
+  const setStatus = (v: string) => {
+    touch();
+    setStatusState(v);
+  };
+  const setDeliveryDraft = (v: ContractDeliveryDraft | ((prev: ContractDeliveryDraft) => ContractDeliveryDraft)) => {
+    touch();
+    setDeliveryDraftState(v);
+  };
+  const setLeadCriteria = (v: ContractLeadCriteria | ((prev: ContractLeadCriteria) => ContractLeadCriteria)) => {
+    touch();
+    setLeadCriteriaState(v);
+  };
+  const setOfferDraft = (v: ContractOfferDraft | ((prev: ContractOfferDraft) => ContractOfferDraft)) => {
+    touch();
+    setOfferDraftState(v);
+  };
+
   useEffect(() => {
-    if (leadCriteriaData) setLeadCriteria(leadCriteriaData);
+    touchedRef.current = false;
+    setNameState(contract.name);
+    setLeadTypeState(contract.lead_type ?? "");
+    setDescriptionState(contract.description ?? "");
+    setStatusState(contract.status);
+    setDeliveryDraftState(deliveryDraftFromContract(contract));
+    setOfferDraftState(
+      offerFromContractModes(contract.allowed_delivery_modes, contract.distribution_strategy)
+    );
+    if (leadCriteriaData) setLeadCriteriaState(leadCriteriaData);
+  }, [contract.id]);
+
+  useEffect(() => {
+    if (touchedRef.current) return;
+    if (leadCriteriaData) setLeadCriteriaState(leadCriteriaData);
   }, [leadCriteriaData]);
 
   useEffect(() => {
-    setName(contract.name);
-    setLeadType(contract.lead_type ?? "");
-    setDescription(contract.description ?? "");
-    setStatus(contract.status);
-  }, [contract.id, contract.name, contract.lead_type, contract.description, contract.status]);
+    if (touchedRef.current) return;
+    setNameState(contract.name);
+    setLeadTypeState(contract.lead_type ?? "");
+    setDescriptionState(contract.description ?? "");
+    setStatusState(contract.status);
+  }, [contract.name, contract.lead_type, contract.description, contract.status]);
 
   const serverDeliveryKey = [
     contract.id,
@@ -553,8 +657,11 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
   ].join("|");
 
   useEffect(() => {
-    setDeliveryDraft(deliveryDraftFromContract(contract));
-    setOfferDraft(offerFromContractModes(contract.allowed_delivery_modes, contract.distribution_strategy));
+    if (touchedRef.current) return;
+    setDeliveryDraftState(deliveryDraftFromContract(contract));
+    setOfferDraftState(
+      offerFromContractModes(contract.allowed_delivery_modes, contract.distribution_strategy)
+    );
   }, [serverDeliveryKey]);
 
   const savedOffer = offerFromContractModes(contract.allowed_delivery_modes, contract.distribution_strategy);
@@ -586,13 +693,150 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
   const footerDirty = !unchanged || offerSaveable || criteriaDirty;
   const activeStatuses = CONTRACT_STATUSES.filter((s) => s.value !== "draft");
 
-  function offerSaveBody() {
+  function offerSaveBodyFrom(draft: ContractOfferDraft, delivery: ContractDeliveryDraft) {
     return {
-      allowed_delivery_modes: offerDraft.allowed_delivery_modes,
-      distribution_strategy: offerDraft.distribution_strategy,
-      source_pipeline_id: deliveryDraft.source_pipeline_id || null,
-      source_stage_id: deliveryDraft.source_stage_id || null,
+      allowed_delivery_modes: draft.allowed_delivery_modes,
+      distribution_strategy: draft.distribution_strategy,
+      source_pipeline_id: delivery.source_pipeline_id || null,
+      source_stage_id: delivery.source_stage_id || null,
     };
+  }
+
+  const flushRef = useRef({
+    contract,
+    name,
+    leadType,
+    description,
+    status,
+    deliveryDraft,
+    leadCriteria,
+    offerDraft,
+    leadCriteriaData,
+    compensations,
+    isOpenOffer,
+  });
+  flushRef.current = {
+    contract,
+    name,
+    leadType,
+    description,
+    status,
+    deliveryDraft,
+    leadCriteria,
+    offerDraft,
+    leadCriteriaData,
+    compensations,
+    isOpenOffer,
+  };
+
+  const flushActiveContract = useCallback(async (): Promise<boolean> => {
+    const s = flushRef.current;
+    const c = s.contract;
+    const trimmed = s.name.trim();
+    const detailsUnchanged =
+      trimmed === c.name &&
+      s.leadType === (c.lead_type ?? "") &&
+      s.description === (c.description ?? "") &&
+      s.status === c.status;
+    const savedCriteria = s.leadCriteriaData ?? emptyLeadCriteria();
+    const criteriaDirty = !leadCriteriaEqual(s.leadCriteria, savedCriteria);
+    const savedOffer = offerFromContractModes(c.allowed_delivery_modes, c.distribution_strategy);
+    const savedDelivery = deliveryDraftFromContract(c, s.compensations?.[0]?.delivery);
+    const offerUnchanged =
+      JSON.stringify(s.offerDraft.allowed_delivery_modes) ===
+        JSON.stringify(savedOffer.allowed_delivery_modes) &&
+      s.offerDraft.distribution_strategy === savedOffer.distribution_strategy &&
+      (!openOfferPipelineRequired(s.offerDraft.allowed_delivery_modes) ||
+        (s.deliveryDraft.source_pipeline_id === savedDelivery.source_pipeline_id &&
+          s.deliveryDraft.source_stage_id === savedDelivery.source_stage_id));
+    const deliveryUnchanged =
+      s.deliveryDraft.delivery === savedDelivery.delivery &&
+      s.deliveryDraft.source_pipeline_id === savedDelivery.source_pipeline_id &&
+      s.deliveryDraft.source_stage_id === savedDelivery.source_stage_id;
+    const invalid = !trimmed || !isContractLeadType(s.leadType);
+    const offerSaveable =
+      s.isOpenOffer && !offerUnchanged && openOfferDeliveryComplete(s.offerDraft, s.deliveryDraft);
+    const offerBlocked =
+      s.isOpenOffer && !offerUnchanged && !openOfferDeliveryComplete(s.offerDraft, s.deliveryDraft);
+    const deliveryDirty = !s.isOpenOffer && !deliveryUnchanged;
+
+    const hasAnyDirty =
+      !detailsUnchanged || criteriaDirty || offerSaveable || deliveryDirty || offerBlocked;
+    if (!hasAnyDirty) return true;
+
+    if (invalid && !detailsUnchanged) {
+      toast.error("Name and lead type are required.");
+      return false;
+    }
+    if (offerBlocked) {
+      toast.error("Complete offer pipeline settings before saving.");
+      return false;
+    }
+    if (deliveryDirty && !deliveryDraftValid(s.deliveryDraft)) {
+      toast.error("Complete distribution settings before saving.");
+      return false;
+    }
+
+    const toastId = toast.progress("Saving…");
+    try {
+      const body: Record<string, unknown> = {};
+      if (trimmed !== c.name) body.name = trimmed;
+      if (s.leadType !== (c.lead_type ?? "")) body.lead_type = s.leadType;
+      if (s.description !== (c.description ?? "")) body.description = s.description;
+      if (s.status !== c.status) body.status = s.status;
+      if (Object.keys(body).length > 0) {
+        await update.mutateAsync({ id: c.id, body });
+      }
+      if (criteriaDirty) {
+        await saveCriteria.mutateAsync({ contractId: c.id, body: s.leadCriteria });
+      }
+      if (offerSaveable) {
+        await saveOffer.mutateAsync({
+          contractId: c.id,
+          body: offerSaveBodyFrom(s.offerDraft, s.deliveryDraft),
+        });
+      }
+      if (deliveryDirty) {
+        await saveDelivery.mutateAsync({
+          contractId: c.id,
+          body: deliveryDraftToBody(s.deliveryDraft),
+        });
+      }
+      toast.update(toastId, "Saved");
+      setTimeout(() => toast.dismiss(toastId), 1500);
+      touchedRef.current = false;
+      return true;
+    } catch (e) {
+      toast.dismiss(toastId);
+      toast.error(errorMessage(e));
+      return false;
+    }
+  }, [update, saveCriteria, saveOffer, saveDelivery]);
+
+  const handleClose = useCallback(async () => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    try {
+      const ok = await flushActiveContract();
+      if (ok) onClose();
+    } finally {
+      closingRef.current = false;
+    }
+  }, [flushActiveContract, onClose]);
+
+  useLayoutEffect(() => {
+    registerClose(() => {
+      void handleClose();
+    });
+    registerFlushHandler?.(flushActiveContract);
+    return () => {
+      registerClose(null);
+      registerFlushHandler?.(null);
+    };
+  }, [handleClose, flushActiveContract, registerClose, registerFlushHandler]);
+
+  function offerSaveBody() {
+    return offerSaveBodyFrom(offerDraft, deliveryDraft);
   }
 
   function saveOfferSettings(onSuccess?: () => void) {
@@ -649,7 +893,7 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
       { id: contract.id, body: { status: next } },
       {
         onSuccess: () => {
-          setStatus(next);
+          setStatusState(next);
           toast.success(successMessage);
         },
         onError: (e) => toast.error(errorMessage(e)),
@@ -665,7 +909,7 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
       <DrawerHeader
         title={contract.name}
         subtitle={`${formatContractType(contract.contract_type)} · ${formatBuyerWithType(contract.buyer_name, contract.buyer_account_type) || (isOpenOffer ? "Open offer" : contract.buyer_id ? `Buyer #${contract.buyer_id}` : "—")} · ${formatMoney(primaryRate)}/lead · ${contract.lead_count ?? 0} distributed`}
-        onClose={onClose}
+        onClose={() => void handleClose()}
       />
 
       <DrawerBody>
@@ -778,11 +1022,19 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
                         <ContractPublisherPipelineSection value={deliveryDraft} onChange={setDeliveryDraft} />
                         {offerBlocked && (
                           <p className="mt-2 text-xs text-gray-500">
-                            Select source pipeline, distribute stage, and return stage to save.
+                            Select Distribute from Pipeline and Distribute from Stage to save.
                           </p>
                         )}
                       </div>
                     )}
+                    <div className="mt-4 border-t border-gray-100 pt-4">
+                      <SectionLabel>Return Routes</SectionLabel>
+                      <PublisherContractReturnRoutesSection
+                        contractId={contract.id}
+                        delivery={deliveryDraft}
+                        openOffer={isOpenOffer}
+                      />
+                    </div>
                     <Button
                       className="mt-3"
                       variant="secondary"
@@ -798,6 +1050,14 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
                       value={deliveryDraft}
                       onChange={setDeliveryDraft}
                     />
+                    <div className="mt-4 border-t border-gray-100 pt-4">
+                      <SectionLabel>Return Routes</SectionLabel>
+                      <PublisherContractReturnRoutesSection
+                        contractId={contract.id}
+                        delivery={deliveryDraft}
+                        openOffer={isOpenOffer}
+                      />
+                    </div>
                     <Button
                       className="mt-3"
                       variant="secondary"
@@ -810,30 +1070,19 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
                         saveDelivery.mutate(
                           { contractId: contract.id, body: deliveryDraftToBody(deliveryDraft) },
                           {
-                            onSuccess: () => toast.success("Delivery saved"),
+                            onSuccess: () => toast.success("Distribution saved"),
                             onError: (e) => toast.error(errorMessage(e)),
                           }
                         )
                       }
                     >
-                      Save delivery
+                      Save distribution
                     </Button>
                   </>
                 )}
                 {leadType === "Call" && (
                   <div className="mt-4">
                     <CallSettingsSection contractId={contract.id} />
-                  </div>
-                )}
-                {leadType === "Appointment" && (
-                  <div className="mt-4">
-                    <PublisherContractCalendarSection
-                      contractId={contract.id}
-                      publisherAppointmentCalendarId={contract.publisher_appointment_calendar_id}
-                    />
-                    {contract.status === "active" && (contract.appointment_calendar_id ?? 0) > 0 && (
-                      <AppointmentSettingsSection contractId={contract.id} />
-                    )}
                   </div>
                 )}
               </>
@@ -843,31 +1092,51 @@ function ActiveDrawerContent({ contract, onClose }: { contract: Contract; onClos
                   buyers: <ContractParticipationsSection contract={contract} />,
                 }
               : {}),
-            criteria: (
+            ...(leadType === "Appointment"
+              ? {
+                  booking: (
+                    <>
+                      <PublisherContractCalendarSection
+                        standalone
+                        contractId={contract.id}
+                        publisherAppointmentCalendarId={contract.publisher_appointment_calendar_id}
+                      />
+                      {contract.status === "active" && (contract.appointment_calendar_id ?? 0) > 0 && (
+                        <AppointmentSettingsSection contractId={contract.id} />
+                      )}
+                    </>
+                  ),
+                }
+              : {}),
+            fields: (
               <>
-                <ContractLeadCriteriaSection
+                <ContractLeadFieldsSection
                   buyerId={contract.buyer_id ?? 0}
                   buyerPipelineId={contract.buyer_pipeline_id ?? 0}
                   contractType={contract.contract_type ?? "sell"}
+                  leadType={leadType}
                   value={leadCriteria}
                   onChange={setLeadCriteria}
                 />
-                <Button
-                  className="mt-3"
-                  variant="secondary"
-                  disabled={!criteriaDirty || saveCriteria.isPending}
+                <ContractLeadCriteriaSaveButton
+                  disabled={!criteriaDirty}
+                  pending={saveCriteria.isPending}
                   onClick={() => saveLeadCriteriaSettings()}
-                >
-                  Save lead criteria
-                </Button>
+                />
               </>
             ),
-            returns: (
-              <PublisherContractReturnRoutesSection
-                contractId={contract.id}
-                delivery={deliveryDraft}
-                openOffer={isOpenOffer}
-              />
+            filters: (
+              <>
+                <ContractLeadFilterRulesSection
+                  value={leadCriteria}
+                  onChange={setLeadCriteria}
+                />
+                <ContractLeadCriteriaSaveButton
+                  disabled={!criteriaDirty}
+                  pending={saveCriteria.isPending}
+                  onClick={() => saveLeadCriteriaSettings()}
+                />
+              </>
             ),
           }}
           extraTabs={isOpenOffer ? [{ id: "buyers", label: "Buyers" }] : undefined}

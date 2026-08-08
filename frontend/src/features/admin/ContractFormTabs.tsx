@@ -8,15 +8,27 @@ import {
 import type { CompensationDraft } from "@/features/admin/CreateContractCompensationList";
 import type { ContractDeliveryDraft } from "@/features/admin/contractCompensation";
 import type { ContractOfferDraft } from "@/features/admin/contractOffer";
+import {
+  fieldsTabLabel,
+  filtersTabLabel,
+} from "@/features/admin/contractLeadCriteriaLabels";
 import type { ContractLeadCriteria } from "@/types";
 
-const BASE_TABS: { id: ContractTabId; label: string; optional?: boolean }[] = [
-  { id: "details", label: "Details" },
-  { id: "compensation", label: "Compensation" },
-  { id: "delivery", label: "Delivery" },
-  { id: "criteria", label: "Lead criteria" },
-  { id: "returns", label: "Return routes" },
-];
+function baseTabs(form: { contract_type: string; lead_type: string }): { id: ContractTabId; label: string; optional?: boolean }[] {
+  const tabs: { id: ContractTabId; label: string; optional?: boolean }[] = [
+    { id: "details", label: "Details" },
+    { id: "compensation", label: "Compensation" },
+    { id: "delivery", label: "Distribution" },
+  ];
+  if (form.lead_type === "Appointment") {
+    tabs.push({ id: "booking", label: "Booking Calendar" });
+  }
+  tabs.push(
+    { id: "fields", label: fieldsTabLabel(form.lead_type, form.contract_type) },
+    { id: "filters", label: filtersTabLabel(form.lead_type) }
+  );
+  return tabs;
+}
 
 export function ContractFormTabs({
   form,
@@ -51,7 +63,7 @@ export function ContractFormTabs({
       setTab(initialTab);
     }
   }, [resetKey, initialTab]);
-  const tabs = [...BASE_TABS, ...(extraTabs ?? [])];
+  const tabs = [...baseTabs(form), ...(extraTabs ?? [])];
 
   return (
     <div>

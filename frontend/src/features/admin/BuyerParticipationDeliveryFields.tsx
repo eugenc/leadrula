@@ -66,9 +66,9 @@ export function BuyerParticipationDeliveryFields({
 
   return (
     <div className="space-y-3">
-      <SectionLabel>Your delivery</SectionLabel>
+      <SectionLabel>Your distribution</SectionLabel>
       <div>
-        <Label>Delivery mode</Label>
+        <Label>Distribution Type</Label>
         <Select value={delivery} onChange={(e) => onDeliveryChange(e.target.value)}>
           {modeOptions.map((m) => (
             <option key={m.value} value={m.value}>
@@ -80,7 +80,7 @@ export function BuyerParticipationDeliveryFields({
       {pipelineDelivery && (
         <>
           <div>
-            <Label>Destination pipeline</Label>
+            <Label>Distribute to Pipeline</Label>
             <Select
               value={pipelineId}
               onChange={(e) => {
@@ -97,7 +97,7 @@ export function BuyerParticipationDeliveryFields({
             </Select>
           </div>
           <div>
-            <Label>Destination stage</Label>
+            <Label>Distribute to Stage</Label>
             <Select value={stageId} onChange={(e) => onStageIdChange(Number(e.target.value))}>
               <option value={0}>Select…</option>
               {(stages ?? [])
@@ -167,7 +167,7 @@ export function deliverySaveBlockReason(
   webhookId: number
 ): string | null {
   if (delivery === "leads_pipeline" && (pipelineId <= 0 || stageId <= 0)) {
-    return "Select destination pipeline and stage.";
+    return "Select Distribute to Pipeline and Distribute to Stage.";
   }
   if (delivery === "webhook" && webhookId <= 0) {
     return "Select an outbound webhook.";

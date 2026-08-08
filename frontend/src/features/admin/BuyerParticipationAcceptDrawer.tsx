@@ -31,7 +31,7 @@ import {
 } from "@/features/admin/BuyerParticipationDeliveryFields";
 import type { ContractParticipation } from "@/types";
 
-const STEPS = ["Review", "Delivery", "Return routes", "Field mapping", "Integrations"] as const;
+const STEPS = ["Review", "Distribution", "Return routes", "Field mapping", "Integrations"] as const;
 
 export function BuyerParticipationAcceptDrawer({
   participation,
@@ -260,7 +260,7 @@ function DrawerContent({
             <SectionLabel>Return routes</SectionLabel>
             {!returnRoutesLoading && !buyerPipelineSelected && (
               <p className="text-sm text-gray-500">
-                Go back to Delivery and select your destination pipeline and stage.
+                Go back to Distribution and select Distribute to Pipeline and Distribute to Stage.
               </p>
             )}
             {!returnRoutesLoading && buyerPipelineSelected && !publisherPipelineConfigured && (
@@ -275,23 +275,27 @@ function DrawerContent({
                 publisherStages={[]}
                 rules={returnRoutes ?? []}
                 loading={returnRoutesLoading}
-                onAdd={(buyerStageId) =>
+                onAdd={(buyerStageId, _returnStageId, schedule, label) =>
                   addRoute.mutate(
                     {
                       participationId: participation.id,
                       buyerStageId,
                       buyerPipelineId: pipelineId || undefined,
+                      schedule,
+                      label,
                     },
                     { onError: (e) => toast.error(errorMessage(e)) }
                   )
                 }
-                onUpdate={(ruleId, buyerStageId) =>
+                onUpdate={(ruleId, buyerStageId, _returnStageId, schedule, label) =>
                   updateRoute.mutate(
                     {
                       participationId: participation.id,
                       ruleId,
                       buyerStageId,
                       buyerPipelineId: pipelineId || undefined,
+                      schedule,
+                      label,
                     },
                     { onError: (e) => toast.error(errorMessage(e)) }
                   )
