@@ -668,6 +668,103 @@ func TestIngest_GHLInbound_realWorkflowPayload(t *testing.T) {
 	}
 }
 
+func TestIngest_GHLInbound_customDataAppointmentNotesCreatesNote(t *testing.T) {
+	ctx := context.Background()
+	pool, err := database.Connect(ctx, "postgres://crm:crm@localhost:5432/crm?sslmode=disable")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer pool.Close()
+
+	svc := NewService(pool, nil, nil, testEncKey(t), nil)
+	repo := leads.NewRepository(pool)
+	svc.leads = repo
+
+	var accountID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM accounts ORDER BY id LIMIT 1`).Scan(&accountID); err != nil {
+		t.Skip(err)
+	}
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	connID, connPublicID := testGHLConnection(ctx, t, pool, accountID, "GHL Notes Conn "+suffix)
+
+	cfg := map[string]any{
+		"location_id":    "loc-test",
+		"create_contact": true,
+		"outbound_field_map": []any{
+			map[string]any{
+				"dest_key":        "appointment_notes",
+				"source_type":     "builtin",
+				"builtin_field":   "note",
+				"ghl_field_model": "opportunity",
+				"ghl_map_section": "opportunity",
+			},
+		},
+	}
+	cfgJSON, _ := json.Marshal(cfg)
+	if _, err := pool.Exec(ctx, `UPDATE integration_connections SET config=$2 WHERE id=$1`, connID, cfgJSON); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := svc.ProvisionGHLWebhooks(ctx, accountID, connID, connPublicID, "GHL Notes "+suffix)
+	if err != nil {
+		t.Fatalf("ProvisionGHLWebhooks: %v", err)
+	}
+	defer svc.DeleteGHLWebhooks(ctx, accountID, *ids)
+
+	if err := svc.SyncGHLInboundFieldMaps(ctx, ids.Inbound, cfg); err != nil {
+		t.Fatalf("SyncGHLInboundFieldMaps: %v", err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leadID, _, err := repo.InsertLead(ctx, tx, accountID, accountID, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contactID := "ghl-notes-" + suffix
+	if err := repo.SetExternalID(ctx, tx, leadID, contactID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	noteBody := "[2026-08-07 16:58] This guy wanted it so bad"
+	res, err := svc.Ingest(ctx, &WebhookAuth{WebhookID: ids.Inbound, AccountID: accountID}, ids.InboundSlug, map[string]any{
+		"contact_id": contactID,
+		"customData": map[string]any{
+			"Appointment Notes":       noteBody,
+			"appointment_disposition": "",
+			"Appointment Recording Link": "",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if len(res.Results) == 0 || res.Results[0].Status != "updated" {
+		t.Fatalf("results = %+v, want updated", res.Results)
+	}
+
+	var count int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM lead_notes WHERE lead_id=$1`, leadID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("note count = %d, want 1", count)
+	}
+
+	var body string
+	if err := pool.QueryRow(ctx, `SELECT body FROM lead_notes WHERE lead_id=$1`, leadID).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body != noteBody {
+		t.Fatalf("note body = %q, want %q", body, noteBody)
+	}
+}
+
 func TestIngest_GHLInbound_collaborationExternalIDNoDuplicate(t *testing.T) {
 	ctx := context.Background()
 	pool, err := database.Connect(ctx, "postgres://crm:crm@localhost:5432/crm?sslmode=disable")

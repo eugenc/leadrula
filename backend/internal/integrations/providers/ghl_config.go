@@ -895,7 +895,7 @@ func GHLInboundNameToKeyFromConfig(config map[string]any) map[string]string {
 func PrepareGHLInboundFlat(flat map[string]any, nameToKey map[string]string) map[string]any {
 	out := NormalizeGHLInboundFlat(flat)
 
-	expandGHLCustomData(out)
+	expandGHLCustomData(out, nameToKey)
 	promoteGHLCustomDataDotKeys(out)
 	applyGHLDisplayNameAliases(out, nameToKey)
 
@@ -922,7 +922,7 @@ func parseGHLJSONMap(v any) map[string]any {
 	return nil
 }
 
-func expandGHLCustomData(out map[string]any) {
+func expandGHLCustomData(out map[string]any, nameToKey map[string]string) {
 	var maps []map[string]any
 	for _, key := range []string{"customData", "custom_data"} {
 		if m := parseGHLJSONMap(out[key]); m != nil {
@@ -937,20 +937,32 @@ func expandGHLCustomData(out map[string]any) {
 		}
 	}
 	for _, customData := range maps {
-		promoteGHLCustomDataEntries(out, customData)
+		promoteGHLCustomDataEntries(out, customData, nameToKey)
 	}
 }
 
-func promoteGHLCustomDataEntries(out map[string]any, customData map[string]any) {
+func promoteGHLCustomDataEntries(out map[string]any, customData map[string]any, nameToKey map[string]string) {
 	for k, v := range customData {
 		if nested, ok := v.(map[string]any); ok {
 			for nk, nv := range nested {
+				if ghlInboundValueEmpty(nv) {
+					continue
+				}
 				promoteGHLCustomFieldKey(out, nk, nv)
 				promoteGHLCustomFieldKey(out, k+"."+nk, nv)
 			}
 			continue
 		}
+		if ghlInboundValueEmpty(v) {
+			continue
+		}
 		promoteGHLCustomFieldKey(out, k, v)
+		if destKey, ok := nameToKey[k]; ok {
+			destKey = strings.TrimSpace(destKey)
+			if destKey != "" {
+				setGHLFlatKeyIfEmpty(out, destKey, v)
+			}
+		}
 	}
 }
 
@@ -993,13 +1005,23 @@ func setGHLFlatKeyIfEmpty(out map[string]any, key string, val any) {
 
 func promoteGHLCustomFieldKey(out map[string]any, key string, val any) {
 	key = strings.TrimSpace(key)
-	if key == "" {
+	if key == "" || ghlInboundValueEmpty(val) {
 		return
 	}
 	setGHLFlatKeyIfEmpty(out, key, val)
 	if !strings.Contains(key, ".") {
 		setGHLFlatKeyIfEmpty(out, "opportunity."+key, val)
 	}
+	if slug := SlugFieldKey(key); slug != "" && slug != key {
+		setGHLFlatKeyIfEmpty(out, slug, val)
+		if !strings.Contains(slug, ".") {
+			setGHLFlatKeyIfEmpty(out, "opportunity."+slug, val)
+		}
+	}
+}
+
+func ghlInboundValueEmpty(v any) bool {
+	return strings.TrimSpace(toGHLText(v)) == ""
 }
 
 func expandGHLCustomFieldsArray(out map[string]any, raw any) {
