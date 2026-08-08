@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useRef, useState, useCallback, type Dispatch, type SetStateAction } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Sheet,
@@ -16,6 +17,7 @@ import { LinkifiedText } from "@/components/ui/linkified-text";
 import { SectionLabel } from "@/components/layout/SectionLabel";
 import { LeadMessageButton } from "@/features/messaging/MessageButton";
 import { ActionDot } from "./ActionDot";
+import { ReturnIndicator } from "./ReturnIndicator";
 import { format, isPast } from "date-fns";
 import { CircleHelp, Copy, MapPin, ChevronDown, ChevronRight, X, Zap } from "lucide-react";
 import { stageColorBorder, stageColorFill } from "@/features/pipelines/stageColors";
@@ -60,6 +62,14 @@ import {
 import type { CustomField, CustomFieldFolder, Lead, LeadHistoryEntry, Stage } from "@/types";
 import { formatStatus, leadSourceLabel, formatBuyerStatus } from "./leadsListColumns";
 import { LeadTagsEditor } from "./LeadTagsEditor";
+import { buildWebhookActivityLogUrl } from "@/features/intake/logShared";
+import {
+  activityFilterGroup,
+  activityGroupLabel,
+  activityKindLabel,
+  presentActivityGroups,
+  useActivityGroupFilters,
+} from "./activityFilterStorage";
 import { useQuery } from "@tanstack/react-query";
 import { get } from "@/lib/api";
 import type { BuyerSummary } from "@/types";
@@ -84,13 +94,7 @@ import {
   toNativeDateValue,
   toNativeDatetimeLocalValue,
 } from "./customFieldDate";
-
-const BUILTINS: { key: keyof Lead; label: string }[] = [
-  { key: "first_name", label: "First Name" },
-  { key: "last_name", label: "Last Name" },
-  { key: "phone", label: "Phone" },
-  { key: "email", label: "Email" },
-];
+import { contactFieldsFromLead, dirtyContactPatch } from "./leadContactFields";
 
 function copyText(text: string, label: string) {
   navigator.clipboard.writeText(text).then(
@@ -175,9 +179,14 @@ function LeadEconomics({ lead, accountType }: { lead: Lead; accountType?: string
 
 export function LeadDetailDrawer() {
   const leadId = useUIStore((s) => s.detailLeadId);
+  const requestedDetailLeadId = useUIStore((s) => s.requestedDetailLeadId);
   const close = useUIStore((s) => s.closeDetail);
+  const completeDetailSwitch = useUIStore((s) => s.completeDetailSwitch);
+  const abortDetailSwitch = useUIStore((s) => s.abortDetailSwitch);
   const qc = useQueryClient();
   const { data: lead, isLoading, isError, error } = useLead(leadId);
+  const closeHandlerRef = useRef<(() => void) | null>(null);
+  const flushHandlerRef = useRef<(() => Promise<boolean>) | null>(null);
 
   useEffect(() => {
     if (isError) {
@@ -185,8 +194,26 @@ export function LeadDetailDrawer() {
     }
   }, [isError, qc]);
 
+  useEffect(() => {
+    if (requestedDetailLeadId == null) return;
+    void (async () => {
+      const flush = flushHandlerRef.current;
+      const ok = flush ? await flush() : true;
+      if (ok) completeDetailSwitch();
+      else abortDetailSwitch();
+    })();
+  }, [requestedDetailLeadId, completeDetailSwitch, abortDetailSwitch]);
+
+  function handleSheetClose() {
+    if (closeHandlerRef.current) {
+      closeHandlerRef.current();
+    } else {
+      close();
+    }
+  }
+
   return (
-    <Sheet open={!!leadId} onClose={close} width={560}>
+    <Sheet open={!!leadId} onClose={handleSheetClose} width={560}>
       {isError ? (
         <div className="px-6 py-20 text-center text-sm text-gray-400">
           {leadDrawerErrorMessage(error)}
@@ -196,7 +223,16 @@ export function LeadDetailDrawer() {
           <Spinner className="h-6 w-6" />
         </div>
       ) : (
-        <DrawerContent lead={lead} onClose={close} />
+        <DrawerContent
+          lead={lead}
+          onClose={close}
+          registerCloseHandler={(fn) => {
+            closeHandlerRef.current = fn;
+          }}
+          registerFlushHandler={(fn) => {
+            flushHandlerRef.current = fn;
+          }}
+        />
       )}
     </Sheet>
   );
@@ -213,11 +249,23 @@ function leadDrawerErrorMessage(err: unknown): string {
   return errorMessage(err);
 }
 
-function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
+function DrawerContent({
+  lead,
+  onClose,
+  registerCloseHandler,
+  registerFlushHandler,
+}: {
+  lead: Lead;
+  onClose: () => void;
+  registerCloseHandler: (fn: (() => void) | null) => void;
+  registerFlushHandler: (fn: (() => Promise<boolean>) | null) => void;
+}) {
   const user = useAuthStore((s) => s.user);
   const canEdit = canEditLead(user, lead);
   const [tab, setTab] = useState<DrawerTab>("details");
   const edgeTouchStart = useRef<number | null>(null);
+  const closingRef = useRef(false);
+  const fieldsTouchedRef = useRef(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const update = useUpdateLead();
   const { data: leadCall } = useLeadCall(lead.id, user?.account_type);
@@ -244,7 +292,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
     if (edgeTouchStart.current === null) return;
     if (e.touches[0].clientX - edgeTouchStart.current > 80) {
       edgeTouchStart.current = null;
-      onClose();
+      void handleClose();
     }
   }
 
@@ -253,19 +301,68 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   }
   const mapsConnected = mapsStatus?.connected === true;
 
-  const [fields, setFields] = useState<Record<string, string>>({});
+  const [fields, setFieldsState] = useState<Record<string, string>>(() => contactFieldsFromLead(lead));
   const [mapOpen, setMapOpen] = useState(false);
+  const fieldsRef = useRef(fields);
+  const leadRef = useRef(lead);
+  fieldsRef.current = fields;
+  leadRef.current = lead;
+
+  function setFields(next: SetStateAction<Record<string, string>>) {
+    fieldsTouchedRef.current = true;
+    setFieldsState(next);
+  }
+
   useEffect(() => {
-    const f: Record<string, string> = {};
-    for (const b of BUILTINS) f[b.key as string] = (lead[b.key] as string) ?? "";
-    f.address = lead.address ?? "";
-    f.city = lead.city ?? "";
-    f.state = lead.state ?? "";
-    f.zip = lead.zip ?? "";
-    f.country = lead.country ?? "";
-    f.address_place_id = lead.address_place_id ?? "";
-    setFields(f);
+    fieldsTouchedRef.current = false;
+    setFieldsState(contactFieldsFromLead(lead));
+  }, [lead.id]);
+
+  useEffect(() => {
+    if (fieldsTouchedRef.current) return;
+    setFieldsState(contactFieldsFromLead(lead));
   }, [lead]);
+
+  const flushContactFields = useCallback(async (): Promise<boolean> => {
+    if (!canEditLead(user, leadRef.current)) return true;
+    const body = dirtyContactPatch(fieldsRef.current, leadRef.current);
+    if (!body) return true;
+
+    const toastId = toast.progress("Saving…");
+    try {
+      await update.mutateAsync({ leadId: leadRef.current.id, body });
+      toast.update(toastId, "Saved");
+      setTimeout(() => toast.dismiss(toastId), 1500);
+      fieldsTouchedRef.current = false;
+      return true;
+    } catch (e) {
+      toast.dismiss(toastId);
+      toast.error(errorMessage(e));
+      return false;
+    }
+  }, [update, user]);
+
+  const handleClose = useCallback(async () => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    try {
+      const ok = await flushContactFields();
+      if (ok) onClose();
+    } finally {
+      closingRef.current = false;
+    }
+  }, [flushContactFields, onClose]);
+
+  useEffect(() => {
+    registerCloseHandler(() => {
+      void handleClose();
+    });
+    registerFlushHandler(flushContactFields);
+    return () => {
+      registerCloseHandler(null);
+      registerFlushHandler(null);
+    };
+  }, [handleClose, flushContactFields, registerCloseHandler, registerFlushHandler]);
 
   const formattedAddress = formatLeadAddress(fields);
 
@@ -284,28 +381,41 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
     );
   }
 
-  function saveAddressField(key: keyof typeof fields) {
+  function saveAddressField(key: keyof typeof fields, opts?: { silent?: boolean }) {
     setFields((prev) => ({ ...prev, address_place_id: "" }));
     update.mutate(
       {
         leadId: lead.id,
         body: {
           fields: {
-            [key]: fields[key],
+            [key]: fieldsRef.current[key],
             address_place_id: null,
           },
         },
       },
-      { onSuccess: () => toast.success("Saved"), onError: (e) => toast.error(errorMessage(e)) }
+      {
+        onSuccess: () => {
+          if (!opts?.silent) toast.success("Saved");
+        },
+        onError: (e) => toast.error(errorMessage(e)),
+      }
     );
   }
 
-  function saveField(key: string) {
+  function saveField(key: string, opts?: { silent?: boolean }) {
     update.mutate(
-      { leadId: lead.id, body: { fields: { [key]: fields[key] } } },
-      { onSuccess: () => toast.success("Saved"), onError: (e) => toast.error(errorMessage(e)) }
+      { leadId: lead.id, body: { fields: { [key]: fieldsRef.current[key] } } },
+      {
+        onSuccess: () => {
+          if (!opts?.silent) toast.success("Saved");
+        },
+        onError: (e) => toast.error(errorMessage(e)),
+      }
     );
   }
+
+  const saveFieldSilent = (key: string) => saveField(key, { silent: true });
+  const saveAddressFieldSilent = (key: keyof typeof fields) => saveAddressField(key, { silent: true });
 
   async function handleDeleteLead() {
     try {
@@ -325,7 +435,7 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
       onTouchMove={onDrawerTouchMove}
       onTouchEnd={onDrawerTouchEnd}
     >
-      <LeadHeader lead={lead} onClose={onClose} />
+      <LeadHeader lead={lead} onClose={() => void handleClose()} />
 
       <div className="flex overflow-x-auto border-b border-gray-100 px-5 py-[10px]">
         {drawerTabs.map(({ id, label }) => (
@@ -357,8 +467,8 @@ function DrawerContent({ lead, onClose }: { lead: Lead; onClose: () => void }) {
               formattedAddress={formattedAddress}
               mapOpen={mapOpen}
               setMapOpen={setMapOpen}
-              saveField={saveField}
-              saveAddressField={saveAddressField}
+              saveField={saveFieldSilent}
+              saveAddressField={saveAddressFieldSilent}
               saveValidatedAddress={saveValidatedAddress}
               addressUpdatePending={update.isPending}
             />
@@ -510,6 +620,14 @@ function LeadHeader({ lead, onClose }: { lead: Lead; onClose: () => void }) {
             className={overdue ? "font-semibold text-danger-fg" : "text-gray-700"}
           />
         </div>
+      )}
+
+      {lead.pending_return_at && (
+        <ReturnIndicator
+          pendingReturnAt={lead.pending_return_at}
+          pendingReturnTimezone={lead.pending_return_timezone}
+          variant="detail"
+        />
       )}
 
       <button
@@ -739,7 +857,7 @@ function LeadPipelineHeader({ lead, collapsed = false }: { lead: Lead; collapsed
               const reached = currentStageIndex >= 0 && i <= currentStageIndex;
               const isCurrent = s.id === stageId;
               return (
-                <span key={s.id} className="group/stage relative min-w-[3rem] shrink-0 flex-1">
+                <span key={s.id} className="relative min-w-[3rem] shrink-0 flex-1">
                   <button
                     type="button"
                     disabled={!canEditPipeline || changeStage.isPending || !stagesReady}
@@ -754,8 +872,8 @@ function LeadPipelineHeader({ lead, collapsed = false }: { lead: Lead; collapsed
                   />
                   <span
                     className={cn(
-                      "pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap text-xs text-gray-400 transition-opacity duration-150",
-                      isCurrent ? "opacity-100" : "opacity-0 group-hover/stage:opacity-100"
+                      "pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap text-xs",
+                      isCurrent ? "text-gray-300" : "text-gray-500/70"
                     )}
                   >
                     {s.name}
@@ -1183,55 +1301,14 @@ function transferHeadline(entry: LeadHistoryEntry): string {
   }
 }
 
-function kindLabel(kind: LeadHistoryEntry["kind"]): string {
-  switch (kind) {
-    case "stage_change":
-      return "Stage";
-    case "account_transfer":
-      return "Transfer";
-    case "purchase":
-      return "Purchase";
-    case "refund":
-      return "Refund";
-    case "dispute_opened":
-    case "dispute_resolved":
-      return "Dispute";
-    case "webhook":
-      return "Webhook";
-    case "outbound_webhook":
-      return "Outbound";
-    case "integration":
-      return "CRM";
-    case "lead_created":
-      return "Created";
-    case "pipeline_placed":
-      return "Placement";
-    case "status_change":
-      return "Status";
-    case "field_change":
-      return "Field";
-    case "assignee_change":
-      return "Assignee";
-    case "tag_change":
-      return "Tags";
-    case "calendar_event":
-      return "Calendar";
-    case "follower_added":
-    case "follower_removed":
-      return "Follower";
-    case "lead_deleted":
-      return "Deleted";
-    case "pipeline_cleared":
-      return "Pipeline";
-    case "imported":
-      return "Import";
-    case "note_added":
-      return "Note";
-    case "route_run":
-      return "Route";
-    default:
-      return "Activity";
+function historyHeadline(entry: LeadHistoryEntry): string {
+  if (entry.summary) return entry.summary;
+  if (entry.kind === "account_transfer") return transferHeadline(entry);
+  if (entry.kind === "stage_change") return stageChangeHeadline(entry);
+  if (entry.field_name && entry.from_value != null && entry.to_value != null) {
+    return `${entry.field_name} · ${entry.from_value} → ${entry.to_value}`;
   }
+  return activityKindLabel(entry.kind);
 }
 
 function actorTypeLabel(type: string | null | undefined): string {
@@ -1255,20 +1332,24 @@ function historyActorLine(entry: LeadHistoryEntry): string {
   return `${name} · ${type}`;
 }
 
-function historyHeadline(entry: LeadHistoryEntry): string {
-  if (entry.summary) return entry.summary;
-  if (entry.kind === "account_transfer") return transferHeadline(entry);
-  if (entry.kind === "stage_change") return stageChangeHeadline(entry);
-  if (entry.field_name && entry.from_value != null && entry.to_value != null) {
-    return `${entry.field_name} · ${entry.from_value} → ${entry.to_value}`;
-  }
-  return kindLabel(entry.kind);
+function isWebhookHistoryEntry(kind: LeadHistoryEntry["kind"]): boolean {
+  return kind === "webhook" || kind === "outbound_webhook";
 }
 
 function ActivityTab({ leadId }: { leadId: number }) {
+  const navigate = useNavigate();
+  const closeDetail = useUIStore((s) => s.closeDetail);
+  const accountType = useAuthStore((s) => s.user?.account_type);
+  const userId = useAuthStore((s) => s.user?.id);
   const { data: history, isLoading, isError } = useLeadHistory(leadId);
+  const { toggleGroup, isVisible } = useActivityGroupFilters(userId);
   const addNote = useAddNote();
   const [body, setBody] = useState("");
+
+  const allHistory = history ?? [];
+  const presentGroups = presentActivityGroups(allHistory);
+  const visibleHistory = allHistory.filter((h) => isVisible(activityFilterGroup(h.kind)));
+
   return (
     <div>
       <div className="mb-4">
@@ -1288,6 +1369,21 @@ function ActivityTab({ leadId }: { leadId: number }) {
         </div>
       </div>
       <SectionLabel className="mb-2">Activity</SectionLabel>
+      {!isLoading && !isError && presentGroups.length > 0 && (
+        <div className="mb-3 flex flex-nowrap gap-3 overflow-x-auto pb-1">
+          {presentGroups.map((group) => (
+            <label key={group} className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-gray-500">
+              <input
+                type="checkbox"
+                className="rounded"
+                checked={isVisible(group)}
+                onChange={() => toggleGroup(group)}
+              />
+              {activityGroupLabel(group)}
+            </label>
+          ))}
+        </div>
+      )}
       {isLoading && (
         <div className="flex justify-center py-6">
           <Spinner />
@@ -1296,16 +1392,19 @@ function ActivityTab({ leadId }: { leadId: number }) {
       {isError && (
         <p className="text-sm text-red-500">Could not load activity.</p>
       )}
-      {!isLoading && !isError && (history ?? []).length === 0 && (
+      {!isLoading && !isError && allHistory.length === 0 && (
         <p className="text-sm text-gray-400">No activity yet.</p>
       )}
-      {(history ?? []).map((h) => (
+      {!isLoading && !isError && allHistory.length > 0 && visibleHistory.length === 0 && (
+        <p className="text-sm text-gray-400">No activity matches your filters.</p>
+      )}
+      {visibleHistory.map((h) => (
         <div key={`${h.kind}-${h.id}`} className="flex items-start gap-2.5 py-1.5 text-sm text-gray-500">
           <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-jade-300" />
           <div className="min-w-0 flex-1">
             <div className="mb-0.5 flex flex-wrap items-center gap-2">
               <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-                {kindLabel(h.kind)}
+                {activityKindLabel(h.kind)}
               </span>
               {h.status && h.status !== "success" && (
                 <span className="text-[10px] font-medium uppercase text-amber-600">{h.status}</span>
@@ -1329,7 +1428,29 @@ function ActivityTab({ leadId }: { leadId: number }) {
               </div>
             ) : (
               <div className={cn("font-medium", h.kind === "note_added" && "whitespace-pre-wrap")}>
-                <LinkifiedText text={historyHeadline(h)} />
+                {isWebhookHistoryEntry(h.kind) && accountType ? (
+                  (() => {
+                    const logUrl = buildWebhookActivityLogUrl(accountType, h, leadId);
+                    const headline = historyHeadline(h);
+                    if (!logUrl) {
+                      return <LinkifiedText text={headline} />;
+                    }
+                    return (
+                      <button
+                        type="button"
+                        className="text-left text-jade-600 hover:underline"
+                        onClick={() => {
+                          closeDetail();
+                          navigate(logUrl);
+                        }}
+                      >
+                        <LinkifiedText text={headline} />
+                      </button>
+                    );
+                  })()
+                ) : (
+                  <LinkifiedText text={historyHeadline(h)} />
+                )}
               </div>
             )}
             <div className="text-xs text-gray-400">

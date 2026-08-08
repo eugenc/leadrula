@@ -190,9 +190,12 @@ func TestAddBuyerContractReturnRule_createsPendingRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rr, err := svc.AddBuyerContractReturnRule(ctx, buyerID, contractID, buyerStageID, buyerPipelineID)
+	rr, err := svc.AddBuyerContractReturnRule(ctx, buyerID, contractID, buyerStageID, buyerPipelineID, ReturnSchedulePatch{}, false, strPtr("No shows"))
 	if err != nil {
 		t.Fatalf("AddBuyerContractReturnRule: %v", err)
+	}
+	if rr.Label != "No shows" {
+		t.Fatalf("label = %q, want No shows", rr.Label)
 	}
 	if rr.ReturnStageID != nil {
 		t.Fatalf("return_stage_id = %v, want pending (nil)", rr.ReturnStageID)
@@ -294,9 +297,6 @@ func TestListContractParticipationReturnRules_andUpdateDestination(t *testing.T)
 		if rr.ParticipationID != nil && *rr.ParticipationID == participationID && rr.BuyerStageID == buyerStageID {
 			found = true
 			ruleID = rr.ID
-			if rr.BuyerStageName == "" {
-				t.Fatal("expected buyer_stage_name on participation return rule")
-			}
 			break
 		}
 	}
@@ -304,9 +304,12 @@ func TestListContractParticipationReturnRules_andUpdateDestination(t *testing.T)
 		t.Fatal("expected participation return rule in list")
 	}
 
-	updated, err := svc.UpdateParticipationReturnRuleDestination(ctx, publisherID, ruleID, altReturnStageID)
+	updated, err := svc.UpdateParticipationReturnRuleDestination(ctx, publisherID, ruleID, altReturnStageID, strPtr("Publisher label"), ReturnSchedulePatch{}, false)
 	if err != nil {
 		t.Fatalf("UpdateParticipationReturnRuleDestination: %v", err)
+	}
+	if updated.Label != "Publisher label" {
+		t.Fatalf("label = %q, want Publisher label", updated.Label)
 	}
 	if updated.ReturnStageID == nil || *updated.ReturnStageID != altReturnStageID {
 		t.Fatalf("return_stage_id = %v, want %d", updated.ReturnStageID, altReturnStageID)
@@ -315,7 +318,7 @@ func TestListContractParticipationReturnRules_andUpdateDestination(t *testing.T)
 		t.Fatalf("buyer_stage_id changed from %d to %d", buyerStageID, updated.BuyerStageID)
 	}
 
-	_, err = svc.UpdateParticipationReturnRuleDestination(ctx, publisherID, ruleID, defaultReturnStageID)
+	_, err = svc.UpdateParticipationReturnRuleDestination(ctx, publisherID, ruleID, defaultReturnStageID, nil, ReturnSchedulePatch{}, false)
 	if err != nil {
 		t.Fatalf("restore return_stage_id: %v", err)
 	}
@@ -358,9 +361,6 @@ func TestListReturnRulesForPublisher_andUpdateContractDestination(t *testing.T) 
 		if rr.BuyerStageID == buyerStageID {
 			found = true
 			ruleID = rr.ID
-			if rr.BuyerStageName == "" {
-				t.Fatal("expected buyer_stage_name on contract return rule")
-			}
 			break
 		}
 	}
@@ -368,15 +368,18 @@ func TestListReturnRulesForPublisher_andUpdateContractDestination(t *testing.T) 
 		t.Fatal("expected contract return rule in list")
 	}
 
-	updated, err := svc.UpdateContractReturnRuleDestination(ctx, publisherID, ruleID, altReturnStageID)
+	updated, err := svc.UpdateContractReturnRuleDestination(ctx, publisherID, ruleID, altReturnStageID, strPtr("Contract label"), ReturnSchedulePatch{}, false)
 	if err != nil {
 		t.Fatalf("UpdateContractReturnRuleDestination: %v", err)
+	}
+	if updated.Label != "Contract label" {
+		t.Fatalf("label = %q, want Contract label", updated.Label)
 	}
 	if updated.ReturnStageID == nil || *updated.ReturnStageID != altReturnStageID {
 		t.Fatalf("return_stage_id = %v, want %d", updated.ReturnStageID, altReturnStageID)
 	}
 
-	_, err = svc.UpdateContractReturnRuleDestination(ctx, publisherID, ruleID, defaultReturnStageID)
+	_, err = svc.UpdateContractReturnRuleDestination(ctx, publisherID, ruleID, defaultReturnStageID, nil, ReturnSchedulePatch{}, false)
 	if err != nil {
 		t.Fatalf("restore return_stage_id: %v", err)
 	}

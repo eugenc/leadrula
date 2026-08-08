@@ -10,15 +10,32 @@ interface UIState {
   toggleSidebar: () => void;
   closeSidebar: () => void;
   detailLeadId: number | null;
+  requestedDetailLeadId: number | null;
   openDetail: (id: number) => void;
   closeDetail: () => void;
+  completeDetailSwitch: () => void;
+  abortDetailSwitch: () => void;
 }
 
-export const useUIStore = create<UIState>((set) => ({
+export const useUIStore = create<UIState>((set, get) => ({
   sidebarOpen: initialSidebarOpen(),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   closeSidebar: () => set({ sidebarOpen: false }),
   detailLeadId: null,
-  openDetail: (id) => set({ detailLeadId: id }),
-  closeDetail: () => set({ detailLeadId: null }),
+  requestedDetailLeadId: null,
+  openDetail: (id) => {
+    const current = get().detailLeadId;
+    if (current === id) return;
+    if (current != null) {
+      set({ requestedDetailLeadId: id });
+      return;
+    }
+    set({ detailLeadId: id });
+  },
+  closeDetail: () => set({ detailLeadId: null, requestedDetailLeadId: null }),
+  completeDetailSwitch: () => {
+    const next = get().requestedDetailLeadId;
+    if (next != null) set({ detailLeadId: next, requestedDetailLeadId: null });
+  },
+  abortDetailSwitch: () => set({ requestedDetailLeadId: null }),
 }));

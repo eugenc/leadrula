@@ -1,9 +1,66 @@
 import { Button } from "@/components/ui/button";
 import { FilterSelect } from "@/components/ui/input";
-import type { WebhookDelivery } from "@/types";
+import type { LeadHistoryEntry, WebhookDelivery } from "@/types";
 import { pipelineStage } from "@/features/routing/routeFormatters";
 
 export type LogTypeFilter = "intake" | "webhooks" | "integrations" | "routes" | "all";
+
+const LOG_TYPE_PARAM_VALUES: LogTypeFilter[] = ["all", "routes", "intake", "webhooks", "integrations"];
+
+export function parseLogTypeParam(value: string | null): LogTypeFilter | undefined {
+  if (value && LOG_TYPE_PARAM_VALUES.includes(value as LogTypeFilter)) {
+    return value as LogTypeFilter;
+  }
+  return undefined;
+}
+
+export function parseLogIntParam(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const n = Number(value);
+  return n > 0 ? n : undefined;
+}
+
+export function parseLogExpandParam(value: string | null): string | null {
+  if (!value) return null;
+  const parts = value.split(":");
+  const kind = parts[0];
+  if (kind === "webhook" && parts.length === 3 && parts[1] && parts[2]) {
+    const webhookId = Number(parts[1]);
+    const deliveryId = Number(parts[2]);
+    if (webhookId > 0 && deliveryId > 0) return value;
+  }
+  if (kind === "integration" && parts.length === 2 && parts[1]) {
+    const id = Number(parts[1]);
+    if (id > 0) return value;
+  }
+  return null;
+}
+
+export function buildWebhookActivityLogUrl(
+  accountType: "publisher" | "buyer",
+  entry: Pick<LeadHistoryEntry, "kind" | "id" | "webhook_id">,
+  leadId: number
+): string | null {
+  const base = accountType === "publisher" ? "/p/log" : "/b/logs";
+  if (entry.kind === "webhook" && entry.webhook_id) {
+    const params = new URLSearchParams({
+      type: "webhooks",
+      lead_id: String(leadId),
+      webhook_id: String(entry.webhook_id),
+      expand: `webhook:${entry.webhook_id}:${entry.id}`,
+    });
+    return `${base}?${params}`;
+  }
+  if (entry.kind === "outbound_webhook") {
+    const params = new URLSearchParams({
+      type: "all",
+      lead_id: String(leadId),
+      expand: `integration:${entry.id}`,
+    });
+    return `${base}?${params}`;
+  }
+  return null;
+}
 
 export const LOG_TYPE_FILTERS: { value: LogTypeFilter; label: string }[] = [
   { value: "all", label: "All" },

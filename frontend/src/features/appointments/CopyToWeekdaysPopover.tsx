@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Dropdown } from "@/components/ui/dropdown";
 import { IconButton } from "@/components/layout/IconButton";
 import { WEEKDAYS } from "@/features/appointments/hooks";
+import { SLOT_CHECKBOX_CLASS } from "@/features/appointments/slotGrid";
 
 const ALL_WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
 
@@ -59,6 +60,7 @@ export function CopyToWeekdaysPopover({
             <label key={i} className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
               <input
                 type="checkbox"
+                className={SLOT_CHECKBOX_CLASS}
                 checked={targets.includes(i)}
                 onChange={(e) =>
                   setTargets((prev) => (e.target.checked ? [...prev, i] : prev.filter((d) => d !== i)))

@@ -264,6 +264,9 @@ func (s *Service) changeStage(ctx context.Context, p *auth.Principal, leadID, ne
 	}
 
 	if !frozen {
+		if err := CancelPendingReturnsIfStageChanged(ctx, tx, s.repo, leadID, finalStageID); err != nil {
+			return nil, nil, err
+		}
 		returnOut, err := TryReturnLead(ctx, tx, ReturnDeps{Repo: s.repo, Notif: s.notif}, leadID)
 		if err != nil {
 			return nil, nil, err

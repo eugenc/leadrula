@@ -1,5 +1,5 @@
 export const PUBLISHER_DELIVERY_MODES = [
-  { value: "leads", label: "Lead inbox" },
+  { value: "leads", label: "Leads Only" },
   { value: "leads_pipeline", label: "Pipeline" },
   { value: "webhook", label: "Webhook" },
 ] as const;

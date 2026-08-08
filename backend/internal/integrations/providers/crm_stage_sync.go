@@ -5,6 +5,9 @@ import (
 	"strings"
 )
 
+// InboundStageSyncPipelineSkipReason is the user-facing skip reason when the lead is not in the configured sync pipeline.
+const InboundStageSyncPipelineSkipReason = "lead is in a different pipeline"
+
 // InboundStageSyncDiagnosis explains why inbound CRM stage sync did or did not run.
 type InboundStageSyncDiagnosis struct {
 	CanSync       bool
@@ -54,7 +57,7 @@ func DiagnoseCRMInboundStageSync(slug string, flat map[string]any, cfg InboundSt
 	}
 	if currentPipelineID != nil && *currentPipelineID != 0 && *currentPipelineID != cfg.LeadrulaPipelineID {
 		return InboundStageSyncDiagnosis{
-			SkipReason:    "lead not in inbound sync pipeline",
+			SkipReason:    InboundStageSyncPipelineSkipReason,
 			TargetStageID: targetStageID,
 			CRMPipelineID: crmPipelineID,
 			CRMStageID:    crmStageID,

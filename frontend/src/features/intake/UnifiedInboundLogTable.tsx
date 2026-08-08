@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useRejectQueue } from "@/features/admin/hooks";
 import { diagnoseGhlInboundStageSyncPayload } from "@/features/integrations/ghlStageSyncDiagnosis";
 import { useIntegrationDelivery, useRetryIntegrationDelivery } from "@/features/intake/hooks";
@@ -37,6 +37,7 @@ interface UnifiedInboundLogTableProps {
   mappingSource?: "publisher" | "buyer";
   canReplayWebhooks?: boolean;
   integrationLogMode?: boolean;
+  initialExpandedKey?: string | null;
   onPageChange: (page: number) => void;
   onLimitChange: (limit: number) => void;
   onWebhookReplayed?: () => void;
@@ -181,6 +182,16 @@ function IntegrationDeliveryExpand({ detail }: { detail: IntegrationDeliveryDeta
   );
 }
 
+function rowExpandKey(row: InboundLogRow): string {
+  if (row.kind === "source") return `source:${row.item.id}`;
+  if (row.kind === "integration") return `integration:${row.item.id}`;
+  if (row.kind === "route") return `route:${row.item.id}`;
+  const isOutbound = row.direction === "outbound";
+  return isOutbound
+    ? `integration:${row.item.id}`
+    : `webhook:${row.item.webhook_id}:${row.item.id}`;
+}
+
 export function UnifiedInboundLogTable({
   rows,
   total,
@@ -194,6 +205,7 @@ export function UnifiedInboundLogTable({
   mappingSource = "publisher",
   canReplayWebhooks = false,
   integrationLogMode = false,
+  initialExpandedKey,
   onPageChange,
   onLimitChange,
   onWebhookReplayed,
@@ -214,6 +226,13 @@ export function UnifiedInboundLogTable({
 
   const { data: expandedDelivery } = useWebhookDelivery(expandedWebhookId, expandedDeliveryId);
   const { data: expandedIntegration } = useIntegrationDelivery(expandedIntegrationId, mappingSource);
+
+  useEffect(() => {
+    if (!initialExpandedKey || isLoading || rows.length === 0) return;
+    if (rows.some((row) => rowExpandKey(row) === initialExpandedKey)) {
+      setExpandedKey(initialExpandedKey);
+    }
+  }, [initialExpandedKey, isLoading, rows]);
 
   if (isLoading) return <Spinner className="h-6 w-6" />;
 

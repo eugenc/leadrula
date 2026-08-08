@@ -498,3 +498,21 @@ func TestDedupePipelinePlaced(t *testing.T) {
 		}
 	}
 }
+
+func TestChangeLogSummaryReturnEvents(t *testing.T) {
+	label := "Mon Jan 2 3:04 PM"
+	got := changeLogSummary("return_scheduled", nil, nil, &label)
+	if got != "Return scheduled · Mon Jan 2 3:04 PM" {
+		t.Fatalf("return_scheduled: got %q", got)
+	}
+	got = changeLogSummary("return_cancelled", nil, nil, &label)
+	if got != "Return cancelled · was Mon Jan 2 3:04 PM" {
+		t.Fatalf("return_cancelled: got %q", got)
+	}
+	if changeLogKind("return_scheduled") != "return_scheduled" {
+		t.Fatal("return_scheduled kind mapping")
+	}
+	if changeLogKind("return_cancelled") != "return_cancelled" {
+		t.Fatal("return_cancelled kind mapping")
+	}
+}

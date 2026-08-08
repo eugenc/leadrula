@@ -54,7 +54,9 @@ type Lead struct {
 	Revenue           *float64                  `json:"revenue,omitempty"`
 	GrossProfit       *float64                  `json:"gross_profit,omitempty"`
 	NetProfit         *float64                  `json:"net_profit,omitempty"`
-	PurchasePrice     *float64                  `json:"purchase_price,omitempty"`
+	PurchasePrice         *float64   `json:"purchase_price,omitempty"`
+	PendingReturnAt       *time.Time `json:"pending_return_at,omitempty"`
+	PendingReturnTimezone *string    `json:"pending_return_timezone,omitempty"`
 }
 
 type ListResult struct {
@@ -116,6 +118,7 @@ type LeadHistoryEntry struct {
 	PipelineName *string `json:"pipeline_name,omitempty"`
 	StageName    *string `json:"stage_name,omitempty"`
 	RouteName    *string `json:"route_name,omitempty"`
+	WebhookID    *int64  `json:"webhook_id,omitempty"`
 
 	ownerAccountID int64 `json:"-"`
 	fromAccountID  int64 `json:"-"`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"time"
 
 	"github.com/echayko/leadrula/backend/internal/database"
 	"github.com/jackc/pgx/v5"
@@ -62,6 +63,64 @@ func (r *Repository) EnrichLeadEconomics(ctx context.Context, accountType string
 			return err
 		}
 	}
+	return nil
+}
+
+func (r *Repository) EnrichPendingReturnsBatch(ctx context.Context, items []Lead) error {
+	if len(items) == 0 {
+		return nil
+	}
+	ids := make([]int64, len(items))
+	for i := range items {
+		ids[i] = items[i].ID
+	}
+	rows, err := r.pool.Query(ctx,
+		`SELECT DISTINCT ON (slr.lead_id) slr.lead_id, slr.execute_at, c.schedule_timezone
+		 FROM scheduled_lead_returns slr
+		 JOIN contracts c ON c.id = slr.contract_id
+		 WHERE slr.lead_id = ANY($1) AND slr.status = 'pending'
+		 ORDER BY slr.lead_id, slr.created_at DESC`, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type pendingReturn struct {
+		executeAt time.Time
+		timezone  string
+	}
+	pending := map[int64]pendingReturn{}
+	for rows.Next() {
+		var leadID int64
+		var executeAt time.Time
+		var tz string
+		if err := rows.Scan(&leadID, &executeAt, &tz); err != nil {
+			return err
+		}
+		pending[leadID] = pendingReturn{executeAt: executeAt, timezone: tz}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range items {
+		p, ok := pending[items[i].ID]
+		if !ok {
+			continue
+		}
+		at := p.executeAt
+		items[i].PendingReturnAt = &at
+		tz := p.timezone
+		items[i].PendingReturnTimezone = &tz
+	}
+	return nil
+}
+
+func (r *Repository) EnrichPendingReturn(ctx context.Context, l *Lead) error {
+	items := []Lead{*l}
+	if err := r.EnrichPendingReturnsBatch(ctx, items); err != nil {
+		return err
+	}
+	l.PendingReturnAt = items[0].PendingReturnAt
+	l.PendingReturnTimezone = items[0].PendingReturnTimezone
 	return nil
 }
 

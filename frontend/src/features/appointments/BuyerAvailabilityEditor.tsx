@@ -46,6 +46,7 @@ import {
   WEEKDAYS,
 } from "@/features/appointments/hooks";
 import { CopyToWeekdaysPopover } from "@/features/appointments/CopyToWeekdaysPopover";
+import { SLOT_ROW_GRID, slotEndTime } from "@/features/appointments/slotGrid";
 import { TimeFieldInput } from "@/features/appointments/TimeFieldInput";
 import { Spinner } from "@/components/ui/misc";
 import type { BuyerAppointmentSlot } from "@/types";
@@ -81,8 +82,6 @@ const MAX_SLOT_DURATION_MIN = 180;
 const DEFAULT_SLOT_CAPACITY = 1;
 const MIN_SLOT_CAPACITY = 1;
 const MAX_SLOT_CAPACITY = 20;
-const SLOT_ROW_GRID =
-  "grid grid-cols-[4rem_minmax(7.5rem,9rem)_minmax(7.5rem,9rem)_3rem_4.5rem] items-center gap-2";
 // From+To share slot From+To+Cap width (equal columns); actions column aligns with slots.
 const WORKING_HOURS_GRID =
   "grid grid-cols-[4rem_minmax(9.25rem,10.75rem)_minmax(9.25rem,10.75rem)_4.5rem] items-center gap-2";
@@ -112,10 +111,6 @@ function isDayOpen(schedule: Schedule, weekday: number): boolean {
 
 function openWeekdays(schedule: Schedule): number[] {
   return WEEKDAYS.map((_, i) => i).filter((i) => isDayOpen(schedule, i));
-}
-
-function slotEndTime(start: string, durationMin: number): string {
-  return minutesToTimeHhmm(timeHhmmToMinutes(start) + durationMin);
 }
 
 function defaultAddSlotStart(
@@ -792,18 +787,20 @@ export function BuyerAvailabilityEditor({
     lastHydratedKey.current = hydrationKey;
 
     const sched = (calendar.schedule as Schedule) ?? {};
-    setName(calendar.name);
-    setSchedule(sched);
-    setTimezone(calendar.timezone);
-    setLocation(calendar.location ?? "");
-    setBufferMin(calendar.buffer_min);
-    savedSnapshot.current = {
+    const hydrated = {
       name: calendar.name,
       schedule: sched,
       timezone: calendar.timezone,
       location: calendar.location ?? "",
       bufferMin: calendar.buffer_min,
     };
+    setName(hydrated.name);
+    setSchedule(hydrated.schedule);
+    setTimezone(hydrated.timezone);
+    setLocation(hydrated.location);
+    setBufferMin(hydrated.bufferMin);
+    savedSnapshot.current = hydrated;
+    stateRef.current = hydrated;
     calendarLoadedRef.current = true;
     slotsInitialized.current = false;
   }, [calendar?.id, calendar?.updated_at]);
@@ -816,24 +813,25 @@ export function BuyerAvailabilityEditor({
     slotsInitialized.current = true;
   }, [slots]);
 
-  const persistIfDirty = useCallback(() => {
+  const persistIfDirty = useCallback((opts?: { silent?: boolean }) => {
     if (readOnly || !calendarLoadedRef.current) return;
     const { name: calName, schedule: sched, timezone: tz, location: loc, bufferMin: buf } = stateRef.current;
     if (scheduleHasInvalidHours(sched)) return;
-    const trimmedName = calName.trim();
-    if (!trimmedName) {
-      toast.error("Calendar name is required");
-      return;
-    }
     const snap = savedSnapshot.current;
-    if (
+    const trimmedName = calName.trim();
+    const notDirty =
       snap &&
       snap.name === trimmedName &&
       snap.timezone === tz &&
       snap.location === loc &&
       snap.bufferMin === buf &&
-      schedulesEqual(snap.schedule, sched)
-    ) {
+      schedulesEqual(snap.schedule, sched);
+    if (notDirty) return;
+    if (!trimmedName) {
+      if (snap?.name?.trim()) return;
+      if (!opts?.silent) {
+        toast.error("Calendar name is required");
+      }
       return;
     }
     saveAvail.mutate(
@@ -861,14 +859,14 @@ export function BuyerAvailabilityEditor({
   const scheduleSave = useCallback(() => {
     if (readOnly || !calendarLoadedRef.current) return;
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(persistIfDirty, SAVE_DEBOUNCE_MS);
+    saveTimer.current = setTimeout(() => persistIfDirty(), SAVE_DEBOUNCE_MS);
   }, [readOnly, persistIfDirty]);
 
   useEffect(() => {
     return () => {
       clearTimeout(saveTimer.current);
       saveTimer.current = undefined;
-      persistIfDirtyRef.current();
+      persistIfDirtyRef.current({ silent: true });
     };
   }, []);
 

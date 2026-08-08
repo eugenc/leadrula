@@ -1,9 +1,15 @@
 import { useState } from "react";
-import { Select } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/layout/IconButton";
 import { Spinner, EmptyState } from "@/components/ui/misc";
 import { Plus, Trash2 } from "lucide-react";
+import { ReturnScheduleFields } from "@/features/admin/ReturnScheduleFields";
+import {
+  DEFAULT_RETURN_SCHEDULE,
+  scheduleFromRule,
+  type ReturnScheduleDraft,
+} from "@/features/admin/returnSchedule";
 import type { ReturnRule, Stage } from "@/types";
 
 type Props = {
@@ -14,13 +20,24 @@ type Props = {
   defaultReturnStageId?: number;
   loading?: boolean;
   description?: string;
-  onAdd: (buyerStageId: number, returnStageId?: number) => void;
-  onUpdate: (ruleId: number, buyerStageId: number, returnStageId?: number) => void;
+  onAdd: (
+    buyerStageId: number,
+    returnStageId?: number,
+    schedule?: ReturnScheduleDraft,
+    label?: string
+  ) => void;
+  onUpdate: (
+    ruleId: number,
+    buyerStageId: number,
+    returnStageId?: number,
+    schedule?: ReturnScheduleDraft,
+    label?: string
+  ) => void;
   onDelete: (ruleId: number) => void;
 };
 
 const BUYER_DESCRIPTION =
-  "Pick which stages on your pipeline send leads back to the publisher.";
+  "Configure one or more return routes — pick which stages on your pipeline send leads back to the publisher.";
 
 const PUBLISHER_DESCRIPTION =
   "When a lead enters the return start stage on the buyer pipeline, it moves to the publisher return destination stage.";
@@ -44,6 +61,8 @@ export function ContractReturnRulesEditor({
   const [draftOpen, setDraftOpen] = useState(false);
   const [addFrom, setAddFrom] = useState(0);
   const [addTo, setAddTo] = useState(defaultReturnStageId ?? 0);
+  const [draftLabel, setDraftLabel] = useState("");
+  const [draftSchedule, setDraftSchedule] = useState<ReturnScheduleDraft>(DEFAULT_RETURN_SCHEDULE);
 
   const sortedBuyer = sortStages(buyerStages);
   const sortedPublisher = sortStages(publisherStages);
@@ -68,6 +87,8 @@ export function ContractReturnRulesEditor({
     setDraftOpen(false);
     setAddFrom(0);
     setAddTo(defaultReturnStageId ?? 0);
+    setDraftLabel("");
+    setDraftSchedule(DEFAULT_RETURN_SCHEDULE);
   }
 
   function openDraft() {
@@ -76,6 +97,7 @@ export function ContractReturnRulesEditor({
     } else {
       setAddTo(defaultReturnStageId || sortedPublisher[0]?.id || 0);
     }
+    setDraftLabel("");
     setDraftOpen(true);
   }
 
@@ -83,12 +105,12 @@ export function ContractReturnRulesEditor({
     if (side === "buyer") {
       const from = addFrom || availableFrom[0]?.id;
       if (!from) return;
-      onAdd(from);
+      onAdd(from, undefined, draftSchedule, draftLabel);
     } else {
       const to = addTo || defaultReturnStageId || sortedPublisher[0]?.id;
       const from = addFrom || availableFrom[0]?.id;
       if (!from || !to) return;
-      onAdd(from, to);
+      onAdd(from, to, draftSchedule, draftLabel);
     }
     closeDraft();
   }
@@ -118,26 +140,37 @@ export function ContractReturnRulesEditor({
             />
           ))}
           {draftOpen && side === "buyer" && (
-            <div className="flex flex-wrap items-end gap-2 rounded-md border border-gray-100 px-3 py-2">
-              <div className="min-w-[120px] flex-1">
-                <div className="mb-1 text-xs font-semibold text-gray-500">Return start</div>
-                <Select
-                  value={addFrom || availableFrom[0]?.id || 0}
-                  onChange={(e) => setAddFrom(Number(e.target.value))}
-                >
-                  {availableFrom.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </Select>
+            <div className="space-y-2 rounded-md border border-gray-100 px-3 py-2">
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-[120px] flex-1">
+                  <div className="mb-1 text-xs font-semibold text-gray-500">Label</div>
+                  <Input
+                    value={draftLabel}
+                    placeholder="Optional label"
+                    onChange={(e) => setDraftLabel(e.target.value)}
+                  />
+                </div>
+                <div className="min-w-[120px] flex-1">
+                  <div className="mb-1 text-xs font-semibold text-gray-500">Return start</div>
+                  <Select
+                    value={addFrom || availableFrom[0]?.id || 0}
+                    onChange={(e) => setAddFrom(Number(e.target.value))}
+                  >
+                    {availableFrom.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <Button size="sm" variant="secondary" onClick={saveDraft}>
+                  <Plus className="h-4 w-4" /> Add
+                </Button>
+                <IconButton variant="danger" aria-label="Cancel new rule" onClick={closeDraft}>
+                  <Trash2 className="h-4 w-4" />
+                </IconButton>
               </div>
-              <Button size="sm" variant="secondary" onClick={saveDraft}>
-                <Plus className="h-4 w-4" /> Add
-              </Button>
-              <IconButton variant="danger" aria-label="Cancel new rule" onClick={closeDraft}>
-                <Trash2 className="h-4 w-4" />
-              </IconButton>
+              <ReturnScheduleFields compact value={draftSchedule} onChange={setDraftSchedule} />
             </div>
           )}
           {draftOpen && side === "publisher" && (
@@ -202,38 +235,78 @@ function RuleRow({
   buyerStages: Stage[];
   publisherStages: Stage[];
   usedFrom: Set<number>;
-  onUpdate: (ruleId: number, buyerStageId: number, returnStageId?: number) => void;
+  onUpdate: (
+    ruleId: number,
+    buyerStageId: number,
+    returnStageId?: number,
+    schedule?: ReturnScheduleDraft,
+    label?: string
+  ) => void;
   onDelete: (ruleId: number) => void;
 }) {
   const fromOptions = buyerStages.filter((s) => s.id === rule.buyer_stage_id || !usedFrom.has(s.id));
+  const [schedule, setSchedule] = useState(() => scheduleFromRule(rule));
+  const [label, setLabel] = useState(rule.label ?? "");
 
   if (side === "buyer") {
     return (
-      <div className="flex flex-wrap items-end gap-2 rounded-md border border-gray-100 px-3 py-2">
-        <div className="min-w-[120px] flex-1">
-          <div className="mb-1 text-xs font-semibold text-gray-500">Return start</div>
-          <Select
-            value={rule.buyer_stage_id}
-            onChange={(e) => onUpdate(rule.id, Number(e.target.value), rule.return_stage_id ?? undefined)}
-          >
-            {fromOptions.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </Select>
-          {rule.stale && (
-            <p className="mt-1 text-xs text-amber-700">
-              This route points at an old pipeline stage and will not trigger returns. Delete and re-add it.
-            </p>
-          )}
-          {rule.buyer_pipeline_name && !rule.stale && (
-            <p className="mt-1 text-xs text-gray-400">{rule.buyer_pipeline_name}</p>
-          )}
+      <div className="space-y-2 rounded-md border border-gray-100 px-3 py-2">
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="min-w-[120px] flex-1">
+            <div className="mb-1 text-xs font-semibold text-gray-500">Label</div>
+            <Input
+              value={label}
+              placeholder="Optional label"
+              onChange={(e) => setLabel(e.target.value)}
+              onBlur={(e) =>
+                onUpdate(
+                  rule.id,
+                  rule.buyer_stage_id,
+                  rule.return_stage_id ?? undefined,
+                  schedule,
+                  e.target.value
+                )
+              }
+            />
+          </div>
+          <div className="min-w-[120px] flex-1">
+            <div className="mb-1 text-xs font-semibold text-gray-500">Return start</div>
+            <Select
+              value={rule.buyer_stage_id}
+              onChange={(e) =>
+                onUpdate(
+                  rule.id,
+                  Number(e.target.value),
+                  rule.return_stage_id ?? undefined,
+                  schedule,
+                  label
+                )
+              }
+            >
+              {fromOptions.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </Select>
+            {rule.stale && (
+              <p className="mt-1 text-xs text-amber-700">
+                This route points at an old pipeline stage and will not trigger returns. Delete and re-add it.
+              </p>
+            )}
+          </div>
+          <IconButton variant="danger" aria-label="Delete rule" onClick={() => onDelete(rule.id)}>
+            <Trash2 className="h-4 w-4" />
+          </IconButton>
         </div>
-        <IconButton variant="danger" aria-label="Delete rule" onClick={() => onDelete(rule.id)}>
-          <Trash2 className="h-4 w-4" />
-        </IconButton>
+        <ReturnScheduleFields
+          compact
+          value={schedule}
+          onChange={(next) => {
+            setSchedule(next);
+            onUpdate(rule.id, rule.buyer_stage_id, rule.return_stage_id ?? undefined, next, label);
+          }}
+        />
       </div>
     );
   }

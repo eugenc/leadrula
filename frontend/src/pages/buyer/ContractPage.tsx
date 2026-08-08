@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useBuyerParticipations, useBuyerContracts } from "@/features/admin/hooks";
 import { PageBody } from "@/components/layout/PageBody";
 import { Table, THead, TH, TBody, TR, TD } from "@/components/ui/table";
@@ -24,6 +24,10 @@ export function ContractPage() {
   const [selectedInvite, setSelectedInvite] = useState<ContractParticipation | null>(null);
   const [selectedActiveId, setSelectedActiveId] = useState<number | null>(null);
   const [selectedContractId, setSelectedContractId] = useState<number | null>(null);
+  const [pendingSwitch, setPendingSwitch] = useState<
+    { kind: "participation"; id: number } | { kind: "contract"; id: number } | null
+  >(null);
+  const flushRef = useRef<(() => Promise<boolean>) | null>(null);
 
   const selectedActive = useMemo(
     () => participations?.find((p) => p.id === selectedActiveId) ?? null,
@@ -57,15 +61,54 @@ export function ContractPage() {
     [contracts, activeParticipationContractIds]
   );
 
+  function hasOpenDrawer() {
+    return selectedActiveId != null || selectedContractId != null;
+  }
+
+  function requestParticipation(id: number) {
+    if (selectedActiveId === id && selectedContractId == null) return;
+    if (hasOpenDrawer()) setPendingSwitch({ kind: "participation", id });
+    else {
+      setSelectedActiveId(id);
+      setSelectedContractId(null);
+    }
+  }
+
+  function requestLegacyContractId(id: number) {
+    if (selectedContractId === id && selectedActiveId == null) return;
+    if (hasOpenDrawer()) setPendingSwitch({ kind: "contract", id });
+    else {
+      setSelectedContractId(id);
+      setSelectedActiveId(null);
+    }
+  }
+
+  useEffect(() => {
+    if (!pendingSwitch) return;
+    void (async () => {
+      const ok = (await flushRef.current?.()) ?? true;
+      if (ok) {
+        if (pendingSwitch.kind === "participation") {
+          setSelectedActiveId(pendingSwitch.id);
+          setSelectedContractId(null);
+        } else {
+          setSelectedContractId(pendingSwitch.id);
+          setSelectedActiveId(null);
+        }
+      }
+      setPendingSwitch(null);
+    })();
+  }, [pendingSwitch]);
+
   function openLegacyContract(contract: Contract) {
     const part = (participations ?? []).find(
       (p) => p.contract_id === contract.id && (p.status === "active" || p.status === "paused")
     );
     if (part) {
-      setSelectedActiveId(part.id);
+      requestParticipation(part.id);
       return;
     }
-    setSelectedContractId(contract.id);
+    requestLegacyContractId(contract.id);
   }
 
   const hasContent =
@@ -125,7 +168,7 @@ export function ContractPage() {
                   </THead>
                   <TBody>
                     {activeParticipations.map((p) => (
-                      <TR key={p.id} onClick={() => setSelectedActiveId(p.id)}>
+                      <TR key={p.id} onClick={() => requestParticipation(p.id)}>
                         <TD className="font-semibold">{p.publisher_name}</TD>
                         <TD>{p.contract_name}</TD>
                         <TD>{formatContractLeadType(p.lead_type) || "—"}</TD>
@@ -169,8 +212,20 @@ export function ContractPage() {
         )}
 
         <BuyerParticipationAcceptDrawer participation={selectedInvite} onClose={() => setSelectedInvite(null)} />
-        <BuyerParticipationDetailDrawer participation={selectedActive} onClose={() => setSelectedActiveId(null)} />
-        <BuyerContractDetailDrawer contract={selectedContract} onClose={() => setSelectedContractId(null)} />
+        <BuyerParticipationDetailDrawer
+          participation={selectedActive}
+          onClose={() => setSelectedActiveId(null)}
+          registerFlushHandler={(fn) => {
+            flushRef.current = fn;
+          }}
+        />
+        <BuyerContractDetailDrawer
+          contract={selectedContract}
+          onClose={() => setSelectedContractId(null)}
+          registerFlushHandler={(fn) => {
+            flushRef.current = fn;
+          }}
+        />
       </PageBody>
     </>
   );

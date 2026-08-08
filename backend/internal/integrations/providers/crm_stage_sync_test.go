@@ -154,7 +154,7 @@ func TestDiagnoseCRMInboundStageSync_leadOutsideSyncPipeline(t *testing.T) {
 		"pipelineId":      "p1",
 		"pipelineStageId": "s1",
 	}, cfg, nil, &otherPipeline)
-	if diag.CanSync || diag.SkipReason != "lead not in inbound sync pipeline" {
+	if diag.CanSync || diag.SkipReason != InboundStageSyncPipelineSkipReason {
 		t.Fatalf("diag = %+v", diag)
 	}
 }

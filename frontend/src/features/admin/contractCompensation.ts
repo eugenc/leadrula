@@ -12,8 +12,8 @@ export const COMPENSATION_TRIGGERS = [
 ] as const;
 
 export const COMPENSATION_DELIVERY = [
+  { value: "leads", label: "Leads Only" },
   { value: "leads_pipeline", label: "Pipeline" },
-  { value: "leads", label: "Leads inbox" },
 ] as const;
 
 export type CompensationKind = (typeof COMPENSATION_KINDS)[number]["value"];
@@ -63,15 +63,19 @@ export type PipelineDraftFields = {
   counterparty_stage_id: number;
 };
 
-export type ContractDeliveryDraft = PipelineDraftFields & { delivery: string };
+export type ContractDeliveryDraft = PipelineDraftFields & {
+  delivery: string;
+  schedule_timezone: string;
+};
 
 export function emptyContractDelivery(): ContractDeliveryDraft {
   return {
-    delivery: "leads_pipeline",
+    delivery: "leads",
     source_pipeline_id: 0,
     source_stage_id: 0,
     counterparty_pipeline_id: 0,
     counterparty_stage_id: 0,
+    schedule_timezone: "America/New_York",
   };
 }
 
@@ -81,6 +85,7 @@ export function deliveryDraftFromContract(
     source_stage_id?: number | null;
     buyer_pipeline_id?: number | null;
     return_stage_id?: number | null;
+    schedule_timezone?: string | null;
   },
   delivery?: string
 ): ContractDeliveryDraft {
@@ -95,6 +100,7 @@ export function deliveryDraftFromContract(
     source_stage_id: contract.source_stage_id ?? 0,
     counterparty_pipeline_id: buyerPipeline,
     counterparty_stage_id: 0,
+    schedule_timezone: contract.schedule_timezone || "America/New_York",
   };
 }
 
@@ -104,6 +110,7 @@ export function deliveryDraftToBody(d: ContractDeliveryDraft): Record<string, un
     delivery: d.delivery,
     source_pipeline_id: leadsInbox ? 0 : d.source_pipeline_id,
     source_stage_id: leadsInbox ? 0 : d.source_stage_id,
+    schedule_timezone: d.schedule_timezone,
   };
 }
 

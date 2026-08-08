@@ -264,8 +264,10 @@ func (h *Handler) buyerAddParticipationReturnRoute(w http.ResponseWriter, r *htt
 		return
 	}
 	var body struct {
-		BuyerStageID     int64 `json:"buyer_stage_id"`
-		BuyerPipelineID  int64 `json:"buyer_pipeline_id"`
+		BuyerStageID    int64   `json:"buyer_stage_id"`
+		BuyerPipelineID int64   `json:"buyer_pipeline_id"`
+		Label           *string `json:"label"`
+		returnScheduleBody
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
@@ -274,7 +276,8 @@ func (h *Handler) buyerAddParticipationReturnRoute(w http.ResponseWriter, r *htt
 		httpx.WriteError(w, httpx.Validation("buyer_stage_id is required"))
 		return
 	}
-	rr, err := h.svc.AddParticipationReturnRule(r.Context(), partID, body.BuyerStageID, body.BuyerPipelineID)
+	schedule, hasSchedule := body.patch()
+	rr, err := h.svc.AddParticipationReturnRule(r.Context(), partID, body.BuyerStageID, body.BuyerPipelineID, schedule, hasSchedule, body.Label)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return
@@ -291,8 +294,10 @@ func (h *Handler) buyerUpdateParticipationReturnRoute(w http.ResponseWriter, r *
 		return
 	}
 	var body struct {
-		BuyerStageID    int64 `json:"buyer_stage_id"`
-		BuyerPipelineID int64 `json:"buyer_pipeline_id"`
+		BuyerStageID    int64   `json:"buyer_stage_id"`
+		BuyerPipelineID int64   `json:"buyer_pipeline_id"`
+		Label           *string `json:"label"`
+		returnScheduleBody
 	}
 	if !httpx.DecodeJSON(w, r, &body) {
 		return
@@ -301,7 +306,8 @@ func (h *Handler) buyerUpdateParticipationReturnRoute(w http.ResponseWriter, r *
 		httpx.WriteError(w, httpx.Validation("buyer_stage_id is required"))
 		return
 	}
-	rr, err := h.svc.UpdateParticipationReturnRule(r.Context(), partID, ruleID, body.BuyerStageID, body.BuyerPipelineID)
+	schedule, hasSchedule := body.patch()
+	rr, err := h.svc.UpdateParticipationReturnRule(r.Context(), partID, ruleID, body.BuyerStageID, body.BuyerPipelineID, schedule, hasSchedule, body.Label)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return

@@ -3,6 +3,7 @@ import type { AccountType, CustomField, Lead, StageType } from "@/types";
 import { Avatar, Badge } from "@/components/ui/misc";
 import { useAuthStore } from "@/store/authStore";
 import { ActionIndicator } from "./ActionDot";
+import { ReturnIndicator } from "./ReturnIndicator";
 import { cellValue, columnIcon, buyerStatusBadgeVariant, formatBuyerStatus, formatStatus } from "./leadsListColumns";
 import { showActionAtForStage } from "@/features/pipelines/stageTypes";
 import { LeadTagBadges } from "./LeadTagsEditor";
@@ -128,6 +129,13 @@ export const LeadCard = memo(function LeadCard({
             </Badge>
           )}
           {showActionAt && <ActionIndicator actionAt={lead.action_at} size="sm" />}
+          {lead.pending_return_at && (
+            <ReturnIndicator
+              pendingReturnAt={lead.pending_return_at}
+              pendingReturnTimezone={lead.pending_return_timezone}
+              variant="card"
+            />
+          )}
           {lead.assigned_user_id && (
             <span
               className="group/avatar relative shrink-0"
