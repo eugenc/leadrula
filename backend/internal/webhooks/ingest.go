@@ -330,6 +330,17 @@ func (s *Service) executeEvent(ctx context.Context, accountID int64, webhookName
 
 func (s *Service) maybeAddInboundNote(ctx context.Context, q database.Querier, event *WebhookEvent, webhookName string, leadID int64, flat map[string]any, maps []FieldMapEntry) error {
 	noteMappedKeys := map[string]struct{}{}
+	seenBodies := map[string]struct{}{}
+	addNote := func(body string) error {
+		if body == "" {
+			return nil
+		}
+		if _, ok := seenBodies[body]; ok {
+			return nil
+		}
+		seenBodies[body] = struct{}{}
+		return s.leads.AddInboundNote(ctx, q, leadID, webhookName, body)
+	}
 	for _, m := range maps {
 		if m.TargetType != "builtin" || m.BuiltinField == nil || *m.BuiltinField != "note" {
 			continue
@@ -339,11 +350,7 @@ func (s *Service) maybeAddInboundNote(ctx context.Context, q database.Querier, e
 		if !ok {
 			continue
 		}
-		body := toText(v)
-		if body == "" {
-			continue
-		}
-		if err := s.leads.AddInboundNote(ctx, q, leadID, webhookName, body); err != nil {
+		if err := addNote(toText(v)); err != nil {
 			return err
 		}
 	}
@@ -358,11 +365,7 @@ func (s *Service) maybeAddInboundNote(ctx context.Context, q database.Querier, e
 	if !ok {
 		return nil
 	}
-	body := toText(v)
-	if body == "" {
-		return nil
-	}
-	return s.leads.AddInboundNote(ctx, q, leadID, webhookName, body)
+	return addNote(toText(v))
 }
 
 func (s *Service) execCreate(ctx context.Context, accountID int64, webhookName string, event *WebhookEvent, flat map[string]any, rawJSON []byte, maps []FieldMapEntry, isSunbaseInbound, isGHLInbound bool) (*IngestResult, *int64, error) {

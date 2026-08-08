@@ -304,6 +304,53 @@ func TestPrepareGHLInboundFlat_realWorkflowPayload(t *testing.T) {
 	}
 }
 
+func TestPrepareGHLInboundFlat_customDataAppointmentNotesSlug(t *testing.T) {
+	noteBody := "[2026-08-07 16:58] Reschedule soon"
+	flat := PrepareGHLInboundFlat(map[string]any{
+		"customData": map[string]any{
+			"Appointment Notes": noteBody,
+		},
+	}, nil)
+	if got := ghlFlatText(flat, "Appointment Notes"); got != noteBody {
+		t.Fatalf("Appointment Notes = %q", got)
+	}
+	if got := ghlFlatText(flat, "appointment_notes"); got != noteBody {
+		t.Fatalf("appointment_notes = %q", got)
+	}
+}
+
+func TestPrepareGHLInboundFlat_customDataSkipsEmptyValues(t *testing.T) {
+	flat := PrepareGHLInboundFlat(map[string]any{
+		"customData": map[string]any{
+			"appointment_disposition":   "",
+			"Appointment Recording Link": "",
+			"Appointment Notes":         "Has content",
+		},
+	}, nil)
+	if _, ok := flat["appointment_disposition"]; ok {
+		t.Fatalf("empty appointment_disposition should not be promoted, flat=%v", flat["appointment_disposition"])
+	}
+	if _, ok := flat["Appointment Recording Link"]; ok {
+		t.Fatal("empty Appointment Recording Link should not be promoted")
+	}
+	if got := ghlFlatText(flat, "appointment_notes"); got != "Has content" {
+		t.Fatalf("appointment_notes = %q", got)
+	}
+}
+
+func TestPrepareGHLInboundFlat_customDataNameToKeyAlias(t *testing.T) {
+	flat := PrepareGHLInboundFlat(map[string]any{
+		"customData": map[string]any{
+			"Recording Link": "https://example.com/rec.wav",
+		},
+	}, map[string]string{
+		"Recording Link": "appointment_recording_link",
+	})
+	if got := ghlFlatText(flat, "appointment_recording_link"); got != "https://example.com/rec.wav" {
+		t.Fatalf("appointment_recording_link = %q", got)
+	}
+}
+
 func TestGHLInboundNameToKeyFromConfig(t *testing.T) {
 	aliases := GHLInboundNameToKeyFromConfig(map[string]any{
 		"outbound_field_map": []map[string]any{
