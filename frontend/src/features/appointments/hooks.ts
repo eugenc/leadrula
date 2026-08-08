@@ -26,11 +26,21 @@ import type {
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 export { WEEKDAYS };
 
-export type SlotMutationMeta = {
+type CalendarOwnerKind = "buyer" | "publisher";
+
+type CreateSlotVariables = {
+  weekday: number;
+  start_time: string;
+  duration_min: number;
+  capacity: number;
   skipOptimistic?: boolean;
 };
 
-type CalendarOwnerKind = "buyer" | "publisher";
+type PatchSlotVariables = {
+  id: number;
+  body: { start_time?: string; duration_min?: number; capacity?: number; disabled?: boolean };
+  skipOptimistic?: boolean;
+};
 
 type SlotMutationContext = {
   prev: BuyerAppointmentSlot[];
@@ -136,12 +146,10 @@ function createCalendarSlotMutations(
 ) {
   const slotsKey = slotsQueryKey(owner, calendarId);
   return {
-    mutationFn: postFn,
-    onMutate: async (
-      body: { weekday: number; start_time: string; duration_min: number; capacity: number },
-      { meta }: { meta?: SlotMutationMeta }
-    ) => {
-      if (meta?.skipOptimistic) return undefined;
+    mutationFn: ({ skipOptimistic: _, ...body }: CreateSlotVariables) => postFn(body),
+    onMutate: async (variables: CreateSlotVariables) => {
+      if (variables.skipOptimistic) return undefined;
+      const { weekday, start_time, duration_min, capacity } = variables;
       await qc.cancelQueries({ queryKey: slotsKey });
       const prev = qc.getQueryData<BuyerAppointmentSlot[]>(slotsKey) ?? [];
       const tempId = optimisticTempId();
@@ -149,10 +157,10 @@ function createCalendarSlotMutations(
         id: tempId,
         account_id: prev[0]?.account_id ?? 0,
         calendar_id: calendarId,
-        weekday: body.weekday,
-        start_time: body.start_time,
-        duration_min: body.duration_min,
-        capacity: body.capacity,
+        weekday,
+        start_time,
+        duration_min,
+        capacity,
         disabled_at: null,
       };
       const next = [...prev, optimistic];
@@ -186,18 +194,9 @@ function patchCalendarSlotMutations(
 ) {
   const slotsKey = slotsQueryKey(owner, calendarId);
   return {
-    mutationFn: patchFn,
-    onMutate: async (
-      {
-        id,
-        body,
-      }: {
-        id: number;
-        body: { start_time?: string; duration_min?: number; capacity?: number; disabled?: boolean };
-      },
-      { meta }: { meta?: SlotMutationMeta }
-    ) => {
-      if (meta?.skipOptimistic) return undefined;
+    mutationFn: ({ id, body }: PatchSlotVariables) => patchFn({ id, body }),
+    onMutate: async ({ id, body, skipOptimistic }: PatchSlotVariables) => {
+      if (skipOptimistic) return undefined;
       await qc.cancelQueries({ queryKey: slotsKey });
       const prev = qc.getQueryData<BuyerAppointmentSlot[]>(slotsKey) ?? [];
       const now = new Date().toISOString();
