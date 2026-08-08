@@ -26,7 +26,10 @@ import { ContractOfferSection } from "@/features/admin/ContractOfferSection";
 import { ContractParticipationsSection } from "@/features/admin/ContractParticipationsSection";
 import { CallSettingsSection } from "@/features/calls/CallSettingsSection";
 import { AppointmentSettingsSection } from "@/features/appointments/AppointmentSettingsSection";
-import { PublisherContractCalendarSection } from "@/features/appointments/PublisherContractCalendarSection";
+import {
+  PublisherContractCalendarSection,
+  type BookingSectionSave,
+} from "@/features/appointments/PublisherContractCalendarSection";
 import { offerFromContractModes, type ContractOfferDraft } from "@/features/admin/contractOffer";
 import {
   ContractLeadFieldsSection,
@@ -78,6 +81,21 @@ function leadCriteriaForCompare(c: ContractLeadCriteria) {
 
 function leadCriteriaEqual(a: ContractLeadCriteria, b: ContractLeadCriteria) {
   return JSON.stringify(leadCriteriaForCompare(a)) === JSON.stringify(leadCriteriaForCompare(b));
+}
+
+async function flushBookingSections(
+  calendarSave: BookingSectionSave | null,
+  slotsSave: BookingSectionSave | null
+): Promise<boolean> {
+  if (calendarSave?.isDirty()) {
+    const ok = await calendarSave.flush();
+    if (!ok) return false;
+  }
+  if (slotsSave?.isDirty()) {
+    const ok = await slotsSave.flush();
+    if (!ok) return false;
+  }
+  return true;
 }
 
 export function ContractDetailDrawer({
@@ -192,6 +210,7 @@ function DraftDrawerContent({
 
   const lastSavedSnapshot = useRef<string | null>(null);
   const initialSyncDone = useRef(false);
+  const calendarSaveRef = useRef<BookingSectionSave | null>(null);
 
   useEffect(() => {
     initialSyncDone.current = false;
@@ -294,20 +313,29 @@ function DraftDrawerContent({
   }
 
   const flushDraft = useCallback(async (): Promise<boolean> => {
-    if (canSaveDraft && isDirty()) {
-      const toastId = toast.progress("Saving…");
-      try {
+    const draftDirty = canSaveDraft && isDirty();
+    const bookingDirty = calendarSaveRef.current?.isDirty() ?? false;
+    if (!draftDirty && !bookingDirty) return true;
+
+    const toastId = toast.progress("Saving…");
+    try {
+      if (draftDirty) {
         await saveDraft.mutateAsync({ contractId: contract.id, body: payload("draft") });
         lastSavedSnapshot.current = draftSnapshot();
-        toast.update(toastId, "Saved");
-        setTimeout(() => toast.dismiss(toastId), 1500);
-      } catch (e) {
+      }
+      const bookingOk = await flushBookingSections(calendarSaveRef.current, null);
+      if (!bookingOk) {
         toast.dismiss(toastId);
-        toast.error(errorMessage(e));
         return false;
       }
+      toast.update(toastId, "Saved");
+      setTimeout(() => toast.dismiss(toastId), 1500);
+      return true;
+    } catch (e) {
+      toast.dismiss(toastId);
+      toast.error(errorMessage(e));
+      return false;
     }
-    return true;
   }, [canSaveDraft, contract.id, form, compDrafts, deliveryDraft, leadCriteria, offerDraft, saveDraft]);
 
   const handleClose = useCallback(async () => {
@@ -334,13 +362,17 @@ function DraftDrawerContent({
         { contractId: contract.id, body },
         {
           onSuccess: () => {
-            if (status === "draft") {
-              lastSavedSnapshot.current = draftSnapshot();
-              toast.success("Draft saved");
-            } else {
-              toast.success("Contract activated");
-            }
-            onSuccess();
+            void (async () => {
+              if (status === "draft") {
+                lastSavedSnapshot.current = draftSnapshot();
+                const bookingOk = await flushBookingSections(calendarSaveRef.current, null);
+                if (!bookingOk) return;
+                toast.success("Draft saved");
+              } else {
+                toast.success("Contract activated");
+              }
+              onSuccess();
+            })();
           },
           onError: (e) => toast.error(errorMessage(e)),
         }
@@ -506,6 +538,9 @@ function DraftDrawerContent({
                         standalone
                         contractId={contract.id}
                         publisherAppointmentCalendarId={contract.publisher_appointment_calendar_id}
+                        registerSave={(api) => {
+                          calendarSaveRef.current = api;
+                        }}
                       />
                       {contract.status === "active" && (contract.appointment_calendar_id ?? 0) > 0 && (
                         <AppointmentSettingsSection contractId={contract.id} />
@@ -575,6 +610,10 @@ function ActiveDrawerContent({
   const returnRulesCount = isOpenOffer ? undefined : (returnRules?.length ?? 0);
   const touchedRef = useRef(false);
   const closingRef = useRef(false);
+  const calendarSaveRef = useRef<BookingSectionSave | null>(null);
+  const slotsSaveRef = useRef<BookingSectionSave | null>(null);
+  const [calendarDirty, setCalendarDirty] = useState(false);
+  const [slotsDirty, setSlotsDirty] = useState(false);
 
   const [name, setNameState] = useState(contract.name);
   const [leadType, setLeadTypeState] = useState(contract.lead_type ?? "");
@@ -690,7 +729,8 @@ function ActiveDrawerContent({
   const offerBlocked = isOpenOffer && offerDirty && !openOfferDeliveryComplete(offerDraft, deliveryDraft);
   const savedCriteria = leadCriteriaData ?? emptyLeadCriteria();
   const criteriaDirty = !leadCriteriaEqual(leadCriteria, savedCriteria);
-  const footerDirty = !unchanged || offerSaveable || criteriaDirty;
+  const bookingDirty = calendarDirty || slotsDirty;
+  const footerDirty = !unchanged || offerSaveable || criteriaDirty || bookingDirty;
   const activeStatuses = CONTRACT_STATUSES.filter((s) => s.value !== "draft");
 
   function offerSaveBodyFrom(draft: ContractOfferDraft, delivery: ContractDeliveryDraft) {
@@ -759,9 +799,16 @@ function ActiveDrawerContent({
     const offerBlocked =
       s.isOpenOffer && !offerUnchanged && !openOfferDeliveryComplete(s.offerDraft, s.deliveryDraft);
     const deliveryDirty = !s.isOpenOffer && !deliveryUnchanged;
+    const bookingDirty =
+      (calendarSaveRef.current?.isDirty() ?? false) || (slotsSaveRef.current?.isDirty() ?? false);
 
     const hasAnyDirty =
-      !detailsUnchanged || criteriaDirty || offerSaveable || deliveryDirty || offerBlocked;
+      !detailsUnchanged ||
+      criteriaDirty ||
+      offerSaveable ||
+      deliveryDirty ||
+      offerBlocked ||
+      bookingDirty;
     if (!hasAnyDirty) return true;
 
     if (invalid && !detailsUnchanged) {
@@ -801,6 +848,11 @@ function ActiveDrawerContent({
           contractId: c.id,
           body: deliveryDraftToBody(s.deliveryDraft),
         });
+      }
+      const bookingOk = await flushBookingSections(calendarSaveRef.current, slotsSaveRef.current);
+      if (!bookingOk) {
+        toast.dismiss(toastId);
+        return false;
       }
       toast.update(toastId, "Saved");
       setTimeout(() => toast.dismiss(toastId), 1500);
@@ -874,13 +926,15 @@ function ActiveDrawerContent({
     if (status !== contract.status) body.status = status;
     const hasDetails = Object.keys(body).length > 0;
 
-    if (!hasDetails && !criteriaDirty && !offerSaveable) return;
+    if (!hasDetails && !criteriaDirty && !offerSaveable && !bookingDirty) return;
 
     void (async () => {
       try {
         if (hasDetails) await update.mutateAsync({ id: contract.id, body });
         if (criteriaDirty) await saveCriteria.mutateAsync({ contractId: contract.id, body: leadCriteria });
         if (offerSaveable) await saveOffer.mutateAsync({ contractId: contract.id, body: offerSaveBody() });
+        const bookingOk = await flushBookingSections(calendarSaveRef.current, slotsSaveRef.current);
+        if (!bookingOk) return;
         toast.success("Contract saved");
       } catch (e) {
         toast.error(errorMessage(e));
@@ -1100,9 +1154,19 @@ function ActiveDrawerContent({
                         standalone
                         contractId={contract.id}
                         publisherAppointmentCalendarId={contract.publisher_appointment_calendar_id}
+                        registerSave={(api) => {
+                          calendarSaveRef.current = api;
+                        }}
+                        onDirtyChange={setCalendarDirty}
                       />
                       {contract.status === "active" && (contract.appointment_calendar_id ?? 0) > 0 && (
-                        <AppointmentSettingsSection contractId={contract.id} />
+                        <AppointmentSettingsSection
+                          contractId={contract.id}
+                          registerSave={(api) => {
+                            slotsSaveRef.current = api;
+                          }}
+                          onDirtyChange={setSlotsDirty}
+                        />
                       )}
                     </>
                   ),

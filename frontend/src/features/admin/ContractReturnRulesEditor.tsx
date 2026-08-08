@@ -170,7 +170,12 @@ export function ContractReturnRulesEditor({
                   <Trash2 className="h-4 w-4" />
                 </IconButton>
               </div>
-              <ReturnScheduleFields compact value={draftSchedule} onChange={setDraftSchedule} />
+              <ReturnScheduleFields
+                compact
+                radioGroupName="return-schedule-draft"
+                value={draftSchedule}
+                onChange={setDraftSchedule}
+              />
             </div>
           )}
           {draftOpen && side === "publisher" && (
@@ -301,6 +306,7 @@ function RuleRow({
         </div>
         <ReturnScheduleFields
           compact
+          radioGroupName={`return-schedule-${rule.id}`}
           value={schedule}
           onChange={(next) => {
             setSchedule(next);

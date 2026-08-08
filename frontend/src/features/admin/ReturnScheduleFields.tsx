@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 type Props = {
   value: ReturnScheduleDraft;
   onChange: (value: ReturnScheduleDraft) => void;
+  radioGroupName: string;
   compact?: boolean;
 };
 
@@ -26,7 +27,7 @@ const choiceInputClass =
 const radioClass = choiceInputClass;
 const checkboxClass = cn(choiceInputClass, "rounded");
 
-export function ReturnScheduleFields({ value, onChange, compact = false }: Props) {
+export function ReturnScheduleFields({ value, onChange, radioGroupName, compact = false }: Props) {
   function set<K extends keyof ReturnScheduleDraft>(key: K, next: ReturnScheduleDraft[K]) {
     onChange({ ...value, [key]: next });
   }
@@ -52,7 +53,7 @@ export function ReturnScheduleFields({ value, onChange, compact = false }: Props
               <input
                 type="radio"
                 className={radioClass}
-                name={`return-schedule-${compact ? "compact" : "full"}`}
+                name={radioGroupName}
                 checked={value.mode === mode.value}
                 onChange={() => onChange({ ...DEFAULT_RETURN_SCHEDULE, ...value, mode: mode.value })}
               />

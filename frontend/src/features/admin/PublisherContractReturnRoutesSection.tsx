@@ -47,7 +47,17 @@ function ReturnRouteRow({
   useEffect(() => {
     setSchedule(scheduleFromRule(rule));
     setLabel(rule.label ?? "");
-  }, [rule]);
+  }, [
+    rule.id,
+    rule.return_stage_id,
+    rule.label,
+    rule.return_schedule_mode,
+    rule.return_delay_value,
+    rule.return_delay_unit,
+    rule.return_delay_seconds,
+    rule.return_time,
+    rule.return_weekdays,
+  ]);
 
   function save(patch: ReturnRouteUpdate) {
     onUpdate(rule.id, {
@@ -115,7 +125,14 @@ function ReturnRouteRow({
           )}
         </div>
       </div>
-      {!pending && <ReturnScheduleFields compact value={schedule} onChange={saveSchedule} />}
+      {!pending && (
+        <ReturnScheduleFields
+          compact
+          radioGroupName={`return-schedule-${rule.id}`}
+          value={schedule}
+          onChange={saveSchedule}
+        />
+      )}
     </div>
   );
 }
