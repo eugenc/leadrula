@@ -193,3 +193,123 @@ func (s *Service) DeleteCRMWebhooks(ctx context.Context, accountID int64, ids CR
 		_ = s.Delete(ctx, accountID, ids.Inbound)
 	}
 }
+
+type crmBindingFieldMap struct {
+	customFieldID    int64
+	inboundSourceKey string
+}
+
+// SyncCRMBindingFieldMaps adds inbound webhook field maps for imported CRM custom field bindings.
+func (s *Service) SyncCRMBindingFieldMaps(ctx context.Context, connectionID int64) error {
+	if connectionID <= 0 {
+		return nil
+	}
+	var webhookID int64
+	var accountID int64
+	var providerSlug *string
+	err := s.pool.QueryRow(ctx,
+		`SELECT w.id, w.account_id, ip.slug FROM webhooks w
+		 JOIN integration_connections ic ON ic.id = w.integration_connection_id
+		 JOIN integration_providers ip ON ip.id = ic.provider_id
+		 WHERE w.integration_connection_id = $1 AND w.inbound_enabled
+		 ORDER BY w.id LIMIT 1`, connectionID).Scan(&webhookID, &accountID, &providerSlug)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	rows, err := s.pool.Query(ctx,
+		`SELECT custom_field_id, inbound_source_key FROM custom_field_crm_bindings
+		 WHERE connection_id = $1 AND account_id = $2`, connectionID, accountID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var bindings []crmBindingFieldMap
+	for rows.Next() {
+		var b crmBindingFieldMap
+		if err := rows.Scan(&b.customFieldID, &b.inboundSourceKey); err != nil {
+			return err
+		}
+		bindings = append(bindings, b)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(bindings) == 0 {
+		return nil
+	}
+
+	createEventID, err := s.eventIDByAction(ctx, webhookID, "create")
+	if err != nil {
+		return err
+	}
+	if createEventID == 0 {
+		return nil
+	}
+	if err := s.mergeCRMBindingFieldMaps(ctx, createEventID, bindings); err != nil {
+		return err
+	}
+
+	updateEventID, err := s.eventIDByAction(ctx, webhookID, "update")
+	if err != nil {
+		return err
+	}
+	if updateEventID == 0 && providerSlug != nil && *providerSlug != "ghl" {
+		dupUpdate := "update"
+		event, err := s.CreateEvent(ctx, webhookID, CreateEventParams{
+			Action:        "update",
+			DuplicateMode: &dupUpdate,
+			Conditions:    json.RawMessage(`[]`),
+		})
+		if err != nil {
+			return err
+		}
+		updateEventID = event.ID
+	}
+	if updateEventID > 0 {
+		return s.mergeCRMBindingFieldMaps(ctx, updateEventID, bindings)
+	}
+	return nil
+}
+
+func (s *Service) eventIDByAction(ctx context.Context, webhookID int64, action string) (int64, error) {
+	var eventID int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT id FROM webhook_events WHERE webhook_id=$1 AND action=$2 ORDER BY id LIMIT 1`,
+		webhookID, action).Scan(&eventID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	return eventID, err
+}
+
+func (s *Service) mergeCRMBindingFieldMaps(ctx context.Context, eventID int64, bindings []crmBindingFieldMap) error {
+	existing, err := s.ListFieldMap(ctx, eventID)
+	if err != nil {
+		return err
+	}
+	seen := map[string]int64{}
+	for _, m := range existing {
+		if m.TargetType == "custom" && m.CustomFieldID != nil {
+			seen[m.SourceKey] = *m.CustomFieldID
+		}
+	}
+	for _, b := range bindings {
+		key := strings.TrimSpace(b.inboundSourceKey)
+		if key == "" {
+			continue
+		}
+		if fid, ok := seen[key]; ok && fid == b.customFieldID {
+			continue
+		}
+		id := b.customFieldID
+		if _, err := s.AddFieldMap(ctx, eventID, key, "custom", nil, &id); err != nil {
+			return err
+		}
+		seen[key] = b.customFieldID
+	}
+	return nil
+}

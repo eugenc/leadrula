@@ -5,21 +5,26 @@ import { Button } from "@/components/ui/button";
 import { DrawerBody, Sheet } from "@/components/ui/dialog";
 import { EmptyState, Spinner } from "@/components/ui/misc";
 import { ActionAppointmentsManage, canAction } from "@/lib/permissions";
+import { errorMessage } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
+import { toast } from "@/store/toastStore";
 import {
   AVAILABILITY_DRAWER_WIDTH,
   BuyerAvailabilityEditor,
   BuyerSetupWizard,
 } from "@/features/appointments/BuyerAvailabilityEditor";
 import { BookingCalendarsTable } from "@/features/appointments/BookingCalendarsTable";
-import { useBuyerCalendars } from "@/features/appointments/hooks";
+import { useBuyerCalendars, useDeleteBookingCalendar } from "@/features/appointments/hooks";
+import { DeletePipelineResourceConfirmDialog } from "@/features/pipelines/DeletePipelineResourceConfirmDialog";
 import type { BuyerBookingCalendar } from "@/types";
 
 export function BuyerCalendarsPage() {
   const user = useAuthStore((s) => s.user);
   const canManageCalendars = canAction(user, ActionAppointmentsManage);
   const { data: calendars = [], isLoading } = useBuyerCalendars();
+  const remove = useDeleteBookingCalendar();
   const [drawerCalendarId, setDrawerCalendarId] = useState<number | null>(null);
+  const [calendarToDelete, setCalendarToDelete] = useState<BuyerBookingCalendar | null>(null);
   const [showWizard, setShowWizard] = useState(false);
   const [wizardKey, setWizardKey] = useState(0);
 
@@ -49,6 +54,7 @@ export function BuyerCalendarsPage() {
             canManageCalendars={canManageCalendars}
             onOpen={(id) => setDrawerCalendarId(id)}
             onAdd={openWizard}
+            onDelete={setCalendarToDelete}
           />
         )}
       </PageBody>
@@ -67,6 +73,29 @@ export function BuyerCalendarsPage() {
           </DrawerBody>
         )}
       </Sheet>
+
+      <DeletePipelineResourceConfirmDialog
+        open={calendarToDelete != null}
+        onClose={() => setCalendarToDelete(null)}
+        title="Delete calendar?"
+        subtitle={
+          calendarToDelete
+            ? `"${calendarToDelete.name}" will be permanently removed. This cannot be undone.`
+            : ""
+        }
+        loading={remove.isPending}
+        onConfirm={() => {
+          if (!calendarToDelete) return;
+          remove.mutate(calendarToDelete.id, {
+            onSuccess: () => {
+              toast.success("Calendar deleted");
+              setCalendarToDelete(null);
+              if (drawerCalendarId === calendarToDelete.id) setDrawerCalendarId(null);
+            },
+            onError: (err) => toast.error(errorMessage(err)),
+          });
+        }}
+      />
     </>
   );
 }
@@ -77,12 +106,14 @@ function CalendarsList({
   canManageCalendars,
   onOpen,
   onAdd,
+  onDelete,
 }: {
   calendars: BuyerBookingCalendar[];
   ownerName: string;
   canManageCalendars: boolean;
   onOpen: (id: number) => void;
   onAdd: () => void;
+  onDelete: (calendar: BuyerBookingCalendar) => void;
 }) {
   if (!calendars.length) {
     return (
@@ -105,7 +136,9 @@ function CalendarsList({
       calendars={calendars}
       ownerName={ownerName}
       showUpdated
+      canManage={canManageCalendars}
       onOpen={onOpen}
+      onDelete={onDelete}
     />
   );
 }

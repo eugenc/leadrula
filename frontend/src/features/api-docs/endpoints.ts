@@ -518,6 +518,7 @@ export function jwtEndpointGroups(ns: "/publisher" | "/buyer"): DocGroup[] {
         endpoints: [
           { method: "GET", path: nsPath(ns, "/booking-calendars"), auth: "JWT", description: "List publisher booking calendars." },
           { method: "POST", path: nsPath(ns, "/booking-calendars"), auth: "JWT appointments_manage", description: "Create booking calendar." },
+          { method: "DELETE", path: nsPath(ns, "/booking-calendars/{calendarId}"), auth: "JWT appointments_manage", description: "Delete booking calendar. Blocked if attached to contracts or has bookings." },
           { method: "PATCH", path: nsPath(ns, "/contracts/{id}/appointment-calendar"), auth: "JWT appointments_manage", description: "Attach publisher calendar to contract." },
           { method: "GET", path: nsPath(ns, "/appointments/contracts"), auth: "JWT", description: "List bookable appointment contracts." },
           { method: "POST", path: nsPath(ns, "/appointments/book"), auth: "JWT", description: "Book an appointment slot." },
@@ -562,6 +563,7 @@ export function jwtEndpointGroups(ns: "/publisher" | "/buyer"): DocGroup[] {
         buyerOnly: true,
         endpoints: [
           { method: "GET", path: nsPath(ns, "/booking-calendars"), auth: "JWT", description: "List buyer booking calendars." },
+          { method: "DELETE", path: nsPath(ns, "/booking-calendars/{calendarId}"), auth: "JWT appointments_manage", description: "Delete booking calendar. Blocked if attached to contracts or has bookings." },
           { method: "PATCH", path: nsPath(ns, "/contracts/{id}/appointment-calendar-source"), auth: "JWT appointments_manage", description: "Choose buyer or publisher calendar for contract." },
           { method: "GET", path: nsPath(ns, "/contracts/{id}/publisher-appointment-slots"), auth: "JWT", description: "Publisher calendar slots for contract." },
           { method: "PUT", path: nsPath(ns, "/contracts/{id}/publisher-appointment-slots"), auth: "JWT appointments_manage", description: "Toggle publisher slots on contract." },

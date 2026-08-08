@@ -168,6 +168,10 @@ func main() {
 	intakeH := intake.NewHandler(intakeSvc, apikeysSvc, cfg.APIBaseURL)
 
 	webhooksSvc := webhooks.NewService(pool, leadsRepo, leadsSvc, encKey, integrationsSvc)
+	cfSvc.SetCRMBindingSyncer(webhooksSvc)
+	if integrationsSvc != nil {
+		integrationsSvc.SetWebhookCRMBindingSyncer(webhooksSvc)
+	}
 	if err := webhooksSvc.SyncAllSunbaseInboundWebhooks(ctx); err != nil {
 		log.Printf("warning: sync sunbase inbound webhooks: %v", err)
 	}

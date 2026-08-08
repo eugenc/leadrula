@@ -41,11 +41,12 @@ type RouteIntegration struct {
 }
 
 type Service struct {
-	pool      *pgxpool.Pool
-	encKey    []byte
-	oauth     OAuthConfig
-	providers map[string]providers.Provider
-	leadSvc   *leads.Service
+	pool          *pgxpool.Pool
+	encKey        []byte
+	oauth         OAuthConfig
+	providers     map[string]providers.Provider
+	leadSvc       *leads.Service
+	webhookSyncer WebhookCRMBindingSyncer
 }
 
 func NewService(pool *pgxpool.Pool, encKey []byte, oauth OAuthConfig) *Service {

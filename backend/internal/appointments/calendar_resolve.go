@@ -319,3 +319,48 @@ func (s *Service) enrichBookingCalendarContracts(ctx context.Context, cal *Booki
 	}
 	return nil
 }
+
+func (s *Service) calendarDeleteBlocked(ctx context.Context, accountID, calendarID int64, source string) (string, error) {
+	var contractQuery string
+	var bookingQuery string
+	switch source {
+	case calendarSourceBuyer:
+		contractQuery = `SELECT EXISTS(
+			SELECT 1 FROM contracts
+			WHERE buyer_id=$1 AND deleted_at IS NULL AND appointment_calendar_id=$2)`
+		bookingQuery = `SELECT EXISTS(
+			SELECT 1 FROM lead_appointment_bookings b
+			WHERE b.buyer_calendar_id=$1
+			   OR EXISTS (
+			     SELECT 1 FROM buyer_appointment_slots sl
+			     WHERE sl.id = b.buyer_slot_id AND sl.calendar_id = $1
+			   ))`
+	case calendarSourcePublisher:
+		contractQuery = `SELECT EXISTS(
+			SELECT 1 FROM contracts
+			WHERE publisher_id=$1 AND deleted_at IS NULL AND publisher_appointment_calendar_id=$2)`
+		bookingQuery = `SELECT EXISTS(
+			SELECT 1 FROM lead_appointment_bookings b
+			WHERE b.publisher_calendar_id=$1
+			   OR EXISTS (
+			     SELECT 1 FROM publisher_appointment_slots sl
+			     WHERE sl.id = b.publisher_slot_id AND sl.calendar_id = $1
+			   ))`
+	default:
+		return "", nil
+	}
+	var attached bool
+	if err := s.pool.QueryRow(ctx, contractQuery, accountID, calendarID).Scan(&attached); err != nil {
+		return "", err
+	}
+	if attached {
+		return "calendar is attached to contracts; detach it first", nil
+	}
+	if err := s.pool.QueryRow(ctx, bookingQuery, calendarID).Scan(&attached); err != nil {
+		return "", err
+	}
+	if attached {
+		return "calendar has appointment bookings; cancel them first", nil
+	}
+	return "", nil
+}
