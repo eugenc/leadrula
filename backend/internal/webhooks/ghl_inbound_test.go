@@ -533,3 +533,101 @@ func TestIngest_GHLInbound_customDataUpdatesCustomField(t *testing.T) {
 		t.Fatalf("custom value = %q, want Reschedule", val)
 	}
 }
+
+func TestIngest_GHLInbound_collaborationExternalIDNoDuplicate(t *testing.T) {
+	ctx := context.Background()
+	pool, err := database.Connect(ctx, "postgres://crm:crm@localhost:5432/crm?sslmode=disable")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer pool.Close()
+
+	svc := NewService(pool, nil, nil, testEncKey(t), nil)
+	repo := leads.NewRepository(pool)
+	svc.leads = repo
+
+	var buyerID, publisherID int64
+	err = pool.QueryRow(ctx,
+		`SELECT c.buyer_id, c.publisher_id FROM contracts c
+		 WHERE c.status = 'active' AND c.deleted_at IS NULL AND c.buyer_id IS NOT NULL
+		 LIMIT 1`).Scan(&buyerID, &publisherID)
+	if err != nil {
+		t.Skip("no active direct contract fixture")
+	}
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	contactID := "ghl-collab-" + suffix
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubLeadID, _, err := repo.InsertLead(ctx, tx, publisherID, publisherID, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetBuiltinField(ctx, tx, pubLeadID, "first_name", "Collab"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetExternalID(ctx, tx, pubLeadID, contactID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetStatus(ctx, tx, pubLeadID, "returned"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `UPDATE leads SET deleted_at=now() WHERE id=$1`, pubLeadID)
+	})
+
+	connID, connPublicID := testGHLConnection(ctx, t, pool, buyerID, "GHL Collab Conn "+suffix)
+	ids, err := svc.ProvisionGHLWebhooks(ctx, buyerID, connID, connPublicID, "GHL Collab "+suffix)
+	if err != nil {
+		t.Fatalf("ProvisionGHLWebhooks: %v", err)
+	}
+	defer svc.DeleteGHLWebhooks(ctx, buyerID, *ids)
+
+	var buyerLeadCountBefore int
+	if err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM leads WHERE owner_account_id=$1 AND deleted_at IS NULL`,
+		buyerID).Scan(&buyerLeadCountBefore); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := svc.Ingest(ctx, &WebhookAuth{WebhookID: ids.Inbound, AccountID: buyerID}, ids.InboundSlug, map[string]any{
+		"contact_id": contactID,
+		"firstName":  "Collab",
+	})
+	if err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if len(res.Results) == 0 || res.Results[0].Status != "updated" {
+		t.Fatalf("results = %+v, want updated", res.Results)
+	}
+	if res.Results[0].LeadInternalID != pubLeadID {
+		t.Fatalf("updated lead id = %d, want publisher lead %d", res.Results[0].LeadInternalID, pubLeadID)
+	}
+
+	var buyerLeadCountAfter int
+	if err := pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM leads WHERE owner_account_id=$1 AND deleted_at IS NULL`,
+		buyerID).Scan(&buyerLeadCountAfter); err != nil {
+		t.Fatal(err)
+	}
+	if buyerLeadCountAfter != buyerLeadCountBefore {
+		t.Fatalf("buyer lead count changed %d -> %d", buyerLeadCountBefore, buyerLeadCountAfter)
+	}
+
+	lead, err := repo.GetByID(ctx, pool, pubLeadID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if lead.Status != "returned" {
+		t.Fatalf("status = %q, want returned", lead.Status)
+	}
+	if lead.ExternalID == nil || *lead.ExternalID != contactID {
+		t.Fatalf("external_id = %v, want %q", lead.ExternalID, contactID)
+	}
+}

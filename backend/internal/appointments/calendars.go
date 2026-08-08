@@ -142,6 +142,26 @@ func (s *Service) PutBookingCalendar(ctx context.Context, buyerID, calendarID in
 	return s.GetBookingCalendar(ctx, buyerID, calendarID)
 }
 
+func (s *Service) DeleteBookingCalendar(ctx context.Context, buyerID, calendarID int64) error {
+	if _, err := s.loadCalendar(ctx, buyerID, calendarID); err != nil {
+		return err
+	}
+	if msg, err := s.calendarDeleteBlocked(ctx, buyerID, calendarID, calendarSourceBuyer); err != nil {
+		return err
+	} else if msg != "" {
+		return httpx.BusinessRule(msg)
+	}
+	ct, err := s.pool.Exec(ctx,
+		`DELETE FROM buyer_booking_calendars WHERE id=$1 AND account_id=$2`, calendarID, buyerID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return httpx.NotFound("calendar not found")
+	}
+	return nil
+}
+
 func (s *Service) loadCalendar(ctx context.Context, buyerID, calendarID int64) (*BookingCalendar, error) {
 	row := s.pool.QueryRow(ctx,
 		`SELECT c.id, c.account_id, c.name, c.schedule, c.timezone, c.buffer_min, COALESCE(c.location, ''), c.updated_at,

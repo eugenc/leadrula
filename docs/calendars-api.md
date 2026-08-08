@@ -231,11 +231,14 @@ Base: `{API_BASE}/publisher`
 | POST | `/booking-calendars` | JWT appointments_manage |
 | GET | `/booking-calendars/{calendarId}` | JWT |
 | PUT | `/booking-calendars/{calendarId}` | JWT appointments_manage |
+| DELETE | `/booking-calendars/{calendarId}` | JWT appointments_manage |
 | GET | `/booking-calendars/{calendarId}/slots` | JWT |
 | POST | `/booking-calendars/{calendarId}/slots` | JWT appointments_manage |
 | PATCH | `/booking-calendars/{calendarId}/slots/{slotId}` | JWT appointments_manage |
 | POST | `/booking-calendars/{calendarId}/slots/copy` | JWT appointments_manage |
 | GET | `/booking-calendars/{calendarId}/markers?from=&to=` | JWT |
+
+**Delete calendar:** returns `422 business_rule` if the calendar is attached to contracts or has appointment bookings. Detach from contracts or cancel bookings first.
 
 ### Contract configuration
 

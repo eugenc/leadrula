@@ -5,7 +5,7 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import { format, parse } from "date-fns";
-import { get, patch, post, put } from "@/lib/api";
+import { get, patch, post, put, del } from "@/lib/api";
 import { QUARTER_MINUTES } from "@/features/leads/customFieldDate";
 import type {
   AppointmentBooking,
@@ -276,6 +276,14 @@ export function useSaveBookingCalendar(calendarId: number) {
   });
 }
 
+export function useDeleteBookingCalendar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => del(`/buyer/booking-calendars/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["buyer-booking-calendars"] }),
+  });
+}
+
 export function useCalendarSlots(calendarId: number | null) {
   return useQuery({
     queryKey: ["buyer-calendar-slots", calendarId],
@@ -459,6 +467,14 @@ export function useSavePublisherBookingCalendar(calendarId: number) {
       qc.invalidateQueries({ queryKey: ["publisher-booking-calendars"] });
       qc.invalidateQueries({ queryKey: ["publisher-calendar-slots", calendarId] });
     },
+  });
+}
+
+export function useDeletePublisherBookingCalendar() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => del(`/publisher/booking-calendars/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["publisher-booking-calendars"] }),
   });
 }
 

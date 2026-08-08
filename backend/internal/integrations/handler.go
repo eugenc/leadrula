@@ -84,6 +84,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Get("/integrations/connections/{id}/ghl/pipelines", h.getGHLPipelines)
 		r.Get("/integrations/connections/{id}/ghl/calendars", h.getGHLCalendars)
 		r.Get("/integrations/connections/{id}/ghl/custom-fields", h.getGHLCustomFields)
+		r.Get("/integrations/connections/{id}/crm/custom-fields", h.getCRMCustomFields)
 		r.Get("/integrations/connections/{id}/twilio/phone-numbers", h.getTwilioPhoneNumbers)
 		r.Get("/integrations/connections/{id}/twilio/available-numbers", h.getTwilioAvailableNumbers)
 		r.Get("/integrations/connections/{id}/twilio/pricing", h.getTwilioPricing)
@@ -480,6 +481,17 @@ func (h *Handler) getGHLCustomFields(w http.ResponseWriter, r *http.Request) {
 	p := auth.FromContext(r.Context())
 	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	data, err := h.svc.GHLMetadata(r.Context(), p.AccountID, id, "custom_fields")
+	if err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, data)
+}
+
+func (h *Handler) getCRMCustomFields(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	id, _ := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	data, err := h.svc.CRMCustomFields(r.Context(), p.AccountID, id)
 	if err != nil {
 		httpx.WriteError(w, err)
 		return

@@ -261,6 +261,9 @@ func (s *Service) executeJob(ctx context.Context, jobID, connID, leadID int64, p
 		repo := leads.NewRepository(s.pool)
 		_ = repo.SetExternalID(ctx, s.pool, leadID, extID)
 	}
+	if providerSlug == "salesforce" && leadID != 0 && extID != "" {
+		s.applySalesforceCRMBindings(ctx, connID, leadID, extID, credentials, connConfig)
+	}
 	if providerSlug == "ghl" && leadID != 0 && result != nil && result.AppointmentEventID != "" {
 		_ = s.setGHLAppointmentEventID(ctx, leadID, connID, result.AppointmentEventID)
 	}

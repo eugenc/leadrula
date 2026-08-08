@@ -294,6 +294,41 @@ export function useImportCustomFields() {
   });
 }
 
+export type CrmCustomFieldOption = {
+  id: string;
+  name: string;
+  field_key: string;
+  object: string;
+  data_type: string;
+  lead_type: string;
+  inbound_source_key: string;
+  options?: string[];
+  already_imported: boolean;
+};
+
+export type CrmCustomFieldsResponse = {
+  connection_id: number;
+  provider_slug: string;
+  custom_fields: CrmCustomFieldOption[];
+};
+
+export function useCrmCustomFields(connectionId: number | null) {
+  return useQuery({
+    queryKey: ["crm-custom-fields", connectionId],
+    queryFn: () =>
+      get<CrmCustomFieldsResponse>(
+        `${ns()}/integrations/connections/${connectionId}/crm/custom-fields`
+      ),
+    enabled: connectionId != null && connectionId > 0,
+  });
+}
+
+export type ImportFromCrmResult = {
+  created: number;
+  skipped: number;
+  errors: { row: number; message: string }[];
+};
+
 // ── Stage disqualification reasons ────────────────────────────────
 export function useStageDisqReasons(stageId: number | null) {
   return useQuery({

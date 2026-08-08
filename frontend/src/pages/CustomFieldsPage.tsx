@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useCustomFields } from "@/features/leads/hooks";
 import { useCreateField, useUpdateField, useDeleteField, useCreateCustomFieldFolder } from "@/features/admin/hooks";
 import { ImportCustomFieldsModal } from "@/features/admin/ImportCustomFieldsModal";
+import { ImportFromCrmModal } from "@/features/admin/ImportFromCrmModal";
 import { CustomFieldFoldersTab } from "@/features/admin/CustomFieldFoldersTab";
 import {
   CUSTOM_FIELD_TYPES,
@@ -17,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Switch, Spinner } from "@/components/ui/misc";
 import { FormDrawer } from "@/components/ui/dialog";
-import { Plus, Trash2, Upload } from "lucide-react";
+import { Plus, Trash2, Upload, Link2 } from "lucide-react";
 import { toast } from "@/store/toastStore";
 import { errorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -55,6 +56,7 @@ export function CustomFieldsPage() {
   const [newFolderName, setNewFolderName] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [importCrmOpen, setImportCrmOpen] = useState(false);
   const [editing, setEditing] = useState<CustomField | null>(null);
   const [form, setForm] = useState<FieldForm>(emptyForm());
   const [fieldKeyTouched, setFieldKeyTouched] = useState(false);
@@ -152,6 +154,9 @@ export function CustomFieldsPage() {
           </div>
           {tab === "fields" && (
             <div className={tabActionsClass}>
+              <Button variant="outline" onClick={() => setImportCrmOpen(true)}>
+                <Link2 className="h-4 w-4" /> Import from CRM
+              </Button>
               <Button variant="outline" onClick={() => setImportOpen(true)}>
                 <Upload className="h-4 w-4" /> Import CSV
               </Button>
@@ -325,6 +330,7 @@ export function CustomFieldsPage() {
       </PageBody>
 
       <ImportCustomFieldsModal open={importOpen} onClose={() => setImportOpen(false)} />
+      <ImportFromCrmModal open={importCrmOpen} onClose={() => setImportCrmOpen(false)} />
     </>
   );
 }

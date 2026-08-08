@@ -37,7 +37,8 @@ func scanField(row pgx.Row, f *CustomField) error {
 }
 
 type Service struct {
-	pool *pgxpool.Pool
+	pool             *pgxpool.Pool
+	crmBindingSyncer CRMBindingSyncer
 }
 
 func NewService(pool *pgxpool.Pool) *Service { return &Service{pool: pool} }

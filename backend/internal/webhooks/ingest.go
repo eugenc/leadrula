@@ -170,7 +170,10 @@ func (s *Service) ingestPayload(ctx context.Context, wa *WebhookAuth, slug strin
 
 	isSunbaseInbound := providerSlug != nil && *providerSlug == "sunbase"
 	isGHLInbound := providerSlug != nil && *providerSlug == "ghl"
-	if isGHLInbound {
+	isCRMInbound := providerSlug != nil && providers.CRMCustomFieldsSupported(*providerSlug)
+	if isCRMInbound {
+		flat = providers.PrepareCRMInboundFlat(*providerSlug, flat)
+	} else if isGHLInbound {
 		flat = providers.PrepareGHLInboundFlat(flat)
 	}
 
@@ -359,7 +362,7 @@ func (s *Service) execCreate(ctx context.Context, accountID int64, webhookName s
 	}
 
 	if externalID != "" {
-		existing, err := s.findLeadByExternalID(ctx, accountID, externalID, isSunbaseInbound)
+		existing, err := s.findLeadByExternalID(ctx, accountID, externalID, isSunbaseInbound, isSunbaseInbound || isGHLInbound)
 		if err == nil && existing != nil {
 			switch *event.DuplicateMode {
 			case "reject":
@@ -604,7 +607,7 @@ func lookupValue(event *WebhookEvent, flat map[string]any, maps []FieldMapEntry)
 	return ""
 }
 
-func (s *Service) findLeadByExternalID(ctx context.Context, accountID int64, externalID string, sunbase bool) (*leads.Lead, error) {
+func (s *Service) findLeadByExternalID(ctx context.Context, accountID int64, externalID string, sunbase, collaborationFallback bool) (*leads.Lead, error) {
 	candidates := []string{externalID}
 	if sunbase {
 		candidates = providers.SunbaseExternalIDCandidates(externalID)
@@ -621,7 +624,7 @@ func (s *Service) findLeadByExternalID(ctx context.Context, accountID int64, ext
 			return nil, err
 		}
 	}
-	if sunbase {
+	if collaborationFallback {
 		for _, id := range candidates {
 			lead, err := s.leads.GetCollaborationLeadByExternalID(ctx, s.leads.Pool(), accountID, id)
 			if err == nil && lead != nil {

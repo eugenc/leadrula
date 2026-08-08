@@ -21,6 +21,7 @@ func (h *Handler) RegisterBuyer(r chi.Router) {
 	r.With(auth.RequirePermission(permissions.ActionAppointmentsManage)).Post("/booking-calendars", h.createBookingCalendar)
 	r.Get("/booking-calendars/{calendarId}", h.getBookingCalendar)
 	r.With(auth.RequirePermission(permissions.ActionAppointmentsManage)).Put("/booking-calendars/{calendarId}", h.putBookingCalendar)
+	r.With(auth.RequirePermission(permissions.ActionAppointmentsManage)).Delete("/booking-calendars/{calendarId}", h.deleteBookingCalendar)
 	r.Get("/booking-calendars/{calendarId}/slots", h.listCalendarSlots)
 	r.With(auth.RequirePermission(permissions.ActionAppointmentsManage)).Post("/booking-calendars/{calendarId}/slots", h.createCalendarSlot)
 	r.With(auth.RequirePermission(permissions.ActionAppointmentsManage)).Patch("/booking-calendars/{calendarId}/slots/{slotId}", h.patchCalendarSlot)
@@ -44,6 +45,7 @@ func (h *Handler) RegisterPublisher(r chi.Router) {
 	r.With(auth.RequirePermission(permissions.ActionAppointmentsManage)).Post("/booking-calendars", h.createPublisherBookingCalendar)
 	r.Get("/booking-calendars/{calendarId}", h.getPublisherBookingCalendar)
 	r.With(auth.RequirePermission(permissions.ActionAppointmentsManage)).Put("/booking-calendars/{calendarId}", h.putPublisherBookingCalendar)
+	r.With(auth.RequirePermission(permissions.ActionAppointmentsManage)).Delete("/booking-calendars/{calendarId}", h.deletePublisherBookingCalendar)
 	r.Get("/booking-calendars/{calendarId}/slots", h.listPublisherCalendarSlots)
 	r.With(auth.RequirePermission(permissions.ActionAppointmentsManage)).Post("/booking-calendars/{calendarId}/slots", h.createPublisherCalendarSlot)
 	r.With(auth.RequirePermission(permissions.ActionAppointmentsManage)).Patch("/booking-calendars/{calendarId}/slots/{slotId}", h.patchPublisherCalendarSlot)
@@ -119,6 +121,15 @@ func (h *Handler) putBookingCalendar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, cal)
+}
+
+func (h *Handler) deleteBookingCalendar(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	if err := h.svc.DeleteBookingCalendar(r.Context(), p.AccountID, int64(pathInt(r, "calendarId"))); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) listCalendarSlots(w http.ResponseWriter, r *http.Request) {
@@ -322,6 +333,15 @@ func (h *Handler) putPublisherBookingCalendar(w http.ResponseWriter, r *http.Req
 		return
 	}
 	httpx.JSON(w, http.StatusOK, cal)
+}
+
+func (h *Handler) deletePublisherBookingCalendar(w http.ResponseWriter, r *http.Request) {
+	p := auth.FromContext(r.Context())
+	if err := h.svc.DeletePublisherBookingCalendar(r.Context(), p.AccountID, int64(pathInt(r, "calendarId"))); err != nil {
+		httpx.WriteError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) listPublisherCalendarSlots(w http.ResponseWriter, r *http.Request) {
