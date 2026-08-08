@@ -65,11 +65,11 @@ import { LeadTagsEditor } from "./LeadTagsEditor";
 import { buildWebhookActivityLogUrl } from "@/features/intake/logShared";
 import {
   activityFilterGroup,
-  activityGroupLabel,
   activityKindLabel,
   presentActivityGroups,
   useActivityGroupFilters,
 } from "./activityFilterStorage";
+import { ActivityFilterDropdown } from "./ActivityFilterDropdown";
 import { useQuery } from "@tanstack/react-query";
 import { get } from "@/lib/api";
 import type { BuyerSummary } from "@/types";
@@ -1342,7 +1342,7 @@ function ActivityTab({ leadId }: { leadId: number }) {
   const accountType = useAuthStore((s) => s.user?.account_type);
   const userId = useAuthStore((s) => s.user?.id);
   const { data: history, isLoading, isError } = useLeadHistory(leadId);
-  const { toggleGroup, isVisible } = useActivityGroupFilters(userId);
+  const { hiddenGroups, toggleGroup, isVisible } = useActivityGroupFilters(userId);
   const addNote = useAddNote();
   const [body, setBody] = useState("");
 
@@ -1368,22 +1368,17 @@ function ActivityTab({ leadId }: { leadId: number }) {
           </Button>
         </div>
       </div>
-      <SectionLabel className="mb-2">Activity</SectionLabel>
-      {!isLoading && !isError && presentGroups.length > 0 && (
-        <div className="mb-3 flex flex-nowrap gap-3 overflow-x-auto pb-1">
-          {presentGroups.map((group) => (
-            <label key={group} className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-gray-500">
-              <input
-                type="checkbox"
-                className="rounded"
-                checked={isVisible(group)}
-                onChange={() => toggleGroup(group)}
-              />
-              {activityGroupLabel(group)}
-            </label>
-          ))}
-        </div>
-      )}
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <SectionLabel>Activity</SectionLabel>
+        {!isLoading && !isError && presentGroups.length > 0 && (
+          <ActivityFilterDropdown
+            groups={presentGroups}
+            isVisible={isVisible}
+            toggleGroup={toggleGroup}
+            hiddenCount={hiddenGroups.size}
+          />
+        )}
+      </div>
       {isLoading && (
         <div className="flex justify-center py-6">
           <Spinner />
@@ -1428,7 +1423,7 @@ function ActivityTab({ leadId }: { leadId: number }) {
               </div>
             ) : (
               <div className={cn("font-medium", h.kind === "note_added" && "whitespace-pre-wrap")}>
-                {isWebhookHistoryEntry(h.kind) && (accountType === "publisher" || accountType === "buyer") ? (
+                {isWebhookHistoryEntry(h.kind) && h.log_viewable && (accountType === "publisher" || accountType === "buyer") ? (
                   (() => {
                     const logUrl = buildWebhookActivityLogUrl(accountType, h, leadId);
                     const headline = historyHeadline(h);

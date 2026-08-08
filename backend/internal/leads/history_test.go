@@ -516,3 +516,33 @@ func TestChangeLogSummaryReturnEvents(t *testing.T) {
 		t.Fatal("return_cancelled kind mapping")
 	}
 }
+
+func TestAnnotateHistoryLogViewability(t *testing.T) {
+	const pubID int64 = 1
+	const buyerID int64 = 99
+
+	entries := []LeadHistoryEntry{
+		{ID: 1, Kind: "webhook", ownerAccountID: pubID},
+		{ID: 2, Kind: "outbound_webhook", ownerAccountID: buyerID},
+		{ID: 3, Kind: "note_added"},
+	}
+
+	pubAnnotated := annotateHistoryLogViewability(&auth.Principal{AccountType: "publisher", AccountID: pubID}, entries)
+	if pubAnnotated[0].LogViewable == nil || !*pubAnnotated[0].LogViewable {
+		t.Fatal("publisher should view own inbound webhook logs")
+	}
+	if pubAnnotated[1].LogViewable == nil || *pubAnnotated[1].LogViewable {
+		t.Fatal("publisher should not view buyer outbound webhook logs")
+	}
+	if pubAnnotated[2].LogViewable != nil {
+		t.Fatal("non-webhook entries should not get log_viewable")
+	}
+
+	buyerAnnotated := annotateHistoryLogViewability(&auth.Principal{AccountType: "buyer", AccountID: buyerID}, entries)
+	if buyerAnnotated[0].LogViewable == nil || *buyerAnnotated[0].LogViewable {
+		t.Fatal("buyer should not view publisher inbound webhook logs")
+	}
+	if buyerAnnotated[1].LogViewable == nil || !*buyerAnnotated[1].LogViewable {
+		t.Fatal("buyer should view own outbound webhook logs")
+	}
+}

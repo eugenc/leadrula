@@ -291,6 +291,7 @@ export interface LeadHistoryEntry {
   stage_name?: string | null;
   route_name?: string | null;
   webhook_id?: number | null;
+  log_viewable?: boolean | null;
 }
 
 export interface CustomField {
