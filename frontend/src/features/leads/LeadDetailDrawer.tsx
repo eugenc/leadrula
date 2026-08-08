@@ -873,7 +873,7 @@ function LeadPipelineHeader({ lead, collapsed = false }: { lead: Lead; collapsed
                   <span
                     className={cn(
                       "pointer-events-none absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap text-xs",
-                      isCurrent ? "text-gray-300" : "text-gray-500/70"
+                      isCurrent ? "text-gray-700" : "text-gray-400"
                     )}
                   >
                     {s.name}
