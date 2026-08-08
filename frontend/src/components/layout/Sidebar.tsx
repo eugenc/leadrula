@@ -51,6 +51,13 @@ const publisherNav: NavGroup[] = [
     ],
   },
   {
+    label: "Pipeline",
+    items: [
+      { to: "/p/board", label: "Pipeline", icon: KanbanSquare, navKey: "board" },
+      { to: "/p/pipelines", label: "Pipelines", icon: GitBranch, navKey: "pipelines" },
+    ],
+  },
+  {
     label: "Appointments",
     items: [
       { to: "/p/appointments", label: "Appointments", icon: CalendarClock, navKey: "appointments" },
@@ -60,13 +67,6 @@ const publisherNav: NavGroup[] = [
   {
     label: "Calls",
     items: [{ to: "/p/calls", label: "Calls", icon: Phone, navKey: "calls" }],
-  },
-  {
-    label: "Pipeline",
-    items: [
-      { to: "/p/board", label: "Pipeline", icon: KanbanSquare, navKey: "board" },
-      { to: "/p/pipelines", label: "Pipelines", icon: GitBranch, navKey: "pipelines" },
-    ],
   },
   {
     label: "Buyers",
@@ -108,6 +108,13 @@ const buyerNav: NavGroup[] = [
     ],
   },
   {
+    label: "Pipeline",
+    items: [
+      { to: "/b/board", label: "Pipeline", icon: KanbanSquare, navKey: "board" },
+      { to: "/b/pipelines", label: "Pipelines", icon: GitBranch, navKey: "pipelines" },
+    ],
+  },
+  {
     label: "Appointments",
     items: [
       { to: "/b/appointments", label: "Appointments", icon: CalendarClock, navKey: "appointments" },
@@ -117,13 +124,6 @@ const buyerNav: NavGroup[] = [
   {
     label: "Calls",
     items: [{ to: "/b/calls", label: "Calls", icon: Phone, navKey: "calls" }],
-  },
-  {
-    label: "Pipeline",
-    items: [
-      { to: "/b/board", label: "Pipeline", icon: KanbanSquare, navKey: "board" },
-      { to: "/b/pipelines", label: "Pipelines", icon: GitBranch, navKey: "pipelines" },
-    ],
   },
   {
     label: "Publishers",

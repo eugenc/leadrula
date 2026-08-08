@@ -276,9 +276,9 @@ export function navSections(accountType: AccountType): NavSection[] {
     return [
       { label: "Overview", keys: [{ key: NavDashboard, label: "Dashboard" }] },
       { label: "Leads", keys: leads },
+      { label: "Pipeline", keys: pipeline },
       { label: "Appointments", keys: appointments },
       { label: "Calls", keys: [{ key: NavCalls, label: "Calls" }] },
-      { label: "Pipeline", keys: pipeline },
       {
         label: "Buyers",
         keys: [
@@ -303,9 +303,9 @@ export function navSections(accountType: AccountType): NavSection[] {
   return [
     { label: "Overview", keys: [{ key: NavDashboard, label: "Dashboard" }] },
     { label: "Leads", keys: leads },
+    { label: "Pipeline", keys: pipeline },
     { label: "Appointments", keys: appointments },
     { label: "Calls", keys: [{ key: NavCalls, label: "Calls" }] },
-    { label: "Pipeline", keys: pipeline },
     {
       label: "Publishers",
       keys: [
