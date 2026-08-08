@@ -42,7 +42,6 @@ import {
   useSaveBookingCalendar,
   useSavePublisherBookingCalendar,
   type CalendarOwner,
-  type SlotMutationMeta,
   WEEKDAY_KEYS,
   WEEKDAYS,
 } from "@/features/appointments/hooks";
@@ -88,7 +87,6 @@ const SLOT_ROW_GRID =
 const WORKING_HOURS_GRID =
   "grid grid-cols-[4rem_minmax(9.25rem,10.75rem)_minmax(9.25rem,10.75rem)_4.5rem] items-center gap-2";
 export const AVAILABILITY_DRAWER_WIDTH = 520;
-const SLOT_SKIP_OPTIMISTIC = { meta: { skipOptimistic: true } satisfies SlotMutationMeta };
 
 function scheduleHasInvalidHours(schedule: Schedule): boolean {
   return WEEKDAY_KEYS.some((key) => {
@@ -881,6 +879,7 @@ export function BuyerAvailabilityEditor({
   if (calendarLoading || !calendar) {
     return <Spinner className="mx-auto h-6 w-6" />;
   }
+  const accountId = calendar.account_id;
 
   function addSlot(
     params: {
@@ -995,7 +994,7 @@ export function BuyerAvailabilityEditor({
 
     const optimisticAdds = targets.flatMap((target) =>
       sourceSlots.map((s) =>
-        buildOptimisticSlot(calendarId, calendar.account_id, {
+        buildOptimisticSlot(calendarId, accountId, {
           weekday: target,
           start_time: s.start_time,
           duration_min: slotDurationMin,
@@ -1046,7 +1045,7 @@ export function BuyerAvailabilityEditor({
           continue;
         }
         try {
-          await patchSlot.mutateAsync({ id: s.id, body: { disabled: true } }, SLOT_SKIP_OPTIMISTIC);
+          await patchSlot.mutateAsync({ id: s.id, body: { disabled: true }, skipOptimistic: true });
           cleared++;
         } catch (e) {
           toast.error(`${WEEKDAYS[s.weekday]} ${s.start_time}: ${errorMessage(e)}`);
@@ -1078,7 +1077,7 @@ export function BuyerAvailabilityEditor({
 
     const now = new Date().toISOString();
     const optimisticNew = generated.map((slot) =>
-      buildOptimisticSlot(calendarId, calendar.account_id, {
+      buildOptimisticSlot(calendarId, accountId, {
         weekday: slot.weekday,
         start_time: slot.start_time,
         duration_min: slotDurationMin,
@@ -1095,7 +1094,7 @@ export function BuyerAvailabilityEditor({
       for (const s of active) {
         if (isOptimisticSlotId(s.id)) continue;
         try {
-          await patchSlot.mutateAsync({ id: s.id, body: { disabled: true } }, SLOT_SKIP_OPTIMISTIC);
+          await patchSlot.mutateAsync({ id: s.id, body: { disabled: true }, skipOptimistic: true });
         } catch (e) {
           toast.error(`${WEEKDAYS[s.weekday]} ${s.start_time}: ${errorMessage(e)}`);
         }
@@ -1104,15 +1103,13 @@ export function BuyerAvailabilityEditor({
       let created = 0;
       for (const slot of generated) {
         try {
-          await createSlot.mutateAsync(
-            {
+          await createSlot.mutateAsync({
               weekday: slot.weekday,
               start_time: slot.start_time,
               duration_min: slotDurationMin,
               capacity,
-            },
-            SLOT_SKIP_OPTIMISTIC
-          );
+              skipOptimistic: true,
+            });
           created++;
         } catch (e) {
           toast.error(`${WEEKDAYS[slot.weekday]} ${slot.start_time}: ${errorMessage(e)}`);
