@@ -185,7 +185,7 @@ func TestPrepareGHLInboundFlat_customData(t *testing.T) {
 		"customData": map[string]any{
 			"appointment_disposition": "Reschedule",
 		},
-	})
+	}, nil)
 	if got := ghlFlatText(flat, "appointment_disposition"); got != "Reschedule" {
 		t.Fatalf("appointment_disposition = %q", got)
 	}
@@ -202,7 +202,7 @@ func TestPrepareGHLInboundFlat_customFieldsArray(t *testing.T) {
 				"field_value":  "Showed",
 			},
 		},
-	})
+	}, nil)
 	if got := ghlFlatText(flat, "opportunity.disposition"); got != "Showed" {
 		t.Fatalf("opportunity.disposition = %q", got)
 	}
@@ -217,9 +217,135 @@ func TestPrepareGHLInboundFlat_customFieldsDoesNotOverwrite(t *testing.T) {
 				"field_value": "Showed",
 			},
 		},
-	})
+	}, nil)
 	if got := ghlFlatText(flat, "opportunity.disposition"); got != "Existing" {
 		t.Fatalf("expected existing value preserved, got %q", got)
+	}
+}
+
+func TestPrepareGHLInboundFlat_customDataJSONString(t *testing.T) {
+	flat := PrepareGHLInboundFlat(map[string]any{
+		"customData": `{"appointment_disposition":"Reschedule"}`,
+	}, nil)
+	if got := ghlFlatText(flat, "appointment_disposition"); got != "Reschedule" {
+		t.Fatalf("appointment_disposition = %q", got)
+	}
+}
+
+func TestPrepareGHLInboundFlat_nestedCustomData(t *testing.T) {
+	flat := PrepareGHLInboundFlat(map[string]any{
+		"customData": map[string]any{
+			"opportunity": map[string]any{
+				"appointment_disposition": "Reschedule",
+			},
+		},
+	}, nil)
+	if got := ghlFlatText(flat, "appointment_disposition"); got != "Reschedule" {
+		t.Fatalf("appointment_disposition = %q", got)
+	}
+	if got := ghlFlatText(flat, "opportunity.appointment_disposition"); got != "Reschedule" {
+		t.Fatalf("opportunity.appointment_disposition = %q", got)
+	}
+}
+
+func TestPrepareGHLInboundFlat_customFieldsBareKeyMirrorsOpportunity(t *testing.T) {
+	flat := PrepareGHLInboundFlat(map[string]any{
+		"customFields": []any{
+			map[string]any{
+				"key":         "appointment_disposition",
+				"field_value": "Showed",
+			},
+		},
+	}, nil)
+	if got := ghlFlatText(flat, "appointment_disposition"); got != "Showed" {
+		t.Fatalf("appointment_disposition = %q", got)
+	}
+	if got := ghlFlatText(flat, "opportunity.appointment_disposition"); got != "Showed" {
+		t.Fatalf("opportunity.appointment_disposition = %q", got)
+	}
+}
+
+func TestPrepareGHLInboundFlat_displayNameAliases(t *testing.T) {
+	flat := PrepareGHLInboundFlat(map[string]any{
+		"Appointment Date & Time": "2026-08-07T12:00:00Z",
+		"Recording Link":          "https://example.com/rec.wav",
+	}, map[string]string{
+		"Appointment Date & Time": "appointment_date_time",
+		"Recording Link":          "appointment_recording_link",
+	})
+	if got := ghlFlatText(flat, "appointment_date_time"); got != "2026-08-07T12:00:00Z" {
+		t.Fatalf("appointment_date_time = %q", got)
+	}
+	if got := ghlFlatText(flat, "appointment_recording_link"); got != "https://example.com/rec.wav" {
+		t.Fatalf("appointment_recording_link = %q", got)
+	}
+}
+
+func TestPrepareGHLInboundFlat_realWorkflowPayload(t *testing.T) {
+	flat := PrepareGHLInboundFlat(map[string]any{
+		"contact_id": "q94AAT7iTxJbbG563wqS",
+		"customData": map[string]any{
+			"appointment_disposition": "[2026-08-07 16:58] Reschedule soon",
+		},
+		"Appointment Date & Time": "2026-08-07T12:00",
+		"Recording Link":          "https://d3njiazx9u20q.cloudfront.net/rec.wav",
+	}, map[string]string{
+		"Appointment Date & Time": "appointment_date_time",
+		"Recording Link":          "appointment_recording_link",
+	})
+	if got := ghlFlatText(flat, "appointment_disposition"); got == "" {
+		t.Fatal("expected appointment_disposition from customData")
+	}
+	if got := ghlFlatText(flat, "appointment_date_time"); got != "2026-08-07T12:00" {
+		t.Fatalf("appointment_date_time = %q", got)
+	}
+	if got := ghlFlatText(flat, "appointment_recording_link"); got == "" {
+		t.Fatal("expected appointment_recording_link from display name alias")
+	}
+}
+
+func TestGHLInboundNameToKeyFromConfig(t *testing.T) {
+	aliases := GHLInboundNameToKeyFromConfig(map[string]any{
+		"outbound_field_map": []map[string]any{
+			{
+				"dest_key":        "appointment_date_time",
+				"ghl_field_name":  "Appointment Date & Time",
+				"source_type":     "builtin",
+				"builtin_field":   "action_at",
+				"ghl_field_model": "opportunity",
+			},
+		},
+	})
+	if got := aliases["Appointment Date & Time"]; got != "appointment_date_time" {
+		t.Fatalf("alias = %q", got)
+	}
+}
+
+func TestGHLInboundMapsFromConfig_opportunityAliases(t *testing.T) {
+	cfid := int64(42)
+	name := "Appointment Disposition"
+	config := map[string]any{
+		"outbound_field_map": []map[string]any{
+			{
+				"dest_key":        "appointment_disposition",
+				"source_type":     "custom",
+				"custom_field_id": cfid,
+				"ghl_field_model": "opportunity",
+				"ghl_field_name":  name,
+			},
+		},
+	}
+	maps := GHLInboundMapsFromConfig(config)
+	keys := map[string]bool{}
+	for _, m := range maps {
+		if m.TargetType == "custom" && m.CustomFieldID != nil && *m.CustomFieldID == cfid {
+			keys[m.SourceKey] = true
+		}
+	}
+	for _, want := range []string{"appointment_disposition", "opportunity.appointment_disposition", name} {
+		if !keys[want] {
+			t.Fatalf("missing inbound source key %q, got %v", want, keys)
+		}
 	}
 }
 

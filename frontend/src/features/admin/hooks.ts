@@ -304,6 +304,8 @@ export type CrmCustomFieldOption = {
   inbound_source_key: string;
   options?: string[];
   already_imported: boolean;
+  linked_field_id?: number;
+  linked_field_name?: string;
 };
 
 export type CrmCustomFieldsResponse = {
@@ -325,6 +327,7 @@ export function useCrmCustomFields(connectionId: number | null) {
 
 export type ImportFromCrmResult = {
   created: number;
+  linked: number;
   skipped: number;
   errors: { row: number; message: string }[];
 };

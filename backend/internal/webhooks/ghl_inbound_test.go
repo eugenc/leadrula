@@ -534,6 +534,140 @@ func TestIngest_GHLInbound_customDataUpdatesCustomField(t *testing.T) {
 	}
 }
 
+func TestIngest_GHLInbound_realWorkflowPayload(t *testing.T) {
+	ctx := context.Background()
+	pool, err := database.Connect(ctx, "postgres://crm:crm@localhost:5432/crm?sslmode=disable")
+	if err != nil {
+		t.Skip(err)
+	}
+	defer pool.Close()
+
+	svc := NewService(pool, nil, nil, testEncKey(t), nil)
+	repo := leads.NewRepository(pool)
+	svc.leads = repo
+
+	var accountID int64
+	if err := pool.QueryRow(ctx, `SELECT id FROM accounts ORDER BY id LIMIT 1`).Scan(&accountID); err != nil {
+		t.Skip(err)
+	}
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	dispositionFieldID := testAccountCustomField(ctx, t, pool, accountID, "appt_disp_"+suffix)
+	recordingFieldID := testAccountCustomField(ctx, t, pool, accountID, "rec_link_"+suffix)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM custom_fields WHERE id IN ($1, $2)`, dispositionFieldID, recordingFieldID)
+	})
+
+	connID, connPublicID := testGHLConnection(ctx, t, pool, accountID, "GHL RealPayload Conn "+suffix)
+
+	cfg := map[string]any{
+		"location_id":    "loc-test",
+		"create_contact": true,
+		"outbound_field_map": []any{
+			map[string]any{
+				"dest_key":        "appointment_disposition",
+				"source_type":     "custom",
+				"custom_field_id": dispositionFieldID,
+				"ghl_field_model": "opportunity",
+				"ghl_field_name":  "Appointment Disposition",
+				"ghl_map_section": "opportunity",
+			},
+			map[string]any{
+				"dest_key":        "appointment_date_time",
+				"source_type":     "builtin",
+				"builtin_field":   "action_at",
+				"ghl_field_model": "opportunity",
+				"ghl_field_name":  "Appointment Date & Time",
+				"ghl_map_section": "opportunity",
+			},
+			map[string]any{
+				"dest_key":        "appointment_recording_link",
+				"source_type":     "custom",
+				"custom_field_id": recordingFieldID,
+				"ghl_field_model": "opportunity",
+				"ghl_field_name":  "Recording Link",
+				"ghl_map_section": "opportunity",
+			},
+		},
+	}
+	cfgJSON, _ := json.Marshal(cfg)
+	if _, err := pool.Exec(ctx, `UPDATE integration_connections SET config=$2 WHERE id=$1`, connID, cfgJSON); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := svc.ProvisionGHLWebhooks(ctx, accountID, connID, connPublicID, "GHL RealPayload "+suffix)
+	if err != nil {
+		t.Fatalf("ProvisionGHLWebhooks: %v", err)
+	}
+	defer svc.DeleteGHLWebhooks(ctx, accountID, *ids)
+
+	if err := svc.SyncGHLInboundFieldMaps(ctx, ids.Inbound, cfg); err != nil {
+		t.Fatalf("SyncGHLInboundFieldMaps: %v", err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leadID, _, err := repo.InsertLead(ctx, tx, accountID, accountID, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contactID := "ghl-realpayload-" + suffix
+	if err := repo.SetExternalID(ctx, tx, leadID, contactID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	dispositionVal := "[2026-08-07 16:58] Reschedule soon"
+	recordingVal := "https://d3njiazx9u20q.cloudfront.net/rec.wav"
+	res, err := svc.Ingest(ctx, &WebhookAuth{WebhookID: ids.Inbound, AccountID: accountID}, ids.InboundSlug, map[string]any{
+		"contact_id": contactID,
+		"customData": map[string]any{
+			"appointment_disposition": dispositionVal,
+		},
+		"Appointment Date & Time": "2026-08-07T12:00:00Z",
+		"Recording Link":          recordingVal,
+	})
+	if err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if len(res.Results) == 0 || res.Results[0].Status != "updated" {
+		t.Fatalf("results = %+v, want updated", res.Results)
+	}
+
+	lead, err := repo.GetByID(ctx, pool, leadID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if err := leads.LoadCustomValues(ctx, pool, lead); err != nil {
+		t.Fatalf("LoadCustomValues: %v", err)
+	}
+
+	assertCustomString := func(fieldID int64, want string) {
+		t.Helper()
+		raw, ok := lead.CustomValues[fmt.Sprintf("%d", fieldID)]
+		if !ok {
+			t.Fatalf("custom field %d not set, values=%v", fieldID, lead.CustomValues)
+		}
+		var val string
+		if err := json.Unmarshal(raw, &val); err != nil {
+			t.Fatalf("unmarshal custom value: %v", err)
+		}
+		if val != want {
+			t.Fatalf("custom field %d = %q, want %q", fieldID, val, want)
+		}
+	}
+	assertCustomString(dispositionFieldID, dispositionVal)
+	assertCustomString(recordingFieldID, recordingVal)
+
+	if lead.ActionAt == nil || lead.ActionAt.UTC().Format(time.RFC3339) != "2026-08-07T12:00:00Z" {
+		t.Fatalf("action_at = %v, want 2026-08-07T12:00:00Z", lead.ActionAt)
+	}
+}
+
 func TestIngest_GHLInbound_collaborationExternalIDNoDuplicate(t *testing.T) {
 	ctx := context.Background()
 	pool, err := database.Connect(ctx, "postgres://crm:crm@localhost:5432/crm?sslmode=disable")

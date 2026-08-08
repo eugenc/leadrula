@@ -427,7 +427,7 @@ func PrepareCRMInboundFlat(providerSlug string, flat map[string]any) map[string]
 	}
 	switch providerSlug {
 	case "ghl":
-		return PrepareGHLInboundFlat(flat)
+		return PrepareGHLInboundFlat(flat, nil)
 	case "hubspot":
 		return flattenHubSpotInbound(flat)
 	case "pipedrive":

@@ -3,6 +3,7 @@ package integrations
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/echayko/leadrula/backend/internal/customfields"
 	"github.com/echayko/leadrula/backend/internal/integrations/providers"
@@ -19,6 +20,8 @@ type CRMCustomFieldResponse struct {
 	InboundSourceKey string   `json:"inbound_source_key"`
 	Options          []string `json:"options,omitempty"`
 	AlreadyImported  bool     `json:"already_imported"`
+	LinkedFieldID    *int64   `json:"linked_field_id,omitempty"`
+	LinkedFieldName  *string  `json:"linked_field_name,omitempty"`
 }
 
 func (s *Service) CRMCustomFields(ctx context.Context, accountID, connectionID int64) (map[string]any, error) {
@@ -46,10 +49,14 @@ func (s *Service) CRMCustomFields(ctx context.Context, accountID, connectionID i
 	if err != nil {
 		return nil, err
 	}
+	namesByLower, namesByID, err := cfSvc.FieldNamesByAccount(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
 
 	out := make([]CRMCustomFieldResponse, 0, len(fields))
 	for _, f := range fields {
-		out = append(out, CRMCustomFieldResponse{
+		resp := CRMCustomFieldResponse{
 			ID:               f.ID,
 			Name:             f.Name,
 			FieldKey:         f.FieldKey,
@@ -59,7 +66,16 @@ func (s *Service) CRMCustomFields(ctx context.Context, accountID, connectionID i
 			InboundSourceKey: providers.CRMInboundSourceKey(conn.ProviderSlug, f),
 			Options:          f.Options,
 			AlreadyImported:  imported[f.ID],
-		})
+		}
+		nameKey := strings.ToLower(strings.TrimSpace(f.Name))
+		if fieldID, ok := namesByLower[nameKey]; ok {
+			resp.LinkedFieldID = &fieldID
+			if lrName, ok := namesByID[fieldID]; ok {
+				name := lrName
+				resp.LinkedFieldName = &name
+			}
+		}
+		out = append(out, resp)
 	}
 	return map[string]any{
 		"connection_id":   connectionID,
