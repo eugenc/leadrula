@@ -143,7 +143,7 @@ func (s *Service) SyncGHLInboundEvent(ctx context.Context, inboundWebhookID int6
 	return s.ensureGHLInboundContactIDFieldMap(ctx, inboundWebhookID)
 }
 
-// SyncGHLInboundFieldMaps replaces inbound field maps derived from outbound GHL connection config.
+// SyncGHLInboundFieldMaps merges inbound field maps derived from outbound GHL connection config.
 func (s *Service) SyncGHLInboundFieldMaps(ctx context.Context, inboundWebhookID int64, config map[string]any) error {
 	if inboundWebhookID <= 0 {
 		return nil
@@ -158,19 +158,53 @@ func (s *Service) SyncGHLInboundFieldMaps(ctx context.Context, inboundWebhookID 
 	if err != nil {
 		return err
 	}
-	if _, err := s.pool.Exec(ctx, `DELETE FROM webhook_event_field_map WHERE event_id=$1`, eventID); err != nil {
+
+	existing, err := s.ListFieldMap(ctx, eventID)
+	if err != nil {
 		return err
 	}
+	seenCustom := map[string]int64{}
+	seenBuiltin := map[string]string{}
+	for _, m := range existing {
+		if m.TargetType == "custom" && m.CustomFieldID != nil {
+			seenCustom[m.SourceKey] = *m.CustomFieldID
+		} else if m.TargetType == "builtin" && m.BuiltinField != nil {
+			seenBuiltin[m.SourceKey] = *m.BuiltinField
+		}
+	}
 
-	seen := map[string]bool{}
 	add := func(sourceKey, targetType string, builtinField *string, customFieldID *int64) error {
 		sourceKey = strings.TrimSpace(sourceKey)
-		if sourceKey == "" || seen[sourceKey] {
+		if sourceKey == "" {
 			return nil
 		}
-		seen[sourceKey] = true
-		_, err := s.AddFieldMap(ctx, eventID, sourceKey, targetType, builtinField, customFieldID)
-		return err
+		switch targetType {
+		case "custom":
+			if customFieldID == nil {
+				return nil
+			}
+			if fid, ok := seenCustom[sourceKey]; ok && fid == *customFieldID {
+				return nil
+			}
+			id := *customFieldID
+			if _, err := s.AddFieldMap(ctx, eventID, sourceKey, "custom", nil, &id); err != nil {
+				return err
+			}
+			seenCustom[sourceKey] = id
+		case "builtin":
+			if builtinField == nil {
+				return nil
+			}
+			bf := *builtinField
+			if existing, ok := seenBuiltin[sourceKey]; ok && existing == bf {
+				return nil
+			}
+			if _, err := s.AddFieldMap(ctx, eventID, sourceKey, "builtin", &bf, nil); err != nil {
+				return err
+			}
+			seenBuiltin[sourceKey] = bf
+		}
+		return nil
 	}
 
 	for _, m := range providers.GHLInboundMapsFromConfig(config) {

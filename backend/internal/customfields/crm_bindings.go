@@ -45,6 +45,7 @@ type ImportFromCRMInput struct {
 
 type ImportFromCRMResult struct {
 	Created int              `json:"created"`
+	Linked  int              `json:"linked"`
 	Skipped int              `json:"skipped"`
 	Errors  []ImportRowError `json:"errors"`
 }
@@ -98,6 +99,61 @@ func (s *Service) ListBindingsByConnection(ctx context.Context, accountID, conne
 		out = append(out, b)
 	}
 	return out, rows.Err()
+}
+
+// FieldNamesByAccount returns lower(trim(name)) -> field id for dedupe lookups.
+func (s *Service) FieldNamesByAccount(ctx context.Context, accountID int64) (map[string]int64, map[int64]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, name FROM custom_fields WHERE account_id=$1`, accountID)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	byName := map[string]int64{}
+	namesByID := map[int64]string{}
+	for rows.Next() {
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, nil, err
+		}
+		key := strings.ToLower(strings.TrimSpace(name))
+		if key == "" {
+			continue
+		}
+		if _, exists := byName[key]; !exists {
+			byName[key] = id
+		}
+		namesByID[id] = name
+	}
+	return byName, namesByID, rows.Err()
+}
+
+func (s *Service) fieldByName(ctx context.Context, accountID int64, name string) (*CustomField, error) {
+	key := strings.ToLower(strings.TrimSpace(name))
+	if key == "" {
+		return nil, nil
+	}
+	f := &CustomField{}
+	err := scanField(s.pool.QueryRow(ctx,
+		`SELECT `+customFieldCols+` FROM custom_fields
+		 WHERE account_id=$1 AND lower(trim(name))=$2 ORDER BY id LIMIT 1`,
+		accountID, key), f)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+func (s *Service) insertCRMBinding(ctx context.Context, accountID, customFieldID, connectionID int64, crmFieldID, crmFieldKey, crmObject, inboundKey string) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO custom_field_crm_bindings(account_id, custom_field_id, connection_id, crm_field_id, crm_field_key, crm_object, inbound_source_key)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		accountID, customFieldID, connectionID, crmFieldID, crmFieldKey, crmObject, inboundKey)
+	return err
 }
 
 func (s *Service) ImportFromCRM(ctx context.Context, accountID int64, in ImportFromCRMInput) (*ImportFromCRMResult, error) {
@@ -176,33 +232,44 @@ func (s *Service) ImportFromCRM(ctx context.Context, accountID int64, in ImportF
 			options = json.RawMessage("[]")
 		}
 
-		fieldKey, err := s.uniqueFieldKey(ctx, accountID, slugFieldKey(name))
-		if err != nil {
+		var customFieldID int64
+		linked := false
+		if existing, err := s.fieldByName(ctx, accountID, name); err != nil {
 			result.Skipped++
 			result.Errors = append(result.Errors, ImportRowError{Row: i + 1, Message: err.Error()})
 			continue
+		} else if existing != nil {
+			customFieldID = existing.ID
+			linked = true
+		} else {
+			fieldKey, err := s.uniqueFieldKey(ctx, accountID, slugFieldKey(name))
+			if err != nil {
+				result.Skipped++
+				result.Errors = append(result.Errors, ImportRowError{Row: i + 1, Message: err.Error()})
+				continue
+			}
+			created, err := s.CreateField(ctx, accountID, name, fieldKey, leadType, options, nil)
+			if err != nil {
+				result.Skipped++
+				result.Errors = append(result.Errors, ImportRowError{Row: i + 1, Message: err.Error()})
+				continue
+			}
+			customFieldID = created.ID
 		}
 
-		created, err := s.CreateField(ctx, accountID, name, fieldKey, leadType, options, nil)
-		if err != nil {
+		if err := s.insertCRMBinding(ctx, accountID, customFieldID, in.ConnectionID, crmFieldID, crmFieldKey, crmObject, inboundKey); err != nil {
 			result.Skipped++
 			result.Errors = append(result.Errors, ImportRowError{Row: i + 1, Message: err.Error()})
 			continue
 		}
-
-		_, err = s.pool.Exec(ctx,
-			`INSERT INTO custom_field_crm_bindings(account_id, custom_field_id, connection_id, crm_field_id, crm_field_key, crm_object, inbound_source_key)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-			accountID, created.ID, in.ConnectionID, crmFieldID, crmFieldKey, crmObject, inboundKey)
-		if err != nil {
-			result.Skipped++
-			result.Errors = append(result.Errors, ImportRowError{Row: i + 1, Message: err.Error()})
-			continue
+		if linked {
+			result.Linked++
+		} else {
+			result.Created++
 		}
-		result.Created++
 	}
 
-	if result.Created > 0 && s.crmBindingSyncer != nil {
+	if result.Created+result.Linked > 0 && s.crmBindingSyncer != nil {
 		if err := s.crmBindingSyncer.SyncCRMBindingFieldMaps(ctx, in.ConnectionID); err != nil {
 			return result, err
 		}

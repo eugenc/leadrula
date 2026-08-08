@@ -174,7 +174,19 @@ func (s *Service) ingestPayload(ctx context.Context, wa *WebhookAuth, slug strin
 	if isCRMInbound {
 		flat = providers.PrepareCRMInboundFlat(*providerSlug, flat)
 	} else if isGHLInbound {
-		flat = providers.PrepareGHLInboundFlat(flat)
+		var nameToKey map[string]string
+		if webhook.IntegrationConnectionID != nil && *webhook.IntegrationConnectionID > 0 {
+			var configJSON []byte
+			if err := s.pool.QueryRow(ctx,
+				`SELECT config FROM integration_connections WHERE id=$1`,
+				*webhook.IntegrationConnectionID).Scan(&configJSON); err == nil && len(configJSON) > 0 {
+				cfg := map[string]any{}
+				if json.Unmarshal(configJSON, &cfg) == nil {
+					nameToKey = providers.GHLInboundNameToKeyFromConfig(cfg)
+				}
+			}
+		}
+		flat = providers.PrepareGHLInboundFlat(flat, nameToKey)
 	}
 
 	var results []ActionResult

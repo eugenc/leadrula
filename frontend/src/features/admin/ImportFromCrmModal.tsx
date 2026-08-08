@@ -8,7 +8,7 @@ import { toast } from "@/store/toastStore";
 import { ns, post, errorMessage } from "@/lib/api";
 import { INTEGRATION_CATEGORY } from "@/features/integrations/constants";
 import { useIntegrationConnections } from "@/features/integrations/hooks";
-import { useCrmCustomFields, type ImportFromCrmResult } from "./hooks";
+import { useCrmCustomFields, type CrmCustomFieldOption, type ImportFromCrmResult } from "./hooks";
 
 interface Props {
   open: boolean;
@@ -33,9 +33,14 @@ export function ImportFromCrmModal({ open, onClose }: Props) {
 
   const { data: crmFieldsData, isLoading: fieldsLoading, error: fieldsError } = useCrmCustomFields(connectionId);
 
+  const allFields = crmFieldsData?.custom_fields ?? [];
   const importableFields = useMemo(
-    () => (crmFieldsData?.custom_fields ?? []).filter((f) => !f.already_imported),
-    [crmFieldsData]
+    () => allFields.filter((f) => !f.already_imported),
+    [allFields]
+  );
+  const existingFields = useMemo(
+    () => allFields.filter((f) => f.already_imported),
+    [allFields]
   );
 
   function reset() {
@@ -70,7 +75,7 @@ export function ImportFromCrmModal({ open, onClose }: Props) {
 
   async function runImport() {
     if (!connectionId || selected.size === 0) return;
-    const fields = (crmFieldsData?.custom_fields ?? [])
+    const fields = allFields
       .filter((f) => selected.has(f.id))
       .map((f) => ({
         crm_field_id: f.id,
@@ -94,9 +99,12 @@ export function ImportFromCrmModal({ open, onClose }: Props) {
         qc.invalidateQueries({ queryKey: ["crm-custom-fields", connectionId] });
       }
       setResult(res);
-      if (res.created > 0) {
-        toast.success(`Imported ${res.created} field${res.created === 1 ? "" : "s"} from CRM`);
-      } else if (res.skipped > 0 && res.created === 0) {
+      const parts: string[] = [];
+      if (res.created > 0) parts.push(`${res.created} created`);
+      if (res.linked > 0) parts.push(`${res.linked} linked to existing`);
+      if (parts.length > 0) {
+        toast.success(`Imported from CRM: ${parts.join(", ")}`);
+      } else if (res.skipped > 0) {
         toast.info("No new fields imported");
       }
     } catch (err) {
@@ -141,6 +149,11 @@ export function ImportFromCrmModal({ open, onClose }: Props) {
         <div className="space-y-2 text-sm text-gray-700">
           <p>
             <strong>{result.created}</strong> created
+            {result.linked > 0 && (
+              <>
+                , <strong>{result.linked}</strong> linked to existing
+              </>
+            )}
             {result.skipped > 0 && (
               <>
                 , <strong>{result.skipped}</strong> skipped
@@ -195,12 +208,10 @@ export function ImportFromCrmModal({ open, onClose }: Props) {
                 </div>
               ) : fieldsError ? (
                 <p className="text-sm text-danger">{errorMessage(fieldsError)}</p>
+              ) : allFields.length === 0 ? (
+                <p className="text-sm text-gray-500">No custom fields found in this CRM.</p>
               ) : importableFields.length === 0 ? (
-                <p className="text-sm text-gray-500">
-                  {(crmFieldsData?.custom_fields ?? []).length === 0
-                    ? "No custom fields found in this CRM."
-                    : "All CRM custom fields are already imported."}
-                </p>
+                <p className="text-sm text-gray-500">All CRM custom fields are already linked.</p>
               ) : (
                 <>
                   <div className="mb-2 flex items-center justify-between">
@@ -215,40 +226,69 @@ export function ImportFromCrmModal({ open, onClose }: Props) {
                       {selected.size === importableFields.length ? "Deselect all" : "Select all"}
                     </button>
                   </div>
-                  <div className="max-h-72 overflow-y-auto rounded border border-gray-100">
-                    <table className="w-full text-left text-sm">
-                      <thead className="sticky top-0 bg-gray-50">
-                        <tr>
-                          <th className="w-10 px-2 py-2" />
-                          <th className="px-2 py-2 font-medium text-gray-500">Name</th>
-                          <th className="px-2 py-2 font-medium text-gray-500">Key</th>
-                          <th className="px-2 py-2 font-medium text-gray-500">Type</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {importableFields.map((f) => (
-                          <tr key={f.id} className="border-t border-gray-50">
-                            <td className="px-2 py-2">
-                              <input
-                                type="checkbox"
-                                checked={selected.has(f.id)}
-                                onChange={() => toggleField(f.id)}
-                              />
-                            </td>
-                            <td className="px-2 py-2 text-gray-800">{f.name}</td>
-                            <td className="px-2 py-2 font-mono text-xs text-gray-500">{f.field_key}</td>
-                            <td className="px-2 py-2 text-gray-600">{f.lead_type}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <FieldTable
+                    fields={importableFields}
+                    selected={selected}
+                    onToggle={toggleField}
+                  />
                 </>
+              )}
+
+              {existingFields.length > 0 && (
+                <div className="mt-4">
+                  <p className="mb-2 text-sm font-medium text-gray-600">Already in Leadrula</p>
+                  <FieldTable fields={existingFields} selected={selected} onToggle={() => {}} disabled />
+                </div>
               )}
             </div>
           )}
         </div>
       )}
     </Dialog>
+  );
+}
+
+function FieldTable(props: {
+  fields: CrmCustomFieldOption[];
+  selected: Set<string>;
+  onToggle: (id: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="max-h-72 overflow-y-auto rounded border border-gray-100">
+      <table className="w-full text-left text-sm">
+        <thead className="sticky top-0 bg-gray-50">
+          <tr>
+            <th className="w-10 px-2 py-2" />
+            <th className="px-2 py-2 font-medium text-gray-500">Name</th>
+            <th className="px-2 py-2 font-medium text-gray-500">Key</th>
+            <th className="px-2 py-2 font-medium text-gray-500">Type</th>
+          </tr>
+        </thead>
+        <tbody>
+          {props.fields.map((f) => (
+            <tr key={f.id} className="border-t border-gray-50">
+              <td className="px-2 py-2">
+                {!props.disabled && (
+                  <input
+                    type="checkbox"
+                    checked={props.selected.has(f.id)}
+                    onChange={() => props.onToggle(f.id)}
+                  />
+                )}
+              </td>
+              <td className="px-2 py-2 text-gray-800">
+                {f.name}
+                {f.linked_field_id != null && !f.already_imported && (
+                  <span className="ml-2 text-xs text-gray-500">Already in Leadrula</span>
+                )}
+              </td>
+              <td className="px-2 py-2 font-mono text-xs text-gray-500">{f.field_key}</td>
+              <td className="px-2 py-2 text-gray-600">{f.lead_type}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

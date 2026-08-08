@@ -18,6 +18,7 @@ function applySourceTypeChange(
     dest_key: row.dest_key,
     source_type,
     ghl_custom_field_id: row.ghl_custom_field_id,
+    ghl_field_name: row.ghl_field_name,
     ghl_field_model: row.ghl_field_model,
     ghl_map_section: row.ghl_map_section,
   };
@@ -118,6 +119,7 @@ export function GhlEntityFieldMapSection({
       updateRow(idx, {
         dest_key: field.field_key,
         ghl_custom_field_id: field.id,
+        ghl_field_name: field.name,
         ghl_field_model: field.model as "contact" | "opportunity",
       });
       return;

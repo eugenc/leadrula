@@ -61,28 +61,56 @@ func invertOutboundFieldMap(entries []SunbaseFieldMapEntry) []GHLInboundMapEntry
 		if e.DestKey == "" || e.SourceType == "static" {
 			continue
 		}
-		entry := GHLInboundMapEntry{SourceKey: strings.TrimSpace(e.DestKey)}
+		var base GHLInboundMapEntry
 		switch e.SourceType {
 		case "builtin":
 			if e.BuiltinField == nil || strings.TrimSpace(*e.BuiltinField) == "" {
 				continue
 			}
 			bf := strings.TrimSpace(*e.BuiltinField)
-			entry.TargetType = "builtin"
-			entry.BuiltinField = &bf
+			base.TargetType = "builtin"
+			base.BuiltinField = &bf
 		case "custom":
 			if e.CustomFieldID == nil || *e.CustomFieldID <= 0 {
 				continue
 			}
 			id := *e.CustomFieldID
-			entry.TargetType = "custom"
-			entry.CustomFieldID = &id
+			base.TargetType = "custom"
+			base.CustomFieldID = &id
 		default:
 			continue
 		}
+		out = append(out, ghlInboundMapAliases(e, base)...)
+	}
+	return out
+}
+
+func ghlInboundMapAliases(e SunbaseFieldMapEntry, base GHLInboundMapEntry) []GHLInboundMapEntry {
+	keys := ghlInboundSourceKeys(e)
+	out := make([]GHLInboundMapEntry, 0, len(keys))
+	for _, key := range keys {
+		entry := base
+		entry.SourceKey = key
 		out = append(out, entry)
 	}
 	return out
+}
+
+func ghlInboundSourceKeys(e SunbaseFieldMapEntry) []string {
+	destKey := strings.TrimSpace(e.DestKey)
+	if destKey == "" {
+		return nil
+	}
+	keys := []string{destKey}
+	if e.GHLFieldName != nil {
+		if name := strings.TrimSpace(*e.GHLFieldName); name != "" && name != destKey {
+			keys = append(keys, name)
+		}
+	}
+	if ghlFieldModel(e) == "opportunity" && !strings.Contains(destKey, ".") {
+		keys = append(keys, "opportunity."+destKey)
+	}
+	return keys
 }
 
 func ghlContactStandardFieldsForInbound(config map[string]any) any {

@@ -99,7 +99,7 @@ function DrawerContent({
       onSuccess: (res) => {
         setKeyPrefix(res.key.key_prefix);
         setSecret(res.secret);
-        setShowSecret(false);
+        setShowSecret(true);
         onSecretCached?.(apiKey.id, res.secret);
         copyText(res.secret, "New key copied to clipboard");
       },
@@ -123,7 +123,7 @@ function DrawerContent({
         setKeyPrefix(res.key.key_prefix);
         setSecret(res.secret);
         setRevokedAt(null);
-        setShowSecret(false);
+        setShowSecret(true);
         onSecretCached?.(apiKey.id, res.secret);
         copyText(res.secret, "New key copied to clipboard");
         toast.success("API key renewed");

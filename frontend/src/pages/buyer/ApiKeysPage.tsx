@@ -165,11 +165,16 @@ export function ApiKeysPage() {
 
       <ApiKeyDetailDrawer
         apiKey={resolvedSelected}
-        initialSecret={detailSecret}
-        onClose={closeDetail}
-        onSecretCached={(keyId, secret) =>
-          setSecretByKeyId((prev) => ({ ...prev, [keyId]: secret }))
+        initialSecret={
+          resolvedSelected
+            ? detailSecret ?? secretByKeyId[resolvedSelected.id] ?? null
+            : null
         }
+        onClose={closeDetail}
+        onSecretCached={(keyId, secret) => {
+          setSecretByKeyId((prev) => ({ ...prev, [keyId]: secret }));
+          setDetailSecret(secret);
+        }}
       />
 
       <FormDrawer

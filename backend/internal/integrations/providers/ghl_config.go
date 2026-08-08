@@ -875,26 +875,131 @@ func NormalizeGHLInboundFlat(flat map[string]any) map[string]any {
 	return out
 }
 
-// PrepareGHLInboundFlat normalizes GHL inbound payloads for field mapping and stage sync.
-func PrepareGHLInboundFlat(flat map[string]any) map[string]any {
-	out := NormalizeGHLInboundFlat(flat)
-
-	if customData, ok := out["customData"].(map[string]any); ok {
-		for k, v := range customData {
-			if ghlFlatText(out, k) == "" {
-				out[k] = v
-			}
-			oppKey := "opportunity." + k
-			if ghlFlatText(out, oppKey) == "" {
-				out[oppKey] = v
-			}
+// GHLInboundNameToKeyFromConfig builds display-name → field_key aliases from outbound GHL field maps.
+func GHLInboundNameToKeyFromConfig(config map[string]any) map[string]string {
+	out := map[string]string{}
+	for _, e := range ghlOutboundFieldMapFromConfig(config) {
+		destKey := strings.TrimSpace(e.DestKey)
+		if destKey == "" || e.GHLFieldName == nil {
+			continue
+		}
+		name := strings.TrimSpace(*e.GHLFieldName)
+		if name != "" && name != destKey {
+			out[name] = destKey
 		}
 	}
+	return out
+}
+
+// PrepareGHLInboundFlat normalizes GHL inbound payloads for field mapping and stage sync.
+func PrepareGHLInboundFlat(flat map[string]any, nameToKey map[string]string) map[string]any {
+	out := NormalizeGHLInboundFlat(flat)
+
+	expandGHLCustomData(out)
+	promoteGHLCustomDataDotKeys(out)
+	applyGHLDisplayNameAliases(out, nameToKey)
 
 	expandGHLCustomFieldsArray(out, out["customFields"])
 	expandGHLCustomFieldsArray(out, out["opportunity.customFields"])
 
 	return out
+}
+
+func parseGHLJSONMap(v any) map[string]any {
+	switch x := v.(type) {
+	case map[string]any:
+		return x
+	case string:
+		s := strings.TrimSpace(x)
+		if s == "" || !strings.HasPrefix(s, "{") {
+			return nil
+		}
+		var m map[string]any
+		if json.Unmarshal([]byte(s), &m) == nil {
+			return m
+		}
+	}
+	return nil
+}
+
+func expandGHLCustomData(out map[string]any) {
+	var maps []map[string]any
+	for _, key := range []string{"customData", "custom_data"} {
+		if m := parseGHLJSONMap(out[key]); m != nil {
+			maps = append(maps, m)
+		}
+	}
+	for k, v := range out {
+		if strings.HasSuffix(k, ".customData") || strings.HasSuffix(k, ".custom_data") {
+			if m := parseGHLJSONMap(v); m != nil {
+				maps = append(maps, m)
+			}
+		}
+	}
+	for _, customData := range maps {
+		promoteGHLCustomDataEntries(out, customData)
+	}
+}
+
+func promoteGHLCustomDataEntries(out map[string]any, customData map[string]any) {
+	for k, v := range customData {
+		if nested, ok := v.(map[string]any); ok {
+			for nk, nv := range nested {
+				promoteGHLCustomFieldKey(out, nk, nv)
+				promoteGHLCustomFieldKey(out, k+"."+nk, nv)
+			}
+			continue
+		}
+		promoteGHLCustomFieldKey(out, k, v)
+	}
+}
+
+func promoteGHLCustomDataDotKeys(out map[string]any) {
+	for k, v := range out {
+		var subKey string
+		switch {
+		case strings.HasPrefix(k, "customData."):
+			subKey = strings.TrimPrefix(k, "customData.")
+		case strings.HasPrefix(k, "custom_data."):
+			subKey = strings.TrimPrefix(k, "custom_data.")
+		default:
+			continue
+		}
+		if subKey == "" {
+			continue
+		}
+		promoteGHLCustomFieldKey(out, subKey, v)
+	}
+}
+
+func applyGHLDisplayNameAliases(out map[string]any, nameToKey map[string]string) {
+	for name, destKey := range nameToKey {
+		name = strings.TrimSpace(name)
+		destKey = strings.TrimSpace(destKey)
+		if name == "" || destKey == "" || ghlFlatText(out, destKey) != "" {
+			continue
+		}
+		if v, ok := out[name]; ok && ghlFlatText(out, name) != "" {
+			out[destKey] = v
+		}
+	}
+}
+
+func setGHLFlatKeyIfEmpty(out map[string]any, key string, val any) {
+	if ghlFlatText(out, key) == "" {
+		out[key] = val
+	}
+}
+
+func promoteGHLCustomFieldKey(out map[string]any, key string, val any) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return
+	}
+	setGHLFlatKeyIfEmpty(out, key, val)
+	if !strings.Contains(key, ".") {
+		setGHLFlatKeyIfEmpty(out, "opportunity."+key, val)
+	}
 }
 
 func expandGHLCustomFieldsArray(out map[string]any, raw any) {
@@ -915,9 +1020,7 @@ func expandGHLCustomFieldsArray(out map[string]any, raw any) {
 		if val == nil {
 			val = m["value"]
 		}
-		if ghlFlatText(out, key) == "" {
-			out[key] = val
-		}
+		promoteGHLCustomFieldKey(out, key, val)
 	}
 }
 
